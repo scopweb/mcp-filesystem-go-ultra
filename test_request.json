@@ -1,0 +1,8 @@
+{
+    "arguments":  {
+                      "path":  "c:\\MCPs\\clone\\mcp-filesystem-go-ultra"
+                  },
+    "id":  "test-list-1",
+    "type":  "call_tool",
+    "tool":  "list_directory"
+}
