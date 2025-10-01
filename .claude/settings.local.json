@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build:*)",
+      "Bash(go doc:*)",
+      "Bash(go list:*)",
+      "Bash(go mod:*)",
+      "Bash(go get:*)",
+      "Bash(go test:*)",
+      "Read(//c/Users/DAVID/AppData/Roaming/Claude/**)",
+      "Bash(.mcp-filesystem-ultra.exe --help)",
+      "Bash(go run:*)",
+      "Bash(timeout:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
