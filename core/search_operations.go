@@ -121,19 +121,55 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 	}
 
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("🔍 Found %d matches for pattern '%s':\n\n", len(matches), pattern))
 
-	for _, match := range matches {
-		result.WriteString(fmt.Sprintf("📁 %s:%d\n", match.File, match.LineNumber))
-		result.WriteString(fmt.Sprintf("   %s\n", match.Line))
+	maxToShow := e.config.MaxSearchResults
+	if maxToShow > len(matches) {
+		maxToShow = len(matches)
+	}
 
-		if includeContext && len(match.Context) > 0 {
-			result.WriteString("   Context:\n")
-			for _, contextLine := range match.Context {
-				result.WriteString(fmt.Sprintf("   │ %s\n", contextLine))
-			}
+	if e.config.CompactMode {
+		// Compact format: minimal output but with full paths
+		result.WriteString(fmt.Sprintf("%d matches", len(matches)))
+		if len(matches) > 20 {
+			result.WriteString(" (first 20): ")
+			maxToShow = 20
+		} else {
+			result.WriteString(": ")
 		}
-		result.WriteString("\n")
+
+		for i := 0; i < maxToShow; i++ {
+			if i > 0 {
+				result.WriteString(", ")
+			}
+			match := matches[i]
+			// Use full path instead of just basename
+			result.WriteString(fmt.Sprintf("%s:%d", match.File, match.LineNumber))
+		}
+
+		if len(matches) > maxToShow {
+			result.WriteString(fmt.Sprintf(" ... (%d more)", len(matches)-maxToShow))
+		}
+	} else {
+		// Verbose format
+		result.WriteString(fmt.Sprintf("🔍 Found %d matches for pattern '%s':\n\n", len(matches), pattern))
+
+		for i := 0; i < maxToShow; i++ {
+			match := matches[i]
+			result.WriteString(fmt.Sprintf("📁 %s:%d\n", match.File, match.LineNumber))
+			result.WriteString(fmt.Sprintf("   %s\n", match.Line))
+
+			if includeContext && len(match.Context) > 0 {
+				result.WriteString("   Context:\n")
+				for _, contextLine := range match.Context {
+					result.WriteString(fmt.Sprintf("   │ %s\n", contextLine))
+				}
+			}
+			result.WriteString("\n")
+		}
+
+		if len(matches) > maxToShow {
+			result.WriteString(fmt.Sprintf("⚠️ Showing %d of %d matches. Use more specific pattern.\n", maxToShow, len(matches)))
+		}
 	}
 
 	return &mcp.CallToolResponse{
@@ -147,6 +183,7 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 func (e *UltraFastEngine) performSmartSearch(path, pattern string, includeContent bool, fileTypes []string) (string, error) {
 	var results []string
 	var contentMatches []SearchMatch
+	maxResults := e.config.MaxSearchResults
 
 	// Compile regex pattern
 	regexPattern, err := regexp.Compile(pattern)
@@ -182,7 +219,9 @@ func (e *UltraFastEngine) performSmartSearch(path, pattern string, includeConten
 
 		// Search in filename
 		if regexPattern.MatchString(info.Name()) {
-			results = append(results, fmt.Sprintf("📄 %s", currentPath))
+			if len(results) < maxResults {
+				results = append(results, fmt.Sprintf("📄 %s", currentPath))
+			}
 		}
 
 		// Search in content if requested and it's a text file
@@ -192,6 +231,9 @@ func (e *UltraFastEngine) performSmartSearch(path, pattern string, includeConten
 				if err == nil {
 					lines := strings.Split(string(content), "\n")
 					for lineNum, line := range lines {
+						if len(contentMatches) >= maxResults {
+							break
+						}
 						if regexPattern.MatchString(line) {
 							match := SearchMatch{
 								File:       currentPath,
@@ -214,23 +256,81 @@ func (e *UltraFastEngine) performSmartSearch(path, pattern string, includeConten
 
 	var resultBuilder strings.Builder
 
+	totalResults := len(results) + len(contentMatches)
+
 	if len(results) > 0 {
-		resultBuilder.WriteString(fmt.Sprintf("🔍 File name matches (%d):\n", len(results)))
-		for _, result := range results {
-			resultBuilder.WriteString(fmt.Sprintf("  %s\n", result))
+		if e.config.CompactMode {
+			resultBuilder.WriteString(fmt.Sprintf("%d filename matches", len(results)))
+			if len(results) > 10 {
+				resultBuilder.WriteString(" (showing first 10): ")
+				for i := 0; i < 10; i++ {
+					if i > 0 {
+						resultBuilder.WriteString(", ")
+					}
+					// Use full path instead of just basename
+					resultBuilder.WriteString(strings.TrimPrefix(results[i], "📄 "))
+				}
+			} else {
+				resultBuilder.WriteString(": ")
+				for i, result := range results {
+					if i > 0 {
+						resultBuilder.WriteString(", ")
+					}
+					// Use full path instead of just basename
+					resultBuilder.WriteString(strings.TrimPrefix(result, "📄 "))
+				}
+			}
+			resultBuilder.WriteString("\n")
+		} else {
+			resultBuilder.WriteString(fmt.Sprintf("🔍 File name matches (%d):\n", len(results)))
+			for _, result := range results {
+				resultBuilder.WriteString(fmt.Sprintf("  %s\n", result))
+			}
+			resultBuilder.WriteString("\n")
 		}
-		resultBuilder.WriteString("\n")
 	}
 
 	if len(contentMatches) > 0 {
-		resultBuilder.WriteString(fmt.Sprintf("📝 Content matches (%d):\n", len(contentMatches)))
-		for _, match := range contentMatches {
-			resultBuilder.WriteString(fmt.Sprintf("  📁 %s:%d - %s\n", match.File, match.LineNumber, match.Line))
+		if e.config.CompactMode {
+			resultBuilder.WriteString(fmt.Sprintf("%d content matches", len(contentMatches)))
+			if len(contentMatches) > 10 {
+				resultBuilder.WriteString(" (first 10): ")
+				for i := 0; i < 10; i++ {
+					if i > 0 {
+						resultBuilder.WriteString(", ")
+					}
+					m := contentMatches[i]
+					// Use full path instead of just basename
+					resultBuilder.WriteString(fmt.Sprintf("%s:%d", m.File, m.LineNumber))
+				}
+			} else {
+				resultBuilder.WriteString(": ")
+				for i, match := range contentMatches {
+					if i > 0 {
+						resultBuilder.WriteString(", ")
+					}
+					// Use full path instead of just basename
+					resultBuilder.WriteString(fmt.Sprintf("%s:%d", match.File, match.LineNumber))
+				}
+			}
+		} else {
+			resultBuilder.WriteString(fmt.Sprintf("📝 Content matches (%d):\n", len(contentMatches)))
+			for _, match := range contentMatches {
+				resultBuilder.WriteString(fmt.Sprintf("  📁 %s:%d - %s\n", match.File, match.LineNumber, match.Line))
+			}
 		}
 	}
 
 	if len(results) == 0 && len(contentMatches) == 0 {
 		return fmt.Sprintf("🔍 No matches found for pattern '%s' in %s", pattern, path), nil
+	}
+
+	if totalResults >= e.config.MaxSearchResults {
+		if e.config.CompactMode {
+			resultBuilder.WriteString(fmt.Sprintf(" (limited to %d)", e.config.MaxSearchResults))
+		} else {
+			resultBuilder.WriteString(fmt.Sprintf("\n⚠️ Results limited to %d. Use more specific pattern.\n", e.config.MaxSearchResults))
+		}
 	}
 
 	return resultBuilder.String(), nil
@@ -355,4 +455,3 @@ func max(a, b int) int {
 	}
 	return b
 }
-
