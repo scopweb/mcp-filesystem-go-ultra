@@ -52,3 +52,26 @@ dist/
 # Development environment
 .env
 .env.local
+
+# Backup files
+*.backup
+*.bak
+*~
+
+# Personal notes and scratch files
+TODO.md
+NOTES.md
+scratch/
+private/
+
+# Test output
+test_output/
+*.coverage
+
+# MCP test data
+test_files/
+filesdelete/
+
+# Compiled hooks
+hooks.json
+hooks.local.json

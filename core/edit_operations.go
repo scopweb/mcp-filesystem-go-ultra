@@ -1,11 +1,13 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/mcp/filesystem-ultra/mcp"
 )
@@ -35,6 +37,33 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, 
 		return nil, fmt.Errorf("file validation failed: %v", err)
 	}
 
+	// Read current content
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("error reading file: %v", err)
+	}
+
+	// Execute pre-edit hooks
+	workingDir, _ := os.Getwd()
+	hookCtx := &HookContext{
+		Event:      HookPreEdit,
+		ToolName:   "edit_file",
+		FilePath:   path,
+		Operation:  "edit",
+		OldContent: string(content),
+		Timestamp:  time.Now(),
+		WorkingDir: workingDir,
+		Metadata: map[string]interface{}{
+			"old_text": oldText,
+			"new_text": newText,
+		},
+	}
+
+	hookResult, err := e.hookManager.ExecuteHooks(context.Background(), HookPreEdit, hookCtx)
+	if err != nil {
+		return nil, fmt.Errorf("pre-edit hook denied operation: %v", err)
+	}
+
 	// Create backup
 	backupPath, err := e.createBackup(path)
 	if err != nil {
@@ -46,21 +75,21 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, 
 		}
 	}()
 
-	// Read current content
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("error reading file: %v", err)
-	}
-
 	// Perform intelligent edit
 	result, err := e.performIntelligentEdit(string(content), oldText, newText)
 	if err != nil {
 		return nil, fmt.Errorf("edit failed: %v", err)
 	}
 
+	// Apply hook modifications if any
+	finalContent := result.ModifiedContent
+	if hookResult.ModifiedContent != "" {
+		finalContent = hookResult.ModifiedContent
+	}
+
 	// Write modified content atomically
 	tmpPath := path + ".tmp." + fmt.Sprintf("%d", e.metrics.OperationsTotal)
-	if err := os.WriteFile(tmpPath, []byte(result.ModifiedContent), 0644); err != nil {
+	if err := os.WriteFile(tmpPath, []byte(finalContent), 0644); err != nil {
 		return nil, fmt.Errorf("error writing temp file: %v", err)
 	}
 
@@ -78,6 +107,11 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, 
 		os.Remove(backupPath)
 		backupPath = ""
 	}
+
+	// Execute post-edit hooks
+	hookCtx.Event = HookPostEdit
+	hookCtx.NewContent = finalContent
+	_, _ = e.hookManager.ExecuteHooks(context.Background(), HookPostEdit, hookCtx)
 
 	return result, nil
 }

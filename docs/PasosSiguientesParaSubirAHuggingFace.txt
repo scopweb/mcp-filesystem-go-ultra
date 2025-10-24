@@ -1,0 +1,12 @@
+📋 Pasos siguientes:
+1. Crear repositorio en Hugging Face (si no lo has hecho):
+Ve a https://huggingface.co/new
+Crea un nuevo Model o Space (recomiendo Model para este caso)
+Nombre sugerido: mcp-filesystem-ultra o similar
+2. Configurar el remote (necesitas el nombre de usuario y repo):
+git remote add origin https://huggingface.co/[TU_USUARIO]/[NOMBRE_REPO]
+3. Subir el código:
+git push -u origin master
+4. Autenticación (si es necesario):
+Necesitarás un token de Hugging Face
+Obtenerlo en: https://huggingface.co/settings/tokens

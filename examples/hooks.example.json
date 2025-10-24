@@ -1,0 +1,105 @@
+{
+  "hooks": {
+    "pre-write": [
+      {
+        "pattern": "*.go",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gofmt -w",
+            "timeout": 10,
+            "failOnError": false,
+            "description": "Format Go files before writing",
+            "enabled": true
+          }
+        ]
+      },
+      {
+        "pattern": "*.js",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "prettier --write",
+            "timeout": 10,
+            "failOnError": false,
+            "description": "Format JavaScript files with prettier",
+            "enabled": true
+          }
+        ]
+      },
+      {
+        "pattern": "*.py",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "black",
+            "timeout": 10,
+            "failOnError": false,
+            "description": "Format Python files with black",
+            "enabled": true
+          }
+        ]
+      }
+    ],
+    "post-write": [
+      {
+        "pattern": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo File written successfully",
+            "timeout": 5,
+            "failOnError": false,
+            "description": "Log file write",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "pre-edit": [
+      {
+        "pattern": "*.go",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "go vet",
+            "timeout": 30,
+            "failOnError": false,
+            "description": "Validate Go syntax before editing",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "post-edit": [
+      {
+        "pattern": "*.go",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "go build",
+            "timeout": 60,
+            "failOnError": false,
+            "description": "Verify Go files compile after edit",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "pre-delete": [
+      {
+        "pattern": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo Deleting file",
+            "timeout": 5,
+            "failOnError": false,
+            "description": "Confirm deletion",
+            "enabled": false
+          }
+        ]
+      }
+    ]
+  }
+}

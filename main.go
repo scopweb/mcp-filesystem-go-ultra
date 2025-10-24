@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -26,6 +27,10 @@ type Configuration struct {
 	DebugMode        bool     // Enable debug logging
 	LogLevel         string   // Log level (info, debug, error)
 	AllowedPaths     []string // List of allowed base paths for access control
+	CompactMode      bool     // Enable compact responses (minimal tokens)
+	MaxResponseSize  int64    // Max response size in bytes
+	MaxSearchResults int      // Max search results to return
+	MaxListItems     int      // Max items in directory listings
 }
 
 // DefaultConfiguration returns optimized defaults based on system
@@ -44,7 +49,11 @@ func DefaultConfiguration() *Configuration {
 		VSCodeAPIEnabled: true,
 		DebugMode:        false,
 		LogLevel:         "info",
-		AllowedPaths:     []string{}, // No restrictions by default
+		AllowedPaths:     []string{},       // No restrictions by default
+		CompactMode:      false,            // Verbose by default
+		MaxResponseSize:  10 * 1024 * 1024, // 10MB default
+		MaxSearchResults: 1000,             // 1000 results default
+		MaxListItems:     500,              // 500 items default
 	}
 }
 
@@ -53,15 +62,21 @@ func main() {
 
 	// Parse command line arguments
 	var (
-		cacheSize       = flag.String("cache-size", "100MB", "Memory cache limit (e.g., 50MB, 1GB)")
-		parallelOps     = flag.Int("parallel-ops", config.ParallelOps, "Max concurrent operations")
-		binaryThreshold = flag.String("binary-threshold", "1MB", "File size threshold for binary protocol")
-		vsCodeAPI       = flag.Bool("vscode-api", true, "Enable VSCode API integration when available")
-		debugMode       = flag.Bool("debug", false, "Enable debug mode")
-		logLevel        = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
-		allowedPaths    = flag.String("allowed-paths", "", "Comma-separated list of allowed base paths for access control (alternative: pass paths as individual arguments)")
-		version         = flag.Bool("version", false, "Show version information")
-		benchmark       = flag.Bool("bench", false, "Run performance benchmark")
+		cacheSize        = flag.String("cache-size", "100MB", "Memory cache limit (e.g., 50MB, 1GB)")
+		parallelOps      = flag.Int("parallel-ops", config.ParallelOps, "Max concurrent operations")
+		binaryThreshold  = flag.String("binary-threshold", "1MB", "File size threshold for binary protocol")
+		vsCodeAPI        = flag.Bool("vscode-api", true, "Enable VSCode API integration when available")
+		debugMode        = flag.Bool("debug", false, "Enable debug mode")
+		logLevel         = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+		allowedPaths     = flag.String("allowed-paths", "", "Comma-separated list of allowed base paths for access control (alternative: pass paths as individual arguments)")
+		compactMode      = flag.Bool("compact-mode", false, "Enable compact responses (minimal tokens for Claude Desktop)")
+		maxResponseSize  = flag.String("max-response-size", "10MB", "Maximum response size")
+		maxSearchResults = flag.Int("max-search-results", 1000, "Maximum search results to return")
+		maxListItems     = flag.Int("max-list-items", 500, "Maximum items in directory listings")
+		hooksEnabled     = flag.Bool("hooks-enabled", false, "Enable hooks system for pre/post operation validation and formatting")
+		hooksConfig      = flag.String("hooks-config", "", "Path to hooks configuration JSON file (e.g., hooks.json)")
+		version          = flag.Bool("version", false, "Show version information")
+		benchmark        = flag.Bool("bench", false, "Run performance benchmark")
 	)
 	flag.Parse()
 
@@ -91,6 +106,16 @@ func main() {
 	config.VSCodeAPIEnabled = *vsCodeAPI
 	config.DebugMode = *debugMode
 	config.LogLevel = *logLevel
+	config.CompactMode = *compactMode
+	config.MaxSearchResults = *maxSearchResults
+	config.MaxListItems = *maxListItems
+
+	// Parse max response size
+	if size, err := parseSize(*maxResponseSize); err != nil {
+		log.Fatalf("Invalid max response size: %v", err)
+	} else {
+		config.MaxResponseSize = size
+	}
 
 	// Parse allowed paths - support both formats:
 	// 1. Single --allowed-paths flag with comma-separated values
@@ -113,9 +138,9 @@ func main() {
 	setupLogging(config)
 
 	log.Printf("🚀 Starting MCP Filesystem Server Ultra-Fast")
-	log.Printf("📊 Config: Cache=%s, Parallel=%d, Binary=%s, VSCode=%v, AllowedPaths=%v",
+	log.Printf("📊 Config: Cache=%s, Parallel=%d, Binary=%s, VSCode=%v, Compact=%v",
 		formatSize(config.CacheSize), config.ParallelOps,
-		formatSize(config.BinaryThreshold), config.VSCodeAPIEnabled, config.AllowedPaths)
+		formatSize(config.BinaryThreshold), config.VSCodeAPIEnabled, config.CompactMode)
 
 	if *benchmark {
 		runBenchmark(config)
@@ -140,6 +165,12 @@ func main() {
 		DebugMode:        config.DebugMode,
 		AllowedPaths:     config.AllowedPaths,
 		BinaryThreshold:  config.BinaryThreshold,
+		CompactMode:      config.CompactMode,
+		MaxResponseSize:  config.MaxResponseSize,
+		MaxSearchResults: config.MaxSearchResults,
+		MaxListItems:     config.MaxListItems,
+		HooksEnabled:     *hooksEnabled,
+		HooksConfigPath:  *hooksConfig,
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize engine: %v", err)
@@ -177,8 +208,10 @@ func main() {
 func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	// Read file tool
 	readTool := mcp.NewTool("read_file",
-		mcp.WithDescription("Read file with ultra-fast caching and memory mapping"),
-		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to read")),
+		mcp.WithDescription("Read file (cached, fast)"),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file")),
+		mcp.WithNumber("max_lines", mcp.Description("Max lines (optional, 0=all)")),
+		mcp.WithString("mode", mcp.Description("Mode: all, head, tail")),
 	)
 	s.AddTool(readTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -186,16 +219,35 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
 		}
 
+		// Get optional parameters from Arguments map
+		maxLines := 0
+		mode := "all"
+
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if ml, ok := args["max_lines"].(float64); ok {
+				maxLines = int(ml)
+			}
+			if m, ok := args["mode"].(string); ok && m != "" {
+				mode = m
+			}
+		}
+
 		content, err := engine.ReadFileContent(ctx, path)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
+
+		// Apply truncation if requested
+		if maxLines > 0 || mode != "all" {
+			content = truncateContent(content, maxLines, mode)
+		}
+
 		return mcp.NewToolResultText(content), nil
 	})
 
 	// Write file tool
 	writeTool := mcp.NewTool("write_file",
-		mcp.WithDescription("Write file with atomic operations and backup"),
+		mcp.WithDescription("Write file (atomic)"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path where to write the file")),
 		mcp.WithString("content", mcp.Required(), mcp.Description("Content to write to the file")),
 	)
@@ -214,12 +266,15 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
+		if engine.IsCompactMode() {
+			return mcp.NewToolResultText(fmt.Sprintf("OK: %s written", formatSize(int64(len(content))))), nil
+		}
 		return mcp.NewToolResultText(fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), path)), nil
 	})
 
 	// List directory tool
 	listTool := mcp.NewTool("list_directory",
-		mcp.WithDescription("List directory with intelligent caching"),
+		mcp.WithDescription("List directory (cached)"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the directory to list")),
 	)
 	s.AddTool(listTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -237,7 +292,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Edit file tool
 	editTool := mcp.NewTool("edit_file",
-		mcp.WithDescription("Intelligent file editing with backup and rollback"),
+		mcp.WithDescription("Edit file (smart, backup)"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
 		mcp.WithString("old_text", mcp.Required(), mcp.Description("Text to be replaced")),
 		mcp.WithString("new_text", mcp.Required(), mcp.Description("New text to replace with")),
@@ -263,13 +318,16 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
 
+		if engine.IsCompactMode() {
+			return mcp.NewToolResultText(fmt.Sprintf("OK: %d changes", result.ReplacementCount)), nil
+		}
 		return mcp.NewToolResultText(fmt.Sprintf("✅ Successfully edited %s\n📊 Changes: %d replacement(s)\n🎯 Match confidence: %s\n📝 Lines affected: %d",
 			path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)), nil
 	})
 
 	// Performance stats tool
 	statsTool := mcp.NewTool("performance_stats",
-		mcp.WithDescription("Get real-time performance statistics"),
+		mcp.WithDescription("Get performance stats"),
 	)
 	s.AddTool(statsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		stats := engine.GetPerformanceStats()
@@ -278,7 +336,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Capture last artifact tool
 	captureLastTool := mcp.NewTool("capture_last_artifact",
-		mcp.WithDescription("Store the most recent artifact code in memory"),
+		mcp.WithDescription("Store artifact in memory"),
 		mcp.WithString("content", mcp.Required(), mcp.Description("Artifact code content")),
 	)
 	s.AddTool(captureLastTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -298,7 +356,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Write last artifact tool
 	writeLastTool := mcp.NewTool("write_last_artifact",
-		mcp.WithDescription("Write last captured artifact to file - SPECIFY FULL PATH"),
+		mcp.WithDescription("Write artifact to file"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("FULL file path including directory and filename (e.g., C:\\temp\\script.py)")),
 	)
 	s.AddTool(writeLastTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -317,7 +375,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Artifact info tool
 	artifactInfoTool := mcp.NewTool("artifact_info",
-		mcp.WithDescription("Get info about last captured artifact"),
+		mcp.WithDescription("Get artifact info"),
 	)
 	s.AddTool(artifactInfoTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		info := engine.GetLastArtifactInfo()
@@ -326,7 +384,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Search & replace tool
 	searchReplaceTool := mcp.NewTool("search_and_replace",
-		mcp.WithDescription("Recursive search & replace (text files <=10MB each). Args: path, pattern, replacement"),
+		mcp.WithDescription("Recursive search & replace"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Base file or directory path")),
 		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal to search")),
 		mcp.WithString("replacement", mcp.Required(), mcp.Description("Replacement text")),
@@ -356,7 +414,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Smart search tool
 	smartSearchTool := mcp.NewTool("smart_search",
-		mcp.WithDescription("Search filenames (and content <=5MB) using regex. Args: path, pattern"),
+		mcp.WithDescription("Search files by name/content"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Base directory or file")),
 		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal pattern")),
 	)
@@ -382,7 +440,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Advanced text search tool
 	advancedTextSearchTool := mcp.NewTool("advanced_text_search",
-		mcp.WithDescription("Advanced content search (default: case-insensitive, no context). Args: path, pattern"),
+		mcp.WithDescription("Advanced text search"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Directory or file")),
 		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal pattern")),
 	)
@@ -407,7 +465,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	})
 	// Rename file tool
 	renameTool := mcp.NewTool("rename_file",
-		mcp.WithDescription("Rename a file or directory"),
+		mcp.WithDescription("Rename file/dir"),
 		mcp.WithString("old_path", mcp.Required(), mcp.Description("Current path of the file/directory")),
 		mcp.WithString("new_path", mcp.Required(), mcp.Description("New path for the file/directory")),
 	)
@@ -431,7 +489,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Soft delete file tool
 	softDeleteTool := mcp.NewTool("soft_delete_file",
-		mcp.WithDescription("Move file to 'filesdelete' folder for safe deletion"),
+		mcp.WithDescription("Safe delete (to trash)"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file/directory to delete")),
 	)
 	s.AddTool(softDeleteTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -449,7 +507,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Streaming write file tool (for large files)
 	streamingWriteTool := mcp.NewTool("streaming_write_file",
-		mcp.WithDescription("Write large files efficiently using intelligent chunking"),
+		mcp.WithDescription("Write large files (chunked)"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path where to write the file")),
 		mcp.WithString("content", mcp.Required(), mcp.Description("Content to write to the file")),
 	)
@@ -473,7 +531,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Chunked read file tool (for large files)
 	chunkedReadTool := mcp.NewTool("chunked_read_file",
-		mcp.WithDescription("Read large files efficiently using intelligent chunking"),
+		mcp.WithDescription("Read large files (chunked)"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to read")),
 		mcp.WithNumber("max_chunk_size", mcp.Description("Maximum chunk size in bytes (default: 32768)")),
 	)
@@ -494,7 +552,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Smart edit file tool (handles large files)
 	smartEditTool := mcp.NewTool("smart_edit_file",
-		mcp.WithDescription("Edit files intelligently with automatic large file handling"),
+		mcp.WithDescription("Edit large files (smart)"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
 		mcp.WithString("old_text", mcp.Required(), mcp.Description("Text to be replaced")),
 		mcp.WithString("new_text", mcp.Required(), mcp.Description("New text to replace with")),
@@ -667,9 +725,314 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		return mcp.NewToolResultText(suggestion), nil
 	})
 
-	log.Printf("📚 Registered 23 ultra-fast tools (with Claude Desktop optimizations)")
+	// Create directory tool
+	createDirTool := mcp.NewTool("create_directory",
+		mcp.WithDescription("Create a new directory (and parent directories if needed)"),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the directory to create")),
+	)
+	s.AddTool(createDirTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+
+		err = engine.CreateDirectory(ctx, path)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+
+		if engine.IsCompactMode() {
+			return mcp.NewToolResultText(fmt.Sprintf("OK: %s created", path)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Successfully created directory: %s", path)), nil
+	})
+
+	// Delete file tool
+	deleteTool := mcp.NewTool("delete_file",
+		mcp.WithDescription("Permanently delete a file or directory (use soft_delete_file for safer deletion)"),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file or directory to delete")),
+	)
+	s.AddTool(deleteTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+
+		err = engine.DeleteFile(ctx, path)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+
+		if engine.IsCompactMode() {
+			return mcp.NewToolResultText(fmt.Sprintf("OK: %s deleted", path)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Successfully deleted: %s", path)), nil
+	})
+
+	// Move file tool
+	moveTool := mcp.NewTool("move_file",
+		mcp.WithDescription("Move a file or directory to a new location"),
+		mcp.WithString("source_path", mcp.Required(), mcp.Description("Current path of the file/directory")),
+		mcp.WithString("dest_path", mcp.Required(), mcp.Description("New path for the file/directory")),
+	)
+	s.AddTool(moveTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		sourcePath, err := request.RequireString("source_path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid source_path: %v", err)), nil
+		}
+
+		destPath, err := request.RequireString("dest_path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid dest_path: %v", err)), nil
+		}
+
+		err = engine.MoveFile(ctx, sourcePath, destPath)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+
+		if engine.IsCompactMode() {
+			return mcp.NewToolResultText(fmt.Sprintf("OK: moved to %s", destPath)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Successfully moved '%s' to '%s'", sourcePath, destPath)), nil
+	})
+
+	// Copy file tool
+	copyTool := mcp.NewTool("copy_file",
+		mcp.WithDescription("Copy a file or directory to a new location"),
+		mcp.WithString("source_path", mcp.Required(), mcp.Description("Path of the file/directory to copy")),
+		mcp.WithString("dest_path", mcp.Required(), mcp.Description("Destination path for the copy")),
+	)
+	s.AddTool(copyTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		sourcePath, err := request.RequireString("source_path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid source_path: %v", err)), nil
+		}
+
+		destPath, err := request.RequireString("dest_path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid dest_path: %v", err)), nil
+		}
+
+		err = engine.CopyFile(ctx, sourcePath, destPath)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+
+		if engine.IsCompactMode() {
+			return mcp.NewToolResultText(fmt.Sprintf("OK: copied to %s", destPath)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Successfully copied '%s' to '%s'", sourcePath, destPath)), nil
+	})
+
+	// Get file info tool
+	fileInfoTool := mcp.NewTool("get_file_info",
+		mcp.WithDescription("Get detailed information about a file or directory"),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file or directory")),
+	)
+	s.AddTool(fileInfoTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+
+		info, err := engine.GetFileInfo(ctx, path)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+		return mcp.NewToolResultText(info), nil
+	})
+
+	// Plan Mode: Analyze write change
+	analyzeWriteTool := mcp.NewTool("analyze_write",
+		mcp.WithDescription("Analyze a write operation without executing (Plan Mode / dry-run)"),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file")),
+		mcp.WithString("content", mcp.Required(), mcp.Description("Content that would be written")),
+	)
+	s.AddTool(analyzeWriteTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+
+		content, err := request.RequireString("content")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid content: %v", err)), nil
+		}
+
+		analysis, err := engine.AnalyzeWriteChange(ctx, path, content)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Analysis failed: %v", err)), nil
+		}
+
+		// Format analysis as text
+		result := formatChangeAnalysis(analysis)
+		return mcp.NewToolResultText(result), nil
+	})
+
+	// Plan Mode: Analyze edit change
+	analyzeEditTool := mcp.NewTool("analyze_edit",
+		mcp.WithDescription("Analyze an edit operation without executing (Plan Mode / dry-run)"),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file")),
+		mcp.WithString("old_text", mcp.Required(), mcp.Description("Text to be replaced")),
+		mcp.WithString("new_text", mcp.Required(), mcp.Description("Replacement text")),
+	)
+	s.AddTool(analyzeEditTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+
+		oldText, err := request.RequireString("old_text")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid old_text: %v", err)), nil
+		}
+
+		newText, err := request.RequireString("new_text")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid new_text: %v", err)), nil
+		}
+
+		analysis, err := engine.AnalyzeEditChange(ctx, path, oldText, newText)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Analysis failed: %v", err)), nil
+		}
+
+		result := formatChangeAnalysis(analysis)
+		return mcp.NewToolResultText(result), nil
+	})
+
+	// Plan Mode: Analyze delete change
+	analyzeDeleteTool := mcp.NewTool("analyze_delete",
+		mcp.WithDescription("Analyze a delete operation without executing (Plan Mode / dry-run)"),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file or directory")),
+	)
+	s.AddTool(analyzeDeleteTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+
+		analysis, err := engine.AnalyzeDeleteChange(ctx, path)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Analysis failed: %v", err)), nil
+		}
+
+		result := formatChangeAnalysis(analysis)
+		return mcp.NewToolResultText(result), nil
+	})
+
+	// Batch operations tool
+	batchOpsTool := mcp.NewTool("batch_operations",
+		mcp.WithDescription("Execute multiple file operations atomically with automatic rollback on failure. Operations JSON format: [{\"type\":\"write\",\"path\":\"file.txt\",\"content\":\"...\"}]"),
+		mcp.WithString("request_json", mcp.Required(), mcp.Description("JSON with operations array and options (atomic, create_backup, validate_only)")),
+	)
+	s.AddTool(batchOpsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		requestJSON, err := request.RequireString("request_json")
+		if err != nil {
+			return mcp.NewToolResultError("request_json parameter is required"), nil
+		}
+
+		// Parse full request from JSON
+		var batchReq core.BatchRequest
+		if err := json.Unmarshal([]byte(requestJSON), &batchReq); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid request JSON: %v", err)), nil
+		}
+
+		// Set defaults if not provided
+		if batchReq.Operations == nil || len(batchReq.Operations) == 0 {
+			return mcp.NewToolResultError("operations array is required and cannot be empty"), nil
+		}
+
+		// Execute batch using batch manager
+		batchManager := core.NewBatchOperationManager("", 10)
+		result := batchManager.ExecuteBatch(batchReq)
+
+		// Format result
+		resultText := formatBatchResult(result)
+
+		if !result.Success {
+			return mcp.NewToolResultError(resultText), nil
+		}
+
+		return mcp.NewToolResultText(resultText), nil
+	})
+
+	log.Printf("📚 Registered 32 ultra-fast tools (with Claude Desktop optimizations + Plan Mode + Batch Operations)")
 
 	return nil
+}
+
+// formatChangeAnalysis formats a ChangeAnalysis struct as human-readable text
+func formatChangeAnalysis(analysis *core.ChangeAnalysis) string {
+	var result strings.Builder
+
+	// Header
+	result.WriteString("📋 Change Analysis (Plan Mode - Dry Run)\n")
+	result.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+
+	// Basic info
+	result.WriteString(fmt.Sprintf("📁 File: %s\n", analysis.FilePath))
+	result.WriteString(fmt.Sprintf("🔧 Operation: %s\n", analysis.OperationType))
+	result.WriteString(fmt.Sprintf("📊 File exists: %v\n", analysis.FileExists))
+
+	// Risk assessment
+	riskEmoji := "✅"
+	switch analysis.RiskLevel {
+	case "medium":
+		riskEmoji = "⚠️"
+	case "high":
+		riskEmoji = "🔴"
+	case "critical":
+		riskEmoji = "💀"
+	}
+	result.WriteString(fmt.Sprintf("\n%s Risk Level: %s\n", riskEmoji, strings.ToUpper(analysis.RiskLevel)))
+
+	// Risk factors
+	if len(analysis.RiskFactors) > 0 {
+		result.WriteString("\n⚠️  Risk Factors:\n")
+		for _, factor := range analysis.RiskFactors {
+			result.WriteString(fmt.Sprintf("  • %s\n", factor))
+		}
+	}
+
+	// Changes summary
+	result.WriteString("\n📝 Changes Summary:\n")
+	if analysis.LinesAdded > 0 {
+		result.WriteString(fmt.Sprintf("  + %d lines added\n", analysis.LinesAdded))
+	}
+	if analysis.LinesRemoved > 0 {
+		result.WriteString(fmt.Sprintf("  - %d lines removed\n", analysis.LinesRemoved))
+	}
+	if analysis.LinesModified > 0 {
+		result.WriteString(fmt.Sprintf("  ~ %d lines modified\n", analysis.LinesModified))
+	}
+
+	// Impact
+	result.WriteString(fmt.Sprintf("\n💡 Impact: %s\n", analysis.Impact))
+
+	// Preview
+	if analysis.Preview != "" {
+		result.WriteString(fmt.Sprintf("\n👁️  Preview:\n%s\n", analysis.Preview))
+	}
+
+	// Suggestions
+	if len(analysis.Suggestions) > 0 {
+		result.WriteString("\n💭 Suggestions:\n")
+		for _, suggestion := range analysis.Suggestions {
+			result.WriteString(fmt.Sprintf("  • %s\n", suggestion))
+		}
+	}
+
+	// Additional info
+	result.WriteString("\n📌 Additional Info:\n")
+	result.WriteString(fmt.Sprintf("  • Backup would be created: %v\n", analysis.WouldCreateBackup))
+	result.WriteString(fmt.Sprintf("  • Estimated time: %s\n", analysis.EstimatedTime))
+
+	result.WriteString("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	result.WriteString("ℹ️  This is a DRY RUN - no changes were made\n")
+
+	return result.String()
 }
 
 // Helper to convert []string -> []interface{} (for building arguments)
@@ -703,6 +1066,120 @@ func parseSize(sizeStr string) (int64, error) {
 	}
 
 	return size * multiplier, nil
+}
+
+// formatBatchResult formats a BatchResult as human-readable text
+func formatBatchResult(result core.BatchResult) string {
+	var sb strings.Builder
+
+	if result.ValidationOnly {
+		sb.WriteString("✅ Batch Validation Results\n")
+		sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+		if result.Success {
+			sb.WriteString(fmt.Sprintf("✓ All %d operations validated successfully\n", result.TotalOps))
+			sb.WriteString("✓ Ready to execute\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("✗ Validation failed\n"))
+			sb.WriteString(fmt.Sprintf("Errors: %v\n", result.Errors))
+		}
+		return sb.String()
+	}
+
+	// Execution results
+	if result.Success {
+		sb.WriteString("✅ Batch Operations Completed Successfully\n")
+	} else {
+		sb.WriteString("❌ Batch Operations Failed\n")
+	}
+	sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+
+	sb.WriteString(fmt.Sprintf("📊 Summary:\n"))
+	sb.WriteString(fmt.Sprintf("  Total operations: %d\n", result.TotalOps))
+	sb.WriteString(fmt.Sprintf("  Completed: %d\n", result.CompletedOps))
+	sb.WriteString(fmt.Sprintf("  Failed: %d\n", result.FailedOps))
+	sb.WriteString(fmt.Sprintf("  Execution time: %s\n", result.ExecutionTime))
+
+	if result.BackupPath != "" {
+		sb.WriteString(fmt.Sprintf("  Backup created: %s\n", result.BackupPath))
+	}
+
+	if result.RollbackDone {
+		sb.WriteString("\n⚠️  Rollback performed - all changes reverted\n")
+	}
+
+	// Individual operation results
+	sb.WriteString("\n📋 Operation Details:\n")
+	for _, opResult := range result.Results {
+		status := "✓"
+		if !opResult.Success {
+			status = "✗"
+		} else if opResult.Skipped {
+			status = "⊘"
+		}
+
+		sb.WriteString(fmt.Sprintf("  %s [%d] %s: %s", status, opResult.Index, opResult.Type, opResult.Path))
+
+		if opResult.BytesAffected > 0 {
+			sb.WriteString(fmt.Sprintf(" (%s)", formatSize(opResult.BytesAffected)))
+		}
+
+		if opResult.Error != "" {
+			sb.WriteString(fmt.Sprintf(" - Error: %s", opResult.Error))
+		}
+
+		sb.WriteString("\n")
+	}
+
+	if len(result.Errors) > 0 {
+		sb.WriteString("\n❌ Errors:\n")
+		for _, err := range result.Errors {
+			sb.WriteString(fmt.Sprintf("  • %s\n", err))
+		}
+	}
+
+	return sb.String()
+}
+
+// truncateContent truncates content based on mode and max lines
+func truncateContent(content string, maxLines int, mode string) string {
+	lines := strings.Split(content, "\n")
+	totalLines := len(lines)
+
+	if maxLines <= 0 {
+		maxLines = 100 // Default
+	}
+
+	var result []string
+	var truncMsg string
+
+	switch mode {
+	case "head":
+		if totalLines <= maxLines {
+			return content
+		}
+		result = lines[:maxLines]
+		truncMsg = fmt.Sprintf("\n[Truncated: showing first %d of %d lines. Use mode=all or increase max_lines to see more]", maxLines, totalLines)
+
+	case "tail":
+		if totalLines <= maxLines {
+			return content
+		}
+		result = lines[totalLines-maxLines:]
+		truncMsg = fmt.Sprintf("\n[Truncated: showing last %d of %d lines. Use mode=all or increase max_lines to see more]", maxLines, totalLines)
+
+	default: // "all" or unspecified
+		if maxLines > 0 && totalLines > maxLines {
+			// Take half from head, half from tail
+			half := maxLines / 2
+			result = append(lines[:half], fmt.Sprintf("\n... [%d lines omitted] ...\n", totalLines-maxLines))
+			result = append(result, lines[totalLines-half:]...)
+			truncMsg = fmt.Sprintf("\n[Truncated: showing %d of %d lines (%d head + %d tail). Use mode=head/tail or increase max_lines]", maxLines, totalLines, half, half)
+		} else {
+			return content
+		}
+	}
+
+	return strings.Join(result, "\n") + truncMsg
 }
 
 // formatSize formats bytes to human readable format

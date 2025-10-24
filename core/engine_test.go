@@ -235,3 +235,269 @@ func TestWrapperMethodsExist(t *testing.T) {
 	var _ func(context.Context, string) (string, error) = engine.GetOptimizationSuggestion
 	var _ func() string = engine.GetOptimizationReport
 }
+
+// TestCreateDirectory tests directory creation
+func TestCreateDirectory(t *testing.T) {
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	engine.config.AllowedPaths = append(engine.config.AllowedPaths, tempDir)
+
+	// Test creating a simple directory
+	newDir := filepath.Join(tempDir, "test_dir")
+	err := engine.CreateDirectory(ctx, newDir)
+	if err != nil {
+		t.Fatalf("CreateDirectory failed: %v", err)
+	}
+
+	// Verify directory was created
+	info, err := os.Stat(newDir)
+	if err != nil {
+		t.Fatalf("Failed to stat created directory: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error("Created path is not a directory")
+	}
+
+	// Test creating nested directories
+	nestedDir := filepath.Join(tempDir, "parent", "child", "grandchild")
+	err = engine.CreateDirectory(ctx, nestedDir)
+	if err != nil {
+		t.Fatalf("CreateDirectory failed for nested path: %v", err)
+	}
+
+	// Verify nested directory was created
+	info, err = os.Stat(nestedDir)
+	if err != nil {
+		t.Fatalf("Failed to stat nested directory: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error("Created nested path is not a directory")
+	}
+
+	// Test error when directory already exists
+	err = engine.CreateDirectory(ctx, newDir)
+	if err == nil {
+		t.Error("Expected error when creating existing directory, got nil")
+	}
+}
+
+// TestDeleteFile tests file and directory deletion
+func TestDeleteFile(t *testing.T) {
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	engine.config.AllowedPaths = append(engine.config.AllowedPaths, tempDir)
+
+	// Test deleting a file
+	testFile := createTestFile(t, tempDir, "delete_test.txt", "test content")
+	err := engine.DeleteFile(ctx, testFile)
+	if err != nil {
+		t.Fatalf("DeleteFile failed: %v", err)
+	}
+
+	// Verify file was deleted
+	if _, err := os.Stat(testFile); !os.IsNotExist(err) {
+		t.Error("File still exists after deletion")
+	}
+
+	// Test deleting a directory
+	testDir := filepath.Join(tempDir, "delete_dir")
+	os.MkdirAll(testDir, 0755)
+	createTestFile(t, testDir, "file_in_dir.txt", "content")
+
+	err = engine.DeleteFile(ctx, testDir)
+	if err != nil {
+		t.Fatalf("DeleteFile failed for directory: %v", err)
+	}
+
+	// Verify directory was deleted
+	if _, err := os.Stat(testDir); !os.IsNotExist(err) {
+		t.Error("Directory still exists after deletion")
+	}
+
+	// Test error when file doesn't exist
+	err = engine.DeleteFile(ctx, filepath.Join(tempDir, "nonexistent.txt"))
+	if err == nil {
+		t.Error("Expected error when deleting non-existent file, got nil")
+	}
+}
+
+// TestMoveFile tests moving files and directories
+func TestMoveFile(t *testing.T) {
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	engine.config.AllowedPaths = append(engine.config.AllowedPaths, tempDir)
+
+	// Test moving a file
+	testContent := "move test content"
+	sourceFile := createTestFile(t, tempDir, "source.txt", testContent)
+	destFile := filepath.Join(tempDir, "destination.txt")
+
+	err := engine.MoveFile(ctx, sourceFile, destFile)
+	if err != nil {
+		t.Fatalf("MoveFile failed: %v", err)
+	}
+
+	// Verify source doesn't exist
+	if _, err := os.Stat(sourceFile); !os.IsNotExist(err) {
+		t.Error("Source file still exists after move")
+	}
+
+	// Verify destination exists with correct content
+	content, err := os.ReadFile(destFile)
+	if err != nil {
+		t.Fatalf("Failed to read destination file: %v", err)
+	}
+	if string(content) != testContent {
+		t.Errorf("Content mismatch. Expected: %s, Got: %s", testContent, string(content))
+	}
+
+	// Test moving to a subdirectory
+	subDir := filepath.Join(tempDir, "subdir")
+	destFile2 := filepath.Join(subDir, "moved.txt")
+
+	err = engine.MoveFile(ctx, destFile, destFile2)
+	if err != nil {
+		t.Fatalf("MoveFile to subdirectory failed: %v", err)
+	}
+
+	// Verify subdirectory was created and file exists there
+	if _, err := os.Stat(destFile2); os.IsNotExist(err) {
+		t.Error("File doesn't exist at destination after move to subdirectory")
+	}
+}
+
+// TestCopyFile tests copying files and directories
+func TestCopyFile(t *testing.T) {
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	engine.config.AllowedPaths = append(engine.config.AllowedPaths, tempDir)
+
+	// Test copying a file
+	testContent := "copy test content"
+	sourceFile := createTestFile(t, tempDir, "source_copy.txt", testContent)
+	destFile := filepath.Join(tempDir, "dest_copy.txt")
+
+	err := engine.CopyFile(ctx, sourceFile, destFile)
+	if err != nil {
+		t.Fatalf("CopyFile failed: %v", err)
+	}
+
+	// Verify source still exists
+	if _, err := os.Stat(sourceFile); os.IsNotExist(err) {
+		t.Error("Source file doesn't exist after copy")
+	}
+
+	// Verify destination exists with correct content
+	content, err := os.ReadFile(destFile)
+	if err != nil {
+		t.Fatalf("Failed to read destination file: %v", err)
+	}
+	if string(content) != testContent {
+		t.Errorf("Content mismatch. Expected: %s, Got: %s", testContent, string(content))
+	}
+
+	// Test copying a directory
+	sourceDir := filepath.Join(tempDir, "source_dir")
+	os.MkdirAll(sourceDir, 0755)
+	createTestFile(t, sourceDir, "file1.txt", "content1")
+	createTestFile(t, sourceDir, "file2.txt", "content2")
+
+	// Create subdirectory
+	subDir := filepath.Join(sourceDir, "subdir")
+	os.MkdirAll(subDir, 0755)
+	createTestFile(t, subDir, "file3.txt", "content3")
+
+	destDir := filepath.Join(tempDir, "dest_dir")
+	err = engine.CopyFile(ctx, sourceDir, destDir)
+	if err != nil {
+		t.Fatalf("CopyFile failed for directory: %v", err)
+	}
+
+	// Verify all files were copied
+	files := []string{
+		filepath.Join(destDir, "file1.txt"),
+		filepath.Join(destDir, "file2.txt"),
+		filepath.Join(destDir, "subdir", "file3.txt"),
+	}
+
+	for _, file := range files {
+		if _, err := os.Stat(file); os.IsNotExist(err) {
+			t.Errorf("File %s doesn't exist after directory copy", file)
+		}
+	}
+}
+
+// TestGetFileInfo tests getting file information
+func TestGetFileInfo(t *testing.T) {
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	engine.config.AllowedPaths = append(engine.config.AllowedPaths, tempDir)
+
+	// Test getting info for a file
+	testContent := "file info test"
+	testFile := createTestFile(t, tempDir, "info_test.txt", testContent)
+
+	info, err := engine.GetFileInfo(ctx, testFile)
+	if err != nil {
+		t.Fatalf("GetFileInfo failed: %v", err)
+	}
+
+	if info == "" {
+		t.Error("GetFileInfo returned empty string")
+	}
+
+	// Info should contain file name
+	if !contains(info, "info_test.txt") {
+		t.Error("File info doesn't contain file name")
+	}
+
+	// Test getting info for a directory
+	testDir := filepath.Join(tempDir, "info_dir")
+	os.MkdirAll(testDir, 0755)
+	createTestFile(t, testDir, "file1.txt", "content")
+	createTestFile(t, testDir, "file2.txt", "content")
+
+	info, err = engine.GetFileInfo(ctx, testDir)
+	if err != nil {
+		t.Fatalf("GetFileInfo failed for directory: %v", err)
+	}
+
+	if info == "" {
+		t.Error("GetFileInfo returned empty string for directory")
+	}
+
+	// Test error for non-existent file
+	_, err = engine.GetFileInfo(ctx, filepath.Join(tempDir, "nonexistent.txt"))
+	if err == nil {
+		t.Error("Expected error for non-existent file, got nil")
+	}
+}
+
+// Helper function to check if string contains substring
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && findSubstring(s, substr))
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
