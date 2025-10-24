@@ -18,21 +18,21 @@ type ClaudeDesktopOptimizer struct {
 
 // OptimizationConfig holds optimization settings
 type OptimizationConfig struct {
-	MaxDirectFileSize    int64         // Max size for direct operations
-	ChunkSize           int           // Default chunk size
-	MaxResponseTime     time.Duration // Max time per operation
-	AutoDetectFileType  bool          // Auto-detect text vs binary
-	ProgressReporting   bool          // Report progress for long operations
-	SmartErrorRecovery  bool          // Attempt error recovery
+	MaxDirectFileSize  int64         // Max size for direct operations
+	ChunkSize          int           // Default chunk size
+	MaxResponseTime    time.Duration // Max time per operation
+	AutoDetectFileType bool          // Auto-detect text vs binary
+	ProgressReporting  bool          // Report progress for long operations
+	SmartErrorRecovery bool          // Attempt error recovery
 }
 
 // BatchOperation represents a single operation in a batch
 type BatchOperation struct {
-	Type     string // "read", "write", "edit"
-	Path     string
-	Content  string // for write operations
-	OldText  string // for edit operations  
-	NewText  string // for edit operations
+	Type    string // "read", "write", "edit"
+	Path    string
+	Content string // for write operations
+	OldText string // for edit operations
+	NewText string // for edit operations
 }
 
 // NewClaudeDesktopOptimizer creates a new optimizer
@@ -40,11 +40,11 @@ func NewClaudeDesktopOptimizer(engine *UltraFastEngine) *ClaudeDesktopOptimizer 
 	return &ClaudeDesktopOptimizer{
 		engine: engine,
 		config: &OptimizationConfig{
-			MaxDirectFileSize:   50 * 1024,      // 50KB
-			ChunkSize:          32 * 1024,       // 32KB chunks
+			MaxDirectFileSize:  200 * 1024,       // 200KB (aumentado para mejor rendimiento)
+			ChunkSize:          64 * 1024,        // 64KB chunks (aumentado)
 			MaxResponseTime:    30 * time.Second, // 30s max
 			AutoDetectFileType: true,
-			ProgressReporting:  true,
+			ProgressReporting:  false, // Desactivado por defecto para reducir overhead
 			SmartErrorRecovery: true,
 		},
 	}
@@ -53,16 +53,11 @@ func NewClaudeDesktopOptimizer(engine *UltraFastEngine) *ClaudeDesktopOptimizer 
 // IntelligentWrite automatically chooses the best write strategy
 func (o *ClaudeDesktopOptimizer) IntelligentWrite(ctx context.Context, path, content string) error {
 	size := int64(len(content))
-	
-	// Log the decision process
-	log.Printf("🧠 IntelligentWrite: %s (%s)", path, formatSize(size))
-	
-	// Auto-select strategy
+
+	// Auto-select strategy sin logging excesivo
 	if size <= o.config.MaxDirectFileSize {
-		log.Printf("📝 Using direct write (small file)")
 		return o.engine.WriteFileContent(ctx, path, content)
 	} else {
-		log.Printf("🚀 Using streaming write (large file)")
 		return o.engine.StreamingWriteFile(ctx, path, content)
 	}
 }
@@ -74,16 +69,17 @@ func (o *ClaudeDesktopOptimizer) IntelligentRead(ctx context.Context, path strin
 	if err != nil {
 		return "", err
 	}
-	
+
 	size := info.Size()
-	log.Printf("🧠 IntelligentRead: %s (%s)", path, formatSize(size))
-	
+	// Log solo si debug mode y archivo grande
+	if size > 5*1024*1024 && !o.engine.config.CompactMode {
+		log.Printf("🧠 IntelligentRead: %s (%s)", path, formatSize(size))
+	}
+
 	// Auto-select strategy
 	if size <= o.config.MaxDirectFileSize {
-		log.Printf("📖 Using direct read (small file)")
 		return o.engine.ReadFileContent(ctx, path)
 	} else {
-		log.Printf("📚 Using chunked read (large file)")
 		return o.engine.ChunkedReadFile(ctx, path, o.config.ChunkSize)
 	}
 }
@@ -95,16 +91,17 @@ func (o *ClaudeDesktopOptimizer) IntelligentEdit(ctx context.Context, path, oldT
 	if err != nil {
 		return nil, err
 	}
-	
+
 	size := info.Size()
-	log.Printf("🧠 IntelligentEdit: %s (%s)", path, formatSize(size))
-	
+	// Log solo si debug mode y archivo grande
+	if size > 5*1024*1024 && !o.engine.config.CompactMode {
+		log.Printf("🧠 IntelligentEdit: %s (%s)", path, formatSize(size))
+	}
+
 	// Auto-select strategy
 	if size <= o.config.MaxDirectFileSize {
-		log.Printf("✏️ Using direct edit (small file)")
 		return o.engine.EditFile(path, oldText, newText)
 	} else {
-		log.Printf("⚡ Using smart edit (large file)")
 		return o.engine.SmartEditFile(ctx, path, oldText, newText, o.config.MaxDirectFileSize)
 	}
 }
@@ -118,11 +115,29 @@ func (o *ClaudeDesktopOptimizer) GetOptimizationSuggestion(ctx context.Context, 
 
 	size := info.Size()
 	ext := strings.ToLower(filepath.Ext(path))
-	
+
+	// Compact mode: minimal suggestion
+	if o.engine.config.CompactMode {
+		var strategy, warning string
+		if size < 50*1024 {
+			strategy = "direct"
+		} else if size < 500*1024 {
+			strategy = "intelligent"
+		} else if size < 5*1024*1024 {
+			strategy = "streaming"
+			warning = " (use streaming ops)"
+		} else {
+			strategy = "chunked"
+			warning = " (very large)"
+		}
+		return fmt.Sprintf("%s: %s, strategy:%s%s", filepath.Base(path), formatSize(size), strategy, warning), nil
+	}
+
+	// Verbose mode: detailed suggestion
 	var suggestion strings.Builder
 	suggestion.WriteString(fmt.Sprintf("🧠 Claude Desktop Optimization Suggestion for: %s\n", filepath.Base(path)))
 	suggestion.WriteString(fmt.Sprintf("File size: %s\n\n", formatSize(size)))
-	
+
 	// Size-based recommendations
 	if size < 10*1024 {
 		suggestion.WriteString("✅ OPTIMAL: Use any operation directly\n")
@@ -148,7 +163,7 @@ func (o *ClaudeDesktopOptimizer) GetOptimizationSuggestion(ctx context.Context, 
 		suggestion.WriteString("• Recommended: Use search operations to find specific sections\n")
 		suggestion.WriteString("• Consider: Breaking into smaller files\n")
 	}
-	
+
 	// File type recommendations
 	suggestion.WriteString("\n📄 File Type Analysis:\n")
 	if isTextFile(ext) {
@@ -169,7 +184,7 @@ func (o *ClaudeDesktopOptimizer) GetOptimizationSuggestion(ctx context.Context, 
 	suggestion.WriteString("• Use intelligent_* functions for automatic optimization\n")
 	suggestion.WriteString("• Progress reporting helps with large files\n")
 	suggestion.WriteString("• Smart edit handles large files better than regular edit\n")
-	
+
 	return suggestion.String(), nil
 }
 
@@ -177,16 +192,16 @@ func (o *ClaudeDesktopOptimizer) GetOptimizationSuggestion(ctx context.Context, 
 func (o *ClaudeDesktopOptimizer) BatchOptimizedOperations(ctx context.Context, operations []BatchOperation) (string, error) {
 	start := time.Now()
 	var results strings.Builder
-	
+
 	results.WriteString(fmt.Sprintf("🚀 Starting batch operations: %d files\n\n", len(operations)))
-	
+
 	successCount := 0
 	errorCount := 0
-	
+
 	for i, op := range operations {
 		opStart := time.Now()
 		results.WriteString(fmt.Sprintf("📁 [%d/%d] %s: %s\n", i+1, len(operations), op.Type, op.Path))
-		
+
 		var err error
 		switch op.Type {
 		case "read":
@@ -198,7 +213,7 @@ func (o *ClaudeDesktopOptimizer) BatchOptimizedOperations(ctx context.Context, o
 		default:
 			err = fmt.Errorf("unknown operation type: %s", op.Type)
 		}
-		
+
 		elapsed := time.Since(opStart)
 		if err != nil {
 			results.WriteString(fmt.Sprintf("❌ Error: %v (took %v)\n", err, elapsed))
@@ -207,20 +222,20 @@ func (o *ClaudeDesktopOptimizer) BatchOptimizedOperations(ctx context.Context, o
 			results.WriteString(fmt.Sprintf("✅ Success (took %v)\n", elapsed))
 			successCount++
 		}
-		
+
 		// Small delay between operations to prevent overwhelming Claude Desktop
 		if i < len(operations)-1 {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
-	
+
 	totalElapsed := time.Since(start)
 	results.WriteString(fmt.Sprintf("\n📊 Batch Summary:\n"))
 	results.WriteString(fmt.Sprintf("✅ Successful: %d\n", successCount))
 	results.WriteString(fmt.Sprintf("❌ Failed: %d\n", errorCount))
 	results.WriteString(fmt.Sprintf("⏱️ Total time: %v\n", totalElapsed))
 	results.WriteString(fmt.Sprintf("⚡ Average per operation: %v\n", totalElapsed/time.Duration(len(operations))))
-	
+
 	return results.String(), nil
 }
 
@@ -231,18 +246,18 @@ func (o *ClaudeDesktopOptimizer) AutoRecoveryEdit(ctx context.Context, path, old
 	if err == nil {
 		return result, nil
 	}
-	
+
 	log.Printf("🔄 Edit failed, attempting recovery: %v", err)
-	
+
 	if !o.config.SmartErrorRecovery {
 		return nil, err
 	}
-	
+
 	// Recovery attempt 1: Normalize whitespace
 	normalizedOldText := strings.TrimSpace(oldText)
 	normalizedOldText = strings.ReplaceAll(normalizedOldText, "\r\n", "\n")
 	normalizedOldText = strings.ReplaceAll(normalizedOldText, "\r", "\n")
-	
+
 	if normalizedOldText != oldText {
 		log.Printf("🔄 Recovery attempt 1: Normalized whitespace")
 		result, err = o.IntelligentEdit(ctx, path, normalizedOldText, newText)
@@ -250,7 +265,7 @@ func (o *ClaudeDesktopOptimizer) AutoRecoveryEdit(ctx context.Context, path, old
 			return result, nil
 		}
 	}
-	
+
 	// Recovery attempt 2: Fuzzy match (remove extra spaces)
 	fuzzyOldText := strings.Join(strings.Fields(oldText), " ")
 	if fuzzyOldText != oldText && fuzzyOldText != normalizedOldText {
@@ -260,7 +275,7 @@ func (o *ClaudeDesktopOptimizer) AutoRecoveryEdit(ctx context.Context, path, old
 			return result, nil
 		}
 	}
-	
+
 	// Recovery attempt 3: Line-by-line search
 	lines := strings.Split(oldText, "\n")
 	if len(lines) > 1 {
@@ -279,7 +294,7 @@ func (o *ClaudeDesktopOptimizer) AutoRecoveryEdit(ctx context.Context, path, old
 			}
 		}
 	}
-	
+
 	log.Printf("❌ All recovery attempts failed")
 	return nil, fmt.Errorf("edit failed even after recovery attempts: %v", err)
 }
@@ -287,7 +302,7 @@ func (o *ClaudeDesktopOptimizer) AutoRecoveryEdit(ctx context.Context, path, old
 // GetPerformanceReport generates a performance report for Claude Desktop
 func (o *ClaudeDesktopOptimizer) GetPerformanceReport() string {
 	stats := o.engine.GetPerformanceStats()
-	
+
 	var report strings.Builder
 	report.WriteString("🚀 Claude Desktop Performance Report\n")
 	report.WriteString("=====================================\n\n")
@@ -298,7 +313,7 @@ func (o *ClaudeDesktopOptimizer) GetPerformanceReport() string {
 	report.WriteString("• Files >500KB: Use streaming operations\n")
 	report.WriteString("• Very large files: Use chunked operations with progress\n")
 	report.WriteString("• Always use analyze_file for unknown files\n")
-	
+
 	return report.String()
 }
 

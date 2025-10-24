@@ -1,17 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(go build:*)",
-      "Bash(go doc:*)",
+      "Bash(\"C:\\Program Files\\GitHub CLI\\gh.exe\" issue close 1 --repo scopweb/mcp-filesystem-go-ultra --comment \"Fixed in commit 40cfe0e. Search operations now return full absolute paths in all modes, including compact mode.\")",
       "Bash(go list:*)",
-      "Bash(go mod:*)",
-      "Bash(go get:*)",
+      "Bash(findstr:*)",
+      "Bash(go build:*)",
       "Bash(go test:*)",
-      "Read(//c/Users/DAVID/AppData/Roaming/Claude/**)",
-      "Bash(.mcp-filesystem-ultra.exe --help)",
-      "Bash(go run:*)",
-      "Bash(timeout:*)",
-      "Bash(git init:*)",
+      "Bash(dir:*)",
+      "Bash(powershell -Command \"(Get-Item mcp-filesystem-ultra.exe).Length / 1MB\")",
+      "Bash(powershell -Command \"(Get-Item c:\\MCPs\\clone\\mcp-filesystem-go-ultra\\mcp-filesystem-ultra.exe).Length / 1MB\")",
+      "Bash(powershell -Command \"Get-Content ''c:\\MCPs\\clone\\mcp-filesystem-go-ultra\\main.go'' | Select-String ''WithDescription'' | Measure-Object\")",
+      "Bash(powershell:*)",
       "Bash(git add:*)"
     ],
     "deny": [],

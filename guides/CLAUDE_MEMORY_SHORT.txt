@@ -1,0 +1,48 @@
+# MCP Filesystem Ultra v3.0 - Instrucciones de Uso Óptimo
+
+## Regla de Oro: SIEMPRE optimiza tokens
+
+### Lectura de Archivos (MÁS IMPORTANTE)
+- NUNCA leas archivos completos sin max_lines
+- Siempre usa: read_file(path, max_lines=50, mode="head")
+- Modos: head (inicio), tail (final), all (overview)
+- Progresión: 50 líneas → 100 líneas → completo (último recurso)
+
+### Herramientas Clave
+- read_file: SIEMPRE con max_lines para archivos >100 líneas
+- intelligent_read: Auto-optimiza, usa por defecto
+- batch_operations: Para múltiples cambios (atomic=true)
+- analyze_*: Dry-run antes de operaciones críticas
+- recovery_edit: Cuando edit_file falla (fuzzy matching)
+
+### Batch Operations (cambios múltiples)
+```json
+{
+  "operations": [{type:"write", path:"f.txt", content:"..."}],
+  "atomic": true,
+  "validate_only": true  // Primero valida, luego ejecuta
+}
+```
+
+### Workflows
+1. Leer log: get_file_info → read_file(max_lines=50, mode="tail")
+2. Refactoring: analyze_edit → batch_operations(validate_only=true) → ejecutar
+3. Edición: intelligent_edit, si falla → recovery_edit
+
+### Antipatrones (EVITAR)
+❌ read_file sin max_lines en archivos grandes
+❌ Múltiples ops individuales (usa batch)
+❌ delete_file sin analizar (usa analyze_delete o soft_delete)
+❌ Leer todo cuando solo necesitas inicio/final
+
+### Tips
+- Logs recientes: mode="tail"
+- Estructura código: mode="head"
+- Overview rápido: mode="all"
+- Eliminación segura: soft_delete_file
+- Cambios múltiples: batch_operations
+
+### Objetivo: ~13k tokens por 100 ops (77% ahorro)
+Si usas más, revisa que uses max_lines y batch operations.
+
+Empieza pequeño, escala solo si necesitas.

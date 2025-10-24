@@ -22,6 +22,12 @@ type Config struct {
 	DebugMode        bool
 	AllowedPaths     []string
 	BinaryThreshold  int64
+	CompactMode      bool  // Enable compact responses
+	MaxResponseSize  int64 // Max response size
+	MaxSearchResults int   // Max search results
+	MaxListItems     int   // Max list items
+	HooksConfigPath  string // Path to hooks configuration file
+	HooksEnabled     bool   // Enable hooks system
 }
 
 // UltraFastEngine implements all filesystem operations with maximum performance
@@ -42,6 +48,9 @@ type UltraFastEngine struct {
 
 	// Claude Desktop optimizer
 	optimizer *ClaudeDesktopOptimizer
+
+	// Hook manager
+	hookManager *HookManager
 }
 
 // PerformanceMetrics tracks real-time performance statistics
@@ -88,11 +97,23 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 	engine.workerPool = workerPool
 
 	log.Printf("🔧 Ultra-fast engine initialized with %d parallel operations", config.ParallelOps)
-	
+
 	// Initialize Claude Desktop optimizer
 	engine.optimizer = NewClaudeDesktopOptimizer(engine)
 	log.Printf("🧠 Claude Desktop optimizer initialized")
-	
+
+	// Initialize hook manager
+	engine.hookManager = NewHookManager()
+	if config.HooksEnabled && config.HooksConfigPath != "" {
+		if err := engine.hookManager.LoadConfig(config.HooksConfigPath); err != nil {
+			log.Printf("⚠️ Failed to load hooks config: %v (hooks disabled)", err)
+		} else {
+			engine.hookManager.SetEnabled(true)
+			engine.hookManager.SetDebugMode(config.DebugMode)
+			log.Printf("🪝 Hook system initialized")
+		}
+	}
+
 	return engine, nil
 }
 
@@ -231,6 +252,29 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 		}
 	}
 
+	// Execute pre-write hooks
+	workingDir, _ := os.Getwd()
+	hookCtx := &HookContext{
+		Event:      HookPreWrite,
+		ToolName:   "write_file",
+		FilePath:   path,
+		Operation:  "write",
+		Content:    content,
+		Timestamp:  time.Now(),
+		WorkingDir: workingDir,
+	}
+
+	hookResult, err := e.hookManager.ExecuteHooks(ctx, HookPreWrite, hookCtx)
+	if err != nil {
+		return fmt.Errorf("pre-write hook denied operation: %v", err)
+	}
+
+	// Use modified content if hook provided it (e.g., formatted code)
+	finalContent := content
+	if hookResult.ModifiedContent != "" {
+		finalContent = hookResult.ModifiedContent
+	}
+
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -241,7 +285,7 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 	tmpPath := path + ".tmp." + fmt.Sprintf("%d", time.Now().UnixNano())
 
 	// Write to temporary file
-	if err := os.WriteFile(tmpPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpPath, []byte(finalContent), 0644); err != nil {
 		return fmt.Errorf("failed to write temp file: %v", err)
 	}
 
@@ -253,6 +297,11 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 
 	// Invalidate cache
 	e.cache.InvalidateFile(path)
+
+	// Execute post-write hooks
+	hookCtx.Event = HookPostWrite
+	hookCtx.Content = finalContent
+	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostWrite, hookCtx)
 
 	return nil
 }
@@ -288,26 +337,60 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 		return "", fmt.Errorf("failed to read directory: %v", err)
 	}
 
-	// Build response
+	// Build response - compact or verbose mode
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("Directory listing for: %s\n\n", path))
 
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil {
-			continue
+	if e.config.CompactMode {
+		// Compact mode: minimal format
+		result.WriteString(path)
+		result.WriteString(": ")
+
+		maxItems := e.config.MaxListItems
+		count := 0
+		for _, entry := range entries {
+			if count >= maxItems {
+				result.WriteString(fmt.Sprintf("... (%d more)", len(entries)-count))
+				break
+			}
+
+			if count > 0 {
+				result.WriteString(", ")
+			}
+
+			if entry.IsDir() {
+				result.WriteString(entry.Name())
+				result.WriteString("/")
+			} else {
+				info, err := entry.Info()
+				if err == nil && info.Size() > 1024 {
+					result.WriteString(fmt.Sprintf("%s(%s)", entry.Name(), formatSize(info.Size())))
+				} else {
+					result.WriteString(entry.Name())
+				}
+			}
+			count++
+		}
+	} else {
+		// Verbose mode: detailed format
+		result.WriteString(fmt.Sprintf("Directory listing for: %s\n\n", path))
+
+		for _, entry := range entries {
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+
+			entryType := "[FILE]"
+			if entry.IsDir() {
+				entryType = "[DIR] "
+			}
+
+			result.WriteString(fmt.Sprintf("%s %s (file://%s) - %d bytes\n",
+				entryType, entry.Name(), filepath.Join(path, entry.Name()), info.Size()))
 		}
 
-		entryType := "[FILE]"
-		if entry.IsDir() {
-			entryType = "[DIR] "
-		}
-
-		result.WriteString(fmt.Sprintf("%s %s (file://%s) - %d bytes\n",
-			entryType, entry.Name(), filepath.Join(path, entry.Name()), info.Size()))
+		result.WriteString(fmt.Sprintf("\nDirectory: %s", path))
 	}
-
-	result.WriteString(fmt.Sprintf("Directory: %s", path))
 
 	responseText := result.String()
 
@@ -325,6 +408,16 @@ func (e *UltraFastEngine) GetPerformanceStats() string {
 	e.metrics.mu.RLock()
 	defer e.metrics.mu.RUnlock()
 
+	if e.config.CompactMode {
+		// Compact format: key metrics only
+		return fmt.Sprintf("ops/s:%.1f hit:%.1f%% mem:%s ops:%d",
+			e.metrics.OperationsPerSecond,
+			e.metrics.CacheHitRate*100,
+			formatSize(e.metrics.MemoryUsage),
+			e.metrics.OperationsTotal)
+	}
+
+	// Verbose format
 	return fmt.Sprintf(`Performance Statistics:
 Operations Total: %d
 Operations/Second: %.2f
@@ -440,6 +533,26 @@ func (e *UltraFastEngine) GetLastArtifactInfo() string {
 
 	lines := strings.Count(e.lastArtifact, "\n") + 1
 	return fmt.Sprintf("Last artifact: %d bytes, %d lines", len(e.lastArtifact), lines)
+}
+
+// IsCompactMode returns whether compact mode is enabled
+func (e *UltraFastEngine) IsCompactMode() bool {
+	return e.config.CompactMode
+}
+
+// GetMaxResponseSize returns max response size
+func (e *UltraFastEngine) GetMaxResponseSize() int64 {
+	return e.config.MaxResponseSize
+}
+
+// GetMaxSearchResults returns max search results
+func (e *UltraFastEngine) GetMaxSearchResults() int {
+	return e.config.MaxSearchResults
+}
+
+// GetMaxListItems returns max list items
+func (e *UltraFastEngine) GetMaxListItems() int {
+	return e.config.MaxListItems
 }
 
 // IntelligentWrite wraps optimizer's IntelligentWrite method

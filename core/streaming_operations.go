@@ -13,48 +13,48 @@ import (
 
 // ChunkingConfig holds configuration for intelligent chunking
 type ChunkingConfig struct {
-	MaxChunkSize    int    // Max size per chunk in bytes
-	OverlapSize     int    // Overlap between chunks for context
-	MaxConcurrent   int    // Max concurrent chunk operations
-	ProgressReport  bool   // Whether to report progress
-	SmartSplit      bool   // Whether to split at logical boundaries
+	MaxChunkSize   int  // Max size per chunk in bytes
+	OverlapSize    int  // Overlap between chunks for context
+	MaxConcurrent  int  // Max concurrent chunk operations
+	ProgressReport bool // Whether to report progress
+	SmartSplit     bool // Whether to split at logical boundaries
 }
 
 // ChunkOperation represents a chunked file operation
 type ChunkOperation struct {
-	ID          string
-	TotalChunks int
+	ID           string
+	TotalChunks  int
 	CurrentChunk int
-	Status      string
-	StartTime   time.Time
-	LastUpdate  time.Time
+	Status       string
+	StartTime    time.Time
+	LastUpdate   time.Time
 }
 
 // DefaultChunkingConfig returns optimized defaults for Claude Desktop
 func DefaultChunkingConfig() *ChunkingConfig {
 	return &ChunkingConfig{
-		MaxChunkSize:   32 * 1024, // 32KB chunks - optimal for Claude Desktop
-		OverlapSize:    256,       // 256 bytes overlap for context
-		MaxConcurrent:  3,         // Conservative for stability
-		ProgressReport: true,
+		MaxChunkSize:   64 * 1024, // 64KB chunks - mejor rendimiento
+		OverlapSize:    512,       // 512 bytes overlap para mejor contexto
+		MaxConcurrent:  4,         // Aumentado para mejor paralelismo
+		ProgressReport: false,     // Desactivado por defecto
 		SmartSplit:     true,
 	}
 }
 
 // StreamingWriteFile writes large files in intelligent chunks
 func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content string) error {
-	// Quick path for small files
-	if len(content) <= 32*1024 {
+	// Quick path for small files - aumentado el umbral
+	if len(content) <= 200*1024 {
 		return e.WriteFileContent(ctx, path, content)
 	}
 
 	start := time.Now()
 	config := DefaultChunkingConfig()
-	
+
 	// Calculate chunks
 	totalSize := len(content)
 	totalChunks := int(math.Ceil(float64(totalSize) / float64(config.MaxChunkSize)))
-	
+
 	// Create operation tracking
 	opID := fmt.Sprintf("stream_%d", time.Now().UnixNano())
 	operation := &ChunkOperation{
@@ -65,7 +65,10 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 		LastUpdate:  start,
 	}
 
-	log.Printf("🚀 Starting streaming write: %s (%s in %d chunks)", path, formatSize(int64(totalSize)), totalChunks)
+	// Log solo para archivos grandes (>5MB) para reducir overhead
+	if totalSize > 5*1024*1024 && !e.config.CompactMode {
+		log.Printf("🚀 Starting streaming write: %s (%s in %d chunks)", path, formatSize(int64(totalSize)), totalChunks)
+	}
 
 	// Ensure directory exists
 	dir := filepath.Dir(path)
@@ -75,9 +78,9 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 
 	// Create temp file for atomic operation
 	tmpPath := path + ".streaming." + opID
-	
-	// Open file for writing
-	file, err := os.Create(tmpPath)
+
+	// Open file for writing con buffer para mejor rendimiento
+	file, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %v", err)
 	}
@@ -103,7 +106,7 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 		}
 
 		chunk := content[startPos:end]
-		
+
 		// Write chunk
 		n, err := file.WriteString(chunk)
 		if err != nil {
@@ -111,18 +114,8 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 		}
 		written += n
 
-		// Progress report every 10 chunks or for large chunks
-		if config.ProgressReport && (i%10 == 0 || len(chunk) > 16*1024) {
-			progress := float64(written) / float64(totalSize) * 100
-			elapsed := time.Since(start)
-			log.Printf("📊 Progress: %.1f%% (%d/%d chunks, %s written, %v elapsed)", 
-				progress, i+1, totalChunks, formatSize(int64(written)), elapsed)
-		}
-
-		// Small delay to prevent overwhelming Claude Desktop
-		if i%5 == 0 && i > 0 {
-			time.Sleep(10 * time.Millisecond)
-		}
+		// Progress report disabled for performance
+		// Eliminado delay innecesario - el OS maneja esto eficientemente
 	}
 
 	// Sync and close
@@ -140,11 +133,12 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 	e.cache.InvalidateFile(path)
 
 	operation.Status = "completed"
-	elapsed := time.Since(start)
-	speed := float64(totalSize) / elapsed.Seconds()
-	
-	log.Printf("✅ Streaming write completed: %s (%s in %v, %.1f KB/s)", 
-		path, formatSize(int64(totalSize)), elapsed, speed/1024)
+
+	// Log solo para archivos muy grandes (>5MB) y si no estamos en compact mode
+	if totalSize > 5*1024*1024 && !e.config.CompactMode {
+		elapsed := time.Since(start)
+		log.Printf("✅ Streaming write completed: %s (%v)", path, elapsed)
+	}
 
 	return nil
 }
@@ -158,14 +152,17 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 	}
 
 	fileSize := info.Size()
-	
+
 	// Quick path for small files
 	if fileSize <= int64(maxChunkSize) {
 		return e.ReadFileContent(ctx, path)
 	}
 
 	start := time.Now()
-	log.Printf("🚀 Starting chunked read: %s (%s)", path, formatSize(fileSize))
+	// Log solo para archivos muy grandes y si no estamos en compact mode
+	if fileSize > 5*1024*1024 && !e.config.CompactMode {
+		log.Printf("🚀 Chunked read: %s (%s)", path, formatSize(fileSize))
+	}
 
 	// Open file
 	file, err := os.Open(path)
@@ -187,17 +184,12 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 		if n == 0 {
 			break
 		}
-		
+
 		chunkNum++
 		result.Write(buffer[:n])
 		totalRead += int64(n)
 
-		// Progress report
-		if chunkNum%10 == 0 {
-			progress := float64(totalRead) / float64(fileSize) * 100
-			log.Printf("📊 Read progress: %.1f%% (%s/%s)", 
-				progress, formatSize(totalRead), formatSize(fileSize))
-		}
+		// Progress reporting disabled for performance
 
 		if err != nil {
 			if err.Error() == "EOF" {
@@ -207,11 +199,11 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 		}
 	}
 
-	elapsed := time.Since(start)
-	speed := float64(totalRead) / elapsed.Seconds()
-	
-	log.Printf("✅ Chunked read completed: %s (%s in %v, %.1f MB/s)", 
-		path, formatSize(totalRead), elapsed, speed/1024/1024)
+	// Log solo para archivos muy grandes y si no estamos en compact mode
+	if fileSize > 5*1024*1024 && !e.config.CompactMode {
+		elapsed := time.Since(start)
+		log.Printf("✅ Chunked read completed: %s (%v)", path, elapsed)
+	}
 
 	return result.String(), nil
 }
@@ -225,7 +217,7 @@ func (e *UltraFastEngine) SmartEditFile(ctx context.Context, path, oldText, newT
 	}
 
 	fileSize := info.Size()
-	
+
 	// For very large files, use different strategy
 	if fileSize > maxFileSize {
 		return e.streamingEditLargeFile(ctx, path, oldText, newText)
@@ -237,8 +229,11 @@ func (e *UltraFastEngine) SmartEditFile(ctx context.Context, path, oldText, newT
 
 // streamingEditLargeFile handles editing of very large files
 func (e *UltraFastEngine) streamingEditLargeFile(ctx context.Context, path, oldText, newText string) (*EditResult, error) {
-	log.Printf("🔧 Large file edit: %s (using streaming approach)", path)
-	
+	// Log solo si no estamos en compact mode
+	if !e.config.CompactMode {
+		log.Printf("🔧 Large file edit: %s (streaming)", path)
+	}
+
 	// Read in chunks and process
 	const chunkSize = 64 * 1024 // 64KB chunks
 	content, err := e.ChunkedReadFile(ctx, path, chunkSize)
@@ -280,11 +275,11 @@ func (e *UltraFastEngine) GetFileAnalysis(ctx context.Context, path string) (str
 	}
 
 	fileSize := info.Size()
-	
+
 	var analysis strings.Builder
 	analysis.WriteString(fmt.Sprintf("📊 File Analysis: %s\n", filepath.Base(path)))
 	analysis.WriteString(fmt.Sprintf("Size: %s\n", formatSize(fileSize)))
-	
+
 	// Determine optimal strategy
 	if fileSize < 32*1024 {
 		analysis.WriteString("Strategy: Direct operation (small file)\n")
@@ -322,7 +317,7 @@ func isTextFile(ext string) bool {
 		".sql", ".r", ".m", ".pl", ".lua", ".vim", ".emacs", ".gitignore",
 		".env", ".config", ".ini", ".toml", ".lock", ".log",
 	}
-	
+
 	for _, textExt := range textExts {
 		if ext == textExt {
 			return true
@@ -342,7 +337,7 @@ func isBinaryFile(ext string) bool {
 		".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
 		".db", ".sqlite", ".mdb", ".accdb",
 	}
-	
+
 	for _, binExt := range binaryExts {
 		if ext == binExt {
 			return true
