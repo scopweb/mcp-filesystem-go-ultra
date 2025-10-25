@@ -448,6 +448,111 @@ func (e *UltraFastEngine) isTextFile(path string) bool {
 	return true
 }
 
+// CountOccurrences counts occurrences of a pattern in a file and optionally returns line numbers
+func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern string, returnLines bool) (string, error) {
+	if err := e.acquireOperation(ctx, "count"); err != nil {
+		return "", err
+	}
+	start := time.Now()
+	defer e.releaseOperation("count", start)
+
+	validPath, err := e.validatePath(path)
+	if err != nil {
+		return "", fmt.Errorf("path validation error: %v", err)
+	}
+
+	// Check if file exists
+	info, err := os.Stat(validPath)
+	if os.IsNotExist(err) {
+		return "", fmt.Errorf("file does not exist: %s", validPath)
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to stat file: %v", err)
+	}
+
+	if info.IsDir() {
+		return "", fmt.Errorf("path is a directory, not a file: %s", validPath)
+	}
+
+	// Read file
+	content, err := os.ReadFile(validPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %v", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+
+	// Try to compile as regex first, fallback to literal if fails
+	var regexPattern *regexp.Regexp
+	regexPattern, err = regexp.Compile(pattern)
+	if err != nil {
+		// Use literal pattern
+		regexPattern = regexp.MustCompile(regexp.QuoteMeta(pattern))
+	}
+
+	// Count occurrences and track line numbers
+	var matchedLines []int
+	totalOccurrences := 0
+
+	for lineNum, line := range lines {
+		matches := regexPattern.FindAllString(line, -1)
+		if len(matches) > 0 {
+			totalOccurrences += len(matches)
+			if returnLines {
+				matchedLines = append(matchedLines, lineNum+1) // 1-indexed
+			}
+		}
+	}
+
+	// Build response
+	var result strings.Builder
+
+	if e.config.CompactMode {
+		result.WriteString(fmt.Sprintf("%d matches", totalOccurrences))
+		if returnLines && len(matchedLines) > 0 {
+			result.WriteString(" at lines: ")
+			maxShow := 20
+			if len(matchedLines) > maxShow {
+				for i := 0; i < maxShow; i++ {
+					if i > 0 {
+						result.WriteString(", ")
+					}
+					result.WriteString(fmt.Sprintf("%d", matchedLines[i]))
+				}
+				result.WriteString(fmt.Sprintf("... (+%d more)", len(matchedLines)-maxShow))
+			} else {
+				for i, lineNum := range matchedLines {
+					if i > 0 {
+						result.WriteString(", ")
+					}
+					result.WriteString(fmt.Sprintf("%d", lineNum))
+				}
+			}
+		}
+	} else {
+		result.WriteString(fmt.Sprintf("🔢 Pattern Occurrence Count\n"))
+		result.WriteString(fmt.Sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))
+		result.WriteString(fmt.Sprintf("📁 File: %s\n", validPath))
+		result.WriteString(fmt.Sprintf("🔍 Pattern: '%s'\n", pattern))
+		result.WriteString(fmt.Sprintf("📊 Total occurrences: %d\n", totalOccurrences))
+		result.WriteString(fmt.Sprintf("📝 Lines with matches: %d\n", len(matchedLines)))
+
+		if returnLines && len(matchedLines) > 0 {
+			result.WriteString(fmt.Sprintf("\n📌 Line numbers:\n"))
+			maxShow := 50
+			for i := 0; i < len(matchedLines) && i < maxShow; i++ {
+				result.WriteString(fmt.Sprintf("  Line %d\n", matchedLines[i]))
+			}
+			if len(matchedLines) > maxShow {
+				result.WriteString(fmt.Sprintf("  ... and %d more lines\n", len(matchedLines)-maxShow))
+			}
+		}
+		result.WriteString(fmt.Sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))
+	}
+
+	return result.String(), nil
+}
+
 // Helper functions
 func max(a, b int) int {
 	if a > b {

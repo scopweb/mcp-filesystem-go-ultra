@@ -958,7 +958,112 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		return mcp.NewToolResultText(resultText), nil
 	})
 
-	log.Printf("📚 Registered 32 ultra-fast tools (with Claude Desktop optimizations + Plan Mode + Batch Operations)")
+	// Read file range tool
+	readRangeTool := mcp.NewTool("read_file_range",
+		mcp.WithDescription("Read specific line range from file (efficient for large files)"),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to read")),
+		mcp.WithNumber("start_line", mcp.Required(), mcp.Description("Starting line number (1-indexed)")),
+		mcp.WithNumber("end_line", mcp.Required(), mcp.Description("Ending line number (inclusive)")),
+	)
+	s.AddTool(readRangeTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+
+		startLine := mcp.ParseInt(request, "start_line", 1)
+		endLine := mcp.ParseInt(request, "end_line", 100)
+
+		content, err := engine.ReadFileRange(ctx, path, startLine, endLine)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+		return mcp.NewToolResultText(content), nil
+	})
+
+	// Count occurrences tool
+	countOccurrencesTool := mcp.NewTool("count_occurrences",
+		mcp.WithDescription("Count pattern occurrences in file and optionally return line numbers"),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to search")),
+		mcp.WithString("pattern", mcp.Required(), mcp.Description("Pattern to search for (regex or literal)")),
+		mcp.WithString("return_lines", mcp.Description("Return line numbers of matches (true/false, default: false)")),
+	)
+	s.AddTool(countOccurrencesTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+
+		pattern, err := request.RequireString("pattern")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid pattern: %v", err)), nil
+		}
+
+		returnLines := false
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if rl, ok := args["return_lines"].(string); ok {
+				returnLines = (rl == "true" || rl == "True" || rl == "TRUE")
+			} else if rl, ok := args["return_lines"].(bool); ok {
+				returnLines = rl
+			}
+		}
+
+		result, err := engine.CountOccurrences(ctx, path, pattern, returnLines)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+		return mcp.NewToolResultText(result), nil
+	})
+
+	// Replace nth occurrence tool
+	replaceNthTool := mcp.NewTool("replace_nth_occurrence",
+		mcp.WithDescription("Replace specific occurrence of pattern (first, last, or N-th)"),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
+		mcp.WithString("pattern", mcp.Required(), mcp.Description("Pattern to search for (regex or literal)")),
+		mcp.WithString("replacement", mcp.Required(), mcp.Description("Replacement text")),
+		mcp.WithNumber("occurrence", mcp.Required(), mcp.Description("Which occurrence to replace (-1=last, 1=first, 2=second, etc.)")),
+		mcp.WithString("whole_word", mcp.Description("Match whole words only (true/false, default: false)")),
+	)
+	s.AddTool(replaceNthTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+
+		pattern, err := request.RequireString("pattern")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid pattern: %v", err)), nil
+		}
+
+		replacement, err := request.RequireString("replacement")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid replacement: %v", err)), nil
+		}
+
+		occurrence := mcp.ParseInt(request, "occurrence", -1)
+
+		wholeWord := false
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if ww, ok := args["whole_word"].(string); ok {
+				wholeWord = (ww == "true" || ww == "True" || ww == "TRUE")
+			} else if ww, ok := args["whole_word"].(bool); ok {
+				wholeWord = ww
+			}
+		}
+
+		result, err := engine.ReplaceNthOccurrence(ctx, path, pattern, replacement, occurrence, wholeWord)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+
+		if engine.IsCompactMode() {
+			return mcp.NewToolResultText(fmt.Sprintf("OK: replaced occurrence #%d", occurrence)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Successfully replaced occurrence #%d\n📊 Line affected: %d\n🎯 Confidence: %s",
+			occurrence, result.LinesAffected, result.MatchConfidence)), nil
+	})
+
+	log.Printf("📚 Registered 35 ultra-fast tools (32 previous + 3 new: read_file_range, count_occurrences, replace_nth_occurrence)")
 
 	return nil
 }

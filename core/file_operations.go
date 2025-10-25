@@ -429,6 +429,74 @@ func (e *UltraFastEngine) copyDirectory(src, dst string) error {
 	return nil
 }
 
+// ReadFileRange reads a specific range of lines from a file
+func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startLine, endLine int) (string, error) {
+	// Acquire semaphore
+	if err := e.acquireOperation(ctx, "read_range"); err != nil {
+		return "", err
+	}
+
+	start := time.Now()
+	defer e.releaseOperation("read_range", start)
+
+	// Validate path
+	if len(e.config.AllowedPaths) > 0 {
+		if !e.isPathAllowed(path) {
+			return "", fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
+		}
+	}
+
+	// Check if file exists
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return "", fmt.Errorf("file does not exist: %s", path)
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to stat file: %v", err)
+	}
+
+	if info.IsDir() {
+		return "", fmt.Errorf("path is a directory, not a file: %s", path)
+	}
+
+	// Validate line numbers
+	if startLine < 1 {
+		return "", fmt.Errorf("start_line must be >= 1, got %d", startLine)
+	}
+	if endLine < startLine {
+		return "", fmt.Errorf("end_line (%d) must be >= start_line (%d)", endLine, startLine)
+	}
+
+	var result strings.Builder
+
+	// Read entire file (for simplicity with small-medium files)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %v", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	totalLines := len(lines)
+
+	// Adjust endLine if it exceeds file length
+	if endLine > totalLines {
+		endLine = totalLines
+	}
+
+	// Extract the range (1-indexed to 0-indexed conversion)
+	for i := startLine - 1; i < endLine && i < totalLines; i++ {
+		if result.Len() > 0 {
+			result.WriteString("\n")
+		}
+		result.WriteString(lines[i])
+	}
+
+	// Add metadata footer
+	result.WriteString(fmt.Sprintf("\n\n[Lines %d-%d of %d total lines in %s]", startLine, endLine, totalLines, filepath.Base(path)))
+
+	return result.String(), nil
+}
+
 // GetFileInfo returns detailed information about a file or directory
 func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string, error) {
 	// Acquire semaphore

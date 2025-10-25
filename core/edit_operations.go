@@ -472,3 +472,174 @@ func isTextContent(content string) bool {
 	nullCount := strings.Count(content, "\x00")
 	return float64(nullCount)/float64(len(content)) < 0.01
 }
+
+// ReplaceNthOccurrence replaces a specific occurrence of a pattern in a file
+// occurrence: -1 for last, 1 for first, 2 for second, etc.
+// wholeWord: if true, only match whole words
+func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, pattern, replacement string, occurrence int, wholeWord bool) (*EditResult, error) {
+	// Acquire semaphore
+	if err := e.acquireOperation(ctx, "replace_nth"); err != nil {
+		return nil, err
+	}
+
+	start := time.Now()
+	defer e.releaseOperation("replace_nth", start)
+
+	// Validate path
+	validPath, err := e.validatePath(path)
+	if err != nil {
+		return nil, fmt.Errorf("path validation error: %v", err)
+	}
+
+	// Check if file exists
+	info, err := os.Stat(validPath)
+	if os.IsNotExist(err) {
+		return nil, fmt.Errorf("file does not exist: %s", validPath)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat file: %v", err)
+	}
+
+	if info.IsDir() {
+		return nil, fmt.Errorf("path is a directory, not a file: %s", validPath)
+	}
+
+	// Validate occurrence parameter
+	if occurrence == 0 {
+		return nil, fmt.Errorf("occurrence cannot be 0 (use -1 for last, 1 for first, etc.)")
+	}
+
+	// Create backup
+	backupPath, err := e.createBackup(validPath)
+	if err != nil {
+		return nil, fmt.Errorf("could not create backup: %v", err)
+	}
+	defer func() {
+		if backupPath != "" {
+			os.Remove(backupPath)
+		}
+	}()
+
+	// Read file
+	content, err := os.ReadFile(validPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %v", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+
+	// Prepare regex pattern
+	searchPattern := pattern
+	if wholeWord {
+		searchPattern = `\b` + regexp.QuoteMeta(pattern) + `\b`
+	} else {
+		// Try to compile as regex first, fallback to literal
+		_, err := regexp.Compile(pattern)
+		if err != nil {
+			searchPattern = regexp.QuoteMeta(pattern)
+		}
+	}
+
+	regexPattern, err := regexp.Compile(searchPattern)
+	if err != nil {
+		return nil, fmt.Errorf("invalid pattern: %v", err)
+	}
+
+	// Find all matches with their line numbers
+	type matchInfo struct {
+		lineIdx int
+		match   string
+		start   int
+		end     int
+	}
+
+	var matches []matchInfo
+
+	for lineIdx, line := range lines {
+		lineMatches := regexPattern.FindAllStringIndex(line, -1)
+		for _, match := range lineMatches {
+			matches = append(matches, matchInfo{
+				lineIdx: lineIdx,
+				match:   line[match[0]:match[1]],
+				start:   match[0],
+				end:     match[1],
+			})
+		}
+	}
+
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("pattern not found: '%s'", pattern)
+	}
+
+	// Determine which match to replace
+	var targetMatchIdx int
+	if occurrence == -1 {
+		// Last occurrence
+		targetMatchIdx = len(matches) - 1
+	} else if occurrence > 0 {
+		// N-th occurrence (1-indexed)
+		targetMatchIdx = occurrence - 1
+		if targetMatchIdx >= len(matches) {
+			return nil, fmt.Errorf("occurrence %d out of range (only %d matches found)", occurrence, len(matches))
+		}
+	} else {
+		// Negative index other than -1 (e.g., -2 for second to last)
+		targetMatchIdx = len(matches) + occurrence
+		if targetMatchIdx < 0 {
+			return nil, fmt.Errorf("occurrence %d out of range (only %d matches found)", occurrence, len(matches))
+		}
+	}
+
+	targetMatch := matches[targetMatchIdx]
+
+	// Replace only the target occurrence
+	targetLine := lines[targetMatch.lineIdx]
+	newLine := targetLine[:targetMatch.start] + replacement + targetLine[targetMatch.end:]
+	lines[targetMatch.lineIdx] = newLine
+
+	// Join back
+	newContent := strings.Join(lines, "\n")
+
+	// Write modified content atomically
+	tmpPath := validPath + ".tmp." + fmt.Sprintf("%d", time.Now().UnixNano())
+	if err := os.WriteFile(tmpPath, []byte(newContent), info.Mode()); err != nil {
+		return nil, fmt.Errorf("error writing temp file: %v", err)
+	}
+
+	// Atomic rename
+	if err := os.Rename(tmpPath, validPath); err != nil {
+		os.Remove(tmpPath)
+		return nil, fmt.Errorf("error finalizing edit: %v", err)
+	}
+
+	// Invalidate cache
+	e.cache.InvalidateFile(validPath)
+
+	// Execute post-edit hooks
+	workingDir, _ := os.Getwd()
+	hookCtx := &HookContext{
+		Event:      HookPostEdit,
+		ToolName:   "replace_nth_occurrence",
+		FilePath:   validPath,
+		Operation:  "replace_nth",
+		OldContent: string(content),
+		NewContent: newContent,
+		Timestamp:  time.Now(),
+		WorkingDir: workingDir,
+		Metadata: map[string]interface{}{
+			"pattern":     pattern,
+			"replacement": replacement,
+			"occurrence":  occurrence,
+			"line_number": targetMatch.lineIdx + 1,
+		},
+	}
+
+	_, _ = e.hookManager.ExecuteHooks(context.Background(), HookPostEdit, hookCtx)
+
+	return &EditResult{
+		ModifiedContent:  newContent,
+		ReplacementCount: 1,
+		MatchConfidence:  "high",
+		LinesAffected:    1,
+	}, nil
+}
