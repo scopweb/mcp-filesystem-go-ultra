@@ -33,12 +33,21 @@ El usuario mencionó "Hay que usar copy_file individualmente para hacer los back
 - batch_operations CON copy funciona perfectamente
 - Ver BATCH_OPERATIONS_GUIDE.md para ejemplos
 
-2 - Bug
-Después de un buen rato de trabajo unos 5 min Claude desktop elimina del hilo lo que hizo y desaparece los procesos en el hilo. 
+2 - Bug [NO ES DEL MCP]
+Después de un buen rato de trabajo unos 5 min Claude desktop elimina del hilo lo que hizo y desaparece los procesos en el hilo.
 
-3 - Bug
+NOTA: Este es un problema de Claude Desktop/Claude AI, no del MCP filesystem-ultra.
+- Relacionado con límites de contexto o manejo de sesiones de Claude Desktop
+- No es causado por filesystem-ultra
+
+3 - Bug [NO ES DEL MCP]
 Otro problema es que claude todo lo que le digo lo busca en el proyecto.. Por ejemplo si le digo que me revise una funcion y le paso la funcion completa el busca la funcion en el proyecto,
 esto es un problema ya que custa mucho encontrarla en un proyecto grande y solo era una revision de una funcion.
+
+NOTA: Este es un problema de cómo Claude interpreta instrucciones, no del MCP filesystem-ultra.
+- Relacionado con cómo el modelo Claude busca e interpreta código
+- Sugerencia: Usar instrucciones explícitas como "NO busques en el proyecto, solo revisa el código que te estoy dando"
+- No se puede arreglar desde filesystem-ultra
 
 4- Bug [RESUELTO]
 Problema con recovery_edit en Windows:
