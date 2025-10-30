@@ -31,6 +31,9 @@ type SearchMatch struct {
 }
 
 // EditFile performs intelligent file editing with backup and rollback
+// WARNING: On Windows with Claude Desktop, changes may not persist to Windows filesystem.
+// Use IntelligentWrite with complete file content for guaranteed persistence.
+// See: guides/WINDOWS_FILESYSTEM_PERSISTENCE.md
 func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, error) {
 	// Validate file
 	if err := e.validateEditableFile(path); err != nil {
