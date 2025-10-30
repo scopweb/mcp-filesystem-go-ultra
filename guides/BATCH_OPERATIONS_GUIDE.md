@@ -327,12 +327,42 @@ Backups include:
 
 Old backups are automatically cleaned, keeping only the last 10.
 
+## Windows-Specific Notes
+
+### Persistence Warning ⚠️
+On Windows with Claude Desktop, be aware that:
+- **Writing operations** (write, edit, copy) use the same mechanism as individual file operations
+- The `copy` operation **DOES work** in batch_operations
+- However, see [WINDOWS_FILESYSTEM_PERSISTENCE.md](WINDOWS_FILESYSTEM_PERSISTENCE.md) for limitations
+
+### Recommended Approach for Windows
+For guaranteed persistence on Windows:
+1. Use `copy` operation in batch_operations (✅ it works)
+2. Or use individual `copy_file` tool
+3. Both write to the filesystem correctly
+
+Example for backup on Windows:
+```json
+{
+  "operations": [
+    {
+      "type": "copy",
+      "source": "C:\\path\\to\\file.txt",
+      "destination": "C:\\path\\to\\backup\\file.txt"
+    }
+  ],
+  "atomic": true,
+  "create_backup": true
+}
+```
+
 ## Limitations
 
 - Maximum operations per batch: No hard limit (recommended < 100)
 - File size limits: Same as individual operations
 - Nested transactions: Not supported
 - Concurrent batches: Managed via mutex (one at a time)
+- Edit operations in batch_operations use simple string replacement (not fuzzy matching)
 
 ## Example: Complete Workflow
 
