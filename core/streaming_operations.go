@@ -208,7 +208,10 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 	return result.String(), nil
 }
 
-// SmartEditFile handles large file editing with intelligent chunking
+// SmartEditFile intelligently edits files based on size
+// WARNING: On Windows with Claude Desktop, changes may not persist to Windows filesystem.
+// Use WriteFileContent with complete file content for guaranteed persistence.
+// See: guides/WINDOWS_FILESYSTEM_PERSISTENCE.md
 func (e *UltraFastEngine) SmartEditFile(ctx context.Context, path, oldText, newText string, maxFileSize int64) (*EditResult, error) {
 	// Get file info first
 	info, err := os.Stat(path)

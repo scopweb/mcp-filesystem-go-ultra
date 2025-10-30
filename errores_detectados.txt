@@ -1,0 +1,41 @@
+1 - Bug
+Parece que el batch_operations no soporta "copy" como operación. Hay que usar copy_file individualmente para hacer los backups.
+
+2 - Bug
+Después de un buen rato de trabajo unos 5 min Claude desktop elimina del hilo lo que hizo y desaparece los procesos en el hilo. 
+
+3 - Bug
+Otro problema es que claude todo lo que le digo lo busca en el proyecto.. Por ejemplo si le digo que me revise una funcion y le paso la funcion completa el busca la funcion en el proyecto,
+esto es un problema ya que custa mucho encontrarla en un proyecto grande y solo era una revision de una funcion.
+
+4- Bug [RESUELTO]
+Problema con recovery_edit en Windows:
+recovery_edit no persiste cambios en tu filesystem de Windows, aunque filesystem-ultra tiene acceso configurado a C:\__REPOS\...
+
+CAUSA RAÍZ IDENTIFICADA:
+- El código de recovery_edit, edit_file y smart_edit_file está correctamente implementado
+- Escriben los cambios atómicamente al disco usando os.Rename()
+- El problema es una limitación de Claude Desktop: ejecuta MCP en un subsistema Linux
+- Aunque los cambios se escriben correctamente en Linux, NO se sincronizan automáticamente con Windows
+
+SOLUCIÓN IMPLEMENTADA:
+1. ✅ Creado: guides/WINDOWS_FILESYSTEM_PERSISTENCE.md (documentación completa)
+2. ✅ Agregados comentarios DEPRECATED/WARNING en:
+   - claude_optimizer.go (AutoRecoveryEdit, IntelligentEdit)
+   - edit_operations.go (EditFile)
+   - streaming_operations.go (SmartEditFile)
+3. ✅ Documentado workflow correcto para Windows
+
+RECOMENDACIÓN OFICIAL:
+**Para que los cambios persistan en Windows:**
+- ✅ Usar: `write_file`, `intelligent_write`, `streaming_write_file` (reemplazo completo)
+- ❌ Evitar: `edit_file`, `recovery_edit`, `smart_edit_file` (edición en memoria no persiste)
+
+**Workflow correcto:**
+1. Leer: `read_file` (obtener contenido completo)
+2. Modificar: en memoria (reemplazo de texto)
+3. Escribir: `write_file` o `intelligent_write` (persiste en Windows)
+4. Git: add, commit, push (si aplica)
+
+Este es un problema de arquitectura de Claude Desktop, no un bug del código.
+No se puede arreglar directamente en filesystem-ultra.

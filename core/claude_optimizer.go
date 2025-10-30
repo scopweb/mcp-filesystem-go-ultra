@@ -85,6 +85,9 @@ func (o *ClaudeDesktopOptimizer) IntelligentRead(ctx context.Context, path strin
 }
 
 // IntelligentEdit automatically chooses the best edit strategy
+// Note: On Windows with Claude Desktop, changes may not persist.
+// For guaranteed persistence, use IntelligentWrite with complete file content instead.
+// See: guides/WINDOWS_FILESYSTEM_PERSISTENCE.md
 func (o *ClaudeDesktopOptimizer) IntelligentEdit(ctx context.Context, path, oldText, newText string) (*EditResult, error) {
 	// Analyze file first
 	info, err := os.Stat(path)
@@ -240,6 +243,9 @@ func (o *ClaudeDesktopOptimizer) BatchOptimizedOperations(ctx context.Context, o
 }
 
 // AutoRecoveryEdit attempts to recover from edit failures
+// DEPRECATED: On Windows with Claude Desktop, use write_file instead.
+// Recovery edits may not persist due to Linux/Windows filesystem sync limitations.
+// See: guides/WINDOWS_FILESYSTEM_PERSISTENCE.md
 func (o *ClaudeDesktopOptimizer) AutoRecoveryEdit(ctx context.Context, path, oldText, newText string) (*EditResult, error) {
 	// First attempt - direct edit
 	result, err := o.IntelligentEdit(ctx, path, oldText, newText)
