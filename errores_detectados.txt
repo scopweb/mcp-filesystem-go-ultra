@@ -1,5 +1,37 @@
-1 - Bug
-Parece que el batch_operations no soporta "copy" como operación. Hay que usar copy_file individualmente para hacer los backups.
+1 - Bug [RESUELTO - FALSA ALARMA]
+"batch_operations no soporta copy"
+
+INVESTIGACIÓN:
+✅ El código SÍ SOPORTA "copy" (batch_operations.go:15, 219-226, 404-405, 455-465)
+✅ El rollback SÍ SOPORTA "copy" (batch_operations.go:290-292)
+
+CAUSA DEL REPORTE:
+La descripción de la herramienta en main.go solo mostraba ejemplos con "write",
+lo que causó confusión sobre qué operaciones se soportaban.
+
+SOLUCIÓN IMPLEMENTADA:
+1. ✅ Mejorada descripción de batch_operations en main.go (line 927)
+   - Ahora menciona explícitamente: write, edit, copy, move, delete, create_dir
+   - Incluye ejemplo con copy
+
+2. ✅ Actualizada documentación BATCH_OPERATIONS_GUIDE.md:
+   - Agregada sección "Windows-Specific Notes"
+   - Clarificado que copy FUNCIONA en batch_operations
+   - Agregados ejemplos de uso con copy
+
+OPERACIONES SOPORTADAS EN batch_operations:
+✅ write      - Escribir archivo
+✅ edit       - Editar archivo (reemplazo simple)
+✅ copy       - Copiar archivo/directorio
+✅ move       - Mover/renombrar archivo
+✅ delete     - Eliminar archivo
+✅ create_dir - Crear directorio
+
+NOTA IMPORTANTE:
+El usuario mencionó "Hay que usar copy_file individualmente para hacer los backups"
+- Esto NO es necesario
+- batch_operations CON copy funciona perfectamente
+- Ver BATCH_OPERATIONS_GUIDE.md para ejemplos
 
 2 - Bug
 Después de un buen rato de trabajo unos 5 min Claude desktop elimina del hilo lo que hizo y desaparece los procesos en el hilo. 

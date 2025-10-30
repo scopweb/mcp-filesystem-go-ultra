@@ -924,8 +924,8 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Batch operations tool
 	batchOpsTool := mcp.NewTool("batch_operations",
-		mcp.WithDescription("Execute multiple file operations atomically with automatic rollback on failure. Operations JSON format: [{\"type\":\"write\",\"path\":\"file.txt\",\"content\":\"...\"}]"),
-		mcp.WithString("request_json", mcp.Required(), mcp.Description("JSON with operations array and options (atomic, create_backup, validate_only)")),
+		mcp.WithDescription("Execute multiple file operations atomically. Supports: write, edit, copy, move, delete, create_dir. Example: {\"operations\":[{\"type\":\"copy\",\"source\":\"file.txt\",\"destination\":\"backup.txt\"}],\"atomic\":true}"),
+		mcp.WithString("request_json", mcp.Required(), mcp.Description("JSON with operations array and options. Fields: operations (array), atomic (bool), create_backup (bool), validate_only (bool)")),
 	)
 	s.AddTool(batchOpsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		requestJSON, err := request.RequireString("request_json")
