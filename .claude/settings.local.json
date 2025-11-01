@@ -11,7 +11,14 @@
       "Bash(powershell -Command \"(Get-Item c:\\MCPs\\clone\\mcp-filesystem-go-ultra\\mcp-filesystem-ultra.exe).Length / 1MB\")",
       "Bash(powershell -Command \"Get-Content ''c:\\MCPs\\clone\\mcp-filesystem-go-ultra\\main.go'' | Select-String ''WithDescription'' | Measure-Object\")",
       "Bash(powershell:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(git tag:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nAdd v3.1.0: Ultra-Efficient Operations (3 new tools)\n\nImplemented 3 critical tools that solve major limitations when working with large files:\n\n## New Tools (32 → 35 total)\n\n1. **read_file_range** - Read specific line ranges efficiently\n   - Read lines 26630-26680 from 31k line file\n   - 90-98% token savings vs reading entire file\n   - Auto-adjusts if end_line exceeds file length\n\n2. **count_occurrences** - Count pattern matches with optional line numbers\n   - Count all occurrences without reading full file\n   - Returns line numbers optionally\n   - Regex or literal pattern support\n   - 95% token savings\n\n3. **replace_nth_occurrence** - Surgical replacement of specific occurrence\n   - Replace first, last, or N-th occurrence only\n   - occurrence: -1=last, 1=first, 2=second, -2=penultimate\n   - whole_word option to match complete words only\n   - 99.8% token savings, 0% risk\n   - Automatic backup and rollback\n\n## Real-World Use Case Solved\n- File: 31,248 lines with 106 occurrences of \"CUMIEIRA\"\n- Task: Change ONLY the last occurrence\n- Old way: read_file (250k tokens) + manual analysis + risky edit\n- New way: replace_nth_occurrence with occurrence=-1 (500 tokens)\n\n## Token Savings\n- read_file_range: 250k → 2.5k tokens (99% savings)\n- count_occurrences: 250k → 500 tokens (95% savings)  \n- replace_nth_occurrence: 252k → 500 tokens (99.8% savings)\n\n## Technical Details\n- All functions support compact/verbose modes\n- Atomic operations with automatic backup\n- Cache invalidation integrated\n- Hooks support for post-edit operations\n- Regex and literal pattern support\n- Comprehensive error handling\n\nUpdated documentation with examples and use cases.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(gh repo view:*)",
+      "Bash(gh api:*)",
+      "Bash(git branch:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

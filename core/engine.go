@@ -68,6 +68,26 @@ type PerformanceMetrics struct {
 	WriteOperations  int64
 	ListOperations   int64
 	SearchOperations int64
+
+	// Telemetry: Track edit operations
+	// Used to detect full-file rewrites vs targeted edits
+	EditOperations       int64          // Total edit operations
+	TargetedEdits        int64          // Edits with small old_text (<100 bytes)
+	FullFileRewrites     int64          // Edits with large old_text (>1000 bytes)
+	LastEditOperation    string         // Description of last edit
+	LastEditBytesSent    int64          // Bytes sent in last edit operation
+	AverageBytesPerEdit  float64        // Running average of bytes per edit
+}
+
+// LogOperationMetric records detailed operation metrics for analysis
+type LogOperationMetric struct {
+	Timestamp      time.Time
+	Operation      string // "edit", "write", "read", "search"
+	FilePath       string
+	BytesProcessed int64
+	Duration       time.Duration
+	IsFullRewrite  bool // true if full-file rewrite detected
+	IsTargetedEdit bool // true if surgical edit (<100 bytes old_text)
 }
 
 // EditResult holds the result of an edit operation
@@ -583,4 +603,73 @@ func (e *UltraFastEngine) AutoRecoveryEdit(ctx context.Context, path, oldText, n
 // GetOptimizationSuggestion wraps optimizer's GetOptimizationSuggestion method
 func (e *UltraFastEngine) GetOptimizationSuggestion(ctx context.Context, path string) (string, error) {
 	return e.optimizer.GetOptimizationSuggestion(ctx, path)
+}
+
+// LogEditTelemetry records telemetry about edit operations to help identify
+// full-file rewrites vs targeted edits. This helps optimize Claude's usage
+// of the tools.
+func (e *UltraFastEngine) LogEditTelemetry(oldTextSize, newTextSize int64, filePath string) {
+	e.metrics.mu.Lock()
+	defer e.metrics.mu.Unlock()
+
+	e.metrics.EditOperations++
+	e.metrics.LastEditBytesSent = oldTextSize
+
+	// Detect edit pattern
+	isTargeted := oldTextSize < 100 && oldTextSize > 0   // Small targeted edit
+	isFullRewrite := oldTextSize > 1000 || newTextSize > 10000 // Large or new content
+
+	if isTargeted {
+		e.metrics.TargetedEdits++
+		e.metrics.LastEditOperation = fmt.Sprintf("✅ Targeted edit: %d bytes", oldTextSize)
+	} else if isFullRewrite {
+		e.metrics.FullFileRewrites++
+		e.metrics.LastEditOperation = fmt.Sprintf("⚠️ Full rewrite detected: %d bytes", oldTextSize)
+	} else {
+		e.metrics.LastEditOperation = fmt.Sprintf("📝 Standard edit: %d bytes", oldTextSize)
+	}
+
+	// Update running average
+	if e.metrics.EditOperations == 1 {
+		e.metrics.AverageBytesPerEdit = float64(oldTextSize)
+	} else {
+		e.metrics.AverageBytesPerEdit = (e.metrics.AverageBytesPerEdit +
+			float64(oldTextSize)) / 2
+	}
+
+	// Log to debug if verbose
+	if e.config.DebugMode {
+		log.Printf("[TELEMETRY] %s (avg: %.0f bytes/edit)", e.metrics.LastEditOperation, e.metrics.AverageBytesPerEdit)
+	}
+}
+
+// GetEditTelemetrySummary returns a summary of edit patterns for analysis
+func (e *UltraFastEngine) GetEditTelemetrySummary() map[string]interface{} {
+	e.metrics.mu.RLock()
+	defer e.metrics.mu.RUnlock()
+
+	totalEdits := e.metrics.EditOperations
+	if totalEdits == 0 {
+		return map[string]interface{}{
+			"message": "No edit operations recorded yet",
+		}
+	}
+
+	targetedPercent := float64(e.metrics.TargetedEdits) / float64(totalEdits) * 100
+	rewritePercent := float64(e.metrics.FullFileRewrites) / float64(totalEdits) * 100
+
+	return map[string]interface{}{
+		"total_edits":          e.metrics.EditOperations,
+		"targeted_edits":       e.metrics.TargetedEdits,
+		"targeted_percent":     fmt.Sprintf("%.1f%%", targetedPercent),
+		"full_rewrites":        e.metrics.FullFileRewrites,
+		"full_rewrite_percent": fmt.Sprintf("%.1f%%", rewritePercent),
+		"average_bytes_per_edit": fmt.Sprintf("%.0f", e.metrics.AverageBytesPerEdit),
+		"last_operation":       e.metrics.LastEditOperation,
+		"recommendation": map[string]string{
+			"if_high_rewrites": "Consider using smart_search + read_file_range + edit_file for surgical edits",
+			"if_low_targeted":  "Good! Edits are efficient",
+			"next_step":        "Monitor these metrics to optimize Claude's tool usage",
+		},
+	}
 }

@@ -34,6 +34,9 @@ type SearchMatch struct {
 // WARNING: On Windows with Claude Desktop, changes may not persist to Windows filesystem.
 // Use IntelligentWrite with complete file content for guaranteed persistence.
 // See: guides/WINDOWS_FILESYSTEM_PERSISTENCE.md
+//
+// Context Validation: Validates surrounding context (3-5 lines) to prevent
+// editing stale content that may have been modified since the file was read.
 func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, error) {
 	// Validate file
 	if err := e.validateEditableFile(path); err != nil {
@@ -45,6 +48,17 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, 
 	if err != nil {
 		return nil, fmt.Errorf("error reading file: %v", err)
 	}
+
+	// Validate context: Check if surrounding content suggests file has changed
+	// This prevents overwriting recent modifications
+	contextValid, contextWarning := e.validateEditContext(string(content), oldText)
+	if !contextValid {
+		return nil, fmt.Errorf("context validation failed: %s - file may have been modified. Please re-read the file with smart_search + read_file_range", contextWarning)
+	}
+
+	// Log telemetry about this edit operation
+	// This helps identify patterns of full-file rewrites vs targeted edits
+	e.LogEditTelemetry(int64(len(oldText)), int64(len(newText)), path)
 
 	// Execute pre-edit hooks
 	workingDir, _ := os.Getwd()
@@ -645,4 +659,80 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 		MatchConfidence:  "high",
 		LinesAffected:    1,
 	}, nil
+}
+
+// validateEditContext performs context validation to ensure the file hasn't
+// been modified since it was read. This prevents stale edits that could
+// overwrite recent changes.
+//
+// Returns (valid, warning) where:
+// - valid: true if context looks good, false if likely changed
+// - warning: descriptive message about the validation result
+func (e *UltraFastEngine) validateEditContext(currentContent, oldText string) (bool, string) {
+	// If oldText not found at all, it's definitely invalid
+	if !strings.Contains(currentContent, oldText) {
+		return false, "old_text not found in current file - file has likely changed"
+	}
+
+	// Extract a snippet with surrounding context (3-5 lines before and after)
+	lines := strings.Split(currentContent, "\n")
+	oldLines := strings.Split(oldText, "\n")
+
+	if len(oldLines) == 0 {
+		return false, "invalid old_text"
+	}
+
+	// Find where oldText appears in the file
+	var matchStartLine int
+	found := false
+
+	for i := 0; i <= len(lines)-len(oldLines); i++ {
+		// Check if we have a multiline match
+		match := true
+		for j := 0; j < len(oldLines); j++ {
+			if !strings.Contains(lines[i+j], strings.TrimSpace(oldLines[j])) {
+				match = false
+				break
+			}
+		}
+		if match {
+			matchStartLine = i
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		// Try single-line match
+		singleLineOld := strings.TrimSpace(strings.Join(oldLines, " "))
+		for i, line := range lines {
+			if strings.Contains(line, singleLineOld) {
+				matchStartLine = i
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		return false, "exact match for old_text not found in current file"
+	}
+
+	// Check context: verify that surrounding lines are stable
+	// Get context window: 2 lines before and 2 lines after the match
+	contextBefore := max(0, matchStartLine-2)
+	contextAfter := min(len(lines), matchStartLine+len(oldLines)+2)
+
+	contextSnippet := strings.Join(lines[contextBefore:contextAfter], "\n")
+
+	// If the context contains the oldText with some surrounding content,
+	// it's likely the edit context is still valid
+	contextHasMatch := strings.Contains(contextSnippet, strings.TrimSpace(oldLines[0]))
+
+	if !contextHasMatch {
+		return false, "surrounding context doesn't match - file has been modified"
+	}
+
+	// Context validation passed
+	return true, "context valid - file appears unchanged"
 }

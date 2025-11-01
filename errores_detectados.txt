@@ -80,3 +80,817 @@ RECOMENDACIÓN OFICIAL:
 
 Este es un problema de arquitectura de Claude Desktop, no un bug del código.
 No se puede arreglar directamente en filesystem-ultra.
+
+
+
+
+5 - Bug
+He detectado que no es muy bueno buscando y sustiyendo codigo, Claude desktop por ejemplo acaba muchas veces
+escribiendo todo el archivo con el prejuicio de gasto de tokens. No sabe buscar y ver lo que hay que cambiar ni 
+donde. Deberiamos estudiar este asunto para añadir o optimizar las herramientas existentes.
+GPT-5 dijo esto al respecto:
+Enhance search_operations.go to add a structured search API that can locate code spans by pattern (function name, signature, regex) and return precise ranges; expose this via the MCP so Claude Desktop can request targeted edits instead of rewriting whole files.
+Introduce a diff-based edit tool in edit_operations.go that takes an original snippet plus intended replacement and validates the context before committing the change; fail early if the surrounding code no longer matches so the agent can re-sync.
+Expand intelligent_write with a “preview-only” mode that computes unified diffs (similar to git diff) before writing, letting the client confirm minimal changes and helping Claude understand which segments will be touched.
+Provide higher-level helper functions (e.g., FindAndReplace, ReplaceFunctionBody) that wrap search + diff logic, and document them in Hooks.md so Claude Desktop can call a single tool for common refactor patterns.
+Add telemetry-style logging in engine.go to capture when full-file rewrites happen versus targeted patches; use this to iterate on tool quality and tune Claude prompts.
+Update user docs (README.md, README.md) with best-practice prompts that show how to request precise replacements, and note the new APIs once implemented.
+Gemini dijo esto al respecto:
+scopweb: En este proyecto de gestion de archivos para soporte a ias sobre todo claude desktop engo un pequeño problema es:
+5 - Bug
+He detectado que no es muy bueno buscando y sustiyendo codigo, Claude desktop por ejemplo acaba muchas veces
+escribiendo todo el archivo con el prejuicio de gasto de tokens. No sabe buscar y ver lo que hay que cambiar ni 
+donde. Deberiamos estudiar este asunto para añadir o optimizar las herramientas existentes.
+
+puedes revisarlo, sin sustituir nada solo un plan de mejoras.
+
+GitHub Copilot: - Enhance `search_operations.go` to add a structured search API that can locate code spans by pattern (function name, signature, regex) and return precise ranges; expose this via the MCP so Claude Desktop can request targeted edits instead of rewriting whole files.  
+- Introduce a diff-based edit tool in edit_operations.go that takes an original snippet plus intended replacement and validates the context before committing the change; fail early if the surrounding code no longer matches so the agent can re-sync.  
+- Expand `intelligent_write` with a “preview-only” mode that computes unified diffs (similar to `git diff`) before writing, letting the client confirm minimal changes and helping Claude understand which segments will be touched.  
+- Provide higher-level helper functions (e.g., `FindAndReplace`, `ReplaceFunctionBody`) that wrap search + diff logic, and document them in Hooks.md so Claude Desktop can call a single tool for common refactor patterns.  
+- Add telemetry-style logging in `engine.go` to capture when full-file rewrites happen versus targeted patches; use this to iterate on tool quality and tune Claude prompts.  
+- Update user docs (README.md, README.md) with best-practice prompts that show how to request precise replacements, and note the new APIs once implemented.
+
+scopweb: En este proyecto de gestion de archivos para soporte a ias sobre todo claude desktop engo un pequeño problema es:
+5 - Bug
+He detectado que no es muy bueno buscando y sustiyendo codigo, Claude desktop por ejemplo acaba muchas veces
+escribiendo todo el archivo con el prejuicio de gasto de tokens. No sabe buscar y ver lo que hay que cambiar ni
+donde. Deberiamos estudiar este asunto para añadir o optimizar las herramientas existentes.
+
+puedes revisarlo, sin sustituir nada solo un plan de mejoras.
+
+GitHub Copilot: Claro, aquí tienes un plan de mejoras para optimizar las capacidades de búsqueda y sustitución de código, reduciendo el consumo de tokens y mejorando la precisión.
+
+### Plan de Mejoras: Búsqueda y Sustitución Inteligente
+
+El objetivo es evolucionar de reescrituras completas de archivos a ediciones quirúrgicas y precisas. Para ello, propongo las siguientes mejoras:
+
+**1. Crear una Herramienta de Búsqueda Estructurada (`structured_search`)**
+
+*   **Problema:** Claude no sabe *dónde* está el código que necesita cambiar. Las búsquedas actuales son demasiado genéricas.
+*   **Solución:** Implementar una nueva función en search_operations.go que permita búsquedas avanzadas y devuelva la ubicación exacta del código.
+    *   **Entradas:** Patrón de búsqueda (nombre de función, signatura, regex), tipo de búsqueda (función, struct, etc.) y ruta del archivo.
+    *   **Salida:** Un objeto JSON con `file_path`, `start_line`, `end_line`, `start_byte`, y `end_byte`.
+    *   **Beneficio:** Claude podrá solicitar la ubicación exacta de un fragmento de código y usar esa información para una edición precisa, en lugar de leer y procesar el archivo completo.
+
+**2. Implementar una Herramienta de Edición Basada en Diff (`apply_diff_edit`)**
+
+*   **Problema:** Reemplazar texto puede ser propenso a errores si el contexto cambia. Reenviar el archivo completo es costoso.
+*   **Solución:** Crear una nueva herramienta en edit_operations.go que aplique un parche en formato `diff`.
+    *   **Flujo de trabajo:**
+        1.  Claude lee una sección del archivo (o el archivo completo si es necesario).
+        2.  Calcula los cambios necesarios en memoria.
+        3.  Genera un `diff` (similar a `git diff`).
+        4.  Envía solo el `diff` a la herramienta `apply_diff_edit`.
+    *   **Beneficio:** El intercambio de información se reduce drásticamente. En lugar de enviar un archivo de 500KB, solo se envían unos pocos bytes con los cambios. Esto es extremadamente eficiente en tokens.
+
+**3. Mejorar `intelligent_write` con un Modo de "Vista Previa" (`preview_changes`)**
+
+*   **Problema:** Claude a veces comete errores y realiza cambios no deseados. No hay una forma segura de verificar una operación antes de que se ejecute.
+*   **Solución:** Añadir un parámetro `preview_only: true` a las herramientas de escritura existentes como `intelligent_write`.
+    *   **Funcionamiento:** Cuando se activa, la herramienta no escribe en el disco. En su lugar, calcula un `diff` entre el contenido actual y el contenido propuesto y lo devuelve.
+    *   **Beneficio:** Claude puede verificar que sus cambios son correctos y mínimos antes de aplicarlos. Esto sirve como una capa de seguridad y le ayuda a "aprender" a generar mejores ediciones.
+
+**4. Crear Herramientas de Refactorización de Alto Nivel**
+
+*   **Problema:** Tareas comunes como "renombrar una variable" o "cambiar el cuerpo de una función" requieren múltiples pasos de bajo nivel (buscar, leer, reemplazar, escribir).
+*   **Solución:** Crear funciones compuestas que automaticen estos flujos de trabajo.
+    *   `find_and_replace(file, find_pattern, replace_with)`: Una herramienta que combina la búsqueda estructurada y la edición.
+    *   `replace_function_body(file, function_name, new_body)`: Una herramienta especializada para refactorizar funciones.
+    *   **Implementación:** Estas funciones se añadirían en claude_optimizer.go o un archivo similar, y expondrían como hooks en mcp.go.
+    *   **Beneficio:** Simplifica drásticamente las instrucciones que necesita dar Claude, reduciendo la probabilidad de error y el coste de tokens de la petición.
+
+**5. Añadir Telemetría para el Análisis de Uso de Herramientas**
+
+*   **Problema:** No sabemos con qué frecuencia fallan las ediciones precisas y se recurre a la reescritura completa.
+*   **Solución:** Implementar un sistema de logging simple en engine.go.
+    *   **Datos a registrar:**
+        *   Qué herramienta se llamó (`edit_file` vs. `write_file`).
+        *   Tamaño del contenido enviado.
+        *   Si la operación fue una reescritura completa o una edición parcial.
+    *   **Beneficio:** Obtendremos datos objetivos para entender qué herramientas funcionan bien y cuáles necesitan ser mejoradas, permitiendo una optimización continua.
+
+**6. Actualizar la Documentación para Guiar a Claude**
+
+*   **Problema:** Incluso con las mejores herramientas, Claude no las usará si no sabe que existen o cómo usarlas.
+*   **Solución:**
+    *   Actualizar HOOKS.md y BATCH_OPERATIONS_GUIDE.md con las nuevas herramientas y flujos de trabajo.
+    *   Proporcionar ejemplos claros de "prompts" que muestren cómo pedir una edición precisa en lugar de una reescritura.
+
+Este plan de acción transformará el sistema de una herramienta de manipulación de archivos a una plataforma de asistencia a la codificación verdaderamente inteligente y eficiente.
+
+Grok4 dijo esto al respecto:
+scopweb: En este proyecto de gestion de archivos para soporte a ias sobre todo claude desktop engo un pequeño problema es:
+5 - Bug
+He detectado que no es muy bueno buscando y sustiyendo codigo, Claude desktop por ejemplo acaba muchas veces
+escribiendo todo el archivo con el prejuicio de gasto de tokens. No sabe buscar y ver lo que hay que cambiar ni 
+donde. Deberiamos estudiar este asunto para añadir o optimizar las herramientas existentes.
+
+puedes revisarlo, sin sustituir nada solo un plan de mejoras.
+
+GitHub Copilot: - Enhance `search_operations.go` to add a structured search API that can locate code spans by pattern (function name, signature, regex) and return precise ranges; expose this via the MCP so Claude Desktop can request targeted edits instead of rewriting whole files.  
+- Introduce a diff-based edit tool in edit_operations.go that takes an original snippet plus intended replacement and validates the context before committing the change; fail early if the surrounding code no longer matches so the agent can re-sync.  
+- Expand `intelligent_write` with a “preview-only” mode that computes unified diffs (similar to `git diff`) before writing, letting the client confirm minimal changes and helping Claude understand which segments will be touched.  
+- Provide higher-level helper functions (e.g., `FindAndReplace`, `ReplaceFunctionBody`) that wrap search + diff logic, and document them in Hooks.md so Claude Desktop can call a single tool for common refactor patterns.  
+- Add telemetry-style logging in `engine.go` to capture when full-file rewrites happen versus targeted patches; use this to iterate on tool quality and tune Claude prompts.  
+- Update user docs (README.md, README.md) with best-practice prompts that show how to request precise replacements, and note the new APIs once implemented.
+
+scopweb: En este proyecto de gestion de archivos para soporte a ias sobre todo claude desktop engo un pequeño problema es:
+5 - Bug
+He detectado que no es muy bueno buscando y sustiyendo codigo, Claude desktop por ejemplo acaba muchas veces
+escribiendo todo el archivo con el prejuicio de gasto de tokens. No sabe buscar y ver lo que hay que cambiar ni
+donde. Deberiamos estudiar este asunto para añadir o optimizar las herramientas existentes.
+
+puedes revisarlo, sin sustituir nada solo un plan de mejoras.
+
+GitHub Copilot: Claro, aquí tienes un plan de mejoras para optimizar las capacidades de búsqueda y sustitución de código, reduciendo el consumo de tokens y mejorando la precisión.
+
+### Plan de Mejoras: Búsqueda y Sustitución Inteligente
+
+El objetivo es evolucionar de reescrituras completas de archivos a ediciones quirúrgicas y precisas. Para ello, propongo las siguientes mejoras:
+
+**1. Crear una Herramienta de Búsqueda Estructurada (`structured_search`)**
+
+*   **Problema:** Claude no sabe *dónde* está el código que necesita cambiar. Las búsquedas actuales son demasiado genéricas.
+*   **Solución:** Implementar una nueva función en search_operations.go que permita búsquedas avanzadas y devuelva la ubicación exacta del código.
+    *   **Entradas:** Patrón de búsqueda (nombre de función, signatura, regex), tipo de búsqueda (función, struct, etc.) y ruta del archivo.
+    *   **Salida:** Un objeto JSON con `file_path`, `start_line`, `end_line`, `start_byte`, y `end_byte`.
+    *   **Beneficio:** Claude podrá solicitar la ubicación exacta de un fragmento de código y usar esa información para una edición precisa, en lugar de leer y procesar el archivo completo.
+
+**2. Implementar una Herramienta de Edición Basada en Diff (`apply_diff_edit`)**
+
+*   **Problema:** Reemplazar texto puede ser propenso a errores si el contexto cambia. Reenviar el archivo completo es costoso.
+*   **Solución:** Crear una nueva herramienta en edit_operations.go que aplique un parche en formato `diff`.
+    *   **Flujo de trabajo:**
+        1.  Claude lee una sección del archivo (o el archivo completo si es necesario).
+        2.  Calcula los cambios necesarios en memoria.
+        3.  Genera un `diff` (similar a `git diff`).
+        4.  Envía solo el `diff` a la herramienta `apply_diff_edit`.
+    *   **Beneficio:** El intercambio de información se reduce drásticamente. En lugar de enviar un archivo de 500KB, solo se envían unos pocos bytes con los cambios. Esto es extremadamente eficiente en tokens.
+
+**3. Mejorar `intelligent_write` con un Modo de "Vista Previa" (`preview_changes`)**
+
+*   **Problema:** Claude a veces comete errores y realiza cambios no deseados. No hay una forma segura de verificar una operación antes de que se ejecute.
+*   **Solución:** Añadir un parámetro `preview_only: true` a las herramientas de escritura existentes como `intelligent_write`.
+    *   **Funcionamiento:** Cuando se activa, la herramienta no escribe en el disco. En su lugar, calcula un `diff` entre el contenido actual y el contenido propuesto y lo devuelve.
+    *   **Beneficio:** Claude puede verificar que sus cambios son correctos y mínimos antes de aplicarlos. Esto sirve como una capa de seguridad y le ayuda a "aprender" a generar mejores ediciones.
+
+**4. Crear Herramientas de Refactorización de Alto Nivel**
+
+*   **Problema:** Tareas comunes como "renombrar una variable" o "cambiar el cuerpo de una función" requieren múltiples pasos de bajo nivel (buscar, leer, reemplazar, escribir).
+*   **Solución:** Crear funciones compuestas que automaticen estos flujos de trabajo.
+    *   `find_and_replace(file, find_pattern, replace_with)`: Una herramienta que combina la búsqueda estructurada y la edición.
+    *   `replace_function_body(file, function_name, new_body)`: Una herramienta especializada para refactorizar funciones.
+    *   **Implementación:** Estas funciones se añadirían en claude_optimizer.go o un archivo similar, y expondrían como hooks en mcp.go.
+    *   **Beneficio:** Simplifica drásticamente las instrucciones que necesita dar Claude, reduciendo la probabilidad de error y el coste de tokens de la petición.
+
+**5. Añadir Telemetría para el Análisis de Uso de Herramientas**
+
+*   **Problema:** No sabemos con qué frecuencia fallan las ediciones precisas y se recurre a la reescritura completa.
+*   **Solución:** Implementar un sistema de logging simple en engine.go.
+    *   **Datos a registrar:**
+        *   Qué herramienta se llamó (`edit_file` vs. `write_file`).
+        *   Tamaño del contenido enviado.
+        *   Si la operación fue una reescritura completa o una edición parcial.
+    *   **Beneficio:** Obtendremos datos objetivos para entender qué herramientas funcionan bien y cuáles necesitan ser mejoradas, permitiendo una optimización continua.
+
+**6. Actualizar la Documentación para Guiar a Claude**
+
+*   **Problema:** Incluso con las mejores herramientas, Claude no las usará si no sabe que existen o cómo usarlas.
+*   **Solución:**
+    *   Actualizar HOOKS.md y BATCH_OPERATIONS_GUIDE.md con las nuevas herramientas y flujos de trabajo.
+    *   Proporcionar ejemplos claros de "prompts" que muestren cómo pedir una edición precisa en lugar de una reescritura.
+
+Este plan de acción transformará el sistema de una herramienta de manipulación de archivos a una plataforma de asistencia a la codificación verdaderamente inteligente y eficiente.
+
+scopweb: En este proyecto de gestion de archivos para soporte a ias sobre todo claude desktop engo un pequeño problema es:
+5 - Bug
+He detectado que no es muy bueno buscando y sustiyendo codigo, Claude desktop por ejemplo acaba muchas veces
+escribiendo todo el archivo con el prejuicio de gasto de tokens. No sabe buscar y ver lo que hay que cambiar ni
+donde. Deberiamos estudiar este asunto para añadir o optimizar las herramientas existentes.
+
+puedes revisarlo, sin sustituir nada solo un plan de mejoras.
+
+GitHub Copilot: ### Plan de Mejoras: Optimización de Búsqueda y Sustitución de Código
+
+Entiendo el problema: Claude Desktop tiende a reescribir archivos completos en lugar de realizar ediciones precisas, lo que aumenta el consumo de tokens y reduce la eficiencia. Esto se debe a limitaciones en la búsqueda de contextos específicos y en la aplicación de cambios quirúrgicos. A continuación, detallo un plan estructurado para abordar esto **sin realizar ninguna modificación en el código actual**. El plan se centra en agregar o mejorar herramientas existentes en el proyecto, priorizando la eficiencia y la integración con Claude Desktop.
+
+#### 1. **Mejora en Búsqueda Estructurada (Enhance `search_operations.go`)**  
+   - **Objetivo:** Permitir búsquedas precisas que identifiquen ubicaciones exactas de código (e.g., funciones, variables) sin leer archivos enteros.  
+   - **Acciones propuestas:**  
+     - Agregar una función `StructuredSearch` que acepte patrones (regex, nombres de símbolos) y devuelva rangos de líneas/bytes.  
+     - Integrar con el protocolo MCP para que Claude pueda solicitar "encuentra la función X en archivo Y" y obtener solo las coordenadas.  
+     - **Beneficio:** Reduce tokens al evitar lecturas completas; Claude puede enfocarse en snippets específicos.  
+     - **Archivo afectado:** search_operations.go.  
+     - **Prioridad:** Alta (base para otras mejoras).
+
+#### 2. **Introducir Edición Basada en Diff (New Tool in `edit_operations.go`)**  
+   - **Objetivo:** Permitir ediciones mínimas enviando solo cambios (diffs) en lugar de archivos completos.  
+   - **Acciones propuestas:**  
+     - Crear `ApplyDiffEdit` que tome un diff unificado (formato git-like) y lo aplique atómicamente, validando el contexto para evitar conflictos.  
+     - Añadir validación: Si el diff no coincide con el archivo actual, rechazar y notificar a Claude para que actualice su contexto.  
+     - **Beneficio:** Minimiza el prejuicio de "reescritura total" al forzar cambios incrementales y eficientes en tokens.  
+     - **Archivo afectado:** edit_operations.go.  
+     - **Prioridad:** Alta (resuelve el core del bug).
+
+#### 3. **Modo de Vista Previa en Herramientas de Escritura (Update `claude_optimizer.go` y `streaming_operations.go`)**  
+   - **Objetivo:** Permitir a Claude "probar" cambios sin aplicarlos, mostrando un diff preview.  
+   - **Acciones propuestas:**  
+     - Extender `intelligent_write` y `smart_edit_file` con un flag `preview: true` que genere y retorne un diff sin escribir al disco.  
+     - Integrar con logging para registrar métricas de uso (e.g., tamaño de diff vs. archivo completo).  
+     - **Beneficio:** Claude puede iterar en memoria, confirmando cambios mínimos antes de commit, reduciendo errores y tokens.  
+     - **Archivos afectados:** claude_optimizer.go, streaming_operations.go.  
+     - **Prioridad:** Media (complementa las ediciones).
+
+#### 4. **Herramientas de Alto Nivel para Refactorización (New in `claude_optimizer.go`)**  
+   - **Objetivo:** Simplificar tareas comunes para que Claude no necesite lógica compleja.  
+   - **Acciones propuestas:**  
+     - Implementar wrappers como `FindAndReplace` (busca + reemplaza) y `ReplaceFunction` (localiza y actualiza cuerpos de funciones).  
+     - Exponer como hooks en mcp.go con ejemplos en la documentación.  
+     - **Beneficio:** Reduce la necesidad de búsquedas manuales y reescrituras, guiando a Claude hacia ediciones precisas.  
+     - **Archivos afectados:** claude_optimizer.go, mcp.go.  
+     - **Prioridad:** Media (facilita adopción).
+
+#### 5. **Telemetría y Logging (Enhance `engine.go`)**  
+   - **Objetivo:** Monitorear el uso para iterar en mejoras.  
+   - **Acciones propuestas:**  
+     - Añadir logs en `Engine` para capturar eventos de edición (e.g., "full rewrite detected" vs. "targeted edit").  
+     - Almacenar métricas anónimas en un archivo como `logs/usage.log` para análisis posterior.  
+     - **Beneficio:** Datos empíricos para optimizar herramientas y prompts en Claude Desktop.  
+     - **Archivo afectado:** engine.go.  
+     - **Prioridad:** Baja (soporte para mantenimiento).
+
+#### 6. **Actualizaciones en Documentación**  
+   - **Objetivo:** Guiar el uso correcto para maximizar eficiencia.  
+   - **Acciones propuestas:**  
+     - Actualizar HOOKS.md y README.md con flujos de ejemplo (e.g., "Para editar una función: usa StructuredSearch + ApplyDiffEdit").  
+     - Agregar secciones sobre "Mejores Prácticas para Ediciones Eficientes en Tokens".  
+     - **Beneficio:** Ayuda a Claude (y usuarios) a evitar patrones ineficientes.  
+     - **Archivos afectados:** HOOKS.md, README.md.  
+     - **Prioridad:** Alta (inmediata y de bajo costo).
+
+#### Implementación General  
+- **Orden de Desarrollo:** Comenzar con 1 y 2 (base técnica), luego 3-4 (mejoras), finalizar con 5-6 (soporte).  
+- **Pruebas:** Agregar tests en mcp_functions_test.go para validar búsquedas y diffs.  
+- **Impacto en Tokens:** Estas mejoras podrían reducir el uso en >50% para ediciones comunes, basado en patrones observados.  
+- **Riesgos:** Asegurar compatibilidad con Windows (ver WINDOWS_FILESYSTEM_PERSISTENCE.md).  
+
+Este plan es accionable y enfocado en resolver el bug sin cambios inmediatos. Si quieres que proceda con la implementación de alguna parte, avísame.
+
+Claude Sonnet 4.5 dijo esto:
+scopweb: En este proyecto de gestion de archivos para soporte a ias sobre todo claude desktop engo un pequeño problema es:
+5 - Bug
+He detectado que no es muy bueno buscando y sustiyendo codigo, Claude desktop por ejemplo acaba muchas veces
+escribiendo todo el archivo con el prejuicio de gasto de tokens. No sabe buscar y ver lo que hay que cambiar ni 
+donde. Deberiamos estudiar este asunto para añadir o optimizar las herramientas existentes.
+
+puedes revisarlo, sin sustituir nada solo un plan de mejoras.
+
+GitHub Copilot: - Enhance `search_operations.go` to add a structured search API that can locate code spans by pattern (function name, signature, regex) and return precise ranges; expose this via the MCP so Claude Desktop can request targeted edits instead of rewriting whole files.  
+- Introduce a diff-based edit tool in edit_operations.go that takes an original snippet plus intended replacement and validates the context before committing the change; fail early if the surrounding code no longer matches so the agent can re-sync.  
+- Expand `intelligent_write` with a “preview-only” mode that computes unified diffs (similar to `git diff`) before writing, letting the client confirm minimal changes and helping Claude understand which segments will be touched.  
+- Provide higher-level helper functions (e.g., `FindAndReplace`, `ReplaceFunctionBody`) that wrap search + diff logic, and document them in Hooks.md so Claude Desktop can call a single tool for common refactor patterns.  
+- Add telemetry-style logging in `engine.go` to capture when full-file rewrites happen versus targeted patches; use this to iterate on tool quality and tune Claude prompts.  
+- Update user docs (README.md, README.md) with best-practice prompts that show how to request precise replacements, and note the new APIs once implemented.
+
+scopweb: En este proyecto de gestion de archivos para soporte a ias sobre todo claude desktop engo un pequeño problema es:
+5 - Bug
+He detectado que no es muy bueno buscando y sustiyendo codigo, Claude desktop por ejemplo acaba muchas veces
+escribiendo todo el archivo con el prejuicio de gasto de tokens. No sabe buscar y ver lo que hay que cambiar ni
+donde. Deberiamos estudiar este asunto para añadir o optimizar las herramientas existentes.
+
+puedes revisarlo, sin sustituir nada solo un plan de mejoras.
+
+GitHub Copilot: Claro, aquí tienes un plan de mejoras para optimizar las capacidades de búsqueda y sustitución de código, reduciendo el consumo de tokens y mejorando la precisión.
+
+### Plan de Mejoras: Búsqueda y Sustitución Inteligente
+
+El objetivo es evolucionar de reescrituras completas de archivos a ediciones quirúrgicas y precisas. Para ello, propongo las siguientes mejoras:
+
+**1. Crear una Herramienta de Búsqueda Estructurada (`structured_search`)**
+
+*   **Problema:** Claude no sabe *dónde* está el código que necesita cambiar. Las búsquedas actuales son demasiado genéricas.
+*   **Solución:** Implementar una nueva función en search_operations.go que permita búsquedas avanzadas y devuelva la ubicación exacta del código.
+    *   **Entradas:** Patrón de búsqueda (nombre de función, signatura, regex), tipo de búsqueda (función, struct, etc.) y ruta del archivo.
+    *   **Salida:** Un objeto JSON con `file_path`, `start_line`, `end_line`, `start_byte`, y `end_byte`.
+    *   **Beneficio:** Claude podrá solicitar la ubicación exacta de un fragmento de código y usar esa información para una edición precisa, en lugar de leer y procesar el archivo completo.
+
+**2. Implementar una Herramienta de Edición Basada en Diff (`apply_diff_edit`)**
+
+*   **Problema:** Reemplazar texto puede ser propenso a errores si el contexto cambia. Reenviar el archivo completo es costoso.
+*   **Solución:** Crear una nueva herramienta en edit_operations.go que aplique un parche en formato `diff`.
+    *   **Flujo de trabajo:**
+        1.  Claude lee una sección del archivo (o el archivo completo si es necesario).
+        2.  Calcula los cambios necesarios en memoria.
+        3.  Genera un `diff` (similar a `git diff`).
+        4.  Envía solo el `diff` a la herramienta `apply_diff_edit`.
+    *   **Beneficio:** El intercambio de información se reduce drásticamente. En lugar de enviar un archivo de 500KB, solo se envían unos pocos bytes con los cambios. Esto es extremadamente eficiente en tokens.
+
+**3. Mejorar `intelligent_write` con un Modo de "Vista Previa" (`preview_changes`)**
+
+*   **Problema:** Claude a veces comete errores y realiza cambios no deseados. No hay una forma segura de verificar una operación antes de que se ejecute.
+*   **Solución:** Añadir un parámetro `preview_only: true` a las herramientas de escritura existentes como `intelligent_write`.
+    *   **Funcionamiento:** Cuando se activa, la herramienta no escribe en el disco. En su lugar, calcula un `diff` entre el contenido actual y el contenido propuesto y lo devuelve.
+    *   **Beneficio:** Claude puede verificar que sus cambios son correctos y mínimos antes de aplicarlos. Esto sirve como una capa de seguridad y le ayuda a "aprender" a generar mejores ediciones.
+
+**4. Crear Herramientas de Refactorización de Alto Nivel**
+
+*   **Problema:** Tareas comunes como "renombrar una variable" o "cambiar el cuerpo de una función" requieren múltiples pasos de bajo nivel (buscar, leer, reemplazar, escribir).
+*   **Solución:** Crear funciones compuestas que automaticen estos flujos de trabajo.
+    *   `find_and_replace(file, find_pattern, replace_with)`: Una herramienta que combina la búsqueda estructurada y la edición.
+    *   `replace_function_body(file, function_name, new_body)`: Una herramienta especializada para refactorizar funciones.
+    *   **Implementación:** Estas funciones se añadirían en claude_optimizer.go o un archivo similar, y expondrían como hooks en mcp.go.
+    *   **Beneficio:** Simplifica drásticamente las instrucciones que necesita dar Claude, reduciendo la probabilidad de error y el coste de tokens de la petición.
+
+**5. Añadir Telemetría para el Análisis de Uso de Herramientas**
+
+*   **Problema:** No sabemos con qué frecuencia fallan las ediciones precisas y se recurre a la reescritura completa.
+*   **Solución:** Implementar un sistema de logging simple en engine.go.
+    *   **Datos a registrar:**
+        *   Qué herramienta se llamó (`edit_file` vs. `write_file`).
+        *   Tamaño del contenido enviado.
+        *   Si la operación fue una reescritura completa o una edición parcial.
+    *   **Beneficio:** Obtendremos datos objetivos para entender qué herramientas funcionan bien y cuáles necesitan ser mejoradas, permitiendo una optimización continua.
+
+**6. Actualizar la Documentación para Guiar a Claude**
+
+*   **Problema:** Incluso con las mejores herramientas, Claude no las usará si no sabe que existen o cómo usarlas.
+*   **Solución:**
+    *   Actualizar HOOKS.md y BATCH_OPERATIONS_GUIDE.md con las nuevas herramientas y flujos de trabajo.
+    *   Proporcionar ejemplos claros de "prompts" que muestren cómo pedir una edición precisa en lugar de una reescritura.
+
+Este plan de acción transformará el sistema de una herramienta de manipulación de archivos a una plataforma de asistencia a la codificación verdaderamente inteligente y eficiente.
+
+scopweb: En este proyecto de gestion de archivos para soporte a ias sobre todo claude desktop engo un pequeño problema es:
+5 - Bug
+He detectado que no es muy bueno buscando y sustiyendo codigo, Claude desktop por ejemplo acaba muchas veces
+escribiendo todo el archivo con el prejuicio de gasto de tokens. No sabe buscar y ver lo que hay que cambiar ni
+donde. Deberiamos estudiar este asunto para añadir o optimizar las herramientas existentes.
+
+puedes revisarlo, sin sustituir nada solo un plan de mejoras.
+
+GitHub Copilot: ### Plan de Mejoras: Optimización de Búsqueda y Sustitución de Código
+
+Entiendo el problema: Claude Desktop tiende a reescribir archivos completos en lugar de realizar ediciones precisas, lo que aumenta el consumo de tokens y reduce la eficiencia. Esto se debe a limitaciones en la búsqueda de contextos específicos y en la aplicación de cambios quirúrgicos. A continuación, detallo un plan estructurado para abordar esto **sin realizar ninguna modificación en el código actual**. El plan se centra en agregar o mejorar herramientas existentes en el proyecto, priorizando la eficiencia y la integración con Claude Desktop.
+
+#### 1. **Mejora en Búsqueda Estructurada (Enhance `search_operations.go`)**  
+   - **Objetivo:** Permitir búsquedas precisas que identifiquen ubicaciones exactas de código (e.g., funciones, variables) sin leer archivos enteros.  
+   - **Acciones propuestas:**  
+     - Agregar una función `StructuredSearch` que acepte patrones (regex, nombres de símbolos) y devuelva rangos de líneas/bytes.  
+     - Integrar con el protocolo MCP para que Claude pueda solicitar "encuentra la función X en archivo Y" y obtener solo las coordenadas.  
+     - **Beneficio:** Reduce tokens al evitar lecturas completas; Claude puede enfocarse en snippets específicos.  
+     - **Archivo afectado:** search_operations.go.  
+     - **Prioridad:** Alta (base para otras mejoras).
+
+#### 2. **Introducir Edición Basada en Diff (New Tool in `edit_operations.go`)**  
+   - **Objetivo:** Permitir ediciones mínimas enviando solo cambios (diffs) en lugar de archivos completos.  
+   - **Acciones propuestas:**  
+     - Crear `ApplyDiffEdit` que tome un diff unificado (formato git-like) y lo aplique atómicamente, validando el contexto para evitar conflictos.  
+     - Añadir validación: Si el diff no coincide con el archivo actual, rechazar y notificar a Claude para que actualice su contexto.  
+     - **Beneficio:** Minimiza el prejuicio de "reescritura total" al forzar cambios incrementales y eficientes en tokens.  
+     - **Archivo afectado:** edit_operations.go.  
+     - **Prioridad:** Alta (resuelve el core del bug).
+
+#### 3. **Modo de Vista Previa en Herramientas de Escritura (Update `claude_optimizer.go` y `streaming_operations.go`)**  
+   - **Objetivo:** Permitir a Claude "probar" cambios sin aplicarlos, mostrando un diff preview.  
+   - **Acciones propuestas:**  
+     - Extender `intelligent_write` y `smart_edit_file` con un flag `preview: true` que genere y retorne un diff sin escribir al disco.  
+     - Integrar con logging para registrar métricas de uso (e.g., tamaño de diff vs. archivo completo).  
+     - **Beneficio:** Claude puede iterar en memoria, confirmando cambios mínimos antes de commit, reduciendo errores y tokens.  
+     - **Archivos afectados:** claude_optimizer.go, streaming_operations.go.  
+     - **Prioridad:** Media (complementa las ediciones).
+
+#### 4. **Herramientas de Alto Nivel para Refactorización (New in `claude_optimizer.go`)**  
+   - **Objetivo:** Simplificar tareas comunes para que Claude no necesite lógica compleja.  
+   - **Acciones propuestas:**  
+     - Implementar wrappers como `FindAndReplace` (busca + reemplaza) y `ReplaceFunction` (localiza y actualiza cuerpos de funciones).  
+     - Exponer como hooks en mcp.go con ejemplos en la documentación.  
+     - **Beneficio:** Reduce la necesidad de búsquedas manuales y reescrituras, guiando a Claude hacia ediciones precisas.  
+     - **Archivos afectados:** claude_optimizer.go, mcp.go.  
+     - **Prioridad:** Media (facilita adopción).
+
+#### 5. **Telemetría y Logging (Enhance `engine.go`)**  
+   - **Objetivo:** Monitorear el uso para iterar en mejoras.  
+   - **Acciones propuestas:**  
+     - Añadir logs en `Engine` para capturar eventos de edición (e.g., "full rewrite detected" vs. "targeted edit").  
+     - Almacenar métricas anónimas en un archivo como `logs/usage.log` para análisis posterior.  
+     - **Beneficio:** Datos empíricos para optimizar herramientas y prompts en Claude Desktop.  
+     - **Archivo afectado:** engine.go.  
+     - **Prioridad:** Baja (soporte para mantenimiento).
+
+#### 6. **Actualizaciones en Documentación**  
+   - **Objetivo:** Guiar el uso correcto para maximizar eficiencia.  
+   - **Acciones propuestas:**  
+     - Actualizar HOOKS.md y README.md con flujos de ejemplo (e.g., "Para editar una función: usa StructuredSearch + ApplyDiffEdit").  
+     - Agregar secciones sobre "Mejores Prácticas para Ediciones Eficientes en Tokens".  
+     - **Beneficio:** Ayuda a Claude (y usuarios) a evitar patrones ineficientes.  
+     - **Archivos afectados:** HOOKS.md, README.md.  
+     - **Prioridad:** Alta (inmediata y de bajo costo).
+
+#### Implementación General  
+- **Orden de Desarrollo:** Comenzar con 1 y 2 (base técnica), luego 3-4 (mejoras), finalizar con 5-6 (soporte).  
+- **Pruebas:** Agregar tests en mcp_functions_test.go para validar búsquedas y diffs.  
+- **Impacto en Tokens:** Estas mejoras podrían reducir el uso en >50% para ediciones comunes, basado en patrones observados.  
+- **Riesgos:** Asegurar compatibilidad con Windows (ver WINDOWS_FILESYSTEM_PERSISTENCE.md).  
+
+Este plan es accionable y enfocado en resolver el bug sin cambios inmediatos. Si quieres que proceda con la implementación de alguna parte, avísame.
+
+scopweb: En este proyecto de gestion de archivos para soporte a ias sobre todo claude desktop engo un pequeño problema es:
+5 - Bug
+He detectado que no es muy bueno buscando y sustiyendo codigo, Claude desktop por ejemplo acaba muchas veces
+escribiendo todo el archivo con el prejuicio de gasto de tokens. No sabe buscar y ver lo que hay que cambiar ni
+donde. Deberiamos estudiar este asunto para añadir o optimizar las herramientas existentes.
+
+puedes revisarlo, sin sustituir nada solo un plan de mejoras.
+
+GitHub Copilot: Voy a analizar el proyecto para entender las herramientas existentes y proponer un plan de mejoras detallado. 
+
+Read [](file:///c%3A/MCPs/clone/mcp-filesystem-go-ultra/core/search_operations.go)
+
+Read [](file:///c%3A/MCPs/clone/mcp-filesystem-go-ultra/core/edit_operations.go)
+
+Read [](file:///c%3A/MCPs/clone/mcp-filesystem-go-ultra/core/claude_optimizer.go)
+
+Read [](file:///c%3A/MCPs/clone/mcp-filesystem-go-ultra/mcp/mcp.go)
+
+Ahora voy a leer el archivo main.go para ver cómo se exponen las herramientas al MCP: 
+
+Read [](file:///c%3A/MCPs/clone/mcp-filesystem-go-ultra/main.go#1-1), lines 1 to 201
+
+Ahora voy a leer más del main.go para ver todas las herramientas registradas: 
+
+Searched text for `Name.*Description|registerTools` (`**/main.go`), 3 results
+
+Read [](file:///c%3A/MCPs/clone/mcp-filesystem-go-ultra/main.go#207-207), lines 207 to 807
+
+Perfecto, ahora tengo una visión completa del proyecto. Voy a crear un **plan detallado de mejoras** basado en el análisis del código existente y el problema identificado (Bug #5).
+
+## 📋 **PLAN DE MEJORAS DETALLADO: Optimización de Búsqueda y Sustitución de Código**
+
+### **Contexto del Problema**
+
+Claude Desktop tiende a reescribir archivos completos en lugar de realizar ediciones precisas, causando:
+- ❌ **Alto consumo de tokens** (archivos de 500KB+ enviados completos)
+- ❌ **Errores de contexto** (no sabe dónde está el código a cambiar)
+- ❌ **Operaciones ineficientes** (búsquedas genéricas sin ubicación exacta)
+
+### **Análisis del Código Actual**
+
+**Herramientas existentes relevantes:**
+1. ✅ search_operations.go: `SmartSearch`, `AdvancedTextSearch`, `CountOccurrences`
+2. ✅ edit_operations.go: `EditFile`, `SearchAndReplace`, `ReplaceNthOccurrence`
+3. ✅ claude_optimizer.go: `IntelligentEdit`, `AutoRecoveryEdit`
+4. ✅ `streaming_operations.go`: `SmartEditFile`
+
+**Limitaciones identificadas:**
+- Las búsquedas devuelven **texto**, no **coordenadas precisas** (línea inicio/fin, byte offset)
+- No hay herramienta de **diff preview** antes de aplicar cambios
+- Falta API de **búsqueda estructurada** (funciones, clases, bloques)
+- No hay herramientas de **refactorización de alto nivel**
+- Sin telemetría para entender patrones de uso
+
+---
+
+## 🎯 **PLAN DE IMPLEMENTACIÓN (6 Fases)**
+
+### **FASE 1: Búsqueda Estructurada con Ubicaciones Precisas** 
+**Prioridad: ALTA | Complejidad: MEDIA | Impacto: 40% reducción tokens**
+
+#### **1.1. Nueva función en search_operations.go**
+```go
+// StructuredCodeSearch - Busca y devuelve ubicaciones exactas
+type CodeLocation struct {
+    FilePath    string `json:"file_path"`
+    StartLine   int    `json:"start_line"`
+    EndLine     int    `json:"end_line"`
+    StartByte   int    `json:"start_byte"`
+    EndByte     int    `json:"end_byte"`
+    CodeSnippet string `json:"code_snippet"`
+    MatchType   string `json:"match_type"` // "function", "struct", "block", "line"
+}
+
+func (e *UltraFastEngine) StructuredCodeSearch(
+    ctx context.Context, 
+    path string, 
+    searchType string, // "function", "struct", "variable", "regex"
+    pattern string,
+) ([]CodeLocation, error)
+```
+
+**Capacidades:**
+- Buscar por nombre de función: `StructuredCodeSearch(path, "function", "ReadFile")`
+- Buscar por patrón: `StructuredCodeSearch(path, "regex", "func.*File")`
+- Devuelve coordenadas exactas para ediciones posteriores
+
+#### **1.2. Exponer en MCP (main.go)**
+```go
+structuredSearchTool := mcp.NewTool("structured_code_search",
+    mcp.WithDescription("Find exact code location (returns line ranges for precise edits)"),
+    mcp.WithString("path", mcp.Required()),
+    mcp.WithString("search_type", mcp.Required()), // function, struct, regex, line
+    mcp.WithString("pattern", mcp.Required()),
+)
+```
+
+**Beneficio:** Claude puede preguntar "¿dónde está la función X?" y obtener `{start:45, end:67}` sin leer el archivo completo.
+
+---
+
+### **FASE 2: Edición Basada en Diff (Incremental Edits)**
+**Prioridad: ALTA | Complejidad: ALTA | Impacto: 60% reducción tokens**
+
+#### **2.1. Nueva función en edit_operations.go**
+```go
+// ApplyDiffPatch - Aplica un diff unificado (estilo git diff)
+type DiffPatch struct {
+    FilePath    string
+    OldContent  string // Contexto original (3-5 líneas)
+    NewContent  string // Contenido nuevo
+    LineStart   int    // Línea de inicio del cambio
+}
+
+func (e *UltraFastEngine) ApplyDiffPatch(
+    ctx context.Context,
+    patch DiffPatch,
+) (*EditResult, error) {
+    // 1. Leer solo las líneas necesarias (no todo el archivo)
+    // 2. Validar que el contexto coincide
+    // 3. Aplicar cambio atómico
+    // 4. Si falla, retornar error con sugerencia
+}
+```
+
+#### **2.2. Generar diff preview**
+```go
+// PreviewDiff - Genera un diff sin aplicarlo
+func (e *UltraFastEngine) PreviewDiff(
+    path string,
+    oldText string,
+    newText string,
+) (string, error) {
+    // Retorna formato unificado:
+    // @@ -45,3 +45,4 @@
+    //  func ReadFile() {
+    // -    return nil
+    // +    return content
+    //  }
+}
+```
+
+#### **2.3. Exponer en MCP**
+```go
+applyDiffTool := mcp.NewTool("apply_diff_patch",
+    mcp.WithDescription("Apply minimal diff (send only changes, not full file)"),
+    mcp.WithString("path", mcp.Required()),
+    mcp.WithString("old_content", mcp.Required()), // 3-5 líneas de contexto
+    mcp.WithString("new_content", mcp.Required()),
+    mcp.WithNumber("line_start", mcp.Required()),
+)
+
+previewDiffTool := mcp.NewTool("preview_diff",
+    mcp.WithDescription("Generate diff preview without applying (safety check)"),
+    mcp.WithString("path", mcp.Required()),
+    mcp.WithString("old_text", mcp.Required()),
+    mcp.WithString("new_text", mcp.Required()),
+)
+```
+
+**Beneficio:** En lugar de enviar 500KB, Claude envía solo 200 bytes con el diff.
+
+---
+
+### **FASE 3: Modo Preview en Herramientas Existentes**
+**Prioridad: MEDIA | Complejidad: BAJA | Impacto: 20% reducción errores**
+
+#### **3.1. Extender `intelligent_write` y `smart_edit_file`**
+Agregar parámetro opcional `preview: true` en main.go:
+
+```go
+intelligentWriteTool := mcp.NewTool("intelligent_write",
+    // ... parámetros existentes
+    mcp.WithBoolean("preview", mcp.Description("If true, return diff without writing")),
+)
+```
+
+Modificar implementación en claude_optimizer.go:
+```go
+func (o *ClaudeDesktopOptimizer) IntelligentWrite(
+    ctx context.Context, 
+    path, content string,
+    preview bool, // NUEVO
+) (string, error) {
+    if preview {
+        // Generar diff y retornar sin escribir
+        return o.engine.PreviewDiff(path, existingContent, content)
+    }
+    // Continuar con escritura normal
+}
+```
+
+**Beneficio:** Claude puede "probar" cambios antes de aplicarlos.
+
+---
+
+### **FASE 4: Herramientas de Alto Nivel (Refactorización)**
+**Prioridad: MEDIA | Complejidad: MEDIA | Impacto: 30% simplificación**
+
+#### **4.1. Nuevas funciones en claude_optimizer.go**
+```go
+// FindAndReplace - Busca + reemplaza en un paso
+func (o *ClaudeDesktopOptimizer) FindAndReplace(
+    ctx context.Context,
+    path string,
+    findPattern string,      // regex o literal
+    replaceWith string,
+    scope string,           // "file", "function", "line"
+) (*EditResult, error) {
+    // 1. Buscar con StructuredCodeSearch
+    // 2. Aplicar ApplyDiffPatch automáticamente
+}
+
+// ReplaceFunctionBody - Reemplaza cuerpo de función completo
+func (o *ClaudeDesktopOptimizer) ReplaceFunctionBody(
+    ctx context.Context,
+    path string,
+    functionName string,
+    newBody string,
+) (*EditResult, error) {
+    // 1. Buscar función con StructuredCodeSearch
+    // 2. Reemplazar solo el cuerpo (mantiene signatura)
+}
+
+// RenameSymbol - Renombra variable/función en scope
+func (o *ClaudeDesktopOptimizer) RenameSymbol(
+    ctx context.Context,
+    path string,
+    oldName string,
+    newName string,
+    scope string, // "file", "function", "global"
+) (*EditResult, error)
+```
+
+#### **4.2. Exponer en MCP**
+```go
+findReplaceTool := mcp.NewTool("find_and_replace",
+    mcp.WithDescription("Smart find+replace (combines search and edit)"),
+    mcp.WithString("path", mcp.Required()),
+    mcp.WithString("find_pattern", mcp.Required()),
+    mcp.WithString("replace_with", mcp.Required()),
+    mcp.WithString("scope", mcp.Description("file|function|line")),
+)
+
+replaceFunctionTool := mcp.NewTool("replace_function_body",
+    mcp.WithDescription("Replace function body (keeps signature)"),
+    mcp.WithString("path", mcp.Required()),
+    mcp.WithString("function_name", mcp.Required()),
+    mcp.WithString("new_body", mcp.Required()),
+)
+```
+
+**Beneficio:** Tareas comunes en 1 llamada en lugar de 3-4.
+
+---
+
+### **FASE 5: Telemetría y Análisis**
+**Prioridad: BAJA | Complejidad: BAJA | Impacto: Mejora continua**
+
+#### **5.1. Agregar logging en engine.go**
+```go
+type OperationMetric struct {
+    ToolName      string
+    FileSize      int64
+    TokensUsed    int    // Estimado: len(content)/4
+    IsFullRewrite bool   // true si se reescribió todo
+    Timestamp     time.Time
+}
+
+func (e *UltraFastEngine) LogOperation(metric OperationMetric) {
+    // Escribir a logs/usage.log en formato JSON
+    // Rotar logs diariamente
+}
+```
+
+#### **5.2. Análisis periódico**
+Crear `scripts/analyze_usage.go`:
+```go
+// Analiza logs/usage.log y genera reporte:
+// - Herramientas más usadas
+// - Tasa de full rewrites vs edits parciales
+// - Consumo de tokens promedio por operación
+```
+
+**Beneficio:** Datos para optimizar herramientas basándose en uso real.
+
+---
+
+### **FASE 6: Documentación y Guías**
+**Prioridad: ALTA | Complejidad: BAJA | Impacto: Adopción**
+
+#### **6.1. Actualizar HOOKS.md**
+Agregar sección:
+```markdown
+## 🎯 Ediciones Eficientes en Tokens
+
+### ❌ Evitar (alto consumo):
+- Leer archivo completo → modificar → reescribir completo
+
+### ✅ Usar (bajo consumo):
+1. **structured_code_search** → obtener ubicación exacta
+2. **preview_diff** → verificar cambios
+3. **apply_diff_patch** → aplicar solo diff
+
+### 📊 Comparación:
+- Método antiguo: 500KB enviados (≈125,000 tokens)
+- Método nuevo: 2KB enviados (≈500 tokens) → **99.6% reducción**
+```
+
+#### **6.2. Crear `guides/EFFICIENT_EDIT_WORKFLOWS.md`**
+```markdown
+# Workflows de Edición Eficiente
+
+## Caso 1: Cambiar función específica
+1. `structured_code_search(path, "function", "MyFunc")` → obtener líneas 45-67
+2. `preview_diff(path, old_snippet, new_snippet)` → verificar
+3. `apply_diff_patch(path, diff, line:45)` → aplicar
+
+## Caso 2: Renombrar variable
+1. `find_and_replace(path, "oldVar", "newVar", scope:"function")`
+
+## Caso 3: Archivo grande (>500KB)
+1. `structured_code_search` → ubicar sección
+2. `chunked_read_file(start:100, end:200)` → leer solo necesario
+3. `apply_diff_patch` → editar
+```
+
+#### **6.3. Actualizar README.md**
+Agregar sección de mejores prácticas con ejemplos de prompts:
+```markdown
+## 💡 Prompts Eficientes para Claude
+
+### ❌ Ineficiente:
+"Cambia la función ReadFile en engine.go"
+→ Claude lee todo el archivo (alto consumo)
+
+### ✅ Eficiente:
+"Usa structured_code_search para encontrar ReadFile en engine.go, 
+luego preview_diff para mostrarme el cambio, 
+y si está bien, aplica con apply_diff_patch"
+→ Claude usa herramientas precisas (bajo consumo)
+```
+
+---
+
+## 📊 **RESUMEN DE IMPACTO ESPERADO**
+
+| Fase | Reducción Tokens | Reducción Errores | Tiempo Implementación |
+|------|-----------------|-------------------|----------------------|
+| 1. Búsqueda Estructurada | 40% | 20% | 2-3 días |
+| 2. Edición Diff | 60% | 30% | 4-5 días |
+| 3. Modo Preview | 10% | 20% | 1 día |
+| 4. Alto Nivel | 20% | 15% | 3-4 días |
+| 5. Telemetría | 0%* | 5% | 1 día |
+| 6. Documentación | 0%* | 10% | 1 día |
+
+**Total estimado: 70-80% reducción en consumo de tokens**  
+**Total tiempo: 12-15 días de desarrollo**
+
+*Impacto indirecto (mejora continua y adopción)
+
+---
+
+## 🚀 **ORDEN DE IMPLEMENTACIÓN RECOMENDADO**
+
+1. **Semana 1**: Fase 1 (búsqueda) + Fase 6 (docs parciales)
+2. **Semana 2**: Fase 2 (diff edits) + Fase 3 (preview)
+3. **Semana 3**: Fase 4 (alto nivel) + Fase 5 (telemetría) + Fase 6 (docs finales)
+
+---
+
+## ⚠️ **CONSIDERACIONES TÉCNICAS**
+
+### **Compatibilidad Windows**
+- ✅ Todas las mejoras son compatibles con Windows
+- ✅ `apply_diff_patch` usa escritura atómica (igual que código actual)
+- ⚠️ Recordar: usar `write_file` en lugar de `edit_file` para persistencia (según `WINDOWS_FILESYSTEM_PERSISTENCE.md`)
+
+### **Tests Necesarios**
+Crear en tests:
+- `structured_search_test.go`
+- `diff_patch_test.go`
+- `preview_mode_test.go`
+- `high_level_tools_test.go`
+
+### **Archivos a Modificar**
+- ✏️ search_operations.go (+200 líneas)
+- ✏️ edit_operations.go (+300 líneas)
+- ✏️ claude_optimizer.go (+150 líneas)
+- ✏️ main.go (+100 líneas para nuevos tools)
+- ✏️ engine.go (+50 líneas para telemetría)
+- 📝 guides (nuevos archivos de docs)
+
+---
+
+Este plan está **listo para ser implementado** sin necesidad de modificar código ahora. ¿Quieres que proceda con alguna fase específica o prefieres ajustes al plan?
+
+
+
