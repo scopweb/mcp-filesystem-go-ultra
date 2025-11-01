@@ -1,5 +1,14 @@
 # MCP Filesystem Ultra - Claude Desktop Quick Reference (v3.1.0)
 
+## ⚡ CRITICAL RULES (ALWAYS FOLLOW)
+
+**NEVER** read entire large files with read_file() → wasteful
+**MUST** use: smart_search() → read_file_range() → edit_file()
+**MUST** check file size: <1000 lines = ok | >1000 lines = ALWAYS use workflow
+**MUST** validate context: if edit fails, file changed externally, re-read it
+
+---
+
 ## The One Rule: Surgical Edits Save 98% Tokens
 
 ### ❌ WASTEFUL (Avoid)
