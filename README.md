@@ -108,6 +108,7 @@ Ver la [Configuración Óptima](#configuración-optimizada-para-claude-desktop) 
 
 ### ✅ COMPLETADO Y OPTIMIZADO
 
+- **✅ Bug #5 Resuelto** (Unreleased): **70-80% token efficiency** en búsqueda/reemplazo (4 fases completadas)
 - **✅ Ultra Token Optimization** (v3.0.0): **77% reducción** con smart truncation
 - **✅ Batch Operations** (v2.6.0): Operaciones atómicas con rollback
 - **✅ Plan Mode** (v2.5.0): Análisis dry-run con evaluación de riesgos
