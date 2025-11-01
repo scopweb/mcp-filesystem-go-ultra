@@ -1063,7 +1063,19 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			occurrence, result.LinesAffected, result.MatchConfidence)), nil
 	})
 
-	log.Printf("📚 Registered 35 ultra-fast tools (32 previous + 3 new: read_file_range, count_occurrences, replace_nth_occurrence)")
+	// Telemetry tool - Monitor edit patterns
+	telemetryTool := mcp.NewTool("get_edit_telemetry",
+		mcp.WithDescription("Get telemetry data about edit operations (helps identify full rewrites vs targeted edits)"),
+	)
+	s.AddTool(telemetryTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		summary := engine.GetEditTelemetrySummary()
+
+		// Format as readable JSON
+		data, _ := json.MarshalIndent(summary, "", "  ")
+		return mcp.NewToolResultText(fmt.Sprintf("📊 Edit Telemetry Summary:\n\n%s", string(data))), nil
+	})
+
+	log.Printf("📚 Registered 36 ultra-fast tools (previous + telemetry: get_edit_telemetry)")
 
 	return nil
 }

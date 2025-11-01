@@ -506,6 +506,101 @@ type HookResult struct {
 }
 ```
 
+## Efficient Code Editing Workflows for Claude
+
+### Problem: Token Waste with Full File Rewrites
+
+Claude Desktop often reads entire files (even 500KB+ files) and rewrites them completely, wasting tokens unnecessarily. This section shows how to use the available tools efficiently to minimize token usage.
+
+### ✅ Optimal Workflow for Small Changes (<50 lines)
+
+**When you need to edit a specific function or section:**
+
+1. **Locate the code** (returns line numbers):
+   ```
+   smart_search(file="engine.go", pattern="func ReadFile")
+   → Returns: "Found at lines 45-67"
+   ```
+
+2. **Read only that section** (not the whole file):
+   ```
+   read_file_range(file="engine.go", start_line=45, end_line=67)
+   → Returns: 23 lines of code (instead of 3000+ lines)
+   ```
+
+3. **Analyze and create minimal changes**:
+   - Identify the exact lines that need to change
+   - Plan the replacement carefully
+
+4. **Apply targeted edit**:
+   ```
+   edit_file(file="engine.go", old_text="return nil", new_text="return content")
+   ```
+
+**Token savings: 99% reduction** (3000+ line file becomes 23 lines searched)
+
+### ✅ Optimal Workflow for Large Files (>1000 lines)
+
+**Never use `read_file()` on large files. Instead:**
+
+1. Use `smart_search()` to locate the exact lines
+2. Use `read_file_range()` to read ONLY the necessary lines
+3. Edit with `edit_file()` using context from step 2
+
+**Example:**
+- File size: 5000 lines
+- Old way: Read 5000 lines (125k tokens) → waste
+- New way: Search (500 tokens) + Read 50 lines (1.2k tokens) + Edit (500 tokens) = 2.2k tokens
+- **Savings: 98%**
+
+### ❌ ANTIPATTERNS - Avoid These
+
+| Antipattern | Problem | Better Way |
+|-------------|---------|------------|
+| `read_file()` on large file | Reads entire file (high tokens) | Use `read_file_range()` with line numbers |
+| Edit without context | Risk of wrong replacement | Use `smart_search()` first to verify location |
+| Multiple edits in one go | If one edit fails, all fail | Apply edits incrementally with validation |
+| Rewriting entire file | Massive token waste | Use `edit_file()` for surgical changes |
+
+### Tools Quick Reference
+
+| Tool | Purpose | Use When |
+|------|---------|----------|
+| `smart_search` | Find code location | You need to locate where code is |
+| `read_file_range` | Read lines N-M | You know the line numbers (from search) |
+| `read_file` | Read entire file | File is small (<1000 lines) |
+| `edit_file` | Replace text in file | You have old_text and new_text |
+| `write_file` | Create/overwrite entire file | File doesn't exist or needs complete rewrite |
+| `count_occurrences` | Count matches without reading | You need to verify multiple occurrences |
+| `replace_nth_occurrence` | Replace specific match | You need to change only the 1st, 2nd, or last occurrence |
+
+### Real Example: Refactoring a Function
+
+**Scenario:** Change function `ProcessData()` in a 2000-line file
+
+❌ **Bad approach:**
+1. `read_file("main.go")` → 2000 lines (50k tokens)
+2. Analyze and rewrite
+3. `write_file("main.go", entire_content)` → 50k tokens
+4. Total: 100k tokens wasted
+
+✅ **Good approach:**
+1. `smart_search("main.go", "func ProcessData")` → "lines 156-189"
+2. `read_file_range("main.go", 156, 189)` → 34 lines (850 tokens)
+3. Analyze: "Change line 165 and 170"
+4. `edit_file("main.go", old_snippet, new_snippet)`
+5. Total: ~2.5k tokens (98% savings)
+
+### Context Validation: How `edit_file()` Prevents Errors
+
+The `edit_file()` tool includes built-in safety:
+1. Before replacing text, it validates surrounding context
+2. If file changed since you read it, edit fails safely
+3. You get error: "Context mismatch - please re-read file"
+4. No accidental overwrites of modified content
+
+This is why `edit_file()` is safer than `write_file()` for ongoing edits.
+
 ## Conclusion
 
 The hooks system provides powerful extensibility for the MCP Filesystem server, enabling automatic code formatting, validation, and custom workflows that integrate seamlessly with Claude Desktop.
