@@ -1,0 +1,221 @@
+# MCP Filesystem Ultra - Complete Tool Reference (v3.1.0)
+
+## ⚠️ IMPORTANT: No 'create_file' Tool
+
+If Claude Desktop returns error: "Tool 'filesystem-ultra:create_file' not found"
+
+**Solution:** Use `write_file` instead. It works for both creating and overwriting files.
+
+Example:
+```
+write_file(path, content)  # Creates file if it doesn't exist
+write_file(path, content)  # Overwrites if it already exists
+```
+
+---
+
+## Complete Tool List (36 Tools)
+
+### 1. Reading Files
+- **read_file** - Read entire file (cached, fast)
+- **read_file_range** - Read specific lines N to M (EFFICIENT for large files)
+- **intelligent_read** - Auto-optimized read (direct or chunked based on size)
+- **chunked_read_file** - Read large files in chunks
+
+### 2. Writing & Editing Files
+- **write_file** - Write/create file (atomic, also creates files if missing)
+- **streaming_write_file** - Write large files (chunked)
+- **intelligent_write** - Auto-optimized write (direct or streaming)
+- **edit_file** - Replace text (surgical edit with context validation)
+- **smart_edit_file** - Edit large files (smart handling)
+- **intelligent_edit** - Auto-optimized edit
+- **recovery_edit** - Edit with fuzzy matching and error recovery
+- **replace_nth_occurrence** - Replace specific occurrence (1st, 2nd, -1=last)
+
+### 3. Search & Pattern Matching
+- **smart_search** - Find exact location in code (returns "lines 45-67")
+- **advanced_text_search** - Advanced pattern search with context
+- **search_and_replace** - Recursive search & replace
+- **count_occurrences** - Count pattern matches (without reading full file)
+
+### 4. File Operations
+- **copy_file** - Copy file or directory
+- **move_file** - Move/rename file or directory
+- **delete_file** - Permanently delete
+- **rename_file** - Rename file or directory
+- **soft_delete_file** - Safe delete (to trash folder)
+
+### 5. Directory Operations
+- **list_directory** - List directory contents (cached)
+- **create_directory** - Create directory and parents
+
+### 6. File Metadata & Analysis
+- **get_file_info** - Get file size, modified date, type, etc.
+- **analyze_file** - Analyze file and recommend optimal operations
+- **performance_stats** - Get performance statistics
+
+### 7. Change Analysis (Plan Mode / Dry Run)
+- **analyze_write** - Analyze write without executing
+- **analyze_edit** - Analyze edit without executing
+- **analyze_delete** - Analyze delete without executing
+
+### 8. Artifacts (Code Capture)
+- **capture_last_artifact** - Store artifact in memory
+- **write_last_artifact** - Write artifact to file
+- **artifact_info** - Get info about last artifact
+
+### 9. Batch Operations
+- **batch_operations** - Execute multiple operations atomically
+  - Supports: write, edit, copy, move, delete, create_directory
+  - Options: atomic, create_backup, validate_only
+
+### 10. Telemetry & Monitoring
+- **get_edit_telemetry** - Monitor edit efficiency (targeted vs full rewrites)
+  - Shows percentage of surgical edits (goal: >80%)
+  - Identifies inefficiency patterns
+
+### 11. Optimization
+- **get_optimization_suggestion** - Get optimization tips for file
+
+---
+
+## Quick Lookup: What Tool to Use?
+
+| Task | Tool | Note |
+|------|------|------|
+| Read file | read_file | Small files (<1000 lines) |
+| Read lines 50-100 | read_file_range | EFFICIENT for large files |
+| Create file | write_file | No 'create_file' - use write_file |
+| Overwrite file | write_file | Atomic write |
+| Replace text | edit_file | Surgical, with validation |
+| Replace specific occurrence | replace_nth_occurrence | More precise |
+| Find location | smart_search | Returns line numbers |
+| Count matches | count_occurrences | Without reading full file |
+| Copy file | copy_file | Duplicates file/dir |
+| Move file | move_file | Moves to new location |
+| Delete safely | soft_delete_file | To trash, not permanent |
+| Multiple ops | batch_operations | Atomic, all-or-nothing |
+| Check telemetry | get_edit_telemetry | See if edits are efficient |
+
+---
+
+## Bug #5 Optimization Workflow
+
+The recommended workflow for maximum token efficiency:
+
+1. **LOCATE** - smart_search(file, pattern)
+   - Find exact line numbers
+   - Cost: ~500 tokens
+
+2. **READ** - read_file_range(file, start, end)
+   - Read ONLY needed lines (never entire file)
+   - Cost: ~850 tokens for 34 lines
+
+3. **EDIT** - edit_file(file, old_text, new_text)
+   - Replace surgically
+   - Includes context validation (fails safely if file changed)
+   - Cost: ~500 tokens
+
+4. **MONITOR** - get_edit_telemetry() (optional)
+   - Check if edits are efficient
+   - Goal: >80% targeted_edits
+
+**Total per edit:** ~2k tokens (vs 250k+ for read_file + write_file on 5000-line file)
+
+---
+
+## Error Messages & Solutions
+
+### "Tool 'filesystem-ultra:create_file' not found"
+**Problem:** write_file with create=true doesn't exist
+**Solution:** Use write_file directly (creates file if missing)
+
+### "context validation failed: surrounding context doesn't match"
+**Problem:** File changed since you read it
+**Solution:** Re-run smart_search + read_file_range to get fresh content
+
+### "no match found for old_text"
+**Problem:** Text doesn't exist in file
+**Solutions:**
+1. Use smart_search to verify location
+2. Check for whitespace differences
+3. Use count_occurrences to verify text exists
+
+### "multiple matches found for old_text"
+**Problem:** Same text appears multiple times
+**Solution:** Use replace_nth_occurrence with occurrence parameter
+- occurrence: 1 (first), 2 (second), -1 (last), -2 (penultimate)
+
+---
+
+## File Size Decision Tree
+
+```
+Is file < 1000 lines?
+  ✅ YES → Use read_file() directly (OK)
+  ❌ NO  → Use smart_search() + read_file_range() + edit_file()
+
+Is file > 5000 lines?
+  ❌ NO  → smart_search() + read_file_range() is enough
+  ✅ YES → smart_search() + read_file_range() is CRITICAL
+```
+
+---
+
+## Intelligent Tools (Auto-optimization)
+
+These tools automatically choose the best strategy based on file size:
+
+- **intelligent_read** - Automatically reads small files direct, large files chunked
+- **intelligent_write** - Automatically writes direct or streams
+- **intelligent_edit** - Automatically chooses edit method
+
+Use these if you're unsure about file size.
+
+---
+
+## Batch Operations Example
+
+Create multiple files atomically:
+
+```json
+{
+  "operations": [
+    {"type": "write", "path": "file1.txt", "content": "..."},
+    {"type": "write", "path": "file2.txt", "content": "..."},
+    {"type": "copy", "source": "file1.txt", "destination": "backup.txt"}
+  ],
+  "atomic": true,
+  "validate_only": false
+}
+```
+
+---
+
+## Performance Metrics (get_edit_telemetry)
+
+Returns:
+- total_edits: Count of all edit operations
+- targeted_edits: Surgical edits <100 bytes (good ✅)
+- full_rewrites: Large edits >1000 bytes (inefficient ⚠️)
+- targeted_percent: Percentage of surgical edits
+- recommendation: Auto-generated advice
+
+**Goal:** Keep targeted_percent > 80%
+**Warning:** If targeted_percent < 50%, you're not using the optimal workflow
+
+---
+
+## Version History
+
+- **v3.1.0** (Current)
+  - Added: read_file_range, count_occurrences, replace_nth_occurrence
+  - Added: Context validation in edit_file
+  - Added: get_edit_telemetry for monitoring
+  - Removed: Non-existent 'create_file' tool
+  - Impact: 70-80% token reduction for typical workflows
+
+- **v3.0**
+  - Core tools: read_file, write_file, edit_file, list_directory
+  - Search tools: smart_search, advanced_text_search
+  - File ops: copy_file, move_file, delete_file
