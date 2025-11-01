@@ -85,12 +85,13 @@ Ejemplo: archivo 5000 líneas = 2k tokens (ahorro 98%)
 
 ---
 
-## Las 35 Herramientas Disponibles
+## Las 36 Herramientas Disponibles
 
-Core: read_file, write_file, edit_file, read_file_range, count_occurrences, replace_nth_occurrence
+Core: read_file, write_file, edit_file, read_file_range, count_occurrences, replace_nth_occurrence, intelligent_write, intelligent_read, intelligent_edit
 Búsqueda: smart_search, advanced_text_search
-Archivos: copy_file, move_file, delete_file, create_file
-Directorios: list_directory, create_directory, delete_directory, move_directory
+Archivos: copy_file, move_file, delete_file
+Directorios: list_directory, create_directory, delete_directory, rename_file
 Lote: batch_operations
 Monitoreo: get_edit_telemetry
-Más 19+ herramientas de utilidad
+Análisis: analyze_file, analyze_write, analyze_edit, analyze_delete
+Más 17+ herramientas de utilidad (artefactos, estadísticas, info, recuperación, etc)
