@@ -1,0 +1,96 @@
+# MCP Filesystem Ultra - Referencia Rápida para Claude Desktop (v3.1.0)
+
+## ⚡ REGLAS CRÍTICAS (SIEMPRE CUMPLIR)
+
+**NUNCA** leas archivos completos grandes con read_file() → derrochador
+**DEBES** usar: smart_search() → read_file_range() → edit_file()
+**DEBES** verificar tamaño: <1000 líneas = ok | >1000 líneas = SIEMPRE usa workflow
+**DEBES** validar contexto: si edit falla, archivo cambió externamente, re-lee
+
+---
+
+## La Regla de Oro: Ediciones Quirúrgicas Ahorran 98% de Tokens
+
+### ❌ DERROCHADOR (Evitar)
+read_file(archivo_grande) → write_file(archivo_grande)
+Ejemplo: archivo 5000 líneas = 250k+ tokens
+
+### ✅ EFICIENTE (Siempre Usar)
+smart_search(archivo, patrón) → read_file_range(inicio, fin) → edit_file(viejo, nuevo)
+Ejemplo: archivo 5000 líneas = 2k tokens (ahorro 98%)
+
+---
+
+## El Workflow de 4 Pasos
+
+1. **smart_search(archivo, patrón)**
+   - Encuentra ubicación exacta → retorna "líneas 45-67"
+
+2. **read_file_range(archivo, línea_inicio, línea_fin)**
+   - Lee SOLO las líneas necesarias → nunca leas archivo completo
+
+3. **edit_file(archivo, texto_viejo, texto_nuevo)**
+   - Reemplaza quirúrgicamente → incluye validación de contexto
+   - ERROR: "context validation failed" = archivo cambió externamente, re-lee
+
+4. **get_edit_telemetry()** (opcional)
+   - Monitorea si estás editando eficientemente (objetivo: >80% targeted_edits)
+
+---
+
+## Reglas por Tamaño de Archivo
+
+| Tamaño | Herramienta | Por Qué |
+|--------|-------------|--------|
+| <1000 líneas | read_file() | Aceptable |
+| 1000-5000 líneas | smart_search + read_file_range + edit_file | OBLIGATORIO |
+| >5000 líneas | smart_search + read_file_range + edit_file | CRÍTICO |
+
+---
+
+## Cuando las Ediciones Fallan
+
+**"context validation failed"** = El archivo cambió desde que lo leíste
+→ Re-ejecuta: smart_search() + read_file_range() para obtener contenido fresco
+
+**"no match found"** = El texto no existe
+→ Usa smart_search() primero para verificar ubicación
+
+**"multiple matches found"** = El mismo texto aparece N veces
+→ Usa replace_nth_occurrence(archivo, patrón, texto_nuevo, occurrence=-1)
+
+---
+
+## Herramientas Avanzadas (Cuando las Necesites)
+
+- **count_occurrences** - Cuenta coincidencias sin leer archivo (ahorro 95% tokens)
+- **replace_nth_occurrence** - Cambia solo 1ª, 2ª, o última coincidencia (ahorro 99.8%)
+
+---
+
+## Métricas Clave
+
+- Edición quirúrgica: <100 bytes (bueno ✅)
+- Reescritura completa: >1000 bytes (ineficiente ⚠️)
+- Objetivo: >80% targeted_edits via get_edit_telemetry()
+
+---
+
+## Ejemplo de Presupuesto de Tokens
+
+5 ediciones en una sesión:
+- Forma antigua: ~250k tokens
+- Forma nueva: ~12k tokens
+- AHORRO: 238k tokens por sesión
+
+---
+
+## Las 35 Herramientas Disponibles
+
+Core: read_file, write_file, edit_file, read_file_range, count_occurrences, replace_nth_occurrence
+Búsqueda: smart_search, advanced_text_search
+Archivos: copy_file, move_file, delete_file, create_file
+Directorios: list_directory, create_directory, delete_directory, move_directory
+Lote: batch_operations
+Monitoreo: get_edit_telemetry
+Más 19+ herramientas de utilidad
