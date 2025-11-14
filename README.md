@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra-Fast
 
-**Version 3.2.0** - Windows/WSL Path Normalization
+**Version 3.3.0** - WSL ↔ Windows Auto-Copy & Sync Tools
 
 Un servidor MCP (Model Context Protocol) de alto rendimiento para operaciones de sistema de archivos, diseñado para máxima velocidad y eficiencia. **Especialmente optimizado para Claude Desktop** con soporte completo para archivos grandes sin timeouts ni bloqueos.
 
@@ -1100,6 +1100,12 @@ DESPUÉS:
 - `capture_last_artifact` + `write_last_artifact` - Sistema de artefactos
 - `artifact_info` - Información del último artefacto
 
+#### 🪟 **WSL ↔ WINDOWS** (Integración automática):
+- `wsl_to_windows_copy` - Copia archivos de WSL a Windows con auto-conversión de rutas
+- `windows_to_wsl_copy` - Copia archivos de Windows a WSL con auto-conversión de rutas
+- `sync_claude_workspace` - Sincroniza espacios de trabajo completos entre WSL y Windows
+- `wsl_windows_status` - Muestra estado de integración WSL/Windows y ubicaciones de archivos
+
 ### 🎯 **Regla de Oro para Claude Desktop**
 
 ```
@@ -1331,6 +1337,39 @@ Claude Desktop ya NO tiene problemas con archivos grandes. El sistema inteligent
 ---
 
 ## 📋 CHANGELOG
+
+### **v3.3.0** (2025-11-14) - WSL ↔ Windows Auto-Copy & Sync Tools
+#### 🪟 **4 Nuevas Herramientas de Integración WSL/Windows**
+- ✅ **`wsl_to_windows_copy`** - Copia archivos/directorios de WSL a Windows con auto-conversión de rutas
+- ✅ **`windows_to_wsl_copy`** - Copia archivos/directorios de Windows a WSL con auto-conversión de rutas
+- ✅ **`sync_claude_workspace`** - Sincroniza espacios de trabajo completos entre WSL y Windows
+- ✅ **`wsl_windows_status`** - Muestra estado de integración y ubicaciones de archivos
+
+#### 🎯 **Funcionalidades**
+- ✅ **Auto-conversión de rutas** - Las rutas de destino se calculan automáticamente si no se especifican
+- ✅ **Copia recursiva** - Soporte completo para directorios y archivos individuales
+- ✅ **Sincronización con filtros** - Sincroniza solo archivos que coincidan con patrones (*.txt, *.go, etc.)
+- ✅ **Dry-run mode** - Vista previa de cambios sin ejecutar
+- ✅ **Detección de entorno** - Identifica automáticamente si está corriendo en WSL o Windows
+- ✅ **Creación de directorios** - Crea automáticamente directorios de destino si no existen
+
+#### 📊 **Impacto**
+- Herramientas aumentadas: 37 → **41 tools** (4 nuevas herramientas WSL/Windows)
+- **3 nuevos módulos**: `path_detector.go`, `path_converter.go`, `wsl_sync.go`
+- **Integración completa** - Facilita el trabajo híbrido entre WSL y Windows para Claude Desktop
+
+#### 💡 **Casos de Uso**
+```bash
+# Copiar archivo de WSL a Windows (ruta auto-calculada)
+wsl_to_windows_copy("/home/user/project/file.txt")
+# → C:\Users\user\project\file.txt
+
+# Sincronizar workspace completo (solo archivos .go)
+sync_claude_workspace("wsl_to_windows", filter_pattern="*.go")
+
+# Ver estado de integración
+wsl_windows_status()
+```
 
 ### **v3.2.0** (2025-11-14) - Windows/WSL Path Normalization + create_file Alias
 #### 🪟 **Soporte Windows/WSL Automático**

@@ -1135,7 +1135,244 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		return mcp.NewToolResultText(resultText), nil
 	})
 
-	log.Printf("📚 Registered 37 ultra-fast tools (includes batch_rename_files)")
+	// WSL <-> Windows Tools
+
+	// 1. wsl_to_windows_copy - Copy file from WSL to Windows
+	wslToWindowsCopyTool := mcp.NewTool("wsl_to_windows_copy",
+		mcp.WithDescription("Copy file/directory from WSL to Windows equivalent path"),
+		mcp.WithString("wsl_path", mcp.Required(), mcp.Description("Source WSL path (e.g., /home/user/file.txt)")),
+		mcp.WithString("windows_path", mcp.Description("Optional destination Windows path (auto-calculated if empty)")),
+		mcp.WithBoolean("create_dirs", mcp.Description("Create destination directories if they don't exist (default: true)")),
+	)
+	s.AddTool(wslToWindowsCopyTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		wslPath, err := request.RequireString("wsl_path")
+		if err != nil {
+			return mcp.NewToolResultError("wsl_path parameter is required"), nil
+		}
+
+		// Get optional parameters
+		var windowsPath string
+		createDirs := true
+
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if wp, ok := args["windows_path"].(string); ok {
+				windowsPath = wp
+			}
+			if cd, ok := args["create_dirs"].(bool); ok {
+				createDirs = cd
+			}
+		}
+
+		// Execute copy
+		err = engine.WSLWindowsCopy(ctx, wslPath, windowsPath, createDirs)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Copy failed: %v", err)), nil
+		}
+
+		// Determine actual destination for response
+		if windowsPath == "" {
+			windowsPath, _ = core.WSLToWindows(wslPath)
+		}
+
+		if engine.IsCompactMode() {
+			return mcp.NewToolResultText(fmt.Sprintf("OK: Copied to %s", windowsPath)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Successfully copied from WSL to Windows:\n  Source: %s\n  Destination: %s", wslPath, windowsPath)), nil
+	})
+
+	// 2. windows_to_wsl_copy - Copy file from Windows to WSL
+	windowsToWSLCopyTool := mcp.NewTool("windows_to_wsl_copy",
+		mcp.WithDescription("Copy file/directory from Windows to WSL equivalent path"),
+		mcp.WithString("windows_path", mcp.Required(), mcp.Description("Source Windows path (e.g., C:\\Users\\user\\file.txt)")),
+		mcp.WithString("wsl_path", mcp.Description("Optional destination WSL path (auto-calculated if empty)")),
+		mcp.WithBoolean("create_dirs", mcp.Description("Create destination directories if they don't exist (default: true)")),
+	)
+	s.AddTool(windowsToWSLCopyTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		windowsPath, err := request.RequireString("windows_path")
+		if err != nil {
+			return mcp.NewToolResultError("windows_path parameter is required"), nil
+		}
+
+		// Get optional parameters
+		var wslPath string
+		createDirs := true
+
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if wp, ok := args["wsl_path"].(string); ok {
+				wslPath = wp
+			}
+			if cd, ok := args["create_dirs"].(bool); ok {
+				createDirs = cd
+			}
+		}
+
+		// Execute copy
+		err = engine.WSLWindowsCopy(ctx, windowsPath, wslPath, createDirs)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Copy failed: %v", err)), nil
+		}
+
+		// Determine actual destination for response
+		if wslPath == "" {
+			wslPath, _ = core.WindowsToWSL(windowsPath)
+		}
+
+		if engine.IsCompactMode() {
+			return mcp.NewToolResultText(fmt.Sprintf("OK: Copied to %s", wslPath)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Successfully copied from Windows to WSL:\n  Source: %s\n  Destination: %s", windowsPath, wslPath)), nil
+	})
+
+	// 3. sync_claude_workspace - Sync entire workspace between WSL and Windows
+	syncWorkspaceTool := mcp.NewTool("sync_claude_workspace",
+		mcp.WithDescription("Sync entire Claude workspace between WSL and Windows"),
+		mcp.WithString("direction", mcp.Required(), mcp.Description("Sync direction: wsl_to_windows, windows_to_wsl, or bidirectional")),
+		mcp.WithString("filter_pattern", mcp.Description("Optional file filter pattern (e.g., *.txt, *.go)")),
+		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without executing (default: false)")),
+	)
+	s.AddTool(syncWorkspaceTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		direction, err := request.RequireString("direction")
+		if err != nil {
+			return mcp.NewToolResultError("direction parameter is required"), nil
+		}
+
+		// Get optional parameters
+		filterPattern := ""
+		dryRun := false
+
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if fp, ok := args["filter_pattern"].(string); ok {
+				filterPattern = fp
+			}
+			if dr, ok := args["dry_run"].(bool); ok {
+				dryRun = dr
+			}
+		}
+
+		// Execute sync
+		result, err := engine.SyncWorkspace(ctx, direction, filterPattern, dryRun)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Sync failed: %v", err)), nil
+		}
+
+		// Format result
+		if engine.IsCompactMode() {
+			syncCount := result["synced_count"].(int)
+			errorCount := result["error_count"].(int)
+			return mcp.NewToolResultText(fmt.Sprintf("OK: %d files synced, %d errors", syncCount, errorCount)), nil
+		}
+
+		// Verbose output
+		var output strings.Builder
+		output.WriteString("📂 Workspace Sync Results\n")
+		output.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+		output.WriteString(fmt.Sprintf("Direction: %s\n", result["direction"]))
+		if filterPattern != "" {
+			output.WriteString(fmt.Sprintf("Filter: %s\n", result["filter_pattern"]))
+		}
+		if dryRun {
+			output.WriteString("Mode: DRY RUN (preview only)\n")
+		}
+		output.WriteString("\n")
+
+		syncedFiles := result["synced_files"].([]string)
+		syncCount := result["synced_count"].(int)
+		errorCount := result["error_count"].(int)
+
+		if syncCount > 0 {
+			output.WriteString(fmt.Sprintf("✅ Files synced: %d\n", syncCount))
+			if syncCount <= 20 {
+				for _, file := range syncedFiles {
+					output.WriteString(fmt.Sprintf("  - %s\n", file))
+				}
+			} else {
+				for i := 0; i < 10; i++ {
+					output.WriteString(fmt.Sprintf("  - %s\n", syncedFiles[i]))
+				}
+				output.WriteString(fmt.Sprintf("  ... and %d more files\n", syncCount-10))
+			}
+		} else {
+			output.WriteString("ℹ️  No files to sync\n")
+		}
+
+		if errorCount > 0 {
+			errors := result["errors"].([]string)
+			output.WriteString(fmt.Sprintf("\n⚠️  Errors: %d\n", errorCount))
+			if errorCount <= 10 {
+				for _, errMsg := range errors {
+					output.WriteString(fmt.Sprintf("  - %s\n", errMsg))
+				}
+			} else {
+				for i := 0; i < 5; i++ {
+					output.WriteString(fmt.Sprintf("  - %s\n", errors[i]))
+				}
+				output.WriteString(fmt.Sprintf("  ... and %d more errors\n", errorCount-5))
+			}
+		}
+
+		return mcp.NewToolResultText(output.String()), nil
+	})
+
+	// 4. wsl_windows_status - Show WSL/Windows integration status
+	wslStatusTool := mcp.NewTool("wsl_windows_status",
+		mcp.WithDescription("Show WSL/Windows integration status and file locations"),
+	)
+	s.AddTool(wslStatusTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		status, err := engine.GetWSLWindowsStatus(ctx)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to get status: %v", err)), nil
+		}
+
+		// Format status output
+		if engine.IsCompactMode() {
+			env := status["environment"].(string)
+			isWSL := status["is_wsl"].(bool)
+			return mcp.NewToolResultText(fmt.Sprintf("Env: %s, WSL: %v", env, isWSL)), nil
+		}
+
+		// Verbose output
+		var output strings.Builder
+		output.WriteString("🔍 WSL ↔ Windows Integration Status\n")
+		output.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+
+		output.WriteString(fmt.Sprintf("Environment: %s\n", status["environment"]))
+		output.WriteString(fmt.Sprintf("Running in WSL: %v\n", status["is_wsl"]))
+
+		if winUser, ok := status["windows_user"].(string); ok && winUser != "" {
+			output.WriteString(fmt.Sprintf("Windows User: %s\n", winUser))
+		}
+
+		output.WriteString("\n📁 Paths:\n")
+		output.WriteString(fmt.Sprintf("  WSL Home: %s\n", status["wsl_home"]))
+		if wslWinHome, ok := status["windows_home_wsl_style"].(string); ok && wslWinHome != "" {
+			output.WriteString(fmt.Sprintf("  Windows Home (WSL style): %s\n", wslWinHome))
+		}
+		if winHome, ok := status["windows_home_windows_style"].(string); ok && winHome != "" {
+			output.WriteString(fmt.Sprintf("  Windows Home (Windows style): %s\n", winHome))
+		}
+
+		output.WriteString(fmt.Sprintf("\n🔧 System:\n"))
+		output.WriteString(fmt.Sprintf("  Path Separator: %s\n", status["path_separator"]))
+
+		if interopAvail, ok := status["windows_interop_available"].(bool); ok {
+			output.WriteString(fmt.Sprintf("  Windows Interop: %v\n", interopAvail))
+		}
+
+		if dirStatus, ok := status["directory_status"].(map[string]bool); ok && len(dirStatus) > 0 {
+			output.WriteString("\n📂 Directory Status:\n")
+			for dir, exists := range dirStatus {
+				status := "❌"
+				if exists {
+					status = "✅"
+				}
+				output.WriteString(fmt.Sprintf("  %s %s\n", status, dir))
+			}
+		}
+
+		return mcp.NewToolResultText(output.String()), nil
+	})
+
+	log.Printf("📚 Registered 41 ultra-fast tools (includes 4 WSL/Windows tools)")
 
 	return nil
 }
