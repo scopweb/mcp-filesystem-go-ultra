@@ -1,0 +1,137 @@
+📋 Plan: WSL ↔ Windows Auto-Copy
+Objetivo
+Automatizar transferencia de archivos entre WSL y Windows para Claude Desktop.
+
+Fase 1: Detección y Utilidades Base
+1.1 Función de detección de entorno
+go// pkg/engine/path_detector.go
+func DetectEnvironment() (isWSL bool, windowsUser string)
+func IsWSLPath(path string) bool
+func IsWindowsPath(path string) bool
+func GetWSLHome() string
+func GetWindowsHome() string
+1.2 Conversor de rutas bidireccional
+go// pkg/engine/path_converter.go
+func WSLToWindows(wslPath string) (string, error)
+func WindowsToWSL(winPath string) (string, error)
+func NormalizePath(path string) (normalized string, isWSL bool)
+Ejemplos:
+
+/home/user/claude/file.txt → C:\Users\user\claude\file.txt
+C:\Projects\test.go → /mnt/c/Projects/test.go
+
+
+Fase 2: Herramientas Automáticas
+2.1 Auto-Copy en operaciones de escritura
+go// Modifica WriteFileContent() en pkg/engine/file.go
+
+func WriteFileContent(path, content string) error {
+    // 1. Escritura normal
+    err := writeFile(path, content)
+    
+    // 2. Si es WSL + config.AutoCopyToWindows = true
+    if IsWSLPath(path) && config.AutoCopyToWindows {
+        winPath, _ := WSLToWindows(path)
+        copyFile(path, winPath) // No falla si error
+    }
+    return err
+}
+2.2 Configuración en MCP settings
+json// .claude/settings.local.json
+{
+  "wsl_integration": {
+    "auto_copy_to_windows": true,
+    "monitored_dirs": [
+      "/home/user/claude",
+      "/tmp/claude"
+    ],
+    "windows_target": "C:\\Users\\user\\claude"
+  }
+}
+
+Fase 3: Herramientas Manuales
+3.1 Tool: wsl_to_windows_copy
+go{
+    Name: "wsl_to_windows_copy",
+    Description: "Copy file from WSL to Windows equivalent path",
+    InputSchema: {
+        wsl_path: string,      // /home/user/file.txt
+        windows_path?: string, // opcional, auto-calcula si vacío
+        create_dirs: bool      // default: true
+    }
+}
+3.2 Tool: windows_to_wsl_copy
+go{
+    Name: "windows_to_wsl_copy",
+    Description: "Copy file from Windows to WSL equivalent path",
+    InputSchema: {
+        windows_path: string,
+        wsl_path?: string,
+        create_dirs: bool
+    }
+}
+3.3 Tool: sync_claude_workspace
+go{
+    Name: "sync_claude_workspace",
+    Description: "Sync entire Claude workspace between WSL and Windows",
+    InputSchema: {
+        direction: "wsl_to_windows" | "windows_to_wsl" | "bidirectional",
+        filter_pattern?: string, // *.txt, *.go, etc.
+        dry_run: bool
+    }
+}
+
+Fase 4: Monitoreo y Reportes
+4.1 Tool: wsl_windows_status
+go{
+    Name: "wsl_windows_status",
+    Description: "Show WSL/Windows integration status and file locations",
+    Output: {
+        environment: "WSL" | "Windows" | "Both",
+        wsl_home: "/home/user",
+        windows_home: "C:\\Users\\user",
+        auto_copy_enabled: bool,
+        pending_syncs: []string,
+        last_sync: timestamp
+    }
+}
+
+Fase 5: Casos de Uso
+Caso 1: Auto-copy transparente
+bash# Usuario en Windows, Claude Desktop con WSL
+create_file("/home/user/claude/test.go", "package main")
+# → Crea en WSL + auto-copia a C:\Users\user\claude\test.go
+Caso 2: Copia manual selectiva
+bashwsl_to_windows_copy("/home/user/project/file.cs")
+# → C:\Users\user\project\file.cs
+Caso 3: Sincronización completa
+bashsync_claude_workspace("wsl_to_windows", filter="*.cs")
+# → Copia todos los .cs de WSL a Windows
+```
+
+---
+
+## Estructura de Archivos
+```
+mcp-filesystem-go-ultra/
+├── pkg/engine/
+│   ├── path_detector.go      # NEW: Detección WSL/Windows
+│   ├── path_converter.go     # NEW: Conversión rutas
+│   ├── wsl_sync.go           # NEW: Sincronización
+│   └── file.go               # MOD: Auto-copy en write
+├── main.go                   # MOD: +4 nuevas tools
+└── .claude/
+    └── settings.local.json   # MOD: Config WSL
+Nuevas tools: 36 → 40 (4 nuevas)
+
+Prioridades
+
+Alta: path_converter.go + path_detector.go
+Alta: wsl_to_windows_copy tool
+Media: Auto-copy en WriteFileContent
+Media: sync_claude_workspace
+Baja: Monitoreo y estadísticas
+
+
+Estimación: 4-6 horas implementación + tests
+Compatibilidad: Windows 10/11 + WSL 1/2
