@@ -242,18 +242,18 @@ func (e *UltraFastEngine) createBackup(path string) (string, error) {
 	return backupPath, err
 }
 
-// performIntelligentEdit performs intelligent text replacement
+// performIntelligentEdit performs intelligent text replacement with optimizations
 func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText string) (*EditResult, error) {
 	if oldText == "" {
 		return nil, fmt.Errorf("old_text cannot be empty")
 	}
 
-	// Normalize line endings
+	// Normalize line endings once
 	content = normalizeLineEndings(content)
 	oldText = normalizeLineEndings(oldText)
 	newText = normalizeLineEndings(newText)
 
-	// Fast path: Check exact match first (most common)
+	// OPTIMIZATION 1: Fast path for exact match (most common case)
 	if idx := strings.Index(content, oldText); idx >= 0 {
 		newContent := strings.ReplaceAll(content, oldText, newText)
 		replacements := strings.Count(content, oldText)
@@ -267,48 +267,78 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 		}, nil
 	}
 
-	// Flexible search if no exact match
-	lines := strings.Split(content, "\n")
-	newLines := make([]string, len(lines))
-	replacements := 0
-	affectedLines := 0
-
+	// OPTIMIZATION 2: Pre-compute normalized variants once
 	normalizedOld := strings.TrimSpace(oldText)
 
-	// Try line by line replacement
-	for i, line := range lines {
-		newLine := line
-
-		if strings.Contains(line, oldText) {
-			newLine = strings.ReplaceAll(line, oldText, newText)
-			replacements += strings.Count(line, oldText)
-			affectedLines++
-		} else if trimmed := strings.TrimSpace(line); trimmed == normalizedOld {
-			newLine = getIndentation(line) + strings.TrimSpace(newText)
-			replacements++
-			affectedLines++
-		} else if strings.Contains(line, normalizedOld) {
-			newLine = strings.ReplaceAll(line, normalizedOld, newText)
-			replacements += strings.Count(line, normalizedOld)
-			affectedLines++
-		}
-
-		newLines[i] = newLine
+	// OPTIMIZATION 3: Check if normalized version exists in content
+	if normalizedOld != oldText && strings.Contains(content, normalizedOld) {
+		// Fast replacement for normalized text
+		newContent := strings.ReplaceAll(content, normalizedOld, newText)
+		return &EditResult{
+			ModifiedContent:  newContent,
+			ReplacementCount: strings.Count(content, normalizedOld),
+			MatchConfidence:  "high",
+			LinesAffected:    calculateLinesWithText(content, normalizedOld),
+		}, nil
 	}
 
-	// If no replacements found, try multiline search
-	if replacements == 0 {
-		if strings.Contains(content, oldText) {
-			newContent := strings.ReplaceAll(content, oldText, newText)
-			return &EditResult{
-				ModifiedContent:  newContent,
-				ReplacementCount: 1,
-				MatchConfidence:  "medium",
-				LinesAffected:    strings.Count(oldText, "\n") + 1,
-			}, nil
+	// OPTIMIZATION 4: Line-by-line processing with minimal allocations
+	lines := strings.Split(content, "\n")
+	replacements := 0
+	affectedLines := 0
+	modified := false
+
+	for i, line := range lines {
+		// Try exact match in line first
+		if strings.Contains(line, oldText) {
+			lines[i] = strings.ReplaceAll(line, oldText, newText)
+			replacements += strings.Count(line, oldText)
+			affectedLines++
+			modified = true
+			continue
 		}
 
-		// Last resort: flexible regex search
+		// Try normalized match with indentation preservation
+		if trimmed := strings.TrimSpace(line); trimmed == normalizedOld {
+			lines[i] = getIndentation(line) + strings.TrimSpace(newText)
+			replacements++
+			affectedLines++
+			modified = true
+			continue
+		}
+
+		// Try normalized match without indentation
+		if strings.Contains(line, normalizedOld) {
+			lines[i] = strings.ReplaceAll(line, normalizedOld, newText)
+			replacements += strings.Count(line, normalizedOld)
+			affectedLines++
+			modified = true
+		}
+	}
+
+	if modified {
+		return &EditResult{
+			ModifiedContent:  strings.Join(lines, "\n"),
+			ReplacementCount: replacements,
+			MatchConfidence:  "medium",
+			LinesAffected:    affectedLines,
+		}, nil
+	}
+
+	// OPTIMIZATION 5: Multiline search only if single-line failed
+	if strings.Contains(content, oldText) {
+		newContent := strings.ReplaceAll(content, oldText, newText)
+		return &EditResult{
+			ModifiedContent:  newContent,
+			ReplacementCount: 1,
+			MatchConfidence:  "medium",
+			LinesAffected:    strings.Count(oldText, "\n") + 1,
+		}, nil
+	}
+
+	// OPTIMIZATION 6: Flexible regex search as last resort (expensive)
+	// Only try if content is not too large (< 100KB for regex)
+	if len(content) < 100*1024 {
 		escapedOld := regexp.QuoteMeta(oldText)
 		flexiblePattern := makeFlexiblePattern(escapedOld)
 
@@ -325,15 +355,6 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 				}, nil
 			}
 		}
-	}
-
-	if replacements > 0 {
-		return &EditResult{
-			ModifiedContent:  strings.Join(newLines, "\n"),
-			ReplacementCount: replacements,
-			MatchConfidence:  "medium",
-			LinesAffected:    affectedLines,
-		}, nil
 	}
 
 	return &EditResult{

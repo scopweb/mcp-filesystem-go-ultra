@@ -1075,7 +1075,40 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		return mcp.NewToolResultText(fmt.Sprintf("📊 Edit Telemetry Summary:\n\n%s", string(data))), nil
 	})
 
-	log.Printf("📚 Registered 36 ultra-fast tools (previous + telemetry: get_edit_telemetry)")
+	// Batch rename files tool - Rename multiple files at once
+	batchRenameTool := mcp.NewTool("batch_rename_files",
+		mcp.WithDescription("Rename multiple files in batch with various modes: find_replace, add_prefix, add_suffix, number_files, regex_rename, change_extension, to_lowercase, to_uppercase"),
+		mcp.WithString("request_json", mcp.Required(), mcp.Description("JSON with batch rename parameters. Fields: path (string), mode (string), find (string), replace (string), prefix (string), suffix (string), pattern (string), extension (string), start_number (int), padding (int), recursive (bool), file_pattern (string), preview (bool), case_sensitive (bool)")),
+	)
+	s.AddTool(batchRenameTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		requestJSON, err := request.RequireString("request_json")
+		if err != nil {
+			return mcp.NewToolResultError("request_json parameter is required"), nil
+		}
+
+		// Parse request from JSON
+		var batchRenameReq core.BatchRenameRequest
+		if err := json.Unmarshal([]byte(requestJSON), &batchRenameReq); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid request JSON: %v", err)), nil
+		}
+
+		// Execute batch rename
+		result, err := engine.BatchRenameFiles(ctx, batchRenameReq)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Batch rename error: %v", err)), nil
+		}
+
+		// Format result
+		resultText := core.FormatBatchRenameResult(result, engine.IsCompactMode())
+
+		if !result.Success && !result.Preview {
+			return mcp.NewToolResultError(resultText), nil
+		}
+
+		return mcp.NewToolResultText(resultText), nil
+	})
+
+	log.Printf("📚 Registered 37 ultra-fast tools (includes batch_rename_files)")
 
 	return nil
 }
