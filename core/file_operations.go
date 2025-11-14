@@ -11,6 +11,9 @@ import (
 
 // RenameFile renames a file or directory
 func (e *UltraFastEngine) RenameFile(ctx context.Context, oldPath, newPath string) error {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	oldPath = NormalizePath(oldPath)
+	newPath = NormalizePath(newPath)
 	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "rename"); err != nil {
 		return err
@@ -63,6 +66,8 @@ func (e *UltraFastEngine) RenameFile(ctx context.Context, oldPath, newPath strin
 
 // SoftDeleteFile moves a file to a "filesdelete" folder for later deletion
 func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) error {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
 	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "softdelete"); err != nil {
 		return err
@@ -175,6 +180,8 @@ func hasProjectIndicators(dir string) bool {
 
 // CreateDirectory creates a new directory (and parents if needed)
 func (e *UltraFastEngine) CreateDirectory(ctx context.Context, path string) error {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
 	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "createdir"); err != nil {
 		return err
@@ -211,6 +218,8 @@ func (e *UltraFastEngine) CreateDirectory(ctx context.Context, path string) erro
 
 // DeleteFile permanently deletes a file or directory
 func (e *UltraFastEngine) DeleteFile(ctx context.Context, path string) error {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
 	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "delete"); err != nil {
 		return err
@@ -256,6 +265,9 @@ func (e *UltraFastEngine) DeleteFile(ctx context.Context, path string) error {
 
 // MoveFile moves a file or directory to a new location
 func (e *UltraFastEngine) MoveFile(ctx context.Context, sourcePath, destPath string) error {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	sourcePath = NormalizePath(sourcePath)
+	destPath = NormalizePath(destPath)
 	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "move"); err != nil {
 		return err
@@ -315,6 +327,9 @@ func (e *UltraFastEngine) MoveFile(ctx context.Context, sourcePath, destPath str
 
 // CopyFile copies a file or directory to a new location
 func (e *UltraFastEngine) CopyFile(ctx context.Context, sourcePath, destPath string) error {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	sourcePath = NormalizePath(sourcePath)
+	destPath = NormalizePath(destPath)
 	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "copy"); err != nil {
 		return err
@@ -431,6 +446,8 @@ func (e *UltraFastEngine) copyDirectory(src, dst string) error {
 
 // ReadFileRange reads a specific range of lines from a file
 func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startLine, endLine int) (string, error) {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
 	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "read_range"); err != nil {
 		return "", err
@@ -499,6 +516,8 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 
 // GetFileInfo returns detailed information about a file or directory
 func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string, error) {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
 	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "fileinfo"); err != nil {
 		return "", err

@@ -43,6 +43,8 @@ func DefaultChunkingConfig() *ChunkingConfig {
 
 // StreamingWriteFile writes large files in intelligent chunks
 func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content string) error {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
 	// Quick path for small files - aumentado el umbral
 	if len(content) <= 200*1024 {
 		return e.WriteFileContent(ctx, path, content)
@@ -145,6 +147,8 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 
 // ChunkedReadFile reads large files in chunks with progress reporting
 func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxChunkSize int) (string, error) {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
 	// Get file info
 	info, err := os.Stat(path)
 	if err != nil {
@@ -213,6 +217,8 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 // Use WriteFileContent with complete file content for guaranteed persistence.
 // See: guides/WINDOWS_FILESYSTEM_PERSISTENCE.md
 func (e *UltraFastEngine) SmartEditFile(ctx context.Context, path, oldText, newText string, maxFileSize int64) (*EditResult, error) {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
 	// Get file info first
 	info, err := os.Stat(path)
 	if err != nil {
@@ -272,6 +278,8 @@ func (e *UltraFastEngine) streamingEditLargeFile(ctx context.Context, path, oldT
 
 // GetFileAnalysis provides intelligent analysis for large files
 func (e *UltraFastEngine) GetFileAnalysis(ctx context.Context, path string) (string, error) {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", err
