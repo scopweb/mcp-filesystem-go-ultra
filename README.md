@@ -1313,7 +1313,7 @@ Claude Desktop ya NO tiene problemas con archivos grandes. El sistema inteligent
 - Reemplazo quirúrgico: 252k tokens → 500 tokens (**99.8% ahorro**)
 
 #### 🎯 **Mejoras**
-- ✅ Herramientas aumentadas: 32 → **35 tools**
+- ✅ Herramientas aumentadas: 32 → **36 tools** (incluye alias `create_file`)
 - ✅ Soporte para archivos grandes sin leer todo el contenido
 - ✅ Precisión quirúrgica en reemplazos (índices negativos: -1=último, -2=penúltimo)
 - ✅ Validación estricta con rollback automático
