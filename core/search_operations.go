@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mcp/filesystem-ultra/mcp"
@@ -179,8 +180,9 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 	}, nil
 }
 
-// performSmartSearch implements intelligent search
+// performSmartSearch implements intelligent search with parallelization
 func (e *UltraFastEngine) performSmartSearch(path, pattern string, includeContent bool, fileTypes []string) (string, error) {
+	var resultsMu sync.Mutex
 	var results []string
 	var contentMatches []SearchMatch
 	maxResults := e.config.MaxSearchResults
@@ -192,6 +194,8 @@ func (e *UltraFastEngine) performSmartSearch(path, pattern string, includeConten
 		regexPattern = regexp.MustCompile(regexp.QuoteMeta(pattern))
 	}
 
+	// First pass: collect all files to search
+	var filesToSearch []string
 	err = filepath.Walk(path, func(currentPath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Continue with other files
@@ -199,6 +203,11 @@ func (e *UltraFastEngine) performSmartSearch(path, pattern string, includeConten
 
 		// Validate path
 		if _, err := e.validatePath(currentPath); err != nil {
+			return nil
+		}
+
+		// Skip directories for content search
+		if info.IsDir() {
 			return nil
 		}
 
@@ -217,38 +226,87 @@ func (e *UltraFastEngine) performSmartSearch(path, pattern string, includeConten
 			}
 		}
 
-		// Search in filename
+		// Check filename match
 		if regexPattern.MatchString(info.Name()) {
+			resultsMu.Lock()
 			if len(results) < maxResults {
 				results = append(results, fmt.Sprintf("📄 %s", currentPath))
 			}
+			resultsMu.Unlock()
 		}
 
-		// Search in content if requested and it's a text file
-		if includeContent && !info.IsDir() && info.Size() < 5*1024*1024 { // 5MB limit
+		// Add to content search list if applicable
+		if includeContent && info.Size() < 10*1024*1024 { // Increased to 10MB limit
 			if e.isTextFile(currentPath) {
-				content, err := os.ReadFile(currentPath)
-				if err == nil {
-					lines := strings.Split(string(content), "\n")
-					for lineNum, line := range lines {
-						if len(contentMatches) >= maxResults {
-							break
-						}
-						if regexPattern.MatchString(line) {
-							match := SearchMatch{
-								File:       currentPath,
-								LineNumber: lineNum + 1,
-								Line:       strings.TrimSpace(line),
-							}
-							contentMatches = append(contentMatches, match)
-						}
-					}
-				}
+				filesToSearch = append(filesToSearch, currentPath)
 			}
 		}
 
 		return nil
 	})
+
+	if err != nil {
+		return "", err
+	}
+
+	// Second pass: parallel content search using worker pool
+	if includeContent && len(filesToSearch) > 0 {
+		var wg sync.WaitGroup
+
+		for _, filePath := range filesToSearch {
+			// Check if we've reached max results
+			resultsMu.Lock()
+			if len(contentMatches) >= maxResults {
+				resultsMu.Unlock()
+				break
+			}
+			resultsMu.Unlock()
+
+			wg.Add(1)
+			currentFile := filePath
+
+			e.workerPool.Submit(func() {
+				defer wg.Done()
+
+				// Read file
+				content, err := os.ReadFile(currentFile)
+				if err != nil {
+					return
+				}
+
+				lines := strings.Split(string(content), "\n")
+				var localMatches []SearchMatch
+
+				for lineNum, line := range lines {
+					if regexPattern.MatchString(line) {
+						match := SearchMatch{
+							File:       currentFile,
+							LineNumber: lineNum + 1,
+							Line:       strings.TrimSpace(line),
+						}
+						localMatches = append(localMatches, match)
+					}
+				}
+
+				// Append local matches to global list
+				if len(localMatches) > 0 {
+					resultsMu.Lock()
+					for _, match := range localMatches {
+						if len(contentMatches) < maxResults {
+							contentMatches = append(contentMatches, match)
+						} else {
+							break
+						}
+					}
+					resultsMu.Unlock()
+				}
+			})
+		}
+
+		wg.Wait()
+	}
+
+	err = nil
 
 	if err != nil {
 		return "", err
@@ -336,8 +394,9 @@ func (e *UltraFastEngine) performSmartSearch(path, pattern string, includeConten
 	return resultBuilder.String(), nil
 }
 
-// performAdvancedTextSearch implements advanced text search
+// performAdvancedTextSearch implements advanced text search with parallelization
 func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSensitive, wholeWord, includeContext bool, contextLines int) ([]SearchMatch, error) {
+	var matchesMu sync.Mutex
 	var matches []SearchMatch
 
 	// Prepare the pattern
@@ -354,6 +413,8 @@ func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSe
 		return nil, fmt.Errorf("invalid regex pattern: %v", err)
 	}
 
+	// First pass: collect all files to search
+	var filesToSearch []string
 	err = filepath.Walk(path, func(currentPath string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
@@ -364,47 +425,75 @@ func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSe
 			return nil
 		}
 
-		// Only search in text files
-		if !e.isTextFile(currentPath) || info.Size() > 5*1024*1024 { // 5MB limit
+		// Only search in text files with increased size limit
+		if !e.isTextFile(currentPath) || info.Size() > 10*1024*1024 { // Increased to 10MB limit
 			return nil
 		}
 
-		content, err := os.ReadFile(currentPath)
-		if err != nil {
-			return nil
-		}
-
-		lines := strings.Split(string(content), "\n")
-		for lineNum, line := range lines {
-			if regexPattern.MatchString(line) {
-				match := SearchMatch{
-					File:       currentPath,
-					LineNumber: lineNum + 1,
-					Line:       strings.TrimSpace(line),
-				}
-
-				// Add context if requested
-				if includeContext {
-					var context []string
-					start := max(0, lineNum-contextLines)
-					end := min(len(lines), lineNum+contextLines+1)
-
-					for i := start; i < end; i++ {
-						if i != lineNum {
-							context = append(context, strings.TrimSpace(lines[i]))
-						}
-					}
-					match.Context = context
-				}
-
-				matches = append(matches, match)
-			}
-		}
-
+		filesToSearch = append(filesToSearch, currentPath)
 		return nil
 	})
 
-	return matches, err
+	if err != nil {
+		return nil, err
+	}
+
+	// Second pass: parallel search using worker pool
+	var wg sync.WaitGroup
+
+	for _, filePath := range filesToSearch {
+		wg.Add(1)
+		currentFile := filePath
+
+		e.workerPool.Submit(func() {
+			defer wg.Done()
+
+			content, err := os.ReadFile(currentFile)
+			if err != nil {
+				return
+			}
+
+			lines := strings.Split(string(content), "\n")
+			var localMatches []SearchMatch
+
+			for lineNum, line := range lines {
+				if regexPattern.MatchString(line) {
+					match := SearchMatch{
+						File:       currentFile,
+						LineNumber: lineNum + 1,
+						Line:       strings.TrimSpace(line),
+					}
+
+					// Add context if requested
+					if includeContext {
+						var context []string
+						start := max(0, lineNum-contextLines)
+						end := min(len(lines), lineNum+contextLines+1)
+
+						for i := start; i < end; i++ {
+							if i != lineNum {
+								context = append(context, strings.TrimSpace(lines[i]))
+							}
+						}
+						match.Context = context
+					}
+
+					localMatches = append(localMatches, match)
+				}
+			}
+
+			// Append local matches to global list
+			if len(localMatches) > 0 {
+				matchesMu.Lock()
+				matches = append(matches, localMatches...)
+				matchesMu.Unlock()
+			}
+		})
+	}
+
+	wg.Wait()
+
+	return matches, nil
 }
 
 // isTextFile determines if a file is likely a text file
