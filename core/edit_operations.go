@@ -38,6 +38,8 @@ type SearchMatch struct {
 // Context Validation: Validates surrounding context (3-5 lines) to prevent
 // editing stale content that may have been modified since the file was read.
 func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, error) {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
 	// Validate file
 	if err := e.validateEditableFile(path); err != nil {
 		return nil, fmt.Errorf("file validation failed: %v", err)
@@ -135,6 +137,8 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, 
 
 // SearchAndReplace performs search and replace operations across files
 func (e *UltraFastEngine) SearchAndReplace(path, pattern, replacement string, caseSensitive bool) (*mcp.CallToolResponse, error) {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
 	// Validate path
 	validPath, err := e.validatePath(path)
 	if err != nil {
@@ -494,6 +498,8 @@ func isTextContent(content string) bool {
 // occurrence: -1 for last, 1 for first, 2 for second, etc.
 // wholeWord: if true, only match whole words
 func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, pattern, replacement string, occurrence int, wholeWord bool) (*EditResult, error) {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
 	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "replace_nth"); err != nil {
 		return nil, err

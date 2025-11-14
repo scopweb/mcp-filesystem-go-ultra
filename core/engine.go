@@ -220,6 +220,9 @@ func (e *UltraFastEngine) releaseOperation(opType string, start time.Time) {
 
 // ReadFileContent implements ultra-fast file reading with intelligent caching
 func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (string, error) {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
+
 	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "read"); err != nil {
 		return "", err
@@ -257,6 +260,9 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 
 // WriteFileContent implements atomic file writing
 func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content string) error {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
+
 	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "write"); err != nil {
 		return err
@@ -328,6 +334,9 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 
 // ListDirectoryContent implements intelligent directory listing with caching
 func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string) (string, error) {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
+
 	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "list"); err != nil {
 		return "", err
@@ -504,6 +513,58 @@ func (e *UltraFastEngine) isPathAllowed(path string) bool {
 		log.Printf("🚫 Access denied to path: %s (not in allowed paths: %v)", path, e.config.AllowedPaths)
 	}
 	return false
+}
+
+// NormalizePath converts between WSL and Windows paths automatically
+// This handles the common issue where Claude Code on Windows sends WSL-style paths
+// Examples:
+//   - /mnt/c/Users/... → C:\Users\... (when running on Windows)
+//   - C:\Users\... → /mnt/c/Users/... (when running on WSL/Linux)
+//   - /mnt/d/Projects/... → D:\Projects\...
+func NormalizePath(path string) string {
+	if path == "" {
+		return path
+	}
+
+	// Detect WSL path format: /mnt/<drive>/<rest of path>
+	if strings.HasPrefix(path, "/mnt/") && len(path) > 6 {
+		// Extract drive letter (e.g., /mnt/c/ -> c)
+		parts := strings.SplitN(path[5:], "/", 2)
+		if len(parts) >= 1 && len(parts[0]) == 1 {
+			driveLetter := strings.ToUpper(parts[0])
+
+			// If running on Windows, convert to Windows path
+			if os.PathSeparator == '\\' {
+				remainder := ""
+				if len(parts) > 1 {
+					remainder = parts[1]
+					// Convert forward slashes to backslashes
+					remainder = filepath.FromSlash(remainder)
+				}
+				return driveLetter + ":\\" + remainder
+			}
+			// If running on Linux/WSL, keep as is
+			return filepath.Clean(path)
+		}
+	}
+
+	// Detect Windows absolute path format: C:\... or C:/...
+	if len(path) >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/') {
+		driveLetter := strings.ToLower(string(path[0]))
+
+		// If running on Linux/WSL, convert to WSL path
+		if os.PathSeparator == '/' {
+			remainder := path[3:]
+			// Convert backslashes to forward slashes
+			remainder = filepath.ToSlash(remainder)
+			return "/mnt/" + driveLetter + "/" + remainder
+		}
+		// If running on Windows, normalize separators
+		return filepath.Clean(path)
+	}
+
+	// For relative paths or already-normalized paths, just clean
+	return filepath.Clean(path)
 }
 
 // formatSize formats bytes to human readable format

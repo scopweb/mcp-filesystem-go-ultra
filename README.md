@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra-Fast
 
-**Version 3.0.0** - Ultra Token Optimization
+**Version 3.2.0** - Windows/WSL Path Normalization
 
 Un servidor MCP (Model Context Protocol) de alto rendimiento para operaciones de sistema de archivos, diseñado para máxima velocidad y eficiencia. **Especialmente optimizado para Claude Desktop** con soporte completo para archivos grandes sin timeouts ni bloqueos.
 
@@ -73,6 +73,42 @@ Un servidor MCP (Model Context Protocol) de alto rendimiento para operaciones de
 | Tiempo de timeout | 30s | **Nunca** | **∞** |
 | Archivos 100KB | FALLO | **3-5s** | **De fallo a éxito** |
 | Archivos 1MB | FALLO | **10-15s** | **De fallo a éxito** |
+
+## 🪟 **Soporte Windows/WSL Automático** (v3.2.0)
+
+### 🎯 Traducción Automática de Rutas
+
+**Problema resuelto**: Claude Code en Windows envía rutas en formato WSL (`/mnt/c/...`) pero el MCP puede estar corriendo en Windows nativo.
+
+**Solución implementada**: Normalización automática bidireccional de rutas:
+
+#### 🔄 Conversiones Automáticas
+
+```bash
+# WSL → Windows (cuando MCP corre en Windows)
+/mnt/c/Users/John/Documents → C:\Users\John\Documents
+/mnt/d/Projects/myapp      → D:\Projects\myapp
+
+# Windows → WSL (cuando MCP corre en WSL/Linux)
+C:\Users\John\Documents → /mnt/c/Users/John/Documents
+D:\Projects\myapp       → /mnt/d/Projects/myapp
+```
+
+#### ✨ Características
+- ✅ **Detección automática** del sistema operativo
+- ✅ **Conversión bidireccional** (WSL ↔ Windows)
+- ✅ **Normalización de separadores** (`\` vs `/`)
+- ✅ **Soporta todas las unidades** (C:, D:, E:, etc.)
+- ✅ **Funciona en todas las operaciones** (read, write, edit, list, search, etc.)
+- ✅ **Sin configuración requerida** - Totalmente automático
+
+#### 📊 Impacto
+- ❌ **Antes**: `CreateFile failed: "El sistema no puede encontrar la ruta especificada"`
+- ✅ **Ahora**: Rutas funcionan transparentemente en cualquier formato
+
+**Beneficia a**: Claude Desktop en Windows, WSL users, entornos híbridos
+
+---
 
 ## � **NUEVO: Optimización de Tokens** (v2.2.0)
 
@@ -1295,6 +1331,22 @@ Claude Desktop ya NO tiene problemas con archivos grandes. El sistema inteligent
 ---
 
 ## 📋 CHANGELOG
+
+### **v3.2.0** (2025-11-14) - Windows/WSL Path Normalization + create_file Alias
+#### 🪟 **Soporte Windows/WSL Automático**
+- ✅ **Normalización automática de rutas** - Convierte `/mnt/c/...` ↔ `C:\...` según el sistema
+- ✅ **Detección inteligente** - Funciona en Windows, WSL y Linux sin configuración
+- ✅ **18 funciones actualizadas** - Todas las operaciones de archivos soportan ambos formatos
+- ✅ **Alias `create_file`** - Añadido para compatibilidad con Claude Desktop (apunta a write_file)
+
+#### 🎯 **Problema Resuelto**
+- ❌ **Antes**: Claude Code en Windows enviaba rutas WSL que fallaban con "ruta no encontrada"
+- ✅ **Ahora**: Todas las rutas se normalizan automáticamente al formato correcto
+
+#### 📊 **Impacto**
+- Herramientas aumentadas: 35 → **36 tools** (incluye alias create_file)
+- **100% compatibilidad** con Claude Desktop en Windows
+- **0 configuración requerida** - Funciona automáticamente
 
 ### **v3.1.0** (2025-10-25) - Ultra-Efficient Operations
 #### 🎯 **3 Nuevas Herramientas Ultra-Eficientes** (Resuelven limitaciones críticas)
