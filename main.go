@@ -272,6 +272,33 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		return mcp.NewToolResultText(fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), path)), nil
 	})
 
+	// Create file tool (alias for write_file for compatibility with Claude Desktop)
+	createFileTool := mcp.NewTool("create_file",
+		mcp.WithDescription("Create/write file (atomic) - alias for write_file"),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path where to create/write the file")),
+		mcp.WithString("content", mcp.Required(), mcp.Description("Content to write to the file")),
+	)
+	s.AddTool(createFileTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+
+		content, err := request.RequireString("content")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid content: %v", err)), nil
+		}
+
+		err = engine.WriteFileContent(ctx, path, content)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+		if engine.IsCompactMode() {
+			return mcp.NewToolResultText(fmt.Sprintf("OK: %s written", formatSize(int64(len(content))))), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Successfully created %d bytes in %s", len(content), path)), nil
+	})
+
 	// List directory tool
 	listTool := mcp.NewTool("list_directory",
 		mcp.WithDescription("List directory (cached)"),
