@@ -1,4 +1,4 @@
-📋 Plan: WSL ↔ Windows Auto-Copy
+✅ COMPLETED: WSL ↔ Windows Auto-Copy (v3.4.0)
 Objetivo
 Automatizar transferencia de archivos entre WSL y Windows para Claude Desktop.
 
