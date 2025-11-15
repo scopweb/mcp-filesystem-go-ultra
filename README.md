@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra-Fast
 
-**Version 3.3.0** - WSL ↔ Windows Auto-Copy & Sync Tools
+**Version 3.4.0** - Automatic WSL ↔ Windows Sync (Silent Auto-Copy)
 
 Un servidor MCP (Model Context Protocol) de alto rendimiento para operaciones de sistema de archivos, diseñado para máxima velocidad y eficiencia. **Especialmente optimizado para Claude Desktop** con soporte completo para archivos grandes sin timeouts ni bloqueos.
 
@@ -601,7 +601,7 @@ Salida: lista de archivos y número de línea. En futuras versiones se expondrá
 - ✅ **Recuperación fácil** - Los archivos quedan disponibles para restauración manual
 - ✅ **Control de acceso** - Respeta las rutas permitidas
 
-### Implementadas ✅ (Resumen de las 31 actuales)
+### Implementadas ✅ (Resumen de las 45 actuales)
 
 #### Core Operations (21):
 - `read_file`
@@ -1106,6 +1106,10 @@ DESPUÉS:
 - `sync_claude_workspace` - Sincroniza espacios de trabajo completos entre WSL y Windows
 - `wsl_windows_status` - Muestra estado de integración WSL/Windows y ubicaciones de archivos
 
+#### 🔄 **AUTO-SYNC** (Sincronización automática WSL ↔ Windows - NUEVO v3.4.0):
+- `configure_autosync` - Activar/desactivar sincronización automática con opciones configurables
+- `autosync_status` - Ver estado actual de la configuración auto-sync
+
 ### 🎯 **Regla de Oro para Claude Desktop**
 
 ```
@@ -1303,12 +1307,12 @@ Se agregará exposición de parámetros avanzados (`case_sensitive`, `include_co
 
 ---
 
-**Versión**: 2.5.0 - Claude Desktop Ultra-Rápido + Plan Mode
-**Fecha de compilación**: 2025-10-24
-**Tamaño del ejecutable**: ~5.4 MB
-**Estado**: ✅ **OPTIMIZADO PARA CLAUDE DESKTOP** - Sin timeouts, sin bloqueos
-**Herramientas**: 31 total (6 inteligentes + 4 streaming + 18 core + 3 plan mode)
-**Nuevo**: ✅ **PLAN MODE / DRY-RUN** (análisis de cambios, evaluación de riesgos, vista previa antes de aplicar)
+**Versión**: 3.4.0 - Automatic WSL ↔ Windows Sync
+**Fecha de compilación**: 2025-11-15
+**Tamaño del ejecutable**: ~5.5 MB
+**Estado**: ✅ **OPTIMIZADO PARA CLAUDE DESKTOP** - Sin timeouts, sin bloqueos, auto-sync integrado
+**Herramientas**: 45 total (6 inteligentes + 4 streaming + 21 core + 3 plan mode + 2 auto-sync + 4 WSL tools)
+**Nuevo**: ✅ **AUTO-SYNC WSL ↔ WINDOWS** (sincronización automática y silenciosa de archivos)
 
 ---
 
@@ -1337,6 +1341,71 @@ Claude Desktop ya NO tiene problemas con archivos grandes. El sistema inteligent
 ---
 
 ## 📋 CHANGELOG
+
+### **v3.4.0** (2025-11-15) - Automatic WSL ↔ Windows Sync (Silent Auto-Copy)
+#### 🔄 **Sistema de Sincronización Automática en Tiempo Real**
+- ✅ **`configure_autosync`** - Activar/desactivar sincronización automática con opciones configurables
+- ✅ **`autosync_status`** - Ver estado actual de la configuración auto-sync
+
+#### 🎯 **Problema Resuelto**
+- ❌ **Antes**: Archivos creados en WSL no aparecen automáticamente en Windows Explorer
+- ✅ **Ahora**: Sincronización automática y silenciosa después de cada write/edit
+
+#### 🚀 **Nuevas Características**
+- ✅ **Auto-Sync Configuration System** (`core/autosync_config.go`) - Sistema completo de sincronización
+- ✅ **Hooks integrados** en WriteFileContent, StreamingWriteFile, EditFile, ReplaceNthOccurrence
+- ✅ **Configuración flexible** - Almacenada en `~/.config/mcp-filesystem-ultra/autosync.json`
+- ✅ **Variable de entorno** - `MCP_WSL_AUTOSYNC=true` para activar en una línea
+- ✅ **Operaciones async** - Nunca bloquean la operación principal
+- ✅ **Fallo silencioso** - Sync errors nunca rompen las operaciones de archivo
+
+#### 📊 **Configuración**
+```json
+{
+  "wsl_auto_sync": {
+    "enabled": true,
+    "sync_on_write": true,
+    "sync_on_edit": true,
+    "sync_on_delete": false,
+    "silent": false,
+    "exclude_patterns": [],
+    "only_subdirs": []
+  }
+}
+```
+
+#### 💡 **Casos de Uso**
+```bash
+# Setup (una sola vez)
+configure_autosync --enabled true
+# O con variable de entorno
+export MCP_WSL_AUTOSYNC=true
+
+# Ahora todo lo que escribas en WSL aparece automáticamente en Windows
+write_file("/home/user/project/test.go", "...")
+# → Automáticamente copiado a C:\Users\user\project\test.go
+```
+
+#### 🎯 **Mejoras**
+- ✅ Herramientas aumentadas: 43 → **45 tools** (2 nuevas herramientas auto-sync)
+- ✅ **3 archivos modificados**: core/engine.go (+46 líneas), core/streaming_operations.go (+5), core/edit_operations.go (+10)
+- ✅ **1 archivo nuevo**: core/autosync_config.go (343 líneas - sistema completo)
+- ✅ **Soporte universal** - Funciona con todas las operaciones de write/edit
+- ✅ **Sin impacto en rendimiento** - Operaciones async que no bloquean
+- ✅ **Totalmente backwards-compatible** - Deshabilitado por defecto
+
+#### 🔄 **Integración Automática**
+- WriteFileContent() - Auto-sync después de escribir
+- StreamingWriteFile() - Auto-sync después de streaming
+- EditFile() - Auto-sync después de editar
+- ReplaceNthOccurrence() - Auto-sync después de reemplazar
+
+#### 📈 **Beneficios**
+- ✅ **Cero intervención manual** - Funciona automáticamente después del setup inicial
+- ✅ **Instantáneo** - Archivos visibles en Windows Explorer inmediatamente
+- ✅ **Sin overhead** - Operaciones async que no ralentizan el servidor
+- ✅ **Seguro** - Nunca falla la operación original si sync falla
+- ✅ **Flexible** - Configurable por archivo, directorio o patrón
 
 ### **v3.3.0** (2025-11-14) - WSL ↔ Windows Auto-Copy & Sync Tools
 #### 🪟 **4 Nuevas Herramientas de Integración WSL/Windows**
