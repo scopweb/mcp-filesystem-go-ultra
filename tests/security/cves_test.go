@@ -2,21 +2,20 @@ package main
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 	"testing"
 )
 
 // CVERecord represents a known CVE vulnerability
 type CVERecord struct {
-	CVEId          string
-	PackageName    string
-	AffectedRange  string
-	Severity       string
-	Description    string
-	FixedVersion   string
-	PublishedDate  string
-	CWEId          string // Common Weakness Enumeration
+	CVEId         string
+	PackageName   string
+	AffectedRange string
+	Severity      string
+	Description   string
+	FixedVersion  string
+	PublishedDate string
+	CWEId         string // Common Weakness Enumeration
 }
 
 // TestKnownCVEs checks for known vulnerabilities in dependencies
@@ -56,14 +55,14 @@ func TestGolangSecurityDatabase(t *testing.T) {
 // TestCommonWeaknessPatterns checks for common security weaknesses
 func TestCommonWeaknessPatterns(t *testing.T) {
 	commonWeaknesses := map[string]string{
-		"CWE-79":   "Improper Neutralization of Input During Web Page Generation (XSS)",
-		"CWE-89":   "Improper Neutralization of Special Elements used in an SQL Command (SQL Injection)",
-		"CWE-352":  "Cross-Site Request Forgery (CSRF)",
-		"CWE-434":  "Unrestricted Upload of File with Dangerous Type",
-		"CWE-476":  "NULL Pointer Dereference",
-		"CWE-94":   "Improper Control of Generation of Code (Code Injection)",
-		"CWE-190":  "Integer Overflow or Wraparound",
-		"CWE-119":  "Improper Restriction of Operations within the Bounds of a Memory Buffer",
+		"CWE-79":  "Improper Neutralization of Input During Web Page Generation (XSS)",
+		"CWE-89":  "Improper Neutralization of Special Elements used in an SQL Command (SQL Injection)",
+		"CWE-352": "Cross-Site Request Forgery (CSRF)",
+		"CWE-434": "Unrestricted Upload of File with Dangerous Type",
+		"CWE-476": "NULL Pointer Dereference",
+		"CWE-94":  "Improper Control of Generation of Code (Code Injection)",
+		"CWE-190": "Integer Overflow or Wraparound",
+		"CWE-119": "Improper Restriction of Operations within the Bounds of a Memory Buffer",
 	}
 
 	t.Logf("Reviewing %d common weakness patterns:\n", len(commonWeaknesses))
@@ -262,10 +261,10 @@ func TestMemorySafetyVulnerabilities(t *testing.T) {
 // TestCryptographyVulnerabilities checks for crypto weaknesses
 func TestCryptographyVulnerabilities(t *testing.T) {
 	weakCryptoPatterns := map[string]string{
-		"md5":        "❌ BROKEN - Do not use",
-		"sha1":       "❌ BROKEN - Do not use",
-		"des":        "❌ BROKEN - Do not use",
-		"rc4":        "❌ BROKEN - Do not use",
+		"md5":       "❌ BROKEN - Do not use",
+		"sha1":      "❌ BROKEN - Do not use",
+		"des":       "❌ BROKEN - Do not use",
+		"rc4":       "❌ BROKEN - Do not use",
 		"rand.Intn": "⚠️  Weak randomness - use crypto/rand",
 	}
 
@@ -398,21 +397,21 @@ func TestFuzzingRecommendations(t *testing.T) {
 // TestSecurityAuditLog documents findings
 func TestSecurityAuditLog(t *testing.T) {
 	auditLog := map[string]string{
-		"Timestamp":              "2024-11-01T12:00:00Z",
-		"Audit Type":             "Security Assessment",
-		"Project":                "MCP Filesystem Ultra",
-		"Version":                "v3.1.0",
-		"Scope":                  "Go dependencies + code patterns",
-		"Critical Issues":        "0",
-		"High Issues":            "0",
-		"Medium Issues":          "0",
-		"Low Issues":             "0",
-		"Info Items":             "Multiple (see details above)",
-		"Remediation Status":     "ACTIVE",
-		"Next Review Date":       "2024-12-01",
+		"Timestamp":          "2024-11-01T12:00:00Z",
+		"Audit Type":         "Security Assessment",
+		"Project":            "MCP Filesystem Ultra",
+		"Version":            "v3.1.0",
+		"Scope":              "Go dependencies + code patterns",
+		"Critical Issues":    "0",
+		"High Issues":        "0",
+		"Medium Issues":      "0",
+		"Low Issues":         "0",
+		"Info Items":         "Multiple (see details above)",
+		"Remediation Status": "ACTIVE",
+		"Next Review Date":   "2024-12-01",
 	}
 
-	fmt.Println("\n═══════════════════════════════════════════════════")
+	fmt.Println("═══════════════════════════════════════════════════")
 	fmt.Println("           SECURITY AUDIT LOG")
 	fmt.Println("═══════════════════════════════════════════════════")
 
@@ -420,7 +419,7 @@ func TestSecurityAuditLog(t *testing.T) {
 		fmt.Printf("%-25s: %s\n", key, value)
 	}
 
-	fmt.Println("═══════════════════════════════════════════════════\n")
+	fmt.Println("═══════════════════════════════════════════════════")
 
 	t.Log("✅ Security audit log generated")
 }
