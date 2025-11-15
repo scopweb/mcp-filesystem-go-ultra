@@ -1372,7 +1372,117 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		return mcp.NewToolResultText(output.String()), nil
 	})
 
-	log.Printf("📚 Registered 41 ultra-fast tools (includes 4 WSL/Windows tools)")
+	// 5. configure_autosync - Configure automatic WSL<->Windows sync
+	configureAutoSyncTool := mcp.NewTool("configure_autosync",
+		mcp.WithDescription("Enable/disable automatic file syncing between WSL and Windows. When enabled, files written in WSL are automatically copied to Windows."),
+		mcp.WithBoolean("enabled", mcp.Required(), mcp.Description("Enable (true) or disable (false) auto-sync")),
+		mcp.WithBoolean("sync_on_write", mcp.Description("Auto-sync on write operations (default: true)")),
+		mcp.WithBoolean("sync_on_edit", mcp.Description("Auto-sync on edit operations (default: true)")),
+		mcp.WithBoolean("silent", mcp.Description("Silent mode - don't log sync operations (default: false)")),
+	)
+	s.AddTool(configureAutoSyncTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		enabled, err := request.RequireBool("enabled")
+		if err != nil {
+			return mcp.NewToolResultError("enabled parameter is required"), nil
+		}
+
+		// Get current config
+		config := engine.GetAutoSyncConfig()
+
+		// Update with provided parameters
+		config.Enabled = enabled
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if syncOnWrite, ok := args["sync_on_write"].(bool); ok {
+				config.SyncOnWrite = syncOnWrite
+			}
+			if syncOnEdit, ok := args["sync_on_edit"].(bool); ok {
+				config.SyncOnEdit = syncOnEdit
+			}
+			if silent, ok := args["silent"].(bool); ok {
+				config.Silent = silent
+			}
+		}
+
+		// Apply configuration
+		if err := engine.SetAutoSyncConfig(config); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to configure auto-sync: %v", err)), nil
+		}
+
+		// Check if we're in WSL
+		isWSL, _ := core.DetectEnvironment()
+		if !isWSL && enabled {
+			return mcp.NewToolResultText("⚠️  Auto-sync enabled, but not running in WSL. Auto-sync only works in WSL environment."), nil
+		}
+
+		if enabled {
+			if engine.IsCompactMode() {
+				return mcp.NewToolResultText("Auto-sync enabled"), nil
+			}
+			return mcp.NewToolResultText("✅ Auto-sync enabled!\n\nFiles written/edited in WSL will be automatically copied to Windows.\nYou can disable it anytime with: configure_autosync --enabled false"), nil
+		} else {
+			if engine.IsCompactMode() {
+				return mcp.NewToolResultText("Auto-sync disabled"), nil
+			}
+			return mcp.NewToolResultText("🔕 Auto-sync disabled. Files will not be automatically synced."), nil
+		}
+	})
+
+	// 6. autosync_status - Show auto-sync status
+	autoSyncStatusTool := mcp.NewTool("autosync_status",
+		mcp.WithDescription("Show the current auto-sync configuration and status"),
+	)
+	s.AddTool(autoSyncStatusTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		status := engine.GetAutoSyncStatus()
+
+		if engine.IsCompactMode() {
+			enabled := status["enabled"].(bool)
+			isWSL := status["is_wsl"].(bool)
+			return mcp.NewToolResultText(fmt.Sprintf("Enabled: %v, WSL: %v", enabled, isWSL)), nil
+		}
+
+		// Verbose output
+		var output strings.Builder
+		output.WriteString("🔄 Auto-Sync Status\n")
+		output.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+
+		enabled := status["enabled"].(bool)
+		isWSL := status["is_wsl"].(bool)
+
+		if enabled {
+			output.WriteString("Status: ✅ ENABLED\n")
+		} else {
+			output.WriteString("Status: 🔕 DISABLED\n")
+		}
+
+		output.WriteString(fmt.Sprintf("Environment: %s\n", map[bool]string{true: "WSL", false: "Native"}[isWSL]))
+
+		if winUser, ok := status["windows_user"].(string); ok && winUser != "" {
+			output.WriteString(fmt.Sprintf("Windows User: %s\n", winUser))
+		}
+
+		output.WriteString("\n⚙️  Configuration:\n")
+		output.WriteString(fmt.Sprintf("  Sync on Write: %v\n", status["sync_on_write"]))
+		output.WriteString(fmt.Sprintf("  Sync on Edit: %v\n", status["sync_on_edit"]))
+		output.WriteString(fmt.Sprintf("  Sync on Delete: %v\n", status["sync_on_delete"]))
+
+		if configPath, ok := status["config_path"].(string); ok && configPath != "" {
+			output.WriteString(fmt.Sprintf("\n📄 Config File: %s\n", configPath))
+		}
+
+		if !enabled && isWSL {
+			output.WriteString("\n💡 To enable auto-sync, run:\n")
+			output.WriteString("   configure_autosync --enabled true\n")
+		}
+
+		if enabled && !isWSL {
+			output.WriteString("\n⚠️  Auto-sync is enabled but you're not in WSL.\n")
+			output.WriteString("   Auto-sync only works when running in WSL environment.\n")
+		}
+
+		return mcp.NewToolResultText(output.String()), nil
+	})
+
+	log.Printf("📚 Registered 43 ultra-fast tools (includes 6 WSL/Windows tools)")
 
 	return nil
 }

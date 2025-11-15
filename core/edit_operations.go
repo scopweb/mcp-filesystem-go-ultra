@@ -132,6 +132,11 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, 
 	hookCtx.NewContent = finalContent
 	_, _ = e.hookManager.ExecuteHooks(context.Background(), HookPostEdit, hookCtx)
 
+	// Auto-sync to Windows if enabled (async, non-blocking)
+	if e.autoSyncManager != nil {
+		_ = e.autoSyncManager.AfterEdit(path)
+	}
+
 	return result, nil
 }
 
@@ -679,6 +684,11 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 	}
 
 	_, _ = e.hookManager.ExecuteHooks(context.Background(), HookPostEdit, hookCtx)
+
+	// Auto-sync to Windows if enabled (async, non-blocking)
+	if e.autoSyncManager != nil {
+		_ = e.autoSyncManager.AfterEdit(validPath)
+	}
 
 	return &EditResult{
 		ModifiedContent:  newContent,

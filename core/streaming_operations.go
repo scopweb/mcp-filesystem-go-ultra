@@ -142,6 +142,11 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 		log.Printf("✅ Streaming write completed: %s (%v)", path, elapsed)
 	}
 
+	// Auto-sync to Windows if enabled (async, non-blocking)
+	if e.autoSyncManager != nil {
+		_ = e.autoSyncManager.AfterWrite(path)
+	}
+
 	return nil
 }
 
