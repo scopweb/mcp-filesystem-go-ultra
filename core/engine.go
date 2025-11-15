@@ -51,6 +51,9 @@ type UltraFastEngine struct {
 
 	// Hook manager
 	hookManager *HookManager
+
+	// Auto-sync manager for WSL<->Windows
+	autoSyncManager *AutoSyncManager
 }
 
 // PerformanceMetrics tracks real-time performance statistics
@@ -131,6 +134,17 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 			engine.hookManager.SetEnabled(true)
 			engine.hookManager.SetDebugMode(config.DebugMode)
 			log.Printf("🪝 Hook system initialized")
+		}
+	}
+
+	// Initialize auto-sync manager
+	engine.autoSyncManager = NewAutoSyncManager()
+	if engine.autoSyncManager.IsEnabled() {
+		log.Printf("🔄 WSL auto-sync enabled")
+	} else {
+		isWSL, _ := DetectEnvironment()
+		if isWSL {
+			log.Printf("💡 WSL detected. Auto-sync is disabled. Enable with: configure_autosync or set MCP_WSL_AUTOSYNC=true")
 		}
 	}
 
@@ -328,6 +342,11 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 	hookCtx.Event = HookPostWrite
 	hookCtx.Content = finalContent
 	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostWrite, hookCtx)
+
+	// Auto-sync to Windows if enabled (async, non-blocking)
+	if e.autoSyncManager != nil {
+		_ = e.autoSyncManager.AfterWrite(path)
+	}
 
 	return nil
 }
@@ -733,4 +752,31 @@ func (e *UltraFastEngine) GetEditTelemetrySummary() map[string]interface{} {
 			"next_step":        "Monitor these metrics to optimize Claude's tool usage",
 		},
 	}
+}
+
+// GetAutoSyncConfig returns the current auto-sync configuration
+func (e *UltraFastEngine) GetAutoSyncConfig() AutoSyncConfig {
+	if e.autoSyncManager == nil {
+		return *DefaultAutoSyncConfig()
+	}
+	return e.autoSyncManager.GetConfig()
+}
+
+// SetAutoSyncConfig updates the auto-sync configuration
+func (e *UltraFastEngine) SetAutoSyncConfig(config AutoSyncConfig) error {
+	if e.autoSyncManager == nil {
+		return fmt.Errorf("auto-sync manager not initialized")
+	}
+	return e.autoSyncManager.UpdateConfig(&config)
+}
+
+// GetAutoSyncStatus returns the current auto-sync status
+func (e *UltraFastEngine) GetAutoSyncStatus() map[string]interface{} {
+	if e.autoSyncManager == nil {
+		return map[string]interface{}{
+			"enabled": false,
+			"error":   "auto-sync manager not initialized",
+		}
+	}
+	return e.autoSyncManager.GetStatus()
 }
