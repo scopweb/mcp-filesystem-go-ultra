@@ -1,0 +1,5 @@
+No es un bug en si de del proyecto, pero si una utilidad a añadir.
+
+Me explico, cuanod Claude Desktop en windows interactua con su editor de archivos en subsitema linux (wsl), luego no es capaz de pasar los archivos a su lugar correspondiente, asi que tengo que ir a la ruta del linux normalmente /home/user/claude/ y copiar y pegar los archivos que ha creado.
+
+Se podri hacer algo para que este repositorio pueda copiar y añadirlos a al ruta windows.
