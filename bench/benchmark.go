@@ -10,22 +10,19 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/mcp/filesystem-ultra/mcp"
-
 	"github.com/mcp/filesystem-ultra/cache"
 	"github.com/mcp/filesystem-ultra/core"
-	"github.com/mcp/filesystem-ultra/protocol"
 )
 
 // BenchmarkResults holds benchmark test results
 type BenchmarkResults struct {
-	TestName        string
-	Operations      int
-	TotalTime       time.Duration
-	AverageTime     time.Duration
+	TestName         string
+	Operations       int
+	TotalTime        time.Duration
+	AverageTime      time.Duration
 	OperationsPerSec float64
-	CacheHitRate    float64
-	MemoryUsage     int64
+	CacheHitRate     float64
+	MemoryUsage      int64
 }
 
 // BenchmarkSuite runs comprehensive performance tests
@@ -33,6 +30,7 @@ type BenchmarkSuite struct {
 	engine    *core.UltraFastEngine
 	testDir   string
 	testFiles []string
+	cache     *cache.IntelligentCache
 }
 
 func main() {
@@ -68,11 +66,8 @@ func NewBenchmarkSuite() (*BenchmarkSuite, error) {
 		return nil, fmt.Errorf("failed to create cache: %v", err)
 	}
 
-	protocolHandler := protocol.NewOptimizedHandler(1024 * 1024) // 1MB threshold
-
 	engine, err := core.NewUltraFastEngine(&core.Config{
 		Cache:            cacheSystem,
-		ProtocolHandler:  protocolHandler,
 		ParallelOps:      runtime.NumCPU() * 2,
 		VSCodeAPIEnabled: false,
 		DebugMode:        false,
@@ -84,6 +79,7 @@ func NewBenchmarkSuite() (*BenchmarkSuite, error) {
 	suite := &BenchmarkSuite{
 		engine:  engine,
 		testDir: testDir,
+		cache:   cacheSystem,
 	}
 
 	// Generate test files
@@ -116,7 +112,7 @@ func main() {
 
 	for _, tc := range testCases {
 		path := filepath.Join(s.testDir, tc.name)
-		
+
 		// Generate content of specified size
 		content := tc.content
 		for len(content) < tc.size {
@@ -167,7 +163,7 @@ func (s *BenchmarkSuite) RunAllBenchmarks() []BenchmarkResults {
 // benchmarkFileReading tests file reading performance
 func (s *BenchmarkSuite) benchmarkFileReading() BenchmarkResults {
 	fmt.Printf("📖 Benchmarking file reading...\n")
-	
+
 	ctx := context.Background()
 	operations := 0
 	start := time.Now()
@@ -175,13 +171,7 @@ func (s *BenchmarkSuite) benchmarkFileReading() BenchmarkResults {
 	// Read each test file multiple times
 	for i := 0; i < 10; i++ {
 		for _, filePath := range s.testFiles {
-			request := mcp.CallToolRequest{
-				Arguments: map[string]interface{}{
-					"path": filePath,
-				},
-			}
-			
-			_, err := s.engine.ReadFile(ctx, request)
+			_, err := s.engine.ReadFileContent(ctx, filePath)
 			if err != nil {
 				log.Printf("Read error: %v", err)
 				continue
@@ -191,32 +181,27 @@ func (s *BenchmarkSuite) benchmarkFileReading() BenchmarkResults {
 	}
 
 	duration := time.Since(start)
-	
+
 	return BenchmarkResults{
-		TestName:        "File Reading",
-		Operations:      operations,
-		TotalTime:       duration,
-		AverageTime:     duration / time.Duration(operations),
+		TestName:         "File Reading",
+		Operations:       operations,
+		TotalTime:        duration,
+		AverageTime:      duration / time.Duration(operations),
 		OperationsPerSec: float64(operations) / duration.Seconds(),
-		CacheHitRate:    s.engine.Cache.GetHitRate(),
-		MemoryUsage:     s.engine.Cache.GetMemoryUsage(),
+		CacheHitRate:     s.cache.GetHitRate(),
+		MemoryUsage:      s.cache.GetMemoryUsage(),
 	}
 }
 
 // benchmarkCachedReading tests cache performance
 func (s *BenchmarkSuite) benchmarkCachedReading() BenchmarkResults {
 	fmt.Printf("📦 Benchmarking cached reading...\n")
-	
+
 	ctx := context.Background()
-	
+
 	// Prime the cache
 	for _, filePath := range s.testFiles {
-		request := mcp.CallToolRequest{
-			Arguments: map[string]interface{}{
-				"path": filePath,
-			},
-		}
-		s.engine.ReadFile(ctx, request)
+		_, _ = s.engine.ReadFileContent(ctx, filePath)
 	}
 
 	// Now benchmark cached reads
@@ -225,13 +210,9 @@ func (s *BenchmarkSuite) benchmarkCachedReading() BenchmarkResults {
 
 	for i := 0; i < 100; i++ {
 		for _, filePath := range s.testFiles {
-			request := mcp.CallToolRequest{
-				Arguments: map[string]interface{}{
-					"path": filePath,
-				},
-			}
-			
-			_, err := s.engine.ReadFile(ctx, request)
+			// Use engine API directly in benchmark
+
+			_, err := s.engine.ReadFileContent(ctx, filePath)
 			if err != nil {
 				log.Printf("Cached read error: %v", err)
 				continue
@@ -241,35 +222,30 @@ func (s *BenchmarkSuite) benchmarkCachedReading() BenchmarkResults {
 	}
 
 	duration := time.Since(start)
-	
+
 	return BenchmarkResults{
-		TestName:        "Cached Reading",
-		Operations:      operations,
-		TotalTime:       duration,
-		AverageTime:     duration / time.Duration(operations),
+		TestName:         "Cached Reading",
+		Operations:       operations,
+		TotalTime:        duration,
+		AverageTime:      duration / time.Duration(operations),
 		OperationsPerSec: float64(operations) / duration.Seconds(),
-		CacheHitRate:    s.engine.Cache.GetHitRate(),
-		MemoryUsage:     s.engine.Cache.GetMemoryUsage(),
+		CacheHitRate:     s.cache.GetHitRate(),
+		MemoryUsage:      s.cache.GetMemoryUsage(),
 	}
 }
 
 // benchmarkDirectoryListing tests directory listing performance
 func (s *BenchmarkSuite) benchmarkDirectoryListing() BenchmarkResults {
 	fmt.Printf("📁 Benchmarking directory listing...\n")
-	
+
 	ctx := context.Background()
 	operations := 0
 	start := time.Now()
 
 	// List directories multiple times
 	for i := 0; i < 50; i++ {
-		request := mcp.CallToolRequest{
-			Arguments: map[string]interface{}{
-				"path": s.testDir,
-			},
-		}
-		
-		_, err := s.engine.ListDirectory(ctx, request)
+		// Top-level directory listing
+		_, err := s.engine.ListDirectoryContent(ctx, s.testDir)
 		if err != nil {
 			log.Printf("Directory listing error: %v", err)
 			continue
@@ -277,35 +253,30 @@ func (s *BenchmarkSuite) benchmarkDirectoryListing() BenchmarkResults {
 		operations++
 
 		// Also list subdirectory
-		subDirRequest := mcp.CallToolRequest{
-			Arguments: map[string]interface{}{
-				"path": filepath.Join(s.testDir, "subdir"),
-			},
-		}
-		
-		_, err = s.engine.ListDirectory(ctx, subDirRequest)
+		// Subdirectory listing
+		_, err = s.engine.ListDirectoryContent(ctx, filepath.Join(s.testDir, "subdir"))
 		if err == nil {
 			operations++
 		}
 	}
 
 	duration := time.Since(start)
-	
+
 	return BenchmarkResults{
-		TestName:        "Directory Listing",
-		Operations:      operations,
-		TotalTime:       duration,
-		AverageTime:     duration / time.Duration(operations),
+		TestName:         "Directory Listing",
+		Operations:       operations,
+		TotalTime:        duration,
+		AverageTime:      duration / time.Duration(operations),
 		OperationsPerSec: float64(operations) / duration.Seconds(),
-		CacheHitRate:    s.engine.Cache.GetHitRate(),
-		MemoryUsage:     s.engine.Cache.GetMemoryUsage(),
+		CacheHitRate:     s.cache.GetHitRate(),
+		MemoryUsage:      s.cache.GetMemoryUsage(),
 	}
 }
 
 // benchmarkFileWriting tests file writing performance
 func (s *BenchmarkSuite) benchmarkFileWriting() BenchmarkResults {
 	fmt.Printf("✍️ Benchmarking file writing...\n")
-	
+
 	ctx := context.Background()
 	operations := 0
 	start := time.Now()
@@ -314,15 +285,8 @@ func (s *BenchmarkSuite) benchmarkFileWriting() BenchmarkResults {
 	for i := 0; i < 100; i++ {
 		filePath := filepath.Join(s.testDir, fmt.Sprintf("write_test_%d.txt", i))
 		content := fmt.Sprintf("Test file %d content with some data to write", i)
-		
-		request := mcp.CallToolRequest{
-			Arguments: map[string]interface{}{
-				"path":    filePath,
-				"content": content,
-			},
-		}
-		
-		_, err := s.engine.WriteFile(ctx, request)
+
+		err := s.engine.WriteFileContent(ctx, filePath, content)
 		if err != nil {
 			log.Printf("Write error: %v", err)
 			continue
@@ -331,22 +295,22 @@ func (s *BenchmarkSuite) benchmarkFileWriting() BenchmarkResults {
 	}
 
 	duration := time.Since(start)
-	
+
 	return BenchmarkResults{
-		TestName:        "File Writing",
-		Operations:      operations,
-		TotalTime:       duration,
-		AverageTime:     duration / time.Duration(operations),
+		TestName:         "File Writing",
+		Operations:       operations,
+		TotalTime:        duration,
+		AverageTime:      duration / time.Duration(operations),
 		OperationsPerSec: float64(operations) / duration.Seconds(),
-		CacheHitRate:    s.engine.Cache.GetHitRate(),
-		MemoryUsage:     s.engine.Cache.GetMemoryUsage(),
+		CacheHitRate:     s.cache.GetHitRate(),
+		MemoryUsage:      s.cache.GetMemoryUsage(),
 	}
 }
 
 // benchmarkMixedOperations tests mixed read/write/list operations
 func (s *BenchmarkSuite) benchmarkMixedOperations() BenchmarkResults {
 	fmt.Printf("🔄 Benchmarking mixed operations...\n")
-	
+
 	ctx := context.Background()
 	operations := 0
 	start := time.Now()
@@ -356,54 +320,37 @@ func (s *BenchmarkSuite) benchmarkMixedOperations() BenchmarkResults {
 		// Read a file
 		if len(s.testFiles) > 0 {
 			filePath := s.testFiles[i%len(s.testFiles)]
-			request := mcp.CallToolRequest{
-				Arguments: map[string]interface{}{
-					"path": filePath,
-				},
-			}
-			
-			if _, err := s.engine.ReadFile(ctx, request); err == nil {
+			// read file using engine API
+
+			if _, err := s.engine.ReadFileContent(ctx, filePath); err == nil {
 				operations++
 			}
 		}
 
 		// List directory
-		dirRequest := mcp.CallToolRequest{
-			Arguments: map[string]interface{}{
-				"path": s.testDir,
-			},
-		}
-		
-		if _, err := s.engine.ListDirectory(ctx, dirRequest); err == nil {
+		if _, err := s.engine.ListDirectoryContent(ctx, s.testDir); err == nil {
 			operations++
 		}
 
 		// Write a small file
 		writeFilePath := filepath.Join(s.testDir, fmt.Sprintf("mixed_test_%d.txt", i))
 		writeContent := fmt.Sprintf("Mixed operation test %d", i)
-		
-		writeRequest := mcp.CallToolRequest{
-			Arguments: map[string]interface{}{
-				"path":    writeFilePath,
-				"content": writeContent,
-			},
-		}
-		
-		if _, err := s.engine.WriteFile(ctx, writeRequest); err == nil {
+
+		if err := s.engine.WriteFileContent(ctx, writeFilePath, writeContent); err == nil {
 			operations++
 		}
 	}
 
 	duration := time.Since(start)
-	
+
 	return BenchmarkResults{
-		TestName:        "Mixed Operations",
-		Operations:      operations,
-		TotalTime:       duration,
-		AverageTime:     duration / time.Duration(operations),
+		TestName:         "Mixed Operations",
+		Operations:       operations,
+		TotalTime:        duration,
+		AverageTime:      duration / time.Duration(operations),
 		OperationsPerSec: float64(operations) / duration.Seconds(),
-		CacheHitRate:    s.engine.Cache.GetHitRate(),
-		MemoryUsage:     s.engine.Cache.GetMemoryUsage(),
+		CacheHitRate:     s.cache.GetHitRate(),
+		MemoryUsage:      s.cache.GetMemoryUsage(),
 	}
 }
 
@@ -411,7 +358,7 @@ func (s *BenchmarkSuite) benchmarkMixedOperations() BenchmarkResults {
 func (s *BenchmarkSuite) PrintResults(results []BenchmarkResults) {
 	fmt.Printf("\n📊 Benchmark Results\n")
 	fmt.Printf("═══════════════════════════════════════════════════════════════════════════════\n")
-	fmt.Printf("%-20s %8s %12s %12s %12s %8s %10s\n", 
+	fmt.Printf("%-20s %8s %12s %12s %12s %8s %10s\n",
 		"Test", "Ops", "Total Time", "Avg Time", "Ops/Sec", "Cache%", "Memory")
 	fmt.Printf("───────────────────────────────────────────────────────────────────────────────\n")
 
@@ -437,7 +384,7 @@ func (s *BenchmarkSuite) PrintResults(results []BenchmarkResults) {
 	}
 
 	avgOpsPerSec := float64(totalOps) / totalTime.Seconds()
-	
+
 	fmt.Printf("\n🎯 Overall Performance Summary:\n")
 	fmt.Printf("   Total Operations: %d\n", totalOps)
 	fmt.Printf("   Total Time: %s\n", formatDuration(totalTime))
