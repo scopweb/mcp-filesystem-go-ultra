@@ -1,5 +1,50 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [3.4.1] - 2025-11-17
+
+### 🔧 Critical Fix: Windows Path Recognition
+
+#### Fixed
+- **Windows path recognition** - El binario ahora se compila correctamente para Windows con `GOOS=windows`
+- **Path normalization** - Rutas de Windows (C:\...) ahora se reconocen correctamente en Windows puro (no WSL)
+
+#### Added
+- **`build-windows.sh`** - Script de compilación para Windows desde WSL/Linux
+- **`build-windows.bat`** - Script de compilación para Windows desde Windows
+- **`WINDOWS_PATH_FIX.md`** - Documentación técnica detallada del problema y solución
+- **`GUIA_RAPIDA_WINDOWS.md`** - Guía rápida en español para usuarios
+
+#### Problem Resolved
+- ❌ **Before**: Binary compiled from WSL thought it was running on Linux
+  - Input: `C:\temp\hol.txt`
+  - Internal conversion: `/mnt/c/temp/hol.txt` (incorrect for Windows)
+  - Result: File not found ❌
+
+- ✅ **After**: Binary properly compiled for Windows with `GOOS=windows`
+  - Input: `C:\temp\hol.txt`
+  - Internal handling: `C:\temp\hol.txt` (correct)
+  - Result: File found ✅
+
+#### Technical Details
+- Root cause: Binary was compiled in WSL without specifying target OS
+- The code was always correct - only the compilation method needed fixing
+- Now uses proper cross-compilation: `GOOS=windows GOARCH=amd64 go build`
+- `runtime.GOOS` now correctly reports "windows" instead of "linux"
+- `os.PathSeparator` now correctly uses `\` instead of `/`
+
+#### Impact
+- **Claude Desktop users on Windows**: Now works correctly with Windows paths
+- **WSL users**: No change, WSL paths continue to work as before
+- **Configuration**: No changes needed to `claude_desktop_config.json`
+
+#### Statistics
+- Files modified: 0 (code was already correct)
+- Files created: 4 (2 build scripts, 2 documentation files)
+- Executable size: 5.67 MB (unchanged)
+- Total tools: 45 tools (unchanged)
+
+---
+
 ## [3.4.0] - 2025-11-15
 
 ### 🔄 Automatic WSL ↔ Windows Sync (Silent Auto-Copy)
@@ -211,6 +256,6 @@
 
 ---
 
-**Current Version**: 3.4.0
-**Last Updated**: 2025-11-15
+**Current Version**: 3.4.1
+**Last Updated**: 2025-11-17
 **Status**: ✅ Production Ready
