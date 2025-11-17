@@ -242,67 +242,15 @@ func (o *ClaudeDesktopOptimizer) BatchOptimizedOperations(ctx context.Context, o
 	return results.String(), nil
 }
 
-// AutoRecoveryEdit attempts to recover from edit failures
-// DEPRECATED: On Windows with Claude Desktop, use write_file instead.
-// Recovery edits may not persist due to Linux/Windows filesystem sync limitations.
+// AutoRecoveryEdit is a redirected alias for IntelligentEdit.
+// It is maintained for backward compatibility with older Claude Desktop versions.
+// The original recovery logic was deprecated due to persistence issues on Windows.
+// For guaranteed persistence, use IntelligentWrite with complete file content.
 // See: guides/WINDOWS_FILESYSTEM_PERSISTENCE.md
 func (o *ClaudeDesktopOptimizer) AutoRecoveryEdit(ctx context.Context, path, oldText, newText string) (*EditResult, error) {
-	// First attempt - direct edit
-	result, err := o.IntelligentEdit(ctx, path, oldText, newText)
-	if err == nil {
-		return result, nil
-	}
-
-	log.Printf("🔄 Edit failed, attempting recovery: %v", err)
-
-	if !o.config.SmartErrorRecovery {
-		return nil, err
-	}
-
-	// Recovery attempt 1: Normalize whitespace
-	normalizedOldText := strings.TrimSpace(oldText)
-	normalizedOldText = strings.ReplaceAll(normalizedOldText, "\r\n", "\n")
-	normalizedOldText = strings.ReplaceAll(normalizedOldText, "\r", "\n")
-
-	if normalizedOldText != oldText {
-		log.Printf("🔄 Recovery attempt 1: Normalized whitespace")
-		result, err = o.IntelligentEdit(ctx, path, normalizedOldText, newText)
-		if err == nil {
-			return result, nil
-		}
-	}
-
-	// Recovery attempt 2: Fuzzy match (remove extra spaces)
-	fuzzyOldText := strings.Join(strings.Fields(oldText), " ")
-	if fuzzyOldText != oldText && fuzzyOldText != normalizedOldText {
-		log.Printf("🔄 Recovery attempt 2: Fuzzy match")
-		result, err = o.IntelligentEdit(ctx, path, fuzzyOldText, newText)
-		if err == nil {
-			return result, nil
-		}
-	}
-
-	// Recovery attempt 3: Line-by-line search
-	lines := strings.Split(oldText, "\n")
-	if len(lines) > 1 {
-		log.Printf("🔄 Recovery attempt 3: Line-by-line search")
-		content, readErr := o.IntelligentRead(ctx, path)
-		if readErr == nil {
-			for _, line := range lines {
-				line = strings.TrimSpace(line)
-				if line != "" && strings.Contains(content, line) {
-					result, err = o.IntelligentEdit(ctx, path, line, newText)
-					if err == nil {
-						log.Printf("✅ Recovery successful with line: %s", line[:min(50, len(line))])
-						return result, nil
-					}
-				}
-			}
-		}
-	}
-
-	log.Printf("❌ All recovery attempts failed")
-	return nil, fmt.Errorf("edit failed even after recovery attempts: %v", err)
+	log.Printf("⚠️ DEPRECATED: 'recovery_edit' was called. Redirecting to 'intelligent_edit' for stability.")
+	// This function is now an alias for IntelligentEdit to prevent timeouts and instability.
+	return o.IntelligentEdit(ctx, path, oldText, newText)
 }
 
 // GetPerformanceReport generates a performance report for Claude Desktop
