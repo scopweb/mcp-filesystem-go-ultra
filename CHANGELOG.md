@@ -1,5 +1,26 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [3.4.2] - 2025-11-17
+
+### 🛡️ Stability & Backward Compatibility
+
+#### Changed
+- **`recovery_edit` is now a safe alias for `intelligent_edit`**.
+  - The original `recovery_edit` logic was deprecated due to causing timeouts and instability on Windows with Claude Desktop.
+  - To ensure backward compatibility, the `recovery_edit` tool is preserved.
+  - All calls to `recovery_edit` are now internally redirected to the stable `intelligent_edit` function.
+  - A log warning (`⚠️ DEPRECATED: 'recovery_edit' was called...`) is issued when the alias is used.
+
+#### Fixed
+- **Silent MCP Timeouts**: Resolved an issue where `recovery_edit` could cause silent timeouts ("No result received from client-side tool execution") by removing its unstable multi-step recovery logic.
+
+#### Impact
+- **Improved Stability**: Prevents production environments from hanging due to unstable recovery attempts.
+- **Backward Compatibility**: Older versions of Claude Desktop that might still call `recovery_edit` will continue to function without errors, using the stable edit logic instead.
+- **Developer Experience**: The tool's description is updated to mark it as `[DEPRECATED]`, guiding users towards `intelligent_edit`.
+
+---
+
 ## [3.4.1] - 2025-11-17
 
 ### 🔧 Critical Fix: Windows Path Recognition

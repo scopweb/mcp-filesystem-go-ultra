@@ -702,9 +702,9 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)), nil
 	})
 
-	// Advanced recovery edit
+	// DEPRECATED: Advanced recovery edit. Redirects to intelligent_edit for stability.
 	recoveryEditTool := mcp.NewTool("recovery_edit",
-		mcp.WithDescription("Edit with automatic error recovery (fuzzy matching, whitespace normalization)"),
+		mcp.WithDescription("[DEPRECATED] Edit with automatic error recovery. Redirects to intelligent_edit."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
 		mcp.WithString("old_text", mcp.Required(), mcp.Description("Text to be replaced")),
 		mcp.WithString("new_text", mcp.Required(), mcp.Description("New text to replace with")),
