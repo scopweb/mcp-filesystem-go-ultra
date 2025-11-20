@@ -706,14 +706,18 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 // - valid: true if context looks good, false if likely changed
 // - warning: descriptive message about the validation result
 func (e *UltraFastEngine) validateEditContext(currentContent, oldText string) (bool, string) {
+	// Normalize line endings for validation
+	normalizedContent := normalizeLineEndings(currentContent)
+	normalizedOldText := normalizeLineEndings(oldText)
+
 	// If oldText not found at all, it's definitely invalid
-	if !strings.Contains(currentContent, oldText) {
+	if !strings.Contains(normalizedContent, normalizedOldText) {
 		return false, "old_text not found in current file - file has likely changed"
 	}
 
 	// Extract a snippet with surrounding context (3-5 lines before and after)
-	lines := strings.Split(currentContent, "\n")
-	oldLines := strings.Split(oldText, "\n")
+	lines := strings.Split(normalizedContent, "\n")
+	oldLines := strings.Split(normalizedOldText, "\n")
 
 	if len(oldLines) == 0 {
 		return false, "invalid old_text"

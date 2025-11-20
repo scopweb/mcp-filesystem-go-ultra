@@ -1,0 +1,206 @@
+Documentación del problema: filesystem-ultra error "old_text not found"
+📊 Contexto del error
+Lo que pasó hoy:
+
+✅ filesystem-ultra:intelligent_read funcionó correctamente
+✅ Leí el contenido del archivo sin problemas
+❌ filesystem-ultra:recovery_edit falló con: "context validation failed: old_text not found in current file - file has likely changed"
+❌ filesystem-ultra:smart_edit_file falló con el mismo error
+✅ filesystem-ultra:batch_operations funcionó perfectamente con el mismo old_text
+
+
+🔍 Detalles técnicos del fallo
+Archivo afectado:
+C:\__REPOS\jotajotape\CRM\Intct.jotajotape.com\crm\Components\Pages\Shipments\UserCamioRicardo\AdTruckerPendingOrdersNew.razor.cs
+Operación que falló (recovery_edit):
+xml<old_text>
+    // Orders list
+    public List<C1Pedidos> Orders { get; set; } = new();
+    private List<C1Pedidos> filteredOrders = new();
+    private bool isFiltered = false;
+    private Dictionary<int, bool> listadoValidados = new Dictionary<int, bool>();
+</old_text>
+
+<new_text>
+    // Orders list
+    public List<C1Pedidos> Orders { get; set; } = new();
+    private List<C1Pedidos> filteredOrders = new();
+    private bool isFiltered = false;
+</new_text>
+Operación que SÍ funcionó (batch_operations):
+json{
+  "operations": [
+    {
+      "type": "edit",
+      "path": "C:\\__REPOS\\jotajotape\\CRM\\Intct.jotajotape.com\\crm\\Components\\Pages\\Shipments\\UserCamioRicardo\\AdTruckerPendingOrdersNew.razor.cs",
+      "old_text": "    private Dictionary<int, bool> listadoValidados = new Dictionary<int, bool>();",
+      "new_text": ""
+    }
+  ],
+  "atomic": true
+}
+
+🤔 Hipótesis del problema
+Hipótesis A: Diferencia en normalización de texto
+recovery_edit hace "fuzzy matching" pero quizás tiene problemas con:
+
+Espacios en blanco: Múltiples espacios, tabs vs espacios
+Saltos de línea: \r\n (Windows) vs \n (Unix)
+Encoding: UTF-8 vs UTF-8 BOM
+
+Evidencia:
+
+El texto que leí tenía 5 líneas
+Intenté editar las 5 líneas juntas → falló
+Intenté editar 1 línea específica en batch_operations → funcionó
+
+Hipótesis B: Tamaño del old_text
+recovery_edit puede tener límite o problema con bloques grandes de texto mientras que batch_operations no.
+Evidencia:
+
+old_text de 5 líneas → falló
+old_text de 1 línea → funcionó
+
+Hipótesis C: Cache o lectura inconsistente
+El archivo pudo haber cambiado entre:
+
+intelligent_read (que leí el contenido)
+recovery_edit (que intentó modificarlo)
+
+Pero esto es poco probable porque:
+
+Nadie más estaba editando el archivo
+No hubo commits de git en medio
+
+Hipótesis D: Formato de ruta
+Aunque batch_operations aceptó rutas con \\, quizás:
+
+recovery_edit espera rutas diferentes
+Hay inconsistencia interna en cómo maneja las rutas
+
+Evidencia:
+
+Usé C:\__REPOS\... en ambos
+batch_operations usó C:\\__REPOS\\... (escaped)
+Podría ser un problema de escaping
+
+
+🧪 Pruebas sugeridas para reproducir
+Test 1: Normalización de espacios
+javascript// Archivo de prueba con diferentes espacios
+const test1 = "line1\nline2";     // Unix
+const test2 = "line1\r\nline2";   // Windows
+const test3 = "line1  \nline2";   // Trailing spaces
+Test 2: Tamaño del old_text
+javascript// Intentar editar:
+// - 1 línea (debería funcionar)
+// - 3 líneas (¿funciona?)
+// - 5 líneas (falló hoy)
+// - 10 líneas (¿falla?)
+Test 3: Formato de ruta
+javascript// Probar con:
+const path1 = "C:\\path\\to\\file.cs";  // Escaped
+const path2 = "C:\path\to\file.cs";     // No escaped
+const path3 = "/mnt/c/path/to/file.cs"; // WSL
+Test 4: Cache/timing
+javascript// Secuencia:
+1. intelligent_read
+2. Esperar 1 segundo
+3. recovery_edit
+// ¿Sigue fallando?
+
+📝 Información del sistema
+Lo que SÍ funcionó hoy:
+
+✅ filesystem-ultra:intelligent_read
+✅ filesystem-ultra:read_file_range
+✅ filesystem-ultra:count_occurrences
+✅ filesystem-ultra:batch_operations (con edit)
+✅ filesystem-ultra:list_directory
+
+Lo que NO funcionó:
+
+❌ filesystem-ultra:recovery_edit (multiline old_text)
+❌ filesystem-ultra:smart_edit_file (multiline old_text)
+❌ filesystem-ultra:intelligent_edit (redirige a recovery_edit, mismo error)
+
+
+🎯 Solución temporal que usé
+Cambié de estrategia:
+
+En lugar de editar 5 líneas juntas
+Usé batch_operations con ediciones de 1 línea
+Funcionó perfectamente
+
+Código que funcionó:
+json{
+  "operations": [
+    {
+      "type": "edit",
+      "old_text": "    private Dictionary<int, bool> listadoValidados = new Dictionary<int, bool>();",
+      "new_text": ""
+    },
+    {
+      "type": "edit", 
+      "old_text": "                    listadoValidados.Add(order.PedidoID, true);",
+      "new_text": "                    // Actualizar el campo ValidadoRicardo directamente en el objeto\n                    order.ValidadoRicardo = true;\n                    order.FechaValidadoRicardo = DateTime.Now;"
+    }
+  ]
+}
+
+---
+
+## 🔧 Sugerencias de debugging
+
+### 1. Logging detallado
+Cuando `recovery_edit` falla con "old_text not found", sería útil ver:
+```
+- Hash del old_text buscado
+- Hash del contenido del archivo
+- Primeros 100 caracteres del old_text
+- Primeros 100 caracteres del contenido del archivo
+- Encoding detectado (UTF-8, UTF-8 BOM, etc.)
+- Line endings detectados (\n vs \r\n)
+```
+
+### 2. Modo verbose para fuzzy matching
+```
+- Similitud encontrada (0-100%)
+- Qué partes del texto coincidieron
+- Qué partes no coincidieron
+- Si normalizó espacios/line endings
+```
+
+### 3. Validación de ruta
+```
+- Ruta recibida: "C:\path\file.cs"
+- Ruta normalizada: "C:\\path\\file.cs"
+- Ruta WSL equivalente: "/mnt/c/path/file.cs"
+- Archivo existe: true/false
+- Permisos: read/write
+```
+
+---
+
+## ❓ Preguntas para ti
+
+1. **¿`recovery_edit` debería aceptar old_text multilínea o solo single-line?**
+2. **¿Hay diferencia entre cómo `recovery_edit` y `batch_operations` normalizan el texto?**
+3. **¿El fuzzy matching tiene umbral de confianza? Si es 95% similar, ¿falla o continúa?**
+4. **¿Hay límite de caracteres para old_text en `recovery_edit`?**
+
+---
+
+## 📊 Estadísticas de hoy
+```
+Total intentos: 6
+Éxitos: 3 (50%)
+Fallos: 3 (50%)
+
+Herramientas usadas:
+- intelligent_read: 2/2 ✅
+- recovery_edit: 0/2 ❌
+- smart_edit_file: 0/1 ❌
+- batch_operations: 1/1 ✅
+
+¿Necesitas más detalles de alguna parte específica? ¿Quieres que pruebe
