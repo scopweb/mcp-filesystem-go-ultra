@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -89,14 +90,31 @@ func (e *UltraFastEngine) copyDirectoryRecursive(srcDir, dstDir string, createDi
 			return os.MkdirAll(dstPath, 0755)
 		}
 
-		// Copy file
-		data, err := os.ReadFile(path)
+		// Copy file using io.CopyBuffer with pooled buffer for memory efficiency
+		srcFile, err := os.Open(path)
 		if err != nil {
-			return fmt.Errorf("failed to read %s: %v", path, err)
+			return fmt.Errorf("failed to open %s: %v", path, err)
+		}
+		defer srcFile.Close()
+
+		dstFile, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		if err != nil {
+			srcFile.Close()
+			return fmt.Errorf("failed to create %s: %v", dstPath, err)
 		}
 
-		if err := os.WriteFile(dstPath, data, 0644); err != nil {
-			return fmt.Errorf("failed to write %s: %v", dstPath, err)
+		// Use pooled buffer to reduce GC pressure
+		bufPtr := e.bufferPool.Get().(*[]byte)
+		defer e.bufferPool.Put(bufPtr)
+
+		if _, err := io.CopyBuffer(dstFile, srcFile, *bufPtr); err != nil {
+			dstFile.Close()
+			srcFile.Close()
+			return fmt.Errorf("failed to copy %s: %v", path, err)
+		}
+
+		if err := dstFile.Close(); err != nil {
+			return fmt.Errorf("failed to close %s: %v", dstPath, err)
 		}
 
 		return nil
@@ -225,15 +243,32 @@ func (e *UltraFastEngine) SyncWorkspace(ctx context.Context, direction string, f
 				return nil
 			}
 
-			// Copy file
-			data, err := os.ReadFile(path)
+			// Copy file using io.CopyBuffer with pooled buffer for memory efficiency
+			srcFile, err := os.Open(path)
 			if err != nil {
-				errors = append(errors, fmt.Sprintf("failed to read %s: %v", path, err))
+				errors = append(errors, fmt.Sprintf("failed to open %s: %v", path, err))
+				return nil
+			}
+			defer srcFile.Close()
+
+			dstFile, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("failed to create %s: %v", dstPath, err))
 				return nil
 			}
 
-			if err := os.WriteFile(dstPath, data, 0644); err != nil {
-				errors = append(errors, fmt.Sprintf("failed to write %s: %v", dstPath, err))
+			// Use pooled buffer to reduce GC pressure
+			bufPtr := e.bufferPool.Get().(*[]byte)
+			defer e.bufferPool.Put(bufPtr)
+
+			if _, err := io.CopyBuffer(dstFile, srcFile, *bufPtr); err != nil {
+				dstFile.Close()
+				errors = append(errors, fmt.Sprintf("failed to copy %s: %v", path, err))
+				return nil
+			}
+
+			if err := dstFile.Close(); err != nil {
+				errors = append(errors, fmt.Sprintf("failed to close %s: %v", dstPath, err))
 				return nil
 			}
 

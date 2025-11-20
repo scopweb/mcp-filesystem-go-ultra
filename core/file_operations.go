@@ -1,8 +1,10 @@
 package core
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -369,19 +371,20 @@ func (e *UltraFastEngine) CopyFile(ctx context.Context, sourcePath, destPath str
 	return e.copyFile(sourcePath, destPath)
 }
 
-// copyFile copies a single file
+// copyFile copies a single file using io.Copy for memory efficiency
 func (e *UltraFastEngine) copyFile(src, dst string) error {
-	// Read source file
-	sourceData, err := os.ReadFile(src)
-	if err != nil {
-		return fmt.Errorf("failed to read source file: %v", err)
-	}
-
 	// Get source file permissions
 	sourceInfo, err := os.Stat(src)
 	if err != nil {
 		return fmt.Errorf("failed to stat source file: %v", err)
 	}
+
+	// Open source file for reading
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("failed to open source file: %v", err)
+	}
+	defer srcFile.Close()
 
 	// Ensure destination directory exists
 	destDir := filepath.Dir(dst)
@@ -389,9 +392,25 @@ func (e *UltraFastEngine) copyFile(src, dst string) error {
 		return fmt.Errorf("failed to create destination directory: %v", err)
 	}
 
-	// Write to destination with same permissions
-	if err := os.WriteFile(dst, sourceData, sourceInfo.Mode()); err != nil {
-		return fmt.Errorf("failed to write destination file: %v", err)
+	// Create destination file with same permissions
+	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, sourceInfo.Mode())
+	if err != nil {
+		return fmt.Errorf("failed to create destination file: %v", err)
+	}
+	defer dstFile.Close()
+
+	// Use io.CopyBuffer with pooled buffer for efficient, memory-constant copy
+	// This leverages OS optimizations like sendfile on Linux/WSL and reduces GC pressure
+	bufPtr := e.bufferPool.Get().(*[]byte)
+	defer e.bufferPool.Put(bufPtr)
+
+	if _, err := io.CopyBuffer(dstFile, srcFile, *bufPtr); err != nil {
+		return fmt.Errorf("failed to copy file content: %v", err)
+	}
+
+	// Sync to ensure data is written to disk
+	if err := dstFile.Sync(); err != nil {
+		return fmt.Errorf("failed to sync destination file: %v", err)
 	}
 
 	// Invalidate cache for destination
@@ -484,32 +503,62 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 		return "", fmt.Errorf("end_line (%d) must be >= start_line (%d)", endLine, startLine)
 	}
 
-	var result strings.Builder
-
-	// Read entire file (for simplicity with small-medium files)
-	content, err := os.ReadFile(path)
+	// Open file for efficient line-by-line reading
+	file, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("failed to read file: %v", err)
+		return "", fmt.Errorf("failed to open file: %v", err)
 	}
+	defer file.Close()
 
-	lines := strings.Split(string(content), "\n")
-	totalLines := len(lines)
+	var result strings.Builder
+	scanner := bufio.NewScanner(file)
 
-	// Adjust endLine if it exceeds file length
-	if endLine > totalLines {
-		endLine = totalLines
-	}
+	// Use a larger buffer for better performance with long lines
+	const maxCapacity = 1024 * 1024 // 1MB buffer for very long lines
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, maxCapacity)
 
-	// Extract the range (1-indexed to 0-indexed conversion)
-	for i := startLine - 1; i < endLine && i < totalLines; i++ {
-		if result.Len() > 0 {
-			result.WriteString("\n")
+	lineNum := 0
+	totalLines := 0
+	foundLines := 0
+
+	// Read file line by line
+	for scanner.Scan() {
+		lineNum++
+		totalLines = lineNum
+
+		// If we're before the start line, skip
+		if lineNum < startLine {
+			continue
 		}
-		result.WriteString(lines[i])
+
+		// If we're in the range, collect the line
+		if lineNum >= startLine && lineNum <= endLine {
+			if result.Len() > 0 {
+				result.WriteString("\n")
+			}
+			result.WriteString(scanner.Text())
+			foundLines++
+		}
+
+		// If we've passed the end line, we can stop reading
+		if lineNum > endLine {
+			break
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("error reading file: %v", err)
+	}
+
+	// If endLine was beyond file length, adjust it
+	actualEndLine := endLine
+	if actualEndLine > totalLines {
+		actualEndLine = totalLines
 	}
 
 	// Add metadata footer
-	result.WriteString(fmt.Sprintf("\n\n[Lines %d-%d of %d total lines in %s]", startLine, endLine, totalLines, filepath.Base(path)))
+	result.WriteString(fmt.Sprintf("\n\n[Lines %d-%d of %d total lines in %s]", startLine, actualEndLine, totalLines, filepath.Base(path)))
 
 	return result.String(), nil
 }

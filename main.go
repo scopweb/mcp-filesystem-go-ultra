@@ -81,7 +81,7 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("MCP Filesystem Server Ultra-Fast v3.4.1\n")
+		fmt.Printf("MCP Filesystem Server Ultra-Fast v3.5.0\n")
 		fmt.Printf("Build: %s\n", time.Now().Format("2006-01-02"))
 		fmt.Printf("Go: %s\n", runtime.Version())
 		fmt.Printf("Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
