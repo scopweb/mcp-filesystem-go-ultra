@@ -274,7 +274,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Create file tool (alias for write_file for compatibility with Claude Desktop)
 	createFileTool := mcp.NewTool("create_file",
-		mcp.WithDescription("Create/write file (atomic) - alias for write_file"),
+		mcp.WithDescription("Create/write file (atomic) - alias for write_file. Do NOT use for backups or copying files; use copy_file instead."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path where to create/write the file")),
 		mcp.WithString("content", mcp.Required(), mcp.Description("Content to write to the file")),
 	)
@@ -826,7 +826,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Copy file tool
 	copyTool := mcp.NewTool("copy_file",
-		mcp.WithDescription("Copy a file or directory to a new location"),
+		mcp.WithDescription("Copy a file or directory to a new location. Use this for backups or duplication instead of reading and writing."),
 		mcp.WithString("source_path", mcp.Required(), mcp.Description("Path of the file/directory to copy")),
 		mcp.WithString("dest_path", mcp.Required(), mcp.Description("Destination path for the copy")),
 	)

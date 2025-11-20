@@ -1,5 +1,21 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [3.4.3] - 2025-11-20
+
+### 🐛 Bug Fix: Multiline Edit Validation
+
+#### Fixed
+- **`recovery_edit` / `smart_edit_file` context validation**
+  - Fixed an issue where multiline edits failed with "context validation failed" due to line ending differences (CRLF vs LF).
+  - Now normalizes line endings before validating context, ensuring robust editing across Windows/WSL environments.
+  - `batch_operations` remains unaffected as it uses a different validation path.
+
+#### Impact
+- **Reliability**: Multiline code replacements now work reliably regardless of file encoding (Windows/Unix).
+- **Developer Experience**: Eliminates false positive "file has changed" errors when editing files with mixed line endings.
+
+---
+
 ## [3.4.2] - 2025-11-17
 
 ### 🛡️ Stability & Backward Compatibility
@@ -124,7 +140,7 @@
 
 ---
 
-## [3.2.0] - 2025-11-14
+## [3.2.0] - 2025-10-14
 
 ### 🪟 Windows/WSL Path Normalization + create_file Alias
 
@@ -277,6 +293,6 @@
 
 ---
 
-**Current Version**: 3.4.1
-**Last Updated**: 2025-11-17
+**Current Version**: 3.4.3
+**Last Updated**: 2025-11-20
 **Status**: ✅ Production Ready
