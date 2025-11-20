@@ -54,6 +54,9 @@ type UltraFastEngine struct {
 
 	// Auto-sync manager for WSL<->Windows
 	autoSyncManager *AutoSyncManager
+
+	// Buffer pool for memory-efficient I/O operations
+	bufferPool *sync.Pool
 }
 
 // PerformanceMetrics tracks real-time performance statistics
@@ -105,6 +108,16 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 		semaphore: make(chan struct{}, config.ParallelOps),
 	}
 
+	// Initialize buffer pool for memory-efficient I/O operations
+	// Using 64KB buffers for optimal performance
+	engine.bufferPool = &sync.Pool{
+		New: func() interface{} {
+			// Allocate 64KB buffer (optimal for most I/O operations)
+			buf := make([]byte, 64*1024)
+			return &buf
+		},
+	}
+
 	// Log if allowed paths are configured
 	if len(config.AllowedPaths) > 0 {
 		log.Printf("🔒 Access control enabled with %d allowed paths", len(config.AllowedPaths))
@@ -119,7 +132,7 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 	}
 	engine.workerPool = workerPool
 
-	log.Printf("🔧 Ultra-fast engine initialized with %d parallel operations", config.ParallelOps)
+	log.Printf("🔧 Ultra-fast engine initialized with %d parallel operations (64KB buffer pool)", config.ParallelOps)
 
 	// Initialize Claude Desktop optimizer
 	engine.optimizer = NewClaudeDesktopOptimizer(engine)
