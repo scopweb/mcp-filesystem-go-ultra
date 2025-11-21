@@ -52,6 +52,9 @@ func NewClaudeDesktopOptimizer(engine *UltraFastEngine) *ClaudeDesktopOptimizer 
 
 // IntelligentWrite automatically chooses the best write strategy
 func (o *ClaudeDesktopOptimizer) IntelligentWrite(ctx context.Context, path, content string) error {
+	// Normalize path first (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
+
 	size := int64(len(content))
 
 	// Auto-select strategy sin logging excesivo
@@ -64,6 +67,9 @@ func (o *ClaudeDesktopOptimizer) IntelligentWrite(ctx context.Context, path, con
 
 // IntelligentRead automatically chooses the best read strategy
 func (o *ClaudeDesktopOptimizer) IntelligentRead(ctx context.Context, path string) (string, error) {
+	// Normalize path first (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
+
 	// Check file size first
 	info, err := os.Stat(path)
 	if err != nil {
@@ -89,6 +95,9 @@ func (o *ClaudeDesktopOptimizer) IntelligentRead(ctx context.Context, path strin
 // For guaranteed persistence, use IntelligentWrite with complete file content instead.
 // See: guides/WINDOWS_FILESYSTEM_PERSISTENCE.md
 func (o *ClaudeDesktopOptimizer) IntelligentEdit(ctx context.Context, path, oldText, newText string) (*EditResult, error) {
+	// Normalize path first (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
+
 	// Analyze file first
 	info, err := os.Stat(path)
 	if err != nil {
@@ -111,6 +120,9 @@ func (o *ClaudeDesktopOptimizer) IntelligentEdit(ctx context.Context, path, oldT
 
 // GetOptimizationSuggestion provides suggestions for Claude Desktop usage
 func (o *ClaudeDesktopOptimizer) GetOptimizationSuggestion(ctx context.Context, path string) (string, error) {
+	// Normalize path first (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
+
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", err
