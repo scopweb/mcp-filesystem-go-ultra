@@ -1,5 +1,39 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [3.5.1] - 2025-11-21
+
+### 🐛 Bug Fix: Silent Failures in intelligent_* Functions on Windows
+
+#### Fixed
+- **`intelligent_read`, `intelligent_write`, `intelligent_edit` path handling**
+  - Fixed silent failures in Claude Desktop on Windows with error: "No result received from client-side tool execution"
+  - Root cause: These functions called `os.Stat()` BEFORE normalizing Windows paths, causing silent failures or timeouts
+  - Solution: Added `NormalizePath()` at the beginning of all intelligent_* functions before any filesystem operations
+  - Also fixed: `GetOptimizationSuggestion()` now normalizes paths before `os.Stat()`
+
+#### Impact
+- **Reliability**: `intelligent_read`, `intelligent_write`, and `intelligent_edit` now work correctly in Claude Desktop on Windows
+- **Consistency**: All intelligent_* functions now match the behavior of basic functions (`read_file`, `write_file`) which already normalized paths
+- **Developer Experience**: Eliminates mysterious "No result received" errors and timeouts when using intelligent operations
+- **Fallback Unnecessary**: Users no longer need to fall back to basic functions with `max_lines` workaround
+
+#### Technical Details
+- **Before**:
+  - `intelligent_read` → `os.Stat(path)` → fails with incorrect Windows path → silent timeout
+  - Users had to use `read_file` with `max_lines` as workaround
+- **After**:
+  - `intelligent_read` → `NormalizePath(path)` → `os.Stat(normalized_path)` → success
+  - Path normalization happens before any filesystem operations
+
+#### Files Modified
+- `core/claude_optimizer.go`: Added path normalization to 4 functions
+  - `IntelligentRead()` (line 70-71)
+  - `IntelligentWrite()` (line 55-56)
+  - `IntelligentEdit()` (line 98-99)
+  - `GetOptimizationSuggestion()` (line 114-115)
+
+---
+
 ## [3.5.0] - 2025-11-20
 
 ### 🚀 Performance Optimization: Memory-Efficient I/O
