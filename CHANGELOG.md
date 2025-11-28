@@ -1,5 +1,27 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased]
+
+### 🐛 Bug Fix: WSLWindowsCopy now supports /mnt/c/ paths
+
+#### Fixed
+- **`wsl_to_windows_copy` and `windows_to_wsl_copy` path handling**
+  - Fixed issue where `wsl_to_windows_copy` would fail with "source does not exist" error when given a `/mnt/c/` source path
+  - Root cause: Function only accepted `/home/` style paths, but files edited via Windows paths are accessible through `/mnt/c/`
+  - Solution: Added automatic path conversion from `/mnt/c/...` to Windows path format (C:\...) when checking file existence and copying
+
+#### Impact
+- **Workflow Support**: Users can now use `wsl_to_windows_copy` with `/mnt/c/` paths (files edited from Windows)
+- **Consistency**: Function now handles all valid WSL path formats consistently
+- **Interoperability**: Better WSL/Windows integration when working with files edited from both environments
+
+#### Files Modified
+- `core/wsl_sync.go`: Enhanced `WSLWindowsCopy()` function
+  - Added detection for `/mnt/` prefixed paths
+  - Auto-converts `/mnt/c/...` to Windows path for file operations
+
+---
+
 ## [3.5.1] - 2025-11-21
 
 ### 🐛 Bug Fix: Silent Failures in intelligent_* Functions on Windows
