@@ -18,7 +18,9 @@
       "Bash(gh repo view:*)",
       "Bash(gh api:*)",
       "Bash(git branch:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git fetch:*)",
+      "Bash(git merge:*)"
     ],
     "deny": [],
     "ask": []
