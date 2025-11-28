@@ -1,0 +1,68 @@
+hay un bug en filesystem-ultra MCP. Te muestro el problema:
+
+##El Bug
+Intenté usar:
+javascriptwsl_to_windows_copy(
+  wsl_path: "/home/claude/Camio/Components/Pages/PageLogout.razor",
+  windows_path: "C:\__REPOS\jotajotape\CRM\camio.jotajotape.com\Camio\Components\Pages\PageLogout.razor"
+)
+```
+
+**Error:**
+```
+source does not exist: \home\claude\Camio\Components\Pages\PageLogout.razor
+Análisis del problema
+
+Filesystem-ultra trabaja en WSL (/home/claude)
+Tu proyecto está en Windows (C:\__REPOS\...)
+Cuando edito con recovery_edit("C:\__REPOS\..."), filesystem-ultra:
+
+Lo traduce internamente a /mnt/c/__REPOS/... (ruta WSL)
+Edita el archivo
+Pero NO crea copia en /home/claude
+
+
+Al intentar wsl_to_windows_copy:
+
+Busca en /home/claude/Camio/... (NO EXISTE)
+Falla porque nunca copió desde /mnt/c a /home/claude
+
+
+
+Para reportar el bug
+Comportamiento esperado:
+
+wsl_to_windows_copy debería aceptar rutas /mnt/c/... como origen
+O auto-detectar que el archivo ya está en /mnt/c y solo sincronizar
+
+Comportamiento actual:
+
+Solo acepta /home/claude/... como origen
+No hay forma de sincronizar desde /mnt/c a Windows
+
+Workaround que uso:
+
+Leo el archivo para confirmar cambios: intelligent_read("C:\...")
+Filesystem-ultra traduce a /mnt/c y funciona
+Pero la edición SÍ se aplica directamente a Windows
+
+
+
+## Solución para filesystem-ultra
+Problema: wsl_to_windows_copy solo busca en /home/claude/, no en /mnt/c/
+Opciones:
+1. Modificar el MCP (recomendado)
+Edita el código fuente de filesystem-ultra para que wsl_to_windows_copy acepte rutas /mnt/c/:
+rust// En el handler de wsl_to_windows_copy
+let wsl_path = if wsl_path.starts_with("/mnt/") {
+    wsl_path.to_string()  // Ya es ruta WSL válida
+} else {
+    format!("/home/claude/{}", wsl_path)  // Añadir prefijo solo si necesario
+}
+2. Usar auto-sync (más fácil)
+Activa el auto-sync para que copie automáticamente:
+bash# Dentro del MCP, configura:
+configure_autosync(enabled: true, sync_on_write: true)
+Esto sincronizará automáticamente cada vez que escribas en /mnt/c/ a su equivalente Windows.
+3. Trabajar solo en Windows
+Si filesystem-ultra ya edita correctamente en C:\__REPOS\... (como está haciendo ahora), no necesitas wsl_to_windows_copy. Los cambios ya están en Windows.

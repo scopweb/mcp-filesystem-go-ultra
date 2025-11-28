@@ -12,6 +12,7 @@ import (
 )
 
 // WSLWindowsCopy copies a file from WSL to Windows or vice versa
+// Supports both traditional WSL paths (/home/..., /tmp/...) and /mnt/c/ style paths
 func (e *UltraFastEngine) WSLWindowsCopy(ctx context.Context, srcPath, dstPath string, createDirs bool) error {
 	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "wsl_copy"); err != nil {
@@ -44,8 +45,18 @@ func (e *UltraFastEngine) WSLWindowsCopy(ctx context.Context, srcPath, dstPath s
 		dstPath = NormalizePath(dstPath)
 	}
 
+	// If source is a /mnt/ path, try to convert it to Windows path to ensure it's accessible
+	accessPath := srcPath
+	if strings.HasPrefix(srcPath, "/mnt/") {
+		// Try to convert /mnt/c/... to Windows path for checking existence
+		winPath, err := WSLToWindows(srcPath)
+		if err == nil && winPath != srcPath {
+			accessPath = winPath
+		}
+	}
+
 	// Check if source exists
-	srcInfo, err := os.Stat(srcPath)
+	srcInfo, err := os.Stat(accessPath)
 	if os.IsNotExist(err) {
 		return fmt.Errorf("source does not exist: %s", srcPath)
 	}
@@ -55,11 +66,11 @@ func (e *UltraFastEngine) WSLWindowsCopy(ctx context.Context, srcPath, dstPath s
 
 	// If source is a directory, copy recursively
 	if srcInfo.IsDir() {
-		return e.copyDirectoryRecursive(srcPath, dstPath, createDirs)
+		return e.copyDirectoryRecursive(accessPath, dstPath, createDirs)
 	}
 
 	// Copy single file
-	return CopyFileWithConversion(srcPath, dstPath, createDirs)
+	return CopyFileWithConversion(accessPath, dstPath, createDirs)
 }
 
 // copyDirectoryRecursive copies a directory recursively
