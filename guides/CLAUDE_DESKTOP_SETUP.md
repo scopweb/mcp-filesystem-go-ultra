@@ -311,5 +311,68 @@ Para **Claude Desktop** con uso intensivo:
 
 ---
 
-**Última actualización:** Octubre 1, 2025  
-**Versión:** 2.2.0 - Token Optimization Release
+## 🔄 Configuración del Sistema de Backup (Nuevo en v3.8.0)
+
+### Configuración Básica
+
+Para habilitar el sistema de backup automático, agrega el directorio de backups a las rutas permitidas:
+
+```json
+{
+  "mcpServers": {
+    "filesystem-ultra": {
+      "command": "C:\\MCPs\\clone\\mcp-filesystem-go-ultra\\mcp-filesystem-ultra.exe",
+      "args": [
+        "--compact-mode",
+        "--max-response-size", "5MB",
+        "--backup-dir", "C:\\MisBackups",
+        "C:\\MCPs\\clone\\",
+        "C:\\temp\\",
+        "C:\\MisBackups"  // ⚠️ IMPORTANTE: Incluir directorio de backups
+      ]
+    }
+  }
+}
+```
+
+### Parámetros de Backup Disponibles
+
+| Parámetro | Valor Default | Descripción |
+|-----------|---------------|-------------|
+| `--backup-dir` | `%TEMP%\mcp-batch-backups` | Directorio donde se guardan los backups |
+| `--backup-max-age` | `7` | Días de retención de backups |
+| `--backup-max-count` | `100` | Número máximo de backups a mantener |
+| `--risk-threshold-medium` | `30.0` | % de cambio para riesgo MEDIUM |
+| `--risk-threshold-high` | `50.0` | % de cambio para riesgo HIGH |
+| `--risk-occurrences-medium` | `50` | Ocurrencias para riesgo MEDIUM |
+| `--risk-occurrences-high` | `100` | Ocurrencias para riesgo HIGH |
+
+### Configuración Avanzada con Backups
+
+```json
+{
+  "args": [
+    "--compact-mode",
+    "--backup-dir", "C:\\Backups\\MCP",
+    "--backup-max-age", "14",
+    "--backup-max-count", "200",
+    "--risk-threshold-medium", "40.0",
+    "--risk-threshold-high", "60.0",
+    "C:\\MCPs\\clone\\",
+    "C:\\Backups\\MCP"
+  ]
+}
+```
+
+**Beneficios:**
+- ✅ Protección automática contra pérdida de código
+- ✅ Validación de riesgo antes de cambios masivos
+- ✅ Recuperación rápida con `restore_backup`
+- ✅ Auditoría completa de cambios
+
+📚 **Más información:** Ver [BACKUP_RECOVERY_GUIDE.md](BACKUP_RECOVERY_GUIDE.md)
+
+---
+
+**Última actualización:** Diciembre 3, 2025  
+**Versión:** 3.8.0 - Backup & Risk Protection Release

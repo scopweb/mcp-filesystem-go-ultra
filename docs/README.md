@@ -4,6 +4,7 @@ Esta carpeta contiene documentación técnica del proyecto.
 
 ## Archivos
 
+- **BUG10_RESOLUTION.md** - Resolución del Bug #10: Sistema de backup y recuperación completo (2025-12-03)
 - **BUG9_RESOLUTION.md** - Resolución del Bug #9: Parámetros opcionales de búsqueda expuestos (2025-12-03)
 - **BUG8_RESOLUTION.md** - Resolución del Bug #8: Correcciones de rutas WSL
 - **BUG5_RESOLUTION_SUMMARY.md** - Resumen de resolución del Bug #5

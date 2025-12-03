@@ -1,12 +1,72 @@
 # MCP Filesystem Server Ultra-Fast
 
-**Version 3.7.1** - Advanced Search Parameters Now Available
+**Version 3.8.0** - Complete Backup and Recovery System
 
 Un servidor MCP (Model Context Protocol) de alto rendimiento para operaciones de sistema de archivos, diseñado para máxima velocidad y eficiencia. **Especialmente optimizado para Claude Desktop** con soporte completo para archivos grandes sin timeouts ni bloqueos.
 
 > 📁 **Proyecto Organizado**: Consulta [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) para ver la estructura completa de carpetas y archivos.
 >
 > 🚀 **Inicio Rápido**: Lee esta página y luego ve a [guides/CLAUDE_DESKTOP_SETUP.md](guides/CLAUDE_DESKTOP_SETUP.md)
+
+## 🔒 NOVEDAD v3.8.0: Sistema de Backup y Recuperación
+
+### 🎯 Protección Total contra Pérdida de Código
+- **Backups automáticos** antes de operaciones destructivas
+- **Validación de riesgo** con 4 niveles (LOW, MEDIUM, HIGH, CRITICAL)
+- **5 nuevas herramientas MCP** para gestión completa de backups
+- **Metadata detallada** con timestamps, hashes SHA256 y contexto
+
+### ✨ Nuevas Características v3.8.0
+
+#### 🔒 Backups Persistentes y Accesibles
+```json
+{
+  "tool": "list_backups",
+  "arguments": {
+    "limit": 20,
+    "filter_operation": "edit",
+    "newer_than_hours": 24
+  }
+}
+```
+
+**Benefits**:
+- Backups en ubicación accesible por MCP
+- No se eliminan automáticamente
+- Recuperación rápida con un comando
+- Auditoría completa de operaciones
+
+#### ⚠️ Validación Inteligente de Riesgo
+```javascript
+edit_file({path: "main.go", old_text: "func", new_text: "function"})
+// → ⚠️ HIGH RISK: 65.3% of file will change (200 occurrences)
+// → Add force: true to proceed or use analyze_edit first
+```
+
+**Protection Levels**:
+- MEDIUM: 30% cambio o 50+ ocurrencias → Warning
+- HIGH: 50% cambio o 100+ ocurrencias → Requires `force: true`
+- CRITICAL: 90%+ cambio → Double confirmation needed
+
+#### 🔄 Herramientas de Recuperación
+- **`list_backups`**: Lista backups con filtros avanzados
+- **`restore_backup`**: Restaura archivos desde backup (con preview)
+- **`compare_with_backup`**: Compara estado actual vs backup
+- **`cleanup_backups`**: Limpia backups antiguos (con dry-run)
+- **`get_backup_info`**: Información detallada de un backup
+
+**Recovery Example**:
+```javascript
+// 1. Find recent backups
+list_backups({newer_than_hours: 2, filter_path: "main.go"})
+
+// 2. Compare changes
+compare_with_backup({backup_id: "...", file_path: "main.go"})
+
+// 3. Restore if needed
+restore_backup({backup_id: "...", file_path: "main.go"})
+// → ✅ Code recovered!
+```
 
 ## 🚀 NOVEDAD v3.0: Optimización Ultra de Tokens (77% Reducción)
 
@@ -144,12 +204,15 @@ Ver la [Configuración Óptima](#configuración-optimizada-para-claude-desktop) 
 
 ### ✅ COMPLETADO Y OPTIMIZADO
 
+- **✅ Bug #10 Resuelto** (v3.8.0): **Sistema completo de backup y recuperación** con 5 nuevas herramientas MCP
+- **✅ Bug #9 Resuelto** (v3.7.1): **Parámetros avanzados de búsqueda** expuestos correctamente
+- **✅ Bug #8 Resuelto** (v3.7.0): **Sistema de ayuda auto-aprendizaje** con get_help tool
 - **✅ Bug #5 Resuelto** (Unreleased): **70-80% token efficiency** en búsqueda/reemplazo (4 fases completadas)
 - **✅ Ultra Token Optimization** (v3.0.0): **77% reducción** con smart truncation
 - **✅ Batch Operations** (v2.6.0): Operaciones atómicas con rollback
 - **✅ Plan Mode** (v2.5.0): Análisis dry-run con evaluación de riesgos
 - **✅ Token Optimization** (v2.2.0): **65-75% reducción** con modo compacto
-- **✅ Claude Desktop Performance**: **32 herramientas** optimizadas sin timeouts
+- **✅ Claude Desktop Performance**: **55 herramientas** optimizadas sin timeouts (50 originales + 5 backup)
 - **✅ Compilación exitosa**: El proyecto compila correctamente en Windows
 - **✅ Estructura modular**: Arquitectura con separación de responsabilidades
 - **✅ Cache inteligente**: Sistema de caché en memoria con bigcache para O(1) operaciones  
@@ -158,11 +221,12 @@ Ver la [Configuración Óptima](#configuración-optimizada-para-claude-desktop) 
 - **✅ Control de acceso**: Restricción de acceso a rutas específicas mediante `--allowed-paths`
 - **✅ Streaming inteligente**: Manejo automático de archivos grandes sin límites de memoria
 - **✅ Recuperación de errores**: Sistema automático que reduce fallos en un 95%
+- **✅ Backup y protección**: Sistema persistente con validación de riesgo y recuperación rápida
 - **✅ Gestión completa**: Renombrar, eliminación segura, y todas las operaciones CRUD
   - `read_file`: Lectura de archivos con caché inteligente y memory mapping
   - `write_file`: Escritura atómica de archivos con backup
   - `list_directory`: Listado de directorios con caché
-  - `edit_file`: Edición inteligente con heurísticas de coincidencia
+  - `edit_file`: Edición inteligente con backup automático + validación de riesgo
   - `search_and_replace`: Búsqueda y reemplazo recursivo (case-insensitive por ahora)
   - `smart_search`: Búsqueda de nombres de archivo y contenido básico (contenido desactivado por defecto)
   - `advanced_text_search`: Búsqueda de texto con pipeline avanzado (parámetros avanzados fijados por defecto)
@@ -170,6 +234,11 @@ Ver la [Configuración Óptima](#configuración-optimizada-para-claude-desktop) 
   - `capture_last_artifact`: Captura artefactos en memoria
   - `write_last_artifact`: Escribe último artefacto capturado sin reenviar contenido
   - `artifact_info`: Información de bytes y líneas del artefacto
+  - `list_backups`: Lista backups disponibles con filtros
+  - `restore_backup`: Restaura archivos desde backup (con preview)
+  - `compare_with_backup`: Compara estado actual vs backup
+  - `cleanup_backups`: Limpia backups antiguos (con dry-run)
+  - `get_backup_info`: Información detallada de backups
 
 ### 🔧 Trabajo Realizado
 
@@ -182,8 +251,10 @@ Ver la [Configuración Óptima](#configuración-optimizada-para-claude-desktop) 
 │   ├── claude_optimizer.go    # 🧠 Sistema inteligente para Claude Desktop
 │   ├── streaming_operations.go # 🌊 Operaciones streaming y chunks
 │   ├── file_operations.go     # 📁 Rename y soft delete
-│   ├── edit_operations.go     # ✏️ Edición inteligente
+│   ├── edit_operations.go     # ✏️ Edición inteligente con backup
 │   ├── search_operations.go   # 🔍 Búsqueda avanzada
+│   ├── backup_manager.go      # 🔒 Sistema de backups persistentes
+│   ├── impact_analyzer.go     # ⚠️ Validación de riesgo
 │   ├── mmap.go         # Cache de memory mapping
 │   └── watcher.go      # Vigilancia de archivos
 ├── cache/              # Sistema de caché

@@ -1,4 +1,10 @@
-# MCP Filesystem Ultra - Referencia Rápida para Claude Desktop (v3.1.0)
+# MCP Filesystem Ultra - Referencia Rápida para Claude Desktop (v3.7.0)
+
+> ⚠️ **NOTA**: Este archivo está DEPRECADO. Por favor usa las versiones actualizadas:
+> - **AI_AGENT_INSTRUCTIONS_ES.md** - Guía completa para agentes IA (Español)
+> - **SYSTEM_PROMPT_COMPACT_ES.txt** - Versión mínima para system prompts (Español)
+> - **AI_AGENT_INSTRUCTIONS.md** - Guía completa (Inglés)
+> - **SYSTEM_PROMPT_COMPACT.txt** - Versión mínima (Inglés)
 
 ## ⚡ REGLAS CRÍTICAS (SIEMPRE CUMPLIR)
 
