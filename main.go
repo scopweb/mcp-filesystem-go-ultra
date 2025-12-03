@@ -77,6 +77,17 @@ func main() {
 		hooksConfig      = flag.String("hooks-config", "", "Path to hooks configuration JSON file (e.g., hooks.json)")
 		version          = flag.Bool("version", false, "Show version information")
 		benchmark        = flag.Bool("bench", false, "Run performance benchmark")
+
+		// Backup configuration
+		backupDir      = flag.String("backup-dir", "", "Directory for backup storage (default: temp/mcp-batch-backups)")
+		backupMaxAge   = flag.Int("backup-max-age", 7, "Max age of backups in days")
+		backupMaxCount = flag.Int("backup-max-count", 100, "Max number of backups to keep")
+
+		// Risk thresholds
+		riskThresholdMedium   = flag.Float64("risk-threshold-medium", 30.0, "Percentage change threshold for medium risk")
+		riskThresholdHigh     = flag.Float64("risk-threshold-high", 50.0, "Percentage change threshold for high risk")
+		riskOccurrencesMedium = flag.Int("risk-occurrences-medium", 50, "Number of occurrences threshold for medium risk")
+		riskOccurrencesHigh   = flag.Int("risk-occurrences-high", 100, "Number of occurrences threshold for high risk")
 	)
 	flag.Parse()
 
@@ -171,6 +182,17 @@ func main() {
 		MaxListItems:     config.MaxListItems,
 		HooksEnabled:     *hooksEnabled,
 		HooksConfigPath:  *hooksConfig,
+
+		// Backup configuration
+		BackupDir:      *backupDir,
+		BackupMaxAge:   *backupMaxAge,
+		BackupMaxCount: *backupMaxCount,
+
+		// Risk thresholds
+		RiskThresholdMedium:   *riskThresholdMedium,
+		RiskThresholdHigh:     *riskThresholdHigh,
+		RiskOccurrencesMedium: *riskOccurrencesMedium,
+		RiskOccurrencesHigh:   *riskOccurrencesHigh,
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize engine: %v", err)
@@ -1746,7 +1768,248 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		return mcp.NewToolResultText(help), nil
 	})
 
-	log.Printf("📚 Registered 50 ultra-fast tools (44 original + 5 mcp_ aliases + get_help)")
+	// ============================================================================
+	// BACKUP AND RECOVERY TOOLS (Bug10 Resolution)
+	// ============================================================================
+
+	// list_backups - List available backups with metadata
+	listBackupsTool := mcp.NewTool("list_backups",
+		mcp.WithDescription("📦 List available file backups with metadata (timestamp, size, operation). Backups are created automatically before destructive operations."),
+		mcp.WithNumber("limit", mcp.Description("Max backups to return (default: 20)")),
+		mcp.WithString("filter_operation", mcp.Description("Filter by operation: edit, delete, batch, all")),
+		mcp.WithString("filter_path", mcp.Description("Filter by file path (substring match)")),
+		mcp.WithNumber("newer_than_hours", mcp.Description("Only backups newer than N hours")),
+	)
+	s.AddTool(listBackupsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if engine.GetBackupManager() == nil {
+			return mcp.NewToolResultError("Backup system not available"), nil
+		}
+
+		args := request.Params.Arguments.(map[string]interface{})
+		limit := 20
+		filterOp := "all"
+		filterPath := ""
+		newerThan := 0
+
+		if l, ok := args["limit"].(float64); ok {
+			limit = int(l)
+		}
+		if f, ok := args["filter_operation"].(string); ok {
+			filterOp = f
+		}
+		if f, ok := args["filter_path"].(string); ok {
+			filterPath = f
+		}
+		if n, ok := args["newer_than_hours"].(float64); ok {
+			newerThan = int(n)
+		}
+
+		backups, err := engine.GetBackupManager().ListBackups(limit, filterOp, filterPath, newerThan)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to list backups: %v", err)), nil
+		}
+
+		var output strings.Builder
+		output.WriteString(fmt.Sprintf("📦 Available Backups (%d)\n", len(backups)))
+		output.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+
+		for _, backup := range backups {
+			output.WriteString(fmt.Sprintf("🔖 %s\n", backup.BackupID))
+			output.WriteString(fmt.Sprintf("   Time: %s (%s)\n", backup.Timestamp.Format("2006-01-02 15:04:05"), core.FormatAge(backup.Timestamp)))
+			output.WriteString(fmt.Sprintf("   Operation: %s\n", backup.Operation))
+			output.WriteString(fmt.Sprintf("   Files: %d (%s)\n", len(backup.Files), core.FormatSize(backup.TotalSize)))
+			if backup.UserContext != "" {
+				output.WriteString(fmt.Sprintf("   Context: %s\n", backup.UserContext))
+			}
+			output.WriteString("\n")
+		}
+
+		if len(backups) == 0 {
+			output.WriteString("No backups found matching the criteria.\n")
+		} else {
+			output.WriteString("💡 Use restore_backup(backup_id) to restore files\n")
+			output.WriteString("💡 Use get_backup_info(backup_id) for detailed information\n")
+		}
+
+		return mcp.NewToolResultText(output.String()), nil
+	})
+
+	// restore_backup - Restore files from a backup
+	restoreBackupTool := mcp.NewTool("restore_backup",
+		mcp.WithDescription("🔄 Restore file(s) from a backup. Creates a backup of current state before restoring. Use preview mode to see changes first."),
+		mcp.WithString("backup_id", mcp.Required(), mcp.Description("Backup ID from list_backups")),
+		mcp.WithString("file_path", mcp.Description("Specific file to restore (optional, default: all files)")),
+		mcp.WithBoolean("preview", mcp.Description("Preview mode: show diff without restoring (default: false)")),
+	)
+	s.AddTool(restoreBackupTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if engine.GetBackupManager() == nil {
+			return mcp.NewToolResultError("Backup system not available"), nil
+		}
+
+		backupID, err := request.RequireString("backup_id")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid backup_id: %v", err)), nil
+		}
+
+		args := request.Params.Arguments.(map[string]interface{})
+		filePath := ""
+		preview := false
+
+		if f, ok := args["file_path"].(string); ok {
+			filePath = f
+		}
+		if p, ok := args["preview"].(bool); ok {
+			preview = p
+		}
+
+		if preview {
+			// Preview mode: show diff
+			if filePath == "" {
+				return mcp.NewToolResultError("preview mode requires file_path parameter"), nil
+			}
+
+			diff, err := engine.GetBackupManager().CompareWithBackup(backupID, filePath)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Failed to compare: %v", err)), nil
+			}
+
+			return mcp.NewToolResultText(fmt.Sprintf("📊 Preview Mode - Changes to be restored:\n\n%s", diff)), nil
+		}
+
+		// Actual restore
+		restoredFiles, err := engine.GetBackupManager().RestoreBackup(backupID, filePath, true)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to restore: %v", err)), nil
+		}
+
+		var output strings.Builder
+		output.WriteString("✅ Restore completed successfully\n\n")
+		output.WriteString(fmt.Sprintf("📁 Restored %d file(s):\n", len(restoredFiles)))
+		for _, file := range restoredFiles {
+			output.WriteString(fmt.Sprintf("   • %s\n", file))
+		}
+		output.WriteString("\n💡 A backup of the current state was created before restoring\n")
+
+		return mcp.NewToolResultText(output.String()), nil
+	})
+
+	// compare_with_backup - Compare current file with backup
+	compareBackupTool := mcp.NewTool("compare_with_backup",
+		mcp.WithDescription("🔍 Compare current file content with a specific backup to see what changed."),
+		mcp.WithString("backup_id", mcp.Required(), mcp.Description("Backup ID from list_backups")),
+		mcp.WithString("file_path", mcp.Required(), mcp.Description("File path to compare")),
+	)
+	s.AddTool(compareBackupTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if engine.GetBackupManager() == nil {
+			return mcp.NewToolResultError("Backup system not available"), nil
+		}
+
+		backupID, err := request.RequireString("backup_id")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid backup_id: %v", err)), nil
+		}
+
+		filePath, err := request.RequireString("file_path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid file_path: %v", err)), nil
+		}
+
+		diff, err := engine.GetBackupManager().CompareWithBackup(backupID, filePath)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Comparison failed: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(diff), nil
+	})
+
+	// cleanup_backups - Remove old backups
+	cleanupBackupsTool := mcp.NewTool("cleanup_backups",
+		mcp.WithDescription("🧹 Remove old backups to free disk space. Use dry_run mode first to see what will be deleted."),
+		mcp.WithNumber("older_than_days", mcp.Description("Delete backups older than N days (default: 7)")),
+		mcp.WithBoolean("dry_run", mcp.Description("Preview mode: show what would be deleted without actually deleting (default: true)")),
+	)
+	s.AddTool(cleanupBackupsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if engine.GetBackupManager() == nil {
+			return mcp.NewToolResultError("Backup system not available"), nil
+		}
+
+		args := request.Params.Arguments.(map[string]interface{})
+		olderThanDays := 7
+		dryRun := true
+
+		if d, ok := args["older_than_days"].(float64); ok {
+			olderThanDays = int(d)
+		}
+		if dr, ok := args["dry_run"].(bool); ok {
+			dryRun = dr
+		}
+
+		deletedCount, freedSpace, err := engine.GetBackupManager().CleanupOldBackups(olderThanDays, dryRun)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Cleanup failed: %v", err)), nil
+		}
+
+		var output strings.Builder
+		if dryRun {
+			output.WriteString("🔍 Dry Run Mode - Preview of cleanup operation\n\n")
+			output.WriteString(fmt.Sprintf("Would delete: %d backup(s)\n", deletedCount))
+			output.WriteString(fmt.Sprintf("Would free: %s\n\n", core.FormatSize(freedSpace)))
+			output.WriteString("💡 Run with dry_run: false to actually delete backups\n")
+		} else {
+			output.WriteString("✅ Cleanup completed\n\n")
+			output.WriteString(fmt.Sprintf("Deleted: %d backup(s)\n", deletedCount))
+			output.WriteString(fmt.Sprintf("Freed: %s\n", core.FormatSize(freedSpace)))
+		}
+
+		return mcp.NewToolResultText(output.String()), nil
+	})
+
+	// get_backup_info - Get detailed info about a specific backup
+	getBackupInfoTool := mcp.NewTool("get_backup_info",
+		mcp.WithDescription("ℹ️  Get detailed information about a specific backup including all files and metadata."),
+		mcp.WithString("backup_id", mcp.Required(), mcp.Description("Backup ID from list_backups")),
+	)
+	s.AddTool(getBackupInfoTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if engine.GetBackupManager() == nil {
+			return mcp.NewToolResultError("Backup system not available"), nil
+		}
+
+		backupID, err := request.RequireString("backup_id")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid backup_id: %v", err)), nil
+		}
+
+		info, err := engine.GetBackupManager().GetBackupInfo(backupID)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to get backup info: %v", err)), nil
+		}
+
+		var output strings.Builder
+		output.WriteString(fmt.Sprintf("📦 Backup Details: %s\n", info.BackupID))
+		output.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+		output.WriteString(fmt.Sprintf("⏰ Timestamp: %s (%s)\n", info.Timestamp.Format("2006-01-02 15:04:05"), core.FormatAge(info.Timestamp)))
+		output.WriteString(fmt.Sprintf("🔧 Operation: %s\n", info.Operation))
+		if info.UserContext != "" {
+			output.WriteString(fmt.Sprintf("📝 Context: %s\n", info.UserContext))
+		}
+		output.WriteString(fmt.Sprintf("📊 Total Size: %s\n", core.FormatSize(info.TotalSize)))
+		output.WriteString(fmt.Sprintf("📁 Files: %d\n\n", len(info.Files)))
+
+		output.WriteString("Files in backup:\n")
+		for i, file := range info.Files {
+			if i >= 10 {
+				output.WriteString(fmt.Sprintf("   ... and %d more files\n", len(info.Files)-10))
+				break
+			}
+			output.WriteString(fmt.Sprintf("   • %s (%s)\n", file.OriginalPath, core.FormatSize(file.Size)))
+		}
+
+		output.WriteString(fmt.Sprintf("\n🔗 Backup Location: %s\n", engine.GetBackupManager().GetBackupPath(backupID)))
+
+		return mcp.NewToolResultText(output.String()), nil
+	})
+
+	log.Printf("📚 Registered 55 ultra-fast tools (44 original + 5 mcp_ aliases + get_help + 5 backup tools)")
 
 	return nil
 }

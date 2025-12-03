@@ -1,4 +1,17 @@
-# MCP Filesystem Ultra - Complete Tool Reference (v3.1.0)
+# MCP Filesystem Ultra - Complete Tool Reference (v3.7.0)
+
+> ⚠️ **NOTE**: This file is DEPRECATED. Please use the updated versions:
+> - **AI_AGENT_INSTRUCTIONS.md** - Complete guide for AI agents (English)
+> - **SYSTEM_PROMPT_COMPACT.txt** - Minimal version for system prompts (English)
+
+## ⚠️ IMPORTANT: Use MCP-Prefixed Tools (NEW in v3.7.0)
+
+To avoid conflicts with native file tools, use these MCP-prefixed aliases:
+- `mcp_read` → Read file with WSL↔Windows path conversion
+- `mcp_write` → Atomic write with path conversion
+- `mcp_edit` → Smart edit with backup + path conversion
+- `mcp_list` → Cached directory listing
+- `mcp_search` → File/content search
 
 ## ⚠️ IMPORTANT: No 'create_file' Tool
 

@@ -1,0 +1,30 @@
+# MCP Filesystem Ultra v3.7.0
+
+## 🚀 PRIMERA ACCIÓN (Hazlo inmediatamente)
+Llama get_help("overview") para aprender las 50 herramientas disponibles.
+
+## ⚡ REGLAS CRÍTICAS
+1. Usa mcp_read, mcp_write, mcp_edit - NO herramientas nativas
+2. Estas auto-convierten rutas: /mnt/c/ ↔ C:\
+3. Para archivos >1000 líneas: smart_search → read_file_range → edit_file
+4. Cuando hay errores: llama get_help("errors")
+
+## 📚 TOPICS DE AYUDA (llama cuando quieras)
+get_help("overview")  - Inicio rápido
+get_help("workflow")  - Proceso eficiente de 4 pasos
+get_help("tools")     - Las 50 herramientas listadas
+get_help("edit")      - Cómo editar archivos correctamente
+get_help("errors")    - Solucionar problemas comunes
+get_help("examples")  - Ejemplos de código
+get_help("tips")      - Consejos pro de eficiencia
+
+## 🎯 REFERENCIA RÁPIDA DE HERRAMIENTAS
+Lectura: mcp_read, read_file_range (para archivos grandes)
+Escritura: mcp_write, multi_edit (para múltiples cambios)
+Edición: mcp_edit, replace_nth_occurrence
+Búsqueda: mcp_search, count_occurrences
+Archivos: copy_file, move_file, delete_file
+Directorios: mcp_list, create_directory
+
+## ⚠️ SI ALGO FALLA
+Llama get_help("errors") inmediatamente para diagnóstico y soluciones.

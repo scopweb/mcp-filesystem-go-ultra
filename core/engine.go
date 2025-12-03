@@ -22,12 +22,23 @@ type Config struct {
 	DebugMode        bool
 	AllowedPaths     []string
 	BinaryThreshold  int64
-	CompactMode      bool  // Enable compact responses
-	MaxResponseSize  int64 // Max response size
-	MaxSearchResults int   // Max search results
-	MaxListItems     int   // Max list items
+	CompactMode      bool   // Enable compact responses
+	MaxResponseSize  int64  // Max response size
+	MaxSearchResults int    // Max search results
+	MaxListItems     int    // Max list items
 	HooksConfigPath  string // Path to hooks configuration file
 	HooksEnabled     bool   // Enable hooks system
+
+	// Backup configuration
+	BackupDir      string // Directory for backup storage
+	BackupMaxAge   int    // Max age of backups in days
+	BackupMaxCount int    // Max number of backups to keep
+
+	// Risk thresholds
+	RiskThresholdMedium   float64 // % change for medium risk
+	RiskThresholdHigh     float64 // % change for high risk
+	RiskOccurrencesMedium int     // Occurrences for medium risk
+	RiskOccurrencesHigh   int     // Occurrences for high risk
 }
 
 // UltraFastEngine implements all filesystem operations with maximum performance
@@ -57,6 +68,12 @@ type UltraFastEngine struct {
 
 	// Buffer pool for memory-efficient I/O operations
 	bufferPool *sync.Pool
+
+	// Backup manager for file protection
+	backupManager *BackupManager
+
+	// Risk thresholds for impact analysis
+	riskThresholds RiskThresholds
 }
 
 // PerformanceMetrics tracks real-time performance statistics
@@ -77,12 +94,12 @@ type PerformanceMetrics struct {
 
 	// Telemetry: Track edit operations
 	// Used to detect full-file rewrites vs targeted edits
-	EditOperations       int64          // Total edit operations
-	TargetedEdits        int64          // Edits with small old_text (<100 bytes)
-	FullFileRewrites     int64          // Edits with large old_text (>1000 bytes)
-	LastEditOperation    string         // Description of last edit
-	LastEditBytesSent    int64          // Bytes sent in last edit operation
-	AverageBytesPerEdit  float64        // Running average of bytes per edit
+	EditOperations      int64   // Total edit operations
+	TargetedEdits       int64   // Edits with small old_text (<100 bytes)
+	FullFileRewrites    int64   // Edits with large old_text (>1000 bytes)
+	LastEditOperation   string  // Description of last edit
+	LastEditBytesSent   int64   // Bytes sent in last edit operation
+	AverageBytesPerEdit float64 // Running average of bytes per edit
 }
 
 // LogOperationMetric records detailed operation metrics for analysis
@@ -159,6 +176,47 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 		if isWSL {
 			log.Printf("💡 WSL detected. Auto-sync is disabled. Enable with: configure_autosync or set MCP_WSL_AUTOSYNC=true")
 		}
+	}
+
+	// Initialize backup manager
+	backupMaxAge := config.BackupMaxAge
+	if backupMaxAge <= 0 {
+		backupMaxAge = 7 // Default: 7 days
+	}
+	backupMaxCount := config.BackupMaxCount
+	if backupMaxCount <= 0 {
+		backupMaxCount = 100 // Default: 100 backups
+	}
+
+	backupManager, err := NewBackupManager(config.BackupDir, backupMaxCount, backupMaxAge)
+	if err != nil {
+		log.Printf("⚠️ Failed to initialize backup manager: %v (backups disabled)", err)
+	} else {
+		engine.backupManager = backupManager
+		log.Printf("🔒 Backup manager initialized: %s (max age: %d days, max count: %d)",
+			backupManager.backupDir, backupMaxAge, backupMaxCount)
+	}
+
+	// Initialize risk thresholds
+	if config.RiskThresholdMedium > 0 {
+		engine.riskThresholds.MediumPercentage = config.RiskThresholdMedium
+	} else {
+		engine.riskThresholds.MediumPercentage = 30.0
+	}
+	if config.RiskThresholdHigh > 0 {
+		engine.riskThresholds.HighPercentage = config.RiskThresholdHigh
+	} else {
+		engine.riskThresholds.HighPercentage = 50.0
+	}
+	if config.RiskOccurrencesMedium > 0 {
+		engine.riskThresholds.MediumOccurrences = config.RiskOccurrencesMedium
+	} else {
+		engine.riskThresholds.MediumOccurrences = 50
+	}
+	if config.RiskOccurrencesHigh > 0 {
+		engine.riskThresholds.HighOccurrences = config.RiskOccurrencesHigh
+	} else {
+		engine.riskThresholds.HighOccurrences = 100
 	}
 
 	return engine, nil
@@ -270,6 +328,8 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 		if e.config.DebugMode {
 			log.Printf("📦 Cache hit for %s", path)
 		}
+		// Track access for predictive prefetching
+		e.cache.TrackAccess(path)
 		return string(cached), nil
 	}
 
@@ -279,8 +339,9 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 		return "", fmt.Errorf("file read error: %v", err)
 	}
 
-	// Cache the content
+	// Cache the content and track access
 	e.cache.SetFile(path, content)
+	e.cache.TrackAccess(path)
 
 	return string(content), nil
 }
@@ -709,7 +770,7 @@ func (e *UltraFastEngine) LogEditTelemetry(oldTextSize, newTextSize int64, fileP
 	e.metrics.LastEditBytesSent = oldTextSize
 
 	// Detect edit pattern
-	isTargeted := oldTextSize < 100 && oldTextSize > 0   // Small targeted edit
+	isTargeted := oldTextSize < 100 && oldTextSize > 0         // Small targeted edit
 	isFullRewrite := oldTextSize > 1000 || newTextSize > 10000 // Large or new content
 
 	if isTargeted {
@@ -752,13 +813,13 @@ func (e *UltraFastEngine) GetEditTelemetrySummary() map[string]interface{} {
 	rewritePercent := float64(e.metrics.FullFileRewrites) / float64(totalEdits) * 100
 
 	return map[string]interface{}{
-		"total_edits":          e.metrics.EditOperations,
-		"targeted_edits":       e.metrics.TargetedEdits,
-		"targeted_percent":     fmt.Sprintf("%.1f%%", targetedPercent),
-		"full_rewrites":        e.metrics.FullFileRewrites,
-		"full_rewrite_percent": fmt.Sprintf("%.1f%%", rewritePercent),
+		"total_edits":            e.metrics.EditOperations,
+		"targeted_edits":         e.metrics.TargetedEdits,
+		"targeted_percent":       fmt.Sprintf("%.1f%%", targetedPercent),
+		"full_rewrites":          e.metrics.FullFileRewrites,
+		"full_rewrite_percent":   fmt.Sprintf("%.1f%%", rewritePercent),
 		"average_bytes_per_edit": fmt.Sprintf("%.0f", e.metrics.AverageBytesPerEdit),
-		"last_operation":       e.metrics.LastEditOperation,
+		"last_operation":         e.metrics.LastEditOperation,
 		"recommendation": map[string]string{
 			"if_high_rewrites": "Consider using smart_search + read_file_range + edit_file for surgical edits",
 			"if_low_targeted":  "Good! Edits are efficient",
@@ -792,4 +853,9 @@ func (e *UltraFastEngine) GetAutoSyncStatus() map[string]interface{} {
 		}
 	}
 	return e.autoSyncManager.GetStatus()
+}
+
+// GetBackupManager returns the backup manager instance
+func (e *UltraFastEngine) GetBackupManager() *BackupManager {
+	return e.backupManager
 }

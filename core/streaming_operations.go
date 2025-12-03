@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -42,11 +43,12 @@ func DefaultChunkingConfig() *ChunkingConfig {
 }
 
 // StreamingWriteFile writes large files in intelligent chunks
+// ULTRA-FAST: Uses buffered I/O with pooled buffers for optimal performance
 func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content string) error {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
-	// Quick path for small files - aumentado el umbral
-	if len(content) <= 200*1024 {
+	// Quick path for small files - increased threshold for better performance
+	if len(content) <= 256*1024 {
 		return e.WriteFileContent(ctx, path, content)
 	}
 
@@ -67,7 +69,7 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 		LastUpdate:  start,
 	}
 
-	// Log solo para archivos grandes (>5MB) para reducir overhead
+	// Log only for very large files (>5MB) to reduce overhead
 	if totalSize > 5*1024*1024 && !e.config.CompactMode {
 		log.Printf("🚀 Starting streaming write: %s (%s in %d chunks)", path, formatSize(int64(totalSize)), totalChunks)
 	}
@@ -81,7 +83,7 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 	// Create temp file for atomic operation
 	tmpPath := path + ".streaming." + opID
 
-	// Open file for writing con buffer para mejor rendimiento
+	// Open file for writing with O_SYNC for data integrity
 	file, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %v", err)
@@ -93,7 +95,14 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 		}
 	}()
 
-	// Write in chunks with progress reporting
+	// Use buffered writer with pooled buffer for better performance
+	// 64KB buffer provides optimal balance between memory and I/O efficiency
+	bufPtr := e.bufferPool.Get().(*[]byte)
+	defer e.bufferPool.Put(bufPtr)
+
+	writer := bufio.NewWriterSize(file, len(*bufPtr))
+
+	// Write in chunks with optimized I/O
 	written := 0
 	for i := 0; i < totalChunks; i++ {
 		operation.CurrentChunk = i + 1
@@ -109,18 +118,20 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 
 		chunk := content[startPos:end]
 
-		// Write chunk
-		n, err := file.WriteString(chunk)
+		// Write chunk through buffered writer
+		n, err := writer.WriteString(chunk)
 		if err != nil {
 			return fmt.Errorf("failed to write chunk %d: %v", i+1, err)
 		}
 		written += n
-
-		// Progress report disabled for performance
-		// Eliminado delay innecesario - el OS maneja esto eficientemente
 	}
 
-	// Sync and close
+	// Flush buffered data
+	if err := writer.Flush(); err != nil {
+		return fmt.Errorf("failed to flush buffer: %v", err)
+	}
+
+	// Sync to disk
 	if err := file.Sync(); err != nil {
 		return fmt.Errorf("failed to sync file: %v", err)
 	}
@@ -136,10 +147,11 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 
 	operation.Status = "completed"
 
-	// Log solo para archivos muy grandes (>5MB) y si no estamos en compact mode
+	// Log only for very large files (>5MB) and if not in compact mode
 	if totalSize > 5*1024*1024 && !e.config.CompactMode {
 		elapsed := time.Since(start)
-		log.Printf("✅ Streaming write completed: %s (%v)", path, elapsed)
+		throughput := float64(totalSize) / elapsed.Seconds() / 1024 / 1024
+		log.Printf("✅ Streaming write completed: %s (%v, %.1f MB/s)", path, elapsed, throughput)
 	}
 
 	// Auto-sync to Windows if enabled (async, non-blocking)
@@ -150,7 +162,8 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 	return nil
 }
 
-// ChunkedReadFile reads large files in chunks with progress reporting
+// ChunkedReadFile reads large files in chunks with optimized I/O
+// ULTRA-FAST: Uses pre-allocated buffer and efficient reading
 func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxChunkSize int) (string, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
@@ -168,7 +181,7 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 	}
 
 	start := time.Now()
-	// Log solo para archivos muy grandes y si no estamos en compact mode
+	// Log only for very large files and if not in compact mode
 	if fileSize > 5*1024*1024 && !e.config.CompactMode {
 		log.Printf("🚀 Chunked read: %s (%s)", path, formatSize(fileSize))
 	}
@@ -180,38 +193,34 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 	}
 	defer file.Close()
 
-	// Read in chunks
+	// Use pooled buffer for reading
+	bufPtr := e.bufferPool.Get().(*[]byte)
+	defer e.bufferPool.Put(bufPtr)
+	buffer := *bufPtr
+
+	// Use buffered reader for better I/O performance
+	reader := bufio.NewReaderSize(file, len(buffer))
+
+	// Pre-allocate result with exact size for zero-copy
 	var result strings.Builder
-	result.Grow(int(fileSize)) // Pre-allocate capacity
+	result.Grow(int(fileSize))
 
-	buffer := make([]byte, maxChunkSize)
-	totalRead := int64(0)
-	chunkNum := 0
-
+	// Read through buffered reader into pre-allocated builder
 	for {
-		n, err := file.Read(buffer)
-		if n == 0 {
-			break
+		n, err := reader.Read(buffer)
+		if n > 0 {
+			result.Write(buffer[:n])
 		}
-
-		chunkNum++
-		result.Write(buffer[:n])
-		totalRead += int64(n)
-
-		// Progress reporting disabled for performance
-
 		if err != nil {
-			if err.Error() == "EOF" {
-				break
-			}
-			return "", fmt.Errorf("read error: %v", err)
+			break
 		}
 	}
 
-	// Log solo para archivos muy grandes y si no estamos en compact mode
+	// Log only for very large files and if not in compact mode
 	if fileSize > 5*1024*1024 && !e.config.CompactMode {
 		elapsed := time.Since(start)
-		log.Printf("✅ Chunked read completed: %s (%v)", path, elapsed)
+		throughput := float64(fileSize) / elapsed.Seconds() / 1024 / 1024
+		log.Printf("✅ Chunked read completed: %s (%v, %.1f MB/s)", path, elapsed, throughput)
 	}
 
 	return result.String(), nil

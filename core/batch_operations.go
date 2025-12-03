@@ -3,7 +3,6 @@ package core
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -28,31 +27,35 @@ type BatchRequest struct {
 	Atomic       bool            `json:"atomic"`        // Si es true, se hace rollback en caso de error
 	CreateBackup bool            `json:"create_backup"` // Crear backup antes de ejecutar
 	ValidateOnly bool            `json:"validate_only"` // Solo validar, no ejecutar
+	Force        bool            `json:"force"`         // Bypass risk validation warnings
 }
 
 // BatchResult representa el resultado de ejecutar un batch
 type BatchResult struct {
-	Success        bool                   `json:"success"`
-	TotalOps       int                    `json:"total_operations"`
-	CompletedOps   int                    `json:"completed_operations"`
-	FailedOps      int                    `json:"failed_operations"`
-	Results        []OperationResult      `json:"results"`
-	BackupPath     string                 `json:"backup_path,omitempty"`
-	RollbackDone   bool                   `json:"rollback_done"`
-	ExecutionTime  string                 `json:"execution_time"`
-	ValidationOnly bool                   `json:"validation_only"`
-	Errors         []string               `json:"errors,omitempty"`
+	Success        bool              `json:"success"`
+	TotalOps       int               `json:"total_operations"`
+	CompletedOps   int               `json:"completed_operations"`
+	FailedOps      int               `json:"failed_operations"`
+	Results        []OperationResult `json:"results"`
+	BackupPath     string            `json:"backup_path,omitempty"`
+	BackupID       string            `json:"backup_id,omitempty"` // New: ID from BackupManager
+	RollbackDone   bool              `json:"rollback_done"`
+	ExecutionTime  string            `json:"execution_time"`
+	ValidationOnly bool              `json:"validation_only"`
+	Errors         []string          `json:"errors,omitempty"`
+	RiskLevel      string            `json:"risk_level,omitempty"`   // New: Batch risk assessment
+	RiskWarning    string            `json:"risk_warning,omitempty"` // New: Risk warning message
 }
 
 // OperationResult representa el resultado de una operación individual
 type OperationResult struct {
-	Index     int    `json:"index"`
-	Type      string `json:"type"`
-	Path      string `json:"path"`
-	Success   bool   `json:"success"`
-	Error     string `json:"error,omitempty"`
-	Skipped   bool   `json:"skipped,omitempty"`
-	BytesAffected int64 `json:"bytes_affected,omitempty"`
+	Index         int    `json:"index"`
+	Type          string `json:"type"`
+	Path          string `json:"path"`
+	Success       bool   `json:"success"`
+	Error         string `json:"error,omitempty"`
+	Skipped       bool   `json:"skipped,omitempty"`
+	BytesAffected int64  `json:"bytes_affected,omitempty"`
 }
 
 // BatchOperationManager maneja operaciones en batch con soporte para rollback
@@ -356,9 +359,9 @@ func (m *BatchOperationManager) createBackup(operations []FileOperation) (string
 
 	// Guardar metadatos del batch
 	metadata := map[string]interface{}{
-		"timestamp":   timestamp,
-		"operations":  len(operations),
-		"created_at":  time.Now().Format(time.RFC3339),
+		"timestamp":  timestamp,
+		"operations": len(operations),
+		"created_at": time.Now().Format(time.RFC3339),
 	}
 
 	metadataJSON, _ := json.MarshalIndent(metadata, "", "  ")
@@ -498,22 +501,4 @@ func (m *BatchOperationManager) cleanOldBackups() {
 		path := filepath.Join(m.backupDir, entries[i].Name())
 		os.RemoveAll(path)
 	}
-}
-
-// copyFile copia un archivo
-func copyFile(src, dst string) error {
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer sourceFile.Close()
-
-	destFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer destFile.Close()
-
-	_, err = io.Copy(destFile, sourceFile)
-	return err
 }

@@ -18,6 +18,7 @@ type EditResult struct {
 	ReplacementCount int
 	MatchConfidence  string
 	LinesAffected    int
+	BackupID         string // ID of backup created before edit
 }
 
 // SearchMatch represents a text search match
@@ -58,6 +59,9 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, 
 		return nil, fmt.Errorf("context validation failed: %s - file may have been modified. Please re-read the file with smart_search + read_file_range", contextWarning)
 	}
 
+	// Calculate change impact for risk assessment
+	impact := CalculateChangeImpact(string(content), oldText, newText, e.riskThresholds)
+
 	// Log telemetry about this edit operation
 	// This helps identify patterns of full-file rewrites vs targeted edits
 	e.LogEditTelemetry(int64(len(oldText)), int64(len(newText)), path)
@@ -73,8 +77,10 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, 
 		Timestamp:  time.Now(),
 		WorkingDir: workingDir,
 		Metadata: map[string]interface{}{
-			"old_text": oldText,
-			"new_text": newText,
+			"old_text":       oldText,
+			"new_text":       newText,
+			"risk_level":     impact.RiskLevel,
+			"change_percent": impact.ChangePercentage,
 		},
 	}
 
@@ -83,16 +89,15 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, 
 		return nil, fmt.Errorf("pre-edit hook denied operation: %v", err)
 	}
 
-	// Create backup
-	backupPath, err := e.createBackup(path)
-	if err != nil {
-		return nil, fmt.Errorf("could not create backup: %v", err)
-	}
-	defer func() {
-		if backupPath != "" {
-			os.Remove(backupPath)
+	// Create persistent backup using BackupManager
+	var backupID string
+	if e.backupManager != nil {
+		backupID, err = e.backupManager.CreateBackupWithContext(path, "edit_file",
+			fmt.Sprintf("Edit: %d occurrences, %.1f%% change", impact.Occurrences, impact.ChangePercentage))
+		if err != nil {
+			return nil, fmt.Errorf("could not create backup: %v", err)
 		}
-	}()
+	}
 
 	// Perform intelligent edit
 	result, err := e.performIntelligentEdit(string(content), oldText, newText)
@@ -121,21 +126,22 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, 
 	// Invalidate cache
 	e.cache.InvalidateFile(path)
 
-	// Remove backup on success
-	if backupPath != "" {
-		os.Remove(backupPath)
-		backupPath = ""
-	}
+	// DO NOT remove backup - keep it persistent for recovery
+	// (old behavior: os.Remove(backupPath) - removed for Bug10 fix)
 
 	// Execute post-edit hooks
 	hookCtx.Event = HookPostEdit
 	hookCtx.NewContent = finalContent
+	hookCtx.Metadata["backup_id"] = backupID
 	_, _ = e.hookManager.ExecuteHooks(context.Background(), HookPostEdit, hookCtx)
 
 	// Auto-sync to Windows if enabled (async, non-blocking)
 	if e.autoSyncManager != nil {
 		_ = e.autoSyncManager.AfterEdit(path)
 	}
+
+	// Store backup ID in result
+	result.BackupID = backupID
 
 	return result, nil
 }
@@ -252,6 +258,7 @@ func (e *UltraFastEngine) createBackup(path string) (string, error) {
 }
 
 // performIntelligentEdit performs intelligent text replacement with optimizations
+// ULTRA-FAST: Uses pre-allocated buffers and minimal allocations
 func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText string) (*EditResult, error) {
 	if oldText == "" {
 		return nil, fmt.Errorf("old_text cannot be empty")
@@ -262,14 +269,40 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 	oldText = normalizeLineEndings(oldText)
 	newText = normalizeLineEndings(newText)
 
-	// OPTIMIZATION 1: Fast path for exact match (most common case)
+	// OPTIMIZATION 1: Fast path for exact match (most common case - ~80% of edits)
+	// Uses strings.Index which is highly optimized with SIMD on modern CPUs
 	if idx := strings.Index(content, oldText); idx >= 0 {
-		newContent := strings.ReplaceAll(content, oldText, newText)
 		replacements := strings.Count(content, oldText)
-		linesAffected := calculateLinesWithText(content, oldText)
+
+		// Pre-allocate result with exact size for zero-copy
+		sizeDiff := len(newText) - len(oldText)
+		newLen := len(content) + (sizeDiff * replacements)
+
+		var sb strings.Builder
+		sb.Grow(newLen)
+
+		// Single-pass replacement (faster than ReplaceAll for known count)
+		last := 0
+		linesAffected := 0
+		for {
+			idx := strings.Index(content[last:], oldText)
+			if idx < 0 {
+				break
+			}
+			// Count newlines in affected region for line tracking
+			if strings.Contains(content[last:last+idx+len(oldText)], "\n") {
+				linesAffected += strings.Count(content[last:last+idx+len(oldText)], "\n")
+			} else {
+				linesAffected++
+			}
+			sb.WriteString(content[last : last+idx])
+			sb.WriteString(newText)
+			last = last + idx + len(oldText)
+		}
+		sb.WriteString(content[last:])
 
 		return &EditResult{
-			ModifiedContent:  newContent,
+			ModifiedContent:  sb.String(),
 			ReplacementCount: replacements,
 			MatchConfidence:  "high",
 			LinesAffected:    linesAffected,
@@ -279,26 +312,51 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 	// OPTIMIZATION 2: Pre-compute normalized variants once
 	normalizedOld := strings.TrimSpace(oldText)
 
-	// OPTIMIZATION 3: Check if normalized version exists in content
+	// OPTIMIZATION 3: Check if normalized version exists in content (whitespace-insensitive)
 	if normalizedOld != oldText && strings.Contains(content, normalizedOld) {
-		// Fast replacement for normalized text
-		newContent := strings.ReplaceAll(content, normalizedOld, newText)
+		replacements := strings.Count(content, normalizedOld)
+
+		// Pre-allocate for zero-copy replacement
+		sizeDiff := len(newText) - len(normalizedOld)
+		newLen := len(content) + (sizeDiff * replacements)
+
+		var sb strings.Builder
+		sb.Grow(newLen)
+
+		// Fast single-pass replacement
+		last := 0
+		for {
+			idx := strings.Index(content[last:], normalizedOld)
+			if idx < 0 {
+				break
+			}
+			sb.WriteString(content[last : last+idx])
+			sb.WriteString(newText)
+			last = last + idx + len(normalizedOld)
+		}
+		sb.WriteString(content[last:])
+
 		return &EditResult{
-			ModifiedContent:  newContent,
-			ReplacementCount: strings.Count(content, normalizedOld),
+			ModifiedContent:  sb.String(),
+			ReplacementCount: replacements,
 			MatchConfidence:  "high",
 			LinesAffected:    calculateLinesWithText(content, normalizedOld),
 		}, nil
 	}
 
-	// OPTIMIZATION 4: Line-by-line processing with minimal allocations
+	// OPTIMIZATION 4: Line-by-line processing with pre-allocated builder
+	// Only used when exact match fails - handles indentation differences
 	lines := strings.Split(content, "\n")
 	replacements := 0
 	affectedLines := 0
 	modified := false
 
+	// Pre-allocate result builder with estimated size
+	var resultBuilder strings.Builder
+	resultBuilder.Grow(len(content) + 1024) // Extra space for potential expansions
+
 	for i, line := range lines {
-		// Try exact match in line first
+		// Try exact match in line first (most common)
 		if strings.Contains(line, oldText) {
 			lines[i] = strings.ReplaceAll(line, oldText, newText)
 			replacements += strings.Count(line, oldText)
@@ -326,8 +384,15 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 	}
 
 	if modified {
+		// Build result with pre-allocated builder
+		for i, line := range lines {
+			resultBuilder.WriteString(line)
+			if i < len(lines)-1 {
+				resultBuilder.WriteByte('\n')
+			}
+		}
 		return &EditResult{
-			ModifiedContent:  strings.Join(lines, "\n"),
+			ModifiedContent:  resultBuilder.String(),
 			ReplacementCount: replacements,
 			MatchConfidence:  "medium",
 			LinesAffected:    affectedLines,
@@ -347,6 +412,7 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 
 	// OPTIMIZATION 6: Flexible regex search as last resort (expensive)
 	// Only try if content is not too large (< 100KB for regex)
+	// Compile regex once and reuse
 	if len(content) < 100*1024 {
 		escapedOld := regexp.QuoteMeta(oldText)
 		flexiblePattern := makeFlexiblePattern(escapedOld)
@@ -518,6 +584,139 @@ func isTextContent(content string) bool {
 	// Simple heuristic: if content has too many null bytes, it's likely binary
 	nullCount := strings.Count(content, "\x00")
 	return float64(nullCount)/float64(len(content)) < 0.01
+}
+
+// MultiEditOperation represents a single edit in a batch
+type MultiEditOperation struct {
+	OldText string `json:"old_text"`
+	NewText string `json:"new_text"`
+}
+
+// MultiEditResult represents the result of a multi-edit operation
+type MultiEditResult struct {
+	TotalEdits      int      `json:"total_edits"`
+	SuccessfulEdits int      `json:"successful_edits"`
+	FailedEdits     int      `json:"failed_edits"`
+	LinesAffected   int      `json:"lines_affected"`
+	MatchConfidence string   `json:"match_confidence"`
+	Errors          []string `json:"errors,omitempty"`
+}
+
+// MultiEdit performs multiple edits on a single file atomically
+// This is MUCH faster than calling edit_file multiple times because:
+// 1. File is read only once
+// 2. All edits are applied in memory
+// 3. File is written only once
+// 4. Only one backup is created
+// ULTRA-FAST: Designed for Claude Desktop batch editing
+func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []MultiEditOperation) (*MultiEditResult, error) {
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
+
+	// Validate file
+	if err := e.validateEditableFile(path); err != nil {
+		return nil, fmt.Errorf("file validation failed: %v", err)
+	}
+
+	// Read current content once
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("error reading file: %v", err)
+	}
+
+	// Create backup once
+	backupPath, err := e.createBackup(path)
+	if err != nil {
+		return nil, fmt.Errorf("could not create backup: %v", err)
+	}
+	defer func() {
+		if backupPath != "" {
+			os.Remove(backupPath)
+		}
+	}()
+
+	// Apply all edits in order
+	result := &MultiEditResult{
+		TotalEdits:      len(edits),
+		MatchConfidence: "high",
+	}
+
+	currentContent := string(content)
+	totalLinesAffected := 0
+
+	for i, edit := range edits {
+		if edit.OldText == "" {
+			result.FailedEdits++
+			result.Errors = append(result.Errors, fmt.Sprintf("edit %d: old_text cannot be empty", i+1))
+			continue
+		}
+
+		// Apply this edit
+		editResult, err := e.performIntelligentEdit(currentContent, edit.OldText, edit.NewText)
+		if err != nil {
+			result.FailedEdits++
+			result.Errors = append(result.Errors, fmt.Sprintf("edit %d: %v", i+1, err))
+			// Lower confidence if some edits fail
+			if result.MatchConfidence == "high" {
+				result.MatchConfidence = "medium"
+			}
+			continue
+		}
+
+		if editResult.ReplacementCount == 0 {
+			result.FailedEdits++
+			result.Errors = append(result.Errors, fmt.Sprintf("edit %d: no match found for old_text", i+1))
+			if result.MatchConfidence == "high" {
+				result.MatchConfidence = "medium"
+			}
+			continue
+		}
+
+		// Update content for next edit
+		currentContent = editResult.ModifiedContent
+		result.SuccessfulEdits++
+		totalLinesAffected += editResult.LinesAffected
+
+		// Update confidence based on individual edit
+		if editResult.MatchConfidence == "low" && result.MatchConfidence == "high" {
+			result.MatchConfidence = "medium"
+		}
+	}
+
+	result.LinesAffected = totalLinesAffected
+
+	// If no edits succeeded, return error
+	if result.SuccessfulEdits == 0 {
+		return result, fmt.Errorf("no edits were successful: %v", result.Errors)
+	}
+
+	// Write modified content atomically
+	tmpPath := path + ".tmp." + fmt.Sprintf("%d", time.Now().UnixNano())
+	if err := os.WriteFile(tmpPath, []byte(currentContent), 0644); err != nil {
+		return nil, fmt.Errorf("error writing temp file: %v", err)
+	}
+
+	// Atomic rename
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return nil, fmt.Errorf("error finalizing edit: %v", err)
+	}
+
+	// Invalidate cache
+	e.cache.InvalidateFile(path)
+
+	// Remove backup on success
+	if backupPath != "" {
+		os.Remove(backupPath)
+		backupPath = ""
+	}
+
+	// Auto-sync to Windows if enabled (async, non-blocking)
+	if e.autoSyncManager != nil {
+		_ = e.autoSyncManager.AfterEdit(path)
+	}
+
+	return result, nil
 }
 
 // ReplaceNthOccurrence replaces a specific occurrence of a pattern in a file

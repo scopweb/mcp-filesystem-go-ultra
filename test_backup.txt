@@ -1,0 +1,5 @@
+Este es un archivo de prueba para el sistema de backup.
+Línea 2: Contenido inicial
+Línea 3: func original
+Línea 4: func original
+Línea 5: func original
