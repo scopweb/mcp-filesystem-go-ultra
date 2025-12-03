@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra-Fast
 
-**Version 3.4.0** - Automatic WSL ↔ Windows Sync (Silent Auto-Copy)
+**Version 3.7.1** - Advanced Search Parameters Now Available
 
 Un servidor MCP (Model Context Protocol) de alto rendimiento para operaciones de sistema de archivos, diseñado para máxima velocidad y eficiencia. **Especialmente optimizado para Claude Desktop** con soporte completo para archivos grandes sin timeouts ni bloqueos.
 
@@ -540,7 +540,7 @@ func NewName(
 - ✅ **Reporte** - Lista archivos con número de reemplazos
 
 #### `smart_search` - Búsqueda Rápida
-**Localiza archivos y coincidencias simples** (modo contenido desactivado por defecto en esta versión)
+**Localiza archivos y coincidencias de contenido con filtros opcionales**
 ```json
 {
   "tool": "smart_search",
@@ -550,10 +550,28 @@ func NewName(
   }
 }
 ```
-Devuelve coincidencias por nombre y (cuando se active include_content) líneas con matches.
+
+**Parámetros opcionales:**
+- `include_content` (boolean): Buscar dentro del contenido de archivos (default: false)
+- `file_types` (string): Filtrar por extensiones, separadas por comas (ej: ".go,.txt")
+
+**Ejemplo con parámetros opcionales:**
+```json
+{
+  "tool": "smart_search",
+  "arguments": {
+    "path": "./src",
+    "pattern": "TODO",
+    "include_content": true,
+    "file_types": ".go,.js"
+  }
+}
+```
+
+Devuelve coincidencias por nombre de archivo y, cuando `include_content` está activo, líneas con matches dentro del contenido.
 
 #### `advanced_text_search` - Búsqueda Detallada
-**Escaneo de contenido con contexto (parámetros avanzados aún fijos: case-insensitive, sin contexto adicional)**
+**Escaneo avanzado de contenido con contexto y opciones de búsqueda**
 ```json
 {
   "tool": "advanced_text_search",
@@ -563,7 +581,29 @@ Devuelve coincidencias por nombre y (cuando se active include_content) líneas c
   }
 }
 ```
-Salida: lista de archivos y número de línea. En futuras versiones se expondrán parámetros: `case_sensitive`, `whole_word`, `include_context`, `context_lines`.
+
+**Parámetros opcionales:**
+- `case_sensitive` (boolean): Búsqueda sensible a mayúsculas/minúsculas (default: false)
+- `whole_word` (boolean): Coincidir palabras completas solamente (default: false)
+- `include_context` (boolean): Incluir líneas de contexto alrededor del match (default: false)
+- `context_lines` (number): Número de líneas de contexto (default: 3)
+
+**Ejemplo con parámetros opcionales:**
+```json
+{
+  "tool": "advanced_text_search",
+  "arguments": {
+    "path": "./src",
+    "pattern": "func",
+    "case_sensitive": true,
+    "whole_word": true,
+    "include_context": true,
+    "context_lines": 5
+  }
+}
+```
+
+Salida: lista de archivos con número de línea y contenido. Con `include_context` activo, muestra líneas circundantes.
 
 #### `rename_file` - Renombrar Archivos/Directorios
 **Nueva funcionalidad: Renombrar archivos y directorios de forma segura**
@@ -1201,7 +1241,7 @@ Incluye líneas de contexto únicas (import, firma de función, comentario espec
 ### Límites Implícitos
 - Lectura/edición viable hasta ~50MB (edición rechaza >50MB).
 - `search_and_replace` ignora archivos >10MB y no-texto.
-- `smart_search` contenido profundo desactivado (parámetros avanzados se activarán en futura versión).
+- `smart_search` ahora soporta parámetros opcionales: `include_content` para búsquedas de contenido y `file_types` para filtrar por extensión.
 
 ### Estilo de Respuesta del Modelo
 Sé conciso y enfocado: explica brevemente intención antes de invocar una tool. Después de una tool, resume hallazgos relevantes y el próximo paso. No repitas listados completos si no cambian.
