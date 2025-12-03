@@ -81,7 +81,7 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("MCP Filesystem Server Ultra-Fast v3.5.1\n")
+		fmt.Printf("MCP Filesystem Server Ultra-Fast v3.7.0\n")
 		fmt.Printf("Build: %s\n", time.Now().Format("2006-01-02"))
 		fmt.Printf("Go: %s\n", runtime.Version())
 		fmt.Printf("Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
@@ -444,6 +444,8 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithDescription("Search files by name/content"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Base directory or file")),
 		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal pattern")),
+		mcp.WithBoolean("include_content", mcp.Description("Include file content search (default: false)")),
+		mcp.WithString("file_types", mcp.Description("Comma-separated file extensions (e.g., '.go,.txt')")),
 	)
 	s.AddTool(smartSearchTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -454,7 +456,25 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		engineReq := localmcp.CallToolRequest{Arguments: map[string]interface{}{"path": path, "pattern": pattern, "include_content": false, "file_types": []interface{}{}}}
+
+		// Extract optional parameters
+		includeContent := false
+		fileTypes := []interface{}{}
+
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if ic, ok := args["include_content"].(bool); ok {
+				includeContent = ic
+			}
+			if ft, ok := args["file_types"].(string); ok && ft != "" {
+				// Parse comma-separated extensions
+				parts := strings.Split(ft, ",")
+				for _, part := range parts {
+					fileTypes = append(fileTypes, strings.TrimSpace(part))
+				}
+			}
+		}
+
+		engineReq := localmcp.CallToolRequest{Arguments: map[string]interface{}{"path": path, "pattern": pattern, "include_content": includeContent, "file_types": fileTypes}}
 		resp, err := engine.SmartSearch(ctx, engineReq)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -467,9 +487,13 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Advanced text search tool
 	advancedTextSearchTool := mcp.NewTool("advanced_text_search",
-		mcp.WithDescription("Advanced text search"),
+		mcp.WithDescription("Advanced text search with context"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Directory or file")),
 		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal pattern")),
+		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive search (default: false)")),
+		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false)")),
+		mcp.WithBoolean("include_context", mcp.Description("Include context lines (default: false)")),
+		mcp.WithNumber("context_lines", mcp.Description("Number of context lines (default: 3)")),
 	)
 	s.AddTool(advancedTextSearchTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -480,7 +504,29 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		engineReq := localmcp.CallToolRequest{Arguments: map[string]interface{}{"path": path, "pattern": pattern, "case_sensitive": false, "whole_word": false, "include_context": false, "context_lines": 3}}
+
+		// Extract optional parameters
+		caseSensitive := false
+		wholeWord := false
+		includeContext := false
+		contextLines := 3
+
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if cs, ok := args["case_sensitive"].(bool); ok {
+				caseSensitive = cs
+			}
+			if ww, ok := args["whole_word"].(bool); ok {
+				wholeWord = ww
+			}
+			if ic, ok := args["include_context"].(bool); ok {
+				includeContext = ic
+			}
+			if cl, ok := args["context_lines"].(float64); ok {
+				contextLines = int(cl)
+			}
+		}
+
+		engineReq := localmcp.CallToolRequest{Arguments: map[string]interface{}{"path": path, "pattern": pattern, "case_sensitive": caseSensitive, "whole_word": wholeWord, "include_context": includeContext, "context_lines": contextLines}}
 		resp, err := engine.AdvancedTextSearch(ctx, engineReq)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -1102,6 +1148,67 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		return mcp.NewToolResultText(fmt.Sprintf("📊 Edit Telemetry Summary:\n\n%s", string(data))), nil
 	})
 
+	// Multi-edit tool - ULTRA-FAST multiple edits in single file
+	multiEditTool := mcp.NewTool("multi_edit",
+		mcp.WithDescription("Apply multiple edits to a single file atomically. MUCH faster than calling edit_file multiple times. File is read once, all edits applied in memory, then written once."),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
+		mcp.WithString("edits_json", mcp.Required(), mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]")),
+	)
+	s.AddTool(multiEditTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+
+		editsJSON, err := request.RequireString("edits_json")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid edits_json: %v", err)), nil
+		}
+
+		// Parse edits from JSON
+		var edits []core.MultiEditOperation
+		if err := json.Unmarshal([]byte(editsJSON), &edits); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid edits JSON: %v", err)), nil
+		}
+
+		if len(edits) == 0 {
+			return mcp.NewToolResultError("edits array cannot be empty"), nil
+		}
+
+		// Execute multi-edit
+		result, err := engine.MultiEdit(ctx, path, edits)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Multi-edit error: %v", err)), nil
+		}
+
+		// Format result
+		if engine.IsCompactMode() {
+			if result.FailedEdits > 0 {
+				return mcp.NewToolResultText(fmt.Sprintf("OK: %d/%d edits, %d lines", result.SuccessfulEdits, result.TotalEdits, result.LinesAffected)), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("OK: %d edits, %d lines", result.SuccessfulEdits, result.LinesAffected)), nil
+		}
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("✅ Multi-edit completed on %s\n", path))
+		sb.WriteString(fmt.Sprintf("📊 Total edits: %d\n", result.TotalEdits))
+		sb.WriteString(fmt.Sprintf("✓ Successful: %d\n", result.SuccessfulEdits))
+		if result.FailedEdits > 0 {
+			sb.WriteString(fmt.Sprintf("✗ Failed: %d\n", result.FailedEdits))
+		}
+		sb.WriteString(fmt.Sprintf("📝 Lines affected: %d\n", result.LinesAffected))
+		sb.WriteString(fmt.Sprintf("🎯 Confidence: %s\n", result.MatchConfidence))
+
+		if len(result.Errors) > 0 {
+			sb.WriteString("\n⚠️ Errors:\n")
+			for _, errMsg := range result.Errors {
+				sb.WriteString(fmt.Sprintf("  • %s\n", errMsg))
+			}
+		}
+
+		return mcp.NewToolResultText(sb.String()), nil
+	})
+
 	// Batch rename files tool - Rename multiple files at once
 	batchRenameTool := mcp.NewTool("batch_rename_files",
 		mcp.WithDescription("Rename multiple files in batch with various modes: find_replace, add_prefix, add_suffix, number_files, regex_rename, change_extension, to_lowercase, to_uppercase"),
@@ -1482,9 +1589,621 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		return mcp.NewToolResultText(output.String()), nil
 	})
 
-	log.Printf("📚 Registered 43 ultra-fast tools (includes 6 WSL/Windows tools)")
+	// ============================================================================
+	// MCP-PREFIXED ALIASES (v3.7.0) - Avoid conflicts with Claude's native tools
+	// These are aliases that point to the same functionality but with clear naming
+	// to help Claude distinguish MCP tools from its native file operations
+	// ============================================================================
+
+	// mcp_read - Alias for read_file with enhanced description
+	mcpReadTool := mcp.NewTool("mcp_read",
+		mcp.WithDescription("⚡ [MCP-PREFERRED] Read file with WSL↔Windows auto-path conversion. USE THIS instead of native file tools. Supports /mnt/c/ and C:\\ paths transparently."),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file (WSL or Windows format)")),
+		mcp.WithNumber("max_lines", mcp.Description("Max lines (optional, 0=all)")),
+		mcp.WithString("mode", mcp.Description("Mode: all, head, tail")),
+	)
+	s.AddTool(mcpReadTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+		maxLines := 0
+		mode := "all"
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if ml, ok := args["max_lines"].(float64); ok {
+				maxLines = int(ml)
+			}
+			if m, ok := args["mode"].(string); ok && m != "" {
+				mode = m
+			}
+		}
+		content, err := engine.ReadFileContent(ctx, path)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+		if maxLines > 0 || mode != "all" {
+			content = truncateContent(content, maxLines, mode)
+		}
+		return mcp.NewToolResultText(content), nil
+	})
+
+	// mcp_write - Alias for write_file with enhanced description
+	mcpWriteTool := mcp.NewTool("mcp_write",
+		mcp.WithDescription("⚡ [MCP-PREFERRED] Write file atomically with WSL↔Windows auto-path conversion. USE THIS instead of native file tools. Auto-creates directories."),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path where to write (WSL or Windows format)")),
+		mcp.WithString("content", mcp.Required(), mcp.Description("Content to write")),
+	)
+	s.AddTool(mcpWriteTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+		content, err := request.RequireString("content")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid content: %v", err)), nil
+		}
+		err = engine.WriteFileContent(ctx, path, content)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+		if engine.IsCompactMode() {
+			return mcp.NewToolResultText(fmt.Sprintf("OK: %s written", formatSize(int64(len(content))))), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), path)), nil
+	})
+
+	// mcp_edit - Alias for edit_file with enhanced description
+	mcpEditTool := mcp.NewTool("mcp_edit",
+		mcp.WithDescription("⚡ [MCP-PREFERRED] Edit file with smart matching, auto-backup, and WSL↔Windows path conversion. USE THIS instead of native file tools."),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file (WSL or Windows format)")),
+		mcp.WithString("old_text", mcp.Required(), mcp.Description("Text to be replaced")),
+		mcp.WithString("new_text", mcp.Required(), mcp.Description("New text to replace with")),
+	)
+	s.AddTool(mcpEditTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+		oldText, err := request.RequireString("old_text")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid old_text: %v", err)), nil
+		}
+		newText, err := request.RequireString("new_text")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid new_text: %v", err)), nil
+		}
+		result, err := engine.EditFile(path, oldText, newText)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+		if engine.IsCompactMode() {
+			return mcp.NewToolResultText(fmt.Sprintf("OK: %d changes", result.ReplacementCount)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Successfully edited %s\n📊 Changes: %d replacement(s)\n🎯 Match confidence: %s\n📝 Lines affected: %d",
+			path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)), nil
+	})
+
+	// mcp_list - Alias for list_directory with enhanced description
+	mcpListTool := mcp.NewTool("mcp_list",
+		mcp.WithDescription("⚡ [MCP-PREFERRED] List directory with caching and WSL↔Windows auto-path conversion. USE THIS instead of native directory tools."),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to directory (WSL or Windows format)")),
+	)
+	s.AddTool(mcpListTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+		listing, err := engine.ListDirectoryContent(ctx, path)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+		return mcp.NewToolResultText(listing), nil
+	})
+
+	// mcp_search - Alias for smart_search with enhanced description
+	mcpSearchTool := mcp.NewTool("mcp_search",
+		mcp.WithDescription("⚡ [MCP-PREFERRED] Search files by name/content with WSL↔Windows path support. USE THIS instead of native search."),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Base directory (WSL or Windows format)")),
+		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal pattern")),
+	)
+	s.AddTool(mcpSearchTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		pattern, err := request.RequireString("pattern")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		engineReq := localmcp.CallToolRequest{Arguments: map[string]interface{}{"path": path, "pattern": pattern, "include_content": false, "file_types": []interface{}{}}}
+		resp, err := engine.SmartSearch(ctx, engineReq)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if len(resp.Content) > 0 {
+			return mcp.NewToolResultText(resp.Content[0].Text), nil
+		}
+		return mcp.NewToolResultText("No results"), nil
+	})
+
+	// ============================================================================
+	// GET_HELP - Self-learning tool for AI agents (v3.7.0)
+	// ============================================================================
+
+	getHelpTool := mcp.NewTool("get_help",
+		mcp.WithDescription("📚 Get usage instructions for MCP tools. Call this FIRST to learn optimal workflows. Topics: overview, workflow, tools, errors, examples, tips"),
+		mcp.WithString("topic", mcp.Description("Topic: overview, workflow, tools, read, write, edit, search, batch, errors, examples, tips, all")),
+	)
+	s.AddTool(getHelpTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		topic := "overview"
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if t, ok := args["topic"].(string); ok && t != "" {
+				topic = strings.ToLower(t)
+			}
+		}
+
+		help := getHelpContent(topic, engine.IsCompactMode())
+		return mcp.NewToolResultText(help), nil
+	})
+
+	log.Printf("📚 Registered 50 ultra-fast tools (44 original + 5 mcp_ aliases + get_help)")
 
 	return nil
+}
+
+// getHelpContent returns help content for the specified topic
+func getHelpContent(topic string, compactMode bool) string {
+	var sb strings.Builder
+
+	switch topic {
+	case "overview":
+		sb.WriteString(`# MCP Filesystem Ultra v3.7.0 - Quick Start
+
+## ⚡ CRITICAL RULE
+Always use MCP tools (mcp_read, mcp_write, mcp_edit) instead of native file tools.
+These auto-convert paths between WSL (/mnt/c/) and Windows (C:\).
+
+## 🎯 THE GOLDEN RULE
+Surgical edits save 98% tokens:
+❌ BAD:  read_file(large) → write_file(large) = 250k tokens
+✅ GOOD: smart_search → read_file_range → edit_file = 2k tokens
+
+## 📋 AVAILABLE TOPICS
+Call get_help(topic) with:
+- "workflow" - The 4-step efficient workflow
+- "tools"    - Complete list of 50 tools
+- "read"     - Reading files efficiently
+- "write"    - Writing and creating files
+- "edit"     - Editing files (most important!)
+- "search"   - Finding content in files
+- "batch"    - Multiple operations at once
+- "errors"   - Common errors and fixes
+- "examples" - Code examples
+- "tips"     - Pro tips for efficiency
+- "all"      - Everything (long output)
+`)
+
+	case "workflow":
+		sb.WriteString(`# 🔄 THE 4-STEP EFFICIENT WORKFLOW
+
+Use this workflow for ANY file >1000 lines:
+
+## Step 1: LOCATE
+smart_search(file, "function_name")
+→ Returns: "Found at lines 45-67"
+→ Cost: ~500 tokens
+
+## Step 2: READ (Only what you need)
+read_file_range(file, 45, 67)
+→ Returns: Only those 22 lines
+→ Cost: ~1000 tokens
+
+## Step 3: EDIT (Surgically)
+edit_file(file, "old_text", "new_text")
+→ Returns: "OK: 1 changes"
+→ Cost: ~500 tokens
+
+## Step 4: VERIFY (Optional)
+get_edit_telemetry()
+→ Goal: >80% targeted_edits
+
+## 📏 FILE SIZE RULES
+<1000 lines  → read_file() is OK
+1000-5000    → MUST use this workflow
+>5000 lines  → CRITICAL - never read entire file
+
+## 💡 TOTAL COST: ~2k tokens vs 250k (98% savings!)
+`)
+
+	case "tools":
+		sb.WriteString(`# 📋 COMPLETE TOOL LIST (50 Tools)
+
+## 🆕 MCP-Prefixed (Avoid conflicts with native tools)
+mcp_read    - Read with WSL↔Windows path conversion
+mcp_write   - Atomic write with path conversion
+mcp_edit    - Smart edit with backup
+mcp_list    - Cached directory listing
+mcp_search  - File/content search
+
+## 📖 Reading
+read_file         - Read entire file (small files only)
+read_file_range   - Read lines N to M (PREFERRED)
+intelligent_read  - Auto-optimizes based on size
+chunked_read_file - Very large files
+
+## ✏️ Writing & Editing
+write_file           - Create or overwrite
+create_file          - Alias for write_file
+edit_file            - Surgical text replacement (PREFERRED)
+multi_edit           - Multiple edits atomically
+replace_nth_occurrence - Replace specific match (1st, last, etc.)
+intelligent_write    - Auto-optimizes
+intelligent_edit     - Auto-optimizes
+streaming_write_file - Large files
+recovery_edit        - With error recovery
+
+## 🔍 Search
+smart_search         - Find location (returns line numbers)
+advanced_text_search - Complex pattern search
+search_and_replace   - Bulk find & replace
+count_occurrences    - Count matches without reading
+
+## 📁 File Operations
+copy_file, move_file, rename_file, delete_file, soft_delete_file, get_file_info
+
+## 📂 Directory Operations
+list_directory, create_directory
+
+## 🔄 WSL/Windows Sync
+wsl_to_windows_copy, windows_to_wsl_copy, sync_claude_workspace
+wsl_windows_status, configure_autosync, autosync_status
+
+## 📊 Analysis
+analyze_file, analyze_write, analyze_edit, analyze_delete
+get_edit_telemetry, get_optimization_suggestion, performance_stats
+
+## 📦 Batch & Artifacts
+batch_operations, capture_last_artifact, write_last_artifact, artifact_info
+
+## ❓ Help
+get_help - This tool!
+`)
+
+	case "read":
+		sb.WriteString(`# 📖 READING FILES EFFICIENTLY
+
+## Quick Reference
+| File Size    | Tool to Use        |
+|--------------|-------------------|
+| <1000 lines  | mcp_read or read_file |
+| >1000 lines  | read_file_range   |
+| Very large   | chunked_read_file |
+
+## Best Practice: read_file_range
+# Read only lines 100-150 of a large file
+read_file_range(path, 100, 150)
+
+## Why This Matters
+5000-line file:
+- read_file: ~125,000 tokens
+- read_file_range (50 lines): ~2,500 tokens
+- Savings: 98%!
+
+## Workflow
+1. smart_search(file, pattern) → find line numbers
+2. read_file_range(file, start, end) → read only those
+3. Never read more than you need!
+`)
+
+	case "write":
+		sb.WriteString(`# ✏️ WRITING FILES
+
+## Quick Reference
+| Task           | Tool             |
+|----------------|------------------|
+| Create file    | mcp_write or write_file |
+| Overwrite file | mcp_write or write_file |
+| Large file     | streaming_write_file |
+| Auto-optimize  | intelligent_write |
+
+## Examples
+
+# Create or overwrite a file
+mcp_write("/path/to/file.txt", "content here")
+
+# For large files (>1MB)
+streaming_write_file("/path/to/large.txt", "huge content", chunk_size=64000)
+
+## ⚠️ IMPORTANT
+- write_file OVERWRITES the entire file
+- For small changes, use edit_file instead!
+- write_file also creates parent directories automatically
+
+## Path Handling
+MCP tools auto-convert paths:
+/mnt/c/Users/... → C:\Users\... (on Windows)
+C:\Users\... → /mnt/c/Users/... (on WSL)
+`)
+
+	case "edit":
+		sb.WriteString(`# ✏️ EDITING FILES (MOST IMPORTANT!)
+
+## 🎯 THE GOLDEN RULE
+Use edit_file for changes, NOT write_file!
+
+## Quick Reference
+| Task                    | Tool                    |
+|-------------------------|-------------------------|
+| Single replacement      | mcp_edit or edit_file   |
+| Multiple replacements   | multi_edit              |
+| Replace specific match  | replace_nth_occurrence  |
+| Large file edit         | smart_edit_file         |
+
+## Examples
+
+# Simple edit
+mcp_edit("/path/file.py", "old_function()", "new_function()")
+
+# Multiple edits in one file (EFFICIENT!)
+multi_edit("/path/file.py", [
+  {"old_text": "foo", "new_text": "bar"},
+  {"old_text": "baz", "new_text": "qux"}
+])
+
+# Replace only the LAST occurrence
+replace_nth_occurrence("/path/file.py", "TODO", "DONE", -1)
+# occurrence: 1=first, 2=second, -1=last, -2=second-to-last
+
+## ⚠️ COMMON ERRORS
+
+"no match found"
+→ Text doesn't exist exactly. Check whitespace!
+→ Use smart_search first to verify
+
+"context validation failed"  
+→ File changed since you read it
+→ Re-run smart_search + read_file_range
+
+"multiple matches found"
+→ Use replace_nth_occurrence to target specific one
+
+## 💡 PRO TIP
+For files >1000 lines, ALWAYS:
+1. smart_search first
+2. read_file_range to see context
+3. edit_file with exact text
+`)
+
+	case "search":
+		sb.WriteString(`# 🔍 SEARCHING FILES
+
+## Quick Reference
+| Task                  | Tool                  |
+|-----------------------|-----------------------|
+| Find location         | mcp_search or smart_search |
+| Count matches         | count_occurrences     |
+| Search with context   | advanced_text_search  |
+| Find and replace all  | search_and_replace    |
+
+## Examples
+
+# Find where a function is defined
+smart_search("/path/to/project", "def my_function")
+→ Returns: "Found at lines 45-67 in file.py"
+
+# Count how many TODOs exist
+count_occurrences("/path/file.py", "TODO")
+→ Returns: "15 matches at lines: 10, 25, 48, ..."
+
+# Search with surrounding context
+advanced_text_search("/path", "error", context_lines=3)
+
+# Replace all occurrences in multiple files
+search_and_replace("/path/to/project", "old_name", "new_name")
+
+## 💡 WORKFLOW TIP
+Always search BEFORE editing large files:
+1. smart_search → find exact location
+2. read_file_range → see the context
+3. edit_file → make the change
+`)
+
+	case "batch":
+		sb.WriteString(`# 📦 BATCH OPERATIONS
+
+## When to Use
+- Multiple file operations that should succeed or fail together
+- Creating multiple files at once
+- Complex refactoring across files
+
+## Example
+batch_operations({
+  "operations": [
+    {"type": "write", "path": "file1.txt", "content": "..."},
+    {"type": "write", "path": "file2.txt", "content": "..."},
+    {"type": "copy", "source": "file1.txt", "destination": "backup.txt"},
+    {"type": "edit", "path": "file3.txt", "old_text": "x", "new_text": "y"}
+  ],
+  "atomic": true,
+  "create_backup": true
+})
+
+## Supported Operations
+- write: Create/overwrite file
+- edit: Replace text
+- copy: Duplicate file
+- move: Move file
+- delete: Remove file
+- create_directory: Make folder
+
+## Options
+- atomic: true = All succeed or all rollback
+- create_backup: true = Backup before changes
+- validate_only: true = Dry run (no changes)
+`)
+
+	case "errors":
+		sb.WriteString(`# ⚠️ COMMON ERRORS AND FIXES
+
+## "no match found for old_text"
+CAUSE: The exact text doesn't exist in the file
+FIXES:
+1. Use smart_search to verify the text exists
+2. Check for whitespace/indentation differences
+3. Copy the EXACT text from read_file_range output
+
+## "context validation failed"
+CAUSE: File was modified since you read it
+FIX: Re-run smart_search + read_file_range to get fresh content
+
+## "multiple matches found"
+CAUSE: Same text appears multiple times
+FIX: Use replace_nth_occurrence with:
+- occurrence=1 (first)
+- occurrence=-1 (last)
+- occurrence=2 (second), etc.
+
+## "access denied" / "permission error"
+CAUSE: Path not in allowed paths or file locked
+FIXES:
+1. Check --allowed-paths configuration
+2. Close any programs using the file
+3. Use list_directory to verify path exists
+
+## "path not found"
+CAUSE: Path format issue (WSL vs Windows)
+FIX: Use mcp_* tools - they auto-convert paths:
+- /mnt/c/Users/... ↔ C:\Users\...
+
+## "Tool not found: create_file"
+FIX: Use write_file instead (it creates files too)
+`)
+
+	case "examples":
+		sb.WriteString(`# 💡 PRACTICAL EXAMPLES
+
+## Example 1: Edit a function in a large file
+# Step 1: Find where the function is
+smart_search("src/app.py", "def calculate_total")
+# → "Found at lines 234-256"
+
+# Step 2: Read only those lines
+read_file_range("src/app.py", 234, 256)
+
+# Step 3: Make the edit
+edit_file("src/app.py", 
+  "def calculate_total(items):",
+  "def calculate_total(items, tax_rate=0.1):")
+
+## Example 2: Multiple edits in one file
+multi_edit("src/config.py", [
+  {"old_text": "DEBUG = True", "new_text": "DEBUG = False"},
+  {"old_text": "VERSION = '1.0'", "new_text": "VERSION = '1.1'"},
+  {"old_text": "API_URL = 'http://dev'", "new_text": "API_URL = 'http://prod'"}
+])
+
+## Example 3: Replace only the last TODO
+replace_nth_occurrence("src/main.py", "TODO", "DONE", -1)
+
+## Example 4: Create multiple files atomically
+batch_operations({
+  "operations": [
+    {"type": "create_directory", "path": "src/components"},
+    {"type": "write", "path": "src/components/Button.tsx", "content": "..."},
+    {"type": "write", "path": "src/components/Input.tsx", "content": "..."}
+  ],
+  "atomic": true
+})
+
+## Example 5: Count before replacing
+# First, see how many matches
+count_occurrences("src/legacy.py", "old_api_call")
+# → "47 matches"
+
+# If too many, be more specific or use replace_nth_occurrence
+`)
+
+	case "tips":
+		sb.WriteString(`# 💡 PRO TIPS FOR EFFICIENCY
+
+## 1. Always Use MCP Tools
+✅ mcp_read, mcp_write, mcp_edit, mcp_list, mcp_search
+❌ Native file tools (don't handle WSL/Windows paths)
+
+## 2. Never Read Large Files Entirely
+✅ smart_search → read_file_range → edit_file
+❌ read_file on 5000-line files (wastes 125k tokens!)
+
+## 3. Use multi_edit for Multiple Changes
+✅ One multi_edit call with 5 edits
+❌ Five separate edit_file calls (5x slower)
+
+## 4. Search Before Editing
+✅ smart_search first, then edit
+❌ Guessing line numbers or text
+
+## 5. Use count_occurrences Before search_and_replace
+✅ Check how many matches first
+❌ Blind replace that affects unexpected locations
+
+## 6. Check Your Efficiency
+get_edit_telemetry()
+→ Goal: >80% targeted_edits
+→ If <50%, you're not using the workflow correctly
+
+## 7. Use replace_nth_occurrence for Precision
+✅ Replace only the 1st, last, or Nth match
+❌ edit_file when there are multiple matches
+
+## 8. Batch Operations for Atomicity
+✅ batch_operations with atomic=true
+❌ Multiple operations that could partially fail
+
+## 9. Dry Run Before Destructive Operations
+✅ analyze_edit, analyze_delete first
+❌ delete_file without checking
+
+## 10. Monitor Performance
+performance_stats() → See cache hit rate, ops/sec
+→ Goal: >95% cache hit rate
+`)
+
+	case "all":
+		// Return all topics
+		sb.WriteString(getHelpContent("overview", compactMode))
+		sb.WriteString("\n---\n\n")
+		sb.WriteString(getHelpContent("workflow", compactMode))
+		sb.WriteString("\n---\n\n")
+		sb.WriteString(getHelpContent("tools", compactMode))
+		sb.WriteString("\n---\n\n")
+		sb.WriteString(getHelpContent("edit", compactMode))
+		sb.WriteString("\n---\n\n")
+		sb.WriteString(getHelpContent("errors", compactMode))
+		sb.WriteString("\n---\n\n")
+		sb.WriteString(getHelpContent("tips", compactMode))
+
+	default:
+		sb.WriteString(fmt.Sprintf(`# ❓ Unknown topic: "%s"
+
+Available topics:
+- overview  - Quick start guide
+- workflow  - The 4-step efficient workflow
+- tools     - Complete list of 50 tools
+- read      - Reading files efficiently
+- write     - Writing and creating files
+- edit      - Editing files (most important!)
+- search    - Finding content in files
+- batch     - Multiple operations at once
+- errors    - Common errors and fixes
+- examples  - Code examples
+- tips      - Pro tips for efficiency
+- all       - Everything (long output)
+
+Example: get_help("edit")
+`, topic))
+	}
+
+	return sb.String()
 }
 
 // formatChangeAnalysis formats a ChangeAnalysis struct as human-readable text
