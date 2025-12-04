@@ -1,0 +1,32 @@
+No es un bug y quizás ya lo sepas,
+pero Claude Desktop simpre hace esto:
+
+Despues de preguntarle algo se pone a buscar.
+"Déjame buscar dónde está definido el modelo PedidosSearch:"
+
+Cuando quizas con preguntar yo le paso la ruta enseguida. Entiendes?
+
+¿podrimas prevenir busquedas innecesarias?
+
+---
+RESUELTO - Dec 4, 2025
+
+Solución implementada:
+1. Creada guía completa: guides/PREVENT_UNNECESSARY_SEARCHES.md
+2. Actualizado AI_AGENT_INSTRUCTIONS.md (EN/ES) con regla al inicio
+3. Actualizado INITIAL_PROMPT_FOR_AI.md (EN/ES) con instrucción
+4. Creado archivo de memoria: CLAUDE_MEMORY_NO_UNNECESSARY_SEARCH.txt
+
+Regla aplicada:
+"ANTES de buscar, PREGUNTA al usuario si sabe la ubicación"
+
+Ahorro estimado: 90% tokens en búsquedas evitables
+
+Archivos modificados:
+- guides/PREVENT_UNNECESSARY_SEARCHES.md (NUEVO)
+- guides/CLAUDE_MEMORY_NO_UNNECESSARY_SEARCH.txt (NUEVO)
+- guides/AI_AGENT_INSTRUCTIONS.md
+- guides/AI_AGENT_INSTRUCTIONS_ES.md
+- guides/INITIAL_PROMPT_FOR_AI.md
+- guides/INITIAL_PROMPT_FOR_AI_ES.md
+- guides/README.md

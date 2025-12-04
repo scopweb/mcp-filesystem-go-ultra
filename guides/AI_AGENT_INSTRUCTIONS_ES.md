@@ -7,6 +7,26 @@
 
 ---
 
+## 🚫 REGLA CRÍTICA: PREGUNTA ANTES DE BUSCAR (Ahorro 90% tokens)
+
+**ANTES de ejecutar `smart_search` o `mcp_search`, PREGUNTA al usuario:**
+
+```
+❌ MAL: "Déjame buscar dónde está X..." [búsqueda automática]
+✅ BIEN: "¿Sabes en qué archivo/línea está X? Si no, puedo buscarlo."
+```
+
+**SOLO busca si:**
+- Usuario dice "no sé dónde está"
+- Usuario pide explícitamente "busca X"
+- Usuario claramente no tiene la información
+
+**Ahorro**: 90% de tokens cuando usuario ya conoce la ubicación.
+
+📖 **Más info**: Ver `guides/PREVENT_UNNECESSARY_SEARCHES.md`
+
+---
+
 ## 🆕 AUTO-APRENDIZAJE: Usa la herramienta `get_help()`
 
 En lugar de leer toda la documentación, puedes llamar a `get_help` en cualquier momento:

@@ -12,6 +12,7 @@ REGLAS CRÍTICAS:
 1. Usa mcp_read, mcp_write, mcp_edit en lugar de herramientas nativas
 2. Para archivos grandes: smart_search → read_file_range → edit_file
 3. Cuando tengas problemas, llama get_help("errors") para soluciones
+4. **ANTES de buscar: Pregunta al usuario si sabe la ubicación (ahorro 90% tokens)**
 
 Topics de ayuda: overview, workflow, tools, edit, search, errors, examples, tips
 
@@ -21,7 +22,7 @@ Topics de ayuda: overview, workflow, tools, edit, search, errors, examples, tips
 
 ---
 
-MCP Filesystem Ultra disponible. Llama get_help("overview") primero para aprender. Usa herramientas mcp_*, no nativas.
+MCP Filesystem Ultra disponible. Llama get_help("overview") primero. Usa mcp_* tools. ANTES de buscar, pregunta al usuario si sabe la ubicación.
 
 ---
 

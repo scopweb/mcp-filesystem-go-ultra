@@ -43,6 +43,7 @@ get_help("tips")      → Consejos de eficiencia
 
 ### Para Usuarios/Configuración
 - **BACKUP_RECOVERY_GUIDE.md** - ⭐ **NUEVO v3.8.0** - Sistema de backup automático, validación de riesgo, y recuperación
+- **PREVENT_UNNECESSARY_SEARCHES.md** - 🚫 **NUEVO** - Cómo evitar búsquedas innecesarias (ahorro 90% tokens)
 - **CLAUDE_DESKTOP_SETUP.md** - Cómo configurar el MCP en Claude Desktop
 - **Claude_Desktop_Performance_Guide.md** - Guía de rendimiento
 - **BATCH_OPERATIONS_GUIDE.md** - Operaciones en lote

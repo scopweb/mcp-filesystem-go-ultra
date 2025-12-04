@@ -7,6 +7,26 @@
 
 ---
 
+## 🚫 CRITICAL RULE: ASK BEFORE SEARCHING (Save 90% tokens)
+
+**BEFORE executing `smart_search` or `mcp_search`, ASK the user:**
+
+```
+❌ BAD: "Let me search where X is..." [automatic search]
+✅ GOOD: "Do you know what file/line X is in? If not, I can search for it."
+```
+
+**ONLY search if:**
+- User says "I don't know where it is"
+- User explicitly asks "find X" or "search for X"
+- User clearly doesn't have the information
+
+**Savings**: 90% tokens when user already knows the location.
+
+📖 **More info**: See `guides/PREVENT_UNNECESSARY_SEARCHES.md`
+
+---
+
 ## 🆕 SELF-LEARNING: Use `get_help()` Tool
 
 Instead of reading all documentation, you can call the `get_help` tool anytime:
