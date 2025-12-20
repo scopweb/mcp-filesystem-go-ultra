@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -84,6 +85,13 @@ type UltraFastEngine struct {
 		cachedAt    time.Time
 		mu          sync.RWMutex
 	}
+
+	// Regex compilation cache
+	// Caches compiled regex patterns to avoid repeated compilation in hot paths
+	regexCache struct {
+		cache map[string]*regexp.Regexp
+		mu    sync.RWMutex
+	}
 }
 
 // PerformanceMetrics tracks real-time performance statistics
@@ -144,6 +152,9 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 			return &buf
 		},
 	}
+
+	// Initialize regex cache for compiled patterns
+	engine.regexCache.cache = make(map[string]*regexp.Regexp)
 
 	// Log if allowed paths are configured
 	if len(config.AllowedPaths) > 0 {
@@ -267,6 +278,36 @@ func (e *UltraFastEngine) GetEnvironment() (isWSL bool, windowsUser string) {
 	e.envCache.cachedAt = time.Now()
 
 	return isWSL, windowsUser
+}
+
+// CompileRegex returns a cached compiled regex pattern or compiles and caches a new one
+// Avoids expensive regex.Compile calls in hot paths
+func (e *UltraFastEngine) CompileRegex(pattern string) (*regexp.Regexp, error) {
+	// Check cache first (read lock)
+	e.regexCache.mu.RLock()
+	if re, exists := e.regexCache.cache[pattern]; exists {
+		e.regexCache.mu.RUnlock()
+		return re, nil
+	}
+	e.regexCache.mu.RUnlock()
+
+	// Cache miss - compile and store
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store in cache (write lock)
+	e.regexCache.mu.Lock()
+	defer e.regexCache.mu.Unlock()
+
+	// Simple LRU: clear cache if it grows too large (>100 patterns)
+	if len(e.regexCache.cache) > 100 {
+		e.regexCache.cache = make(map[string]*regexp.Regexp)
+	}
+
+	e.regexCache.cache[pattern] = re
+	return re, nil
 }
 
 // StartMonitoring starts real-time performance monitoring
