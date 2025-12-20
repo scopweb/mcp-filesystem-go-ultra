@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra-Fast
 
-**Version 3.8.0** - Complete Backup and Recovery System
+**Version 3.8.1** - CRITICAL FIX: Risk Assessment Now Enforced
 
 Un servidor MCP (Model Context Protocol) de alto rendimiento para operaciones de sistema de archivos, diseñado para máxima velocidad y eficiencia. **Especialmente optimizado para Claude Desktop** con soporte completo para archivos grandes sin timeouts ni bloqueos.
 
@@ -8,11 +8,16 @@ Un servidor MCP (Model Context Protocol) de alto rendimiento para operaciones de
 >
 > 🚀 **Inicio Rápido**: Lee esta página y luego ve a [guides/CLAUDE_DESKTOP_SETUP.md](guides/CLAUDE_DESKTOP_SETUP.md)
 
-## 🔒 NOVEDAD v3.8.0: Sistema de Backup y Recuperación
+## 🔒 NOVEDAD v3.8.1: Bug Crítico Corregido
 
-### 🎯 Protección Total contra Pérdida de Código
+### ⚠️ Actualización Urgente Recomendada
+- **v3.8.0 BUG**: Risk assessment calculaba pero NO bloqueaba operaciones peligrosas
+- **v3.8.1 FIX**: Ahora HIGH/CRITICAL risk **requiere `force: true`** para ejecutar
+- Todos los usuarios de v3.8.0 deben actualizar inmediatamente
+
+### Sistema de Backup y Recuperación (v3.8.0+)
 - **Backups automáticos** antes de operaciones destructivas
-- **Validación de riesgo** con 4 niveles (LOW, MEDIUM, HIGH, CRITICAL)
+- **Validación de riesgo funcional** con 4 niveles (LOW, MEDIUM, HIGH, CRITICAL)
 - **5 nuevas herramientas MCP** para gestión completa de backups
 - **Metadata detallada** con timestamps, hashes SHA256 y contexto
 

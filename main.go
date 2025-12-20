@@ -341,10 +341,11 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Edit file tool
 	editTool := mcp.NewTool("edit_file",
-		mcp.WithDescription("Edit file (smart, backup)"),
+		mcp.WithDescription("Edit file (smart, backup, risk validation)"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
 		mcp.WithString("old_text", mcp.Required(), mcp.Description("Text to be replaced")),
 		mcp.WithString("new_text", mcp.Required(), mcp.Description("New text to replace with")),
+		mcp.WithBoolean("force", mcp.Description("Force operation even if HIGH/CRITICAL risk (default: false)")),
 	)
 	s.AddTool(editTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -362,7 +363,15 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid new_text: %v", err)), nil
 		}
 
-		result, err := engine.EditFile(path, oldText, newText)
+		// Extract force parameter
+		force := false
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if f, ok := args["force"].(bool); ok {
+				force = f
+			}
+		}
+
+		result, err := engine.EditFile(path, oldText, newText, force)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
@@ -740,10 +749,11 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	})
 
 	intelligentEditTool := mcp.NewTool("intelligent_edit",
-		mcp.WithDescription("Automatically optimized edit for Claude Desktop (chooses direct or smart edit)"),
+		mcp.WithDescription("Automatically optimized edit for Claude Desktop (chooses direct or smart edit). Blocks HIGH/CRITICAL risk."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
 		mcp.WithString("old_text", mcp.Required(), mcp.Description("Text to be replaced")),
 		mcp.WithString("new_text", mcp.Required(), mcp.Description("New text to replace with")),
+		mcp.WithBoolean("force", mcp.Description("Force operation even if HIGH/CRITICAL risk (default: false)")),
 	)
 	s.AddTool(intelligentEditTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -761,7 +771,15 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid new_text: %v", err)), nil
 		}
 
-		result, err := engine.IntelligentEdit(ctx, path, oldText, newText)
+		// Extract force parameter
+		force := false
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if f, ok := args["force"].(bool); ok {
+				force = f
+			}
+		}
+
+		result, err := engine.IntelligentEdit(ctx, path, oldText, newText, force)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
@@ -772,10 +790,11 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// DEPRECATED: Advanced recovery edit. Redirects to intelligent_edit for stability.
 	recoveryEditTool := mcp.NewTool("recovery_edit",
-		mcp.WithDescription("[DEPRECATED] Edit with automatic error recovery. Redirects to intelligent_edit."),
+		mcp.WithDescription("[DEPRECATED] Edit with automatic error recovery. Redirects to intelligent_edit. Blocks HIGH/CRITICAL risk."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
 		mcp.WithString("old_text", mcp.Required(), mcp.Description("Text to be replaced")),
 		mcp.WithString("new_text", mcp.Required(), mcp.Description("New text to replace with")),
+		mcp.WithBoolean("force", mcp.Description("Force operation even if HIGH/CRITICAL risk (default: false)")),
 	)
 	s.AddTool(recoveryEditTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -793,7 +812,15 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid new_text: %v", err)), nil
 		}
 
-		result, err := engine.AutoRecoveryEdit(ctx, path, oldText, newText)
+		// Extract force parameter
+		force := false
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if f, ok := args["force"].(bool); ok {
+				force = f
+			}
+		}
+
+		result, err := engine.AutoRecoveryEdit(ctx, path, oldText, newText, force)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
@@ -1694,7 +1721,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid new_text: %v", err)), nil
 		}
-		result, err := engine.EditFile(path, oldText, newText)
+		result, err := engine.EditFile(path, oldText, newText, false)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}

@@ -6,10 +6,52 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
+)
+
+// Environment detection cache
+// Caches the result of DetectEnvironment() to avoid repeated /proc/version reads
+var (
+	envCacheMu       sync.RWMutex
+	envCacheIsWSL    bool
+	envCacheWinUser  string
+	envCacheCachedAt time.Time
 )
 
 // DetectEnvironment detects if running in WSL and returns Windows username if applicable
+// Uses caching with a 5-minute TTL to avoid repeated /proc/version reads
 func DetectEnvironment() (isWSL bool, windowsUser string) {
+	// Check cache first (read lock)
+	envCacheMu.RLock()
+	if !envCacheCachedAt.IsZero() && time.Since(envCacheCachedAt) < 5*time.Minute {
+		defer envCacheMu.RUnlock()
+		return envCacheIsWSL, envCacheWinUser
+	}
+	envCacheMu.RUnlock()
+
+	// Cache miss or expired - perform detection
+	envCacheMu.Lock()
+	defer envCacheMu.Unlock()
+
+	// Double-check after acquiring write lock (another goroutine might have updated it)
+	if !envCacheCachedAt.IsZero() && time.Since(envCacheCachedAt) < 5*time.Minute {
+		return envCacheIsWSL, envCacheWinUser
+	}
+
+	// Detect environment (only if actually needed)
+	isWSL, windowsUser = detectEnvironmentOnce()
+
+	// Store in cache
+	envCacheIsWSL = isWSL
+	envCacheWinUser = windowsUser
+	envCacheCachedAt = time.Now()
+
+	return isWSL, windowsUser
+}
+
+// detectEnvironmentOnce performs the actual environment detection without caching
+func detectEnvironmentOnce() (isWSL bool, windowsUser string) {
 	// Check if running on Linux (WSL runs on Linux kernel)
 	if runtime.GOOS != "linux" {
 		return false, ""

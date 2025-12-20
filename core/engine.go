@@ -74,6 +74,15 @@ type UltraFastEngine struct {
 
 	// Risk thresholds for impact analysis
 	riskThresholds RiskThresholds
+
+	// Environment detection cache (WSL/Windows detection)
+	// Caches the result of DetectEnvironment() to avoid repeated /proc/version reads
+	envCache struct {
+		isWSL       bool
+		windowsUser string
+		cachedAt    time.Time
+		mu          sync.RWMutex
+	}
 }
 
 // PerformanceMetrics tracks real-time performance statistics
@@ -228,6 +237,35 @@ func (e *UltraFastEngine) Close() error {
 		e.workerPool.Release()
 	}
 	return nil
+}
+
+// GetEnvironment returns the cached WSL/Windows environment detection result
+// Uses a 5-minute cache to avoid repeated /proc/version reads on every path normalization
+func (e *UltraFastEngine) GetEnvironment() (isWSL bool, windowsUser string) {
+	e.envCache.mu.RLock()
+	// Check if cache is still valid (5-minute TTL)
+	if !e.envCache.cachedAt.IsZero() && time.Since(e.envCache.cachedAt) < 5*time.Minute {
+		defer e.envCache.mu.RUnlock()
+		return e.envCache.isWSL, e.envCache.windowsUser
+	}
+	e.envCache.mu.RUnlock()
+
+	// Cache miss or expired - detect environment
+	e.envCache.mu.Lock()
+	defer e.envCache.mu.Unlock()
+
+	// Double-check after acquiring write lock (another goroutine might have updated it)
+	if !e.envCache.cachedAt.IsZero() && time.Since(e.envCache.cachedAt) < 5*time.Minute {
+		return e.envCache.isWSL, e.envCache.windowsUser
+	}
+
+	// Perform actual detection
+	isWSL, windowsUser = DetectEnvironment()
+	e.envCache.isWSL = isWSL
+	e.envCache.windowsUser = windowsUser
+	e.envCache.cachedAt = time.Now()
+
+	return isWSL, windowsUser
 }
 
 // StartMonitoring starts real-time performance monitoring

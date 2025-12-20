@@ -20,7 +20,18 @@
       "Bash(git branch:*)",
       "Bash(git commit:*)",
       "Bash(git fetch:*)",
-      "Bash(git merge:*)"
+      "Bash(git merge:*)",
+      "Bash(go get:*)",
+      "Bash(git log:*)",
+      "Bash(go version:*)",
+      "Bash(wc:*)",
+      "Bash(go mod graph:*)",
+      "Bash(git checkout:*)",
+      "Bash(gh release create v3.10.0-baseline --title \"v3.10.0 Baseline - Before Modernization\" --body \"$\\(cat <<''EOF''\n# v3.10.0 Baseline Release\n\n**Purpose:** Snapshot of current stable version before starting modernization and optimization work.\n\n## Status\n✅ Production Ready - Current stable version\n- All features working as expected\n- Test suite passing\n- Performance baseline established\n\n## Key Features \\(Current\\)\n- ✅ Ultra-fast file operations \\(2000+ ops/sec\\)\n- ✅ Smart Claude Desktop optimization\n- ✅ Edit safety layer with blindaje protocol\n- ✅ Persistent backup & recovery system\n- ✅ WSL ↔ Windows auto-sync\n- ✅ 3 critical tools: read_file_range, count_occurrences, replace_nth_occurrence\n- ✅ Comprehensive hooks system\n- ✅ Impact analyzer with risk assessment\n\n## What''s Next\nThis release is a baseline for the upcoming modernization work:\n- **v3.11.0+** will include Go 1.21+ modernization\n- Error handling improvements \\(Go 1.13+ patterns\\)\n- Context cancellation implementation\n- Performance optimizations \\(+10-20%\\)\n- All changes will be backward compatible\n\n## Build Info\n- Go: 1.24.6\n- Binary Size: 8.6 MB\n- Test Coverage: 18%\n- Performance: 2000+ ops/sec for file operations\n\n## To Use This Version\n```bash\ngit checkout v3.10.0-baseline\ngo build -o mcp-filesystem-ultra.exe\n```\n\n---\nThis is a snapshot point. The main branch will continue with modernization work.\nEOF\n\\)\")",
+      "Bash(gh release create:*)",
+      "Bash(paste:*)",
+      "Bash(sort:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

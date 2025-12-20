@@ -693,7 +693,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 
 	// If no edits succeeded, return error
 	if result.SuccessfulEdits == 0 {
-		return result, fmt.Errorf("no edits were successful: %w", result.Errors)
+		return result, fmt.Errorf("no edits were successful: %v", result.Errors)
 	}
 
 	// Write modified content atomically
