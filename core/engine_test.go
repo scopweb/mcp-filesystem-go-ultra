@@ -110,7 +110,7 @@ func TestIntelligentEdit(t *testing.T) {
 	oldText := "world"
 	newText := "universe"
 
-	result, err := engine.IntelligentEdit(ctx, testFile, oldText, newText)
+	result, err := engine.IntelligentEdit(ctx, testFile, oldText, newText, false)
 	if err != nil {
 		t.Errorf("IntelligentEdit failed: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestAutoRecoveryEdit(t *testing.T) {
 	oldText := "function test() {"
 	newText := "function testFunction() {"
 
-	result, err := engine.AutoRecoveryEdit(ctx, testFile, oldText, newText)
+	result, err := engine.AutoRecoveryEdit(ctx, testFile, oldText, newText, false)
 	if err != nil {
 		t.Errorf("AutoRecoveryEdit failed: %v", err)
 	}
@@ -230,8 +230,8 @@ func TestWrapperMethodsExist(t *testing.T) {
 	// Test that all methods exist (compile-time check)
 	var _ func(context.Context, string, string) error = engine.IntelligentWrite
 	var _ func(context.Context, string) (string, error) = engine.IntelligentRead
-	var _ func(context.Context, string, string, string) (*EditResult, error) = engine.IntelligentEdit
-	var _ func(context.Context, string, string, string) (*EditResult, error) = engine.AutoRecoveryEdit
+	var _ func(context.Context, string, string, string, bool) (*EditResult, error) = engine.IntelligentEdit
+	var _ func(context.Context, string, string, string, bool) (*EditResult, error) = engine.AutoRecoveryEdit
 	var _ func(context.Context, string) (string, error) = engine.GetOptimizationSuggestion
 	var _ func() string = engine.GetOptimizationReport
 }
