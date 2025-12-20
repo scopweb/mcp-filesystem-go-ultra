@@ -126,13 +126,13 @@ func (hm *HookManager) LoadConfig(configPath string) error {
 	// Read config file
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return fmt.Errorf("failed to read hook config: %v", err)
+		return fmt.Errorf("failed to read hook config: %w", err)
 	}
 
 	// Parse JSON
 	var config HookConfig
 	if err := json.Unmarshal(data, &config); err != nil {
-		return fmt.Errorf("failed to parse hook config: %v", err)
+		return fmt.Errorf("failed to parse hook config: %w", err)
 	}
 
 	hm.config = &config

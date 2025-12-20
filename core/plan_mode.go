@@ -132,7 +132,7 @@ func (e *UltraFastEngine) AnalyzeEditChange(ctx context.Context, path, oldText, 
 	// Read current content
 	contentBytes, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %v", err)
+		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 	content := string(contentBytes)
 

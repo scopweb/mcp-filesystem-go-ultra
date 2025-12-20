@@ -31,12 +31,12 @@ func (e *UltraFastEngine) WSLWindowsCopy(ctx context.Context, srcPath, dstPath s
 		if IsWSLPath(srcPath) {
 			dstPath, err = WSLToWindows(srcPath)
 			if err != nil {
-				return fmt.Errorf("failed to auto-convert WSL path to Windows: %v", err)
+				return fmt.Errorf("failed to auto-convert WSL path to Windows: %w", err)
 			}
 		} else if IsWindowsPath(srcPath) {
 			dstPath, err = WindowsToWSL(srcPath)
 			if err != nil {
-				return fmt.Errorf("failed to auto-convert Windows path to WSL: %v", err)
+				return fmt.Errorf("failed to auto-convert Windows path to WSL: %w", err)
 			}
 		} else {
 			return fmt.Errorf("could not determine path type for auto-conversion: %s", srcPath)
@@ -61,7 +61,7 @@ func (e *UltraFastEngine) WSLWindowsCopy(ctx context.Context, srcPath, dstPath s
 		return fmt.Errorf("source does not exist: %s", srcPath)
 	}
 	if err != nil {
-		return fmt.Errorf("failed to stat source: %v", err)
+		return fmt.Errorf("failed to stat source: %w", err)
 	}
 
 	// If source is a directory, copy recursively
@@ -78,7 +78,7 @@ func (e *UltraFastEngine) copyDirectoryRecursive(srcDir, dstDir string, createDi
 	// Create destination directory
 	if createDirs {
 		if err := os.MkdirAll(dstDir, 0755); err != nil {
-			return fmt.Errorf("failed to create destination directory: %v", err)
+			return fmt.Errorf("failed to create destination directory: %w", err)
 		}
 	}
 
@@ -104,14 +104,14 @@ func (e *UltraFastEngine) copyDirectoryRecursive(srcDir, dstDir string, createDi
 		// Copy file using io.CopyBuffer with pooled buffer for memory efficiency
 		srcFile, err := os.Open(path)
 		if err != nil {
-			return fmt.Errorf("failed to open %s: %v", path, err)
+			return fmt.Errorf("failed to open %s: %w", path, err)
 		}
 		defer srcFile.Close()
 
 		dstFile, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 		if err != nil {
 			srcFile.Close()
-			return fmt.Errorf("failed to create %s: %v", dstPath, err)
+			return fmt.Errorf("failed to create %s: %w", dstPath, err)
 		}
 
 		// Use pooled buffer to reduce GC pressure
@@ -121,11 +121,11 @@ func (e *UltraFastEngine) copyDirectoryRecursive(srcDir, dstDir string, createDi
 		if _, err := io.CopyBuffer(dstFile, srcFile, *bufPtr); err != nil {
 			dstFile.Close()
 			srcFile.Close()
-			return fmt.Errorf("failed to copy %s: %v", path, err)
+			return fmt.Errorf("failed to copy %s: %w", path, err)
 		}
 
 		if err := dstFile.Close(); err != nil {
-			return fmt.Errorf("failed to close %s: %v", dstPath, err)
+			return fmt.Errorf("failed to close %s: %w", dstPath, err)
 		}
 
 		return nil

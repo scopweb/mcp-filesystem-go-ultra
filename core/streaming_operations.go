@@ -77,7 +77,7 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %v", err)
+		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	// Create temp file for atomic operation
@@ -86,7 +86,7 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 	// Open file for writing with O_SYNC for data integrity
 	file, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
-		return fmt.Errorf("failed to create temp file: %v", err)
+		return fmt.Errorf("failed to create temp file: %w", err)
 	}
 	defer func() {
 		file.Close()
@@ -121,25 +121,25 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 		// Write chunk through buffered writer
 		n, err := writer.WriteString(chunk)
 		if err != nil {
-			return fmt.Errorf("failed to write chunk %d: %v", i+1, err)
+			return fmt.Errorf("failed to write chunk %d: %w", i+1, err)
 		}
 		written += n
 	}
 
 	// Flush buffered data
 	if err := writer.Flush(); err != nil {
-		return fmt.Errorf("failed to flush buffer: %v", err)
+		return fmt.Errorf("failed to flush buffer: %w", err)
 	}
 
 	// Sync to disk
 	if err := file.Sync(); err != nil {
-		return fmt.Errorf("failed to sync file: %v", err)
+		return fmt.Errorf("failed to sync file: %w", err)
 	}
 	file.Close()
 
 	// Atomic rename
 	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("failed to finalize file: %v", err)
+		return fmt.Errorf("failed to finalize file: %w", err)
 	}
 
 	// Invalidate cache
@@ -170,7 +170,7 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 	// Get file info
 	info, err := os.Stat(path)
 	if err != nil {
-		return "", fmt.Errorf("file stat error: %v", err)
+		return "", fmt.Errorf("file stat error: %w", err)
 	}
 
 	fileSize := info.Size()
@@ -189,7 +189,7 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 	// Open file
 	file, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("failed to open file: %v", err)
+		return "", fmt.Errorf("failed to open file: %w", err)
 	}
 	defer file.Close()
 
@@ -236,7 +236,7 @@ func (e *UltraFastEngine) SmartEditFile(ctx context.Context, path, oldText, newT
 	// Get file info first
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, fmt.Errorf("file stat error: %v", err)
+		return nil, fmt.Errorf("file stat error: %w", err)
 	}
 
 	fileSize := info.Size()
@@ -246,8 +246,8 @@ func (e *UltraFastEngine) SmartEditFile(ctx context.Context, path, oldText, newT
 		return e.streamingEditLargeFile(ctx, path, oldText, newText)
 	}
 
-	// Use regular edit for smaller files
-	return e.EditFile(path, oldText, newText)
+	// Use regular edit for smaller files (force=false for SmartEditFile)
+	return e.EditFile(path, oldText, newText, false)
 }
 
 // streamingEditLargeFile handles editing of very large files

@@ -47,12 +47,12 @@ func (e *UltraFastEngine) RenameFile(ctx context.Context, oldPath, newPath strin
 	// Ensure destination directory exists
 	destDir := filepath.Dir(newPath)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("failed to create destination directory: %v", err)
+		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
 	// Perform the rename
 	if err := os.Rename(oldPath, newPath); err != nil {
-		return fmt.Errorf("failed to rename file: %v", err)
+		return fmt.Errorf("failed to rename file: %w", err)
 	}
 
 	// Invalidate cache entries for both paths
@@ -114,18 +114,18 @@ func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) error
 	// Create the filesdelete directory
 	deleteDir := filepath.Join(rootDir, "filesdelete")
 	if err := os.MkdirAll(deleteDir, 0755); err != nil {
-		return fmt.Errorf("failed to create filesdelete directory: %v", err)
+		return fmt.Errorf("failed to create filesdelete directory: %w", err)
 	}
 
 	// Create destination path maintaining relative structure
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return fmt.Errorf("failed to get absolute path: %v", err)
+		return fmt.Errorf("failed to get absolute path: %w", err)
 	}
 
 	absRootDir, err := filepath.Abs(rootDir)
 	if err != nil {
-		return fmt.Errorf("failed to get absolute root directory: %v", err)
+		return fmt.Errorf("failed to get absolute root directory: %w", err)
 	}
 
 	relPath, err := filepath.Rel(absRootDir, absPath)
@@ -141,7 +141,7 @@ func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) error
 	// Ensure destination directory exists
 	destDir := filepath.Dir(destPath)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("failed to create destination directory in filesdelete: %v", err)
+		return fmt.Errorf("failed to create destination directory in filesdelete: %w", err)
 	}
 
 	// If destination already exists, add timestamp suffix
@@ -154,7 +154,7 @@ func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) error
 
 	// Move the file
 	if err := os.Rename(path, destPath); err != nil {
-		return fmt.Errorf("failed to move file to filesdelete: %v", err)
+		return fmt.Errorf("failed to move file to filesdelete: %w", err)
 	}
 
 	// Invalidate cache entries
@@ -209,7 +209,7 @@ func (e *UltraFastEngine) CreateDirectory(ctx context.Context, path string) erro
 
 	// Create directory with all parent directories
 	if err := os.MkdirAll(path, 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %v", err)
+		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	// Invalidate parent directory cache
@@ -243,7 +243,7 @@ func (e *UltraFastEngine) DeleteFile(ctx context.Context, path string) error {
 		return fmt.Errorf("file or directory does not exist: %s", path)
 	}
 	if err != nil {
-		return fmt.Errorf("failed to stat file: %v", err)
+		return fmt.Errorf("failed to stat file: %w", err)
 	}
 
 	// Delete file or directory recursively
@@ -254,7 +254,7 @@ func (e *UltraFastEngine) DeleteFile(ctx context.Context, path string) error {
 	}
 
 	if err != nil {
-		return fmt.Errorf("failed to delete: %v", err)
+		return fmt.Errorf("failed to delete: %w", err)
 	}
 
 	// Invalidate cache entries
@@ -294,7 +294,7 @@ func (e *UltraFastEngine) MoveFile(ctx context.Context, sourcePath, destPath str
 		return fmt.Errorf("source does not exist: %s", sourcePath)
 	}
 	if err != nil {
-		return fmt.Errorf("failed to stat source: %v", err)
+		return fmt.Errorf("failed to stat source: %w", err)
 	}
 
 	// Check if destination already exists
@@ -307,13 +307,13 @@ func (e *UltraFastEngine) MoveFile(ctx context.Context, sourcePath, destPath str
 	if !sourceInfo.IsDir() {
 		// For files, create parent directory
 		if err := os.MkdirAll(destDir, 0755); err != nil {
-			return fmt.Errorf("failed to create destination directory: %v", err)
+			return fmt.Errorf("failed to create destination directory: %w", err)
 		}
 	}
 
 	// Perform the move
 	if err := os.Rename(sourcePath, destPath); err != nil {
-		return fmt.Errorf("failed to move: %v", err)
+		return fmt.Errorf("failed to move: %w", err)
 	}
 
 	// Invalidate cache entries
@@ -356,7 +356,7 @@ func (e *UltraFastEngine) CopyFile(ctx context.Context, sourcePath, destPath str
 		return fmt.Errorf("source does not exist: %s", sourcePath)
 	}
 	if err != nil {
-		return fmt.Errorf("failed to stat source: %v", err)
+		return fmt.Errorf("failed to stat source: %w", err)
 	}
 
 	// Check if destination already exists
@@ -376,26 +376,26 @@ func (e *UltraFastEngine) copyFile(src, dst string) error {
 	// Get source file permissions
 	sourceInfo, err := os.Stat(src)
 	if err != nil {
-		return fmt.Errorf("failed to stat source file: %v", err)
+		return fmt.Errorf("failed to stat source file: %w", err)
 	}
 
 	// Open source file for reading
 	srcFile, err := os.Open(src)
 	if err != nil {
-		return fmt.Errorf("failed to open source file: %v", err)
+		return fmt.Errorf("failed to open source file: %w", err)
 	}
 	defer srcFile.Close()
 
 	// Ensure destination directory exists
 	destDir := filepath.Dir(dst)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("failed to create destination directory: %v", err)
+		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
 	// Create destination file with same permissions
 	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, sourceInfo.Mode())
 	if err != nil {
-		return fmt.Errorf("failed to create destination file: %v", err)
+		return fmt.Errorf("failed to create destination file: %w", err)
 	}
 	defer dstFile.Close()
 
@@ -405,12 +405,12 @@ func (e *UltraFastEngine) copyFile(src, dst string) error {
 	defer e.bufferPool.Put(bufPtr)
 
 	if _, err := io.CopyBuffer(dstFile, srcFile, *bufPtr); err != nil {
-		return fmt.Errorf("failed to copy file content: %v", err)
+		return fmt.Errorf("failed to copy file content: %w", err)
 	}
 
 	// Sync to ensure data is written to disk
 	if err := dstFile.Sync(); err != nil {
-		return fmt.Errorf("failed to sync destination file: %v", err)
+		return fmt.Errorf("failed to sync destination file: %w", err)
 	}
 
 	// Invalidate cache for destination
@@ -425,18 +425,18 @@ func (e *UltraFastEngine) copyDirectory(src, dst string) error {
 	// Get source directory info
 	sourceInfo, err := os.Stat(src)
 	if err != nil {
-		return fmt.Errorf("failed to stat source directory: %v", err)
+		return fmt.Errorf("failed to stat source directory: %w", err)
 	}
 
 	// Create destination directory
 	if err := os.MkdirAll(dst, sourceInfo.Mode()); err != nil {
-		return fmt.Errorf("failed to create destination directory: %v", err)
+		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
 	// Read directory contents
 	entries, err := os.ReadDir(src)
 	if err != nil {
-		return fmt.Errorf("failed to read directory: %v", err)
+		return fmt.Errorf("failed to read directory: %w", err)
 	}
 
 	// Copy each entry
@@ -488,7 +488,7 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 		return "", fmt.Errorf("file does not exist: %s", path)
 	}
 	if err != nil {
-		return "", fmt.Errorf("failed to stat file: %v", err)
+		return "", fmt.Errorf("failed to stat file: %w", err)
 	}
 
 	if info.IsDir() {
@@ -506,7 +506,7 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 	// Open file for efficient line-by-line reading
 	file, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("failed to open file: %v", err)
+		return "", fmt.Errorf("failed to open file: %w", err)
 	}
 	defer file.Close()
 
@@ -548,7 +548,7 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 	}
 
 	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("error reading file: %v", err)
+		return "", fmt.Errorf("error reading file: %w", err)
 	}
 
 	// If endLine was beyond file length, adjust it
@@ -588,7 +588,7 @@ func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string,
 		return "", fmt.Errorf("file or directory does not exist: %s", path)
 	}
 	if err != nil {
-		return "", fmt.Errorf("failed to stat file: %v", err)
+		return "", fmt.Errorf("failed to stat file: %w", err)
 	}
 
 	// Build detailed info string

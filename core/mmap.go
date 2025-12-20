@@ -52,14 +52,14 @@ func (mc *MmapCache) ReadFile(path string) ([]byte, error) {
 	// Open file
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %v", err)
+		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
 
 	// Get file size
 	stat, err := file.Stat()
 	if err != nil {
 		file.Close()
-		return nil, fmt.Errorf("failed to stat file: %v", err)
+		return nil, fmt.Errorf("failed to stat file: %w", err)
 	}
 
 	size := stat.Size()
@@ -72,7 +72,7 @@ func (mc *MmapCache) ReadFile(path string) ([]byte, error) {
 	data, err := mmapFile(file, size)
 	if err != nil {
 		file.Close()
-		return nil, fmt.Errorf("failed to mmap file: %v", err)
+		return nil, fmt.Errorf("failed to mmap file: %w", err)
 	}
 
 	// Check if we need to evict old entries
@@ -147,7 +147,7 @@ func mmapFile(file *os.File, size int64) ([]byte, error) {
 	data := make([]byte, size)
 	_, err := file.ReadAt(data, 0)
 	if err != nil {
-		return nil, fmt.Errorf("file read failed: %v", err)
+		return nil, fmt.Errorf("file read failed: %w", err)
 	}
 
 	return data, nil

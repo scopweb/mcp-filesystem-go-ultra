@@ -52,7 +52,7 @@ func NewBackupManager(backupDir string, maxBackups int, maxAgeDays int) (*Backup
 
 	// Crear directorio si no existe
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create backup directory: %v", err)
+		return nil, fmt.Errorf("failed to create backup directory: %w", err)
 	}
 
 	bm := &BackupManager{
@@ -84,7 +84,7 @@ func (bm *BackupManager) CreateBackupWithContext(path string, operation string, 
 	// Verificar que el archivo existe
 	fileInfo, err := os.Stat(path)
 	if err != nil {
-		return "", fmt.Errorf("source file not found: %v", err)
+		return "", fmt.Errorf("source file not found: %w", err)
 	}
 
 	// Generar ID único para este backup
@@ -94,7 +94,7 @@ func (bm *BackupManager) CreateBackupWithContext(path string, operation string, 
 	// Crear directorio del backup
 	backupFilesDir := filepath.Join(backupBaseDir, "files")
 	if err := os.MkdirAll(backupFilesDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create backup directory: %v", err)
+		return "", fmt.Errorf("failed to create backup directory: %w", err)
 	}
 
 	// Calcular ruta relativa para mantener estructura
@@ -105,7 +105,7 @@ func (bm *BackupManager) CreateBackupWithContext(path string, operation string, 
 	hash, err := copyFileWithHash(path, backupFilePath)
 	if err != nil {
 		os.RemoveAll(backupBaseDir) // Limpiar en caso de error
-		return "", fmt.Errorf("failed to copy file: %v", err)
+		return "", fmt.Errorf("failed to copy file: %w", err)
 	}
 
 	// Crear metadata
@@ -129,7 +129,7 @@ func (bm *BackupManager) CreateBackupWithContext(path string, operation string, 
 	// Guardar metadata
 	if err := bm.saveBackupMetadata(backupBaseDir, &backupInfo); err != nil {
 		os.RemoveAll(backupBaseDir)
-		return "", fmt.Errorf("failed to save metadata: %v", err)
+		return "", fmt.Errorf("failed to save metadata: %w", err)
 	}
 
 	// Actualizar cache
@@ -156,7 +156,7 @@ func (bm *BackupManager) CreateBatchBackup(paths []string, operation string, use
 	backupFilesDir := filepath.Join(backupBaseDir, "files")
 
 	if err := os.MkdirAll(backupFilesDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create backup directory: %v", err)
+		return "", fmt.Errorf("failed to create backup directory: %w", err)
 	}
 
 	var files []BackupMetadata
@@ -207,7 +207,7 @@ func (bm *BackupManager) CreateBatchBackup(paths []string, operation string, use
 
 	if err := bm.saveBackupMetadata(backupBaseDir, &backupInfo); err != nil {
 		os.RemoveAll(backupBaseDir)
-		return "", fmt.Errorf("failed to save metadata: %v", err)
+		return "", fmt.Errorf("failed to save metadata: %w", err)
 	}
 
 	bm.metadataCache[backupID] = &backupInfo
@@ -287,7 +287,7 @@ func (bm *BackupManager) GetBackupInfo(backupID string) (*BackupInfo, error) {
 	backupDir := filepath.Join(bm.backupDir, backupID)
 	info, err := bm.loadBackupMetadata(backupDir)
 	if err != nil {
-		return nil, fmt.Errorf("backup not found: %v", err)
+		return nil, fmt.Errorf("backup not found: %w", err)
 	}
 
 	return info, nil
@@ -312,13 +312,13 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 					// Crear backup del estado actual antes de restaurar
 					_, err := bm.CreateBackup(file.OriginalPath, "pre_restore")
 					if err != nil {
-						return nil, fmt.Errorf("failed to create pre-restore backup: %v", err)
+						return nil, fmt.Errorf("failed to create pre-restore backup: %w", err)
 					}
 				}
 
 				backupFilePath := filepath.Join(backupBaseDir, file.BackupPath)
 				if err := copyFile(backupFilePath, file.OriginalPath); err != nil {
-					return nil, fmt.Errorf("failed to restore %s: %v", file.OriginalPath, err)
+					return nil, fmt.Errorf("failed to restore %s: %w", file.OriginalPath, err)
 				}
 				restoredFiles = append(restoredFiles, file.OriginalPath)
 				break
@@ -383,7 +383,7 @@ func (bm *BackupManager) CompareWithBackup(backupID string, filePath string) (st
 	// Leer archivo del backup
 	backupContent, err := os.ReadFile(filepath.Join(backupBaseDir, backupFile.BackupPath))
 	if err != nil {
-		return "", fmt.Errorf("failed to read backup file: %v", err)
+		return "", fmt.Errorf("failed to read backup file: %w", err)
 	}
 
 	// Leer archivo actual (si existe)
@@ -391,7 +391,7 @@ func (bm *BackupManager) CompareWithBackup(backupID string, filePath string) (st
 	if _, err := os.Stat(filePath); err == nil {
 		currentContent, err = os.ReadFile(filePath)
 		if err != nil {
-			return "", fmt.Errorf("failed to read current file: %v", err)
+			return "", fmt.Errorf("failed to read current file: %w", err)
 		}
 	}
 
@@ -412,7 +412,7 @@ func (bm *BackupManager) CleanupOldBackups(olderThanDays int, dryRun bool) (int,
 
 	entries, err := os.ReadDir(bm.backupDir)
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to read backup directory: %v", err)
+		return 0, 0, fmt.Errorf("failed to read backup directory: %w", err)
 	}
 
 	for _, entry := range entries {

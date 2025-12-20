@@ -145,7 +145,7 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 	// Initialize worker pool for parallel operations
 	workerPool, err := ants.NewPool(config.ParallelOps, ants.WithPreAlloc(true))
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize worker pool: %v", err)
+		return nil, fmt.Errorf("failed to initialize worker pool: %w", err)
 	}
 	engine.workerPool = workerPool
 
@@ -336,7 +336,7 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 	// Read from disk
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("file read error: %v", err)
+		return "", fmt.Errorf("file read error: %w", err)
 	}
 
 	// Cache the content and track access
@@ -380,7 +380,7 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 
 	hookResult, err := e.hookManager.ExecuteHooks(ctx, HookPreWrite, hookCtx)
 	if err != nil {
-		return fmt.Errorf("pre-write hook denied operation: %v", err)
+		return fmt.Errorf("pre-write hook denied operation: %w", err)
 	}
 
 	// Use modified content if hook provided it (e.g., formatted code)
@@ -392,7 +392,7 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %v", err)
+		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	// Atomic write using temp file
@@ -400,13 +400,13 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 
 	// Write to temporary file
 	if err := os.WriteFile(tmpPath, []byte(finalContent), 0644); err != nil {
-		return fmt.Errorf("failed to write temp file: %v", err)
+		return fmt.Errorf("failed to write temp file: %w", err)
 	}
 
 	// Atomic rename
 	if err := os.Rename(tmpPath, path); err != nil {
 		os.Remove(tmpPath) // Clean up temp file
-		return fmt.Errorf("failed to rename temp file: %v", err)
+		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 
 	// Invalidate cache
@@ -456,7 +456,7 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 	// Read directory
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return "", fmt.Errorf("failed to read directory: %v", err)
+		return "", fmt.Errorf("failed to read directory: %w", err)
 	}
 
 	// Build response - compact or verbose mode
@@ -740,8 +740,8 @@ func (e *UltraFastEngine) IntelligentRead(ctx context.Context, path string) (str
 }
 
 // IntelligentEdit wraps optimizer's IntelligentEdit method
-func (e *UltraFastEngine) IntelligentEdit(ctx context.Context, path, oldText, newText string) (*EditResult, error) {
-	return e.optimizer.IntelligentEdit(ctx, path, oldText, newText)
+func (e *UltraFastEngine) IntelligentEdit(ctx context.Context, path, oldText, newText string, force bool) (*EditResult, error) {
+	return e.optimizer.IntelligentEdit(ctx, path, oldText, newText, force)
 }
 
 // GetOptimizationReport wraps optimizer's GetPerformanceReport method
@@ -750,8 +750,8 @@ func (e *UltraFastEngine) GetOptimizationReport() string {
 }
 
 // AutoRecoveryEdit wraps optimizer's AutoRecoveryEdit method
-func (e *UltraFastEngine) AutoRecoveryEdit(ctx context.Context, path, oldText, newText string) (*EditResult, error) {
-	return e.optimizer.AutoRecoveryEdit(ctx, path, oldText, newText)
+func (e *UltraFastEngine) AutoRecoveryEdit(ctx context.Context, path, oldText, newText string, force bool) (*EditResult, error) {
+	return e.optimizer.AutoRecoveryEdit(ctx, path, oldText, newText, force)
 }
 
 // GetOptimizationSuggestion wraps optimizer's GetOptimizationSuggestion method

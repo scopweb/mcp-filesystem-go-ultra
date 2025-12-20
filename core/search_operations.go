@@ -410,7 +410,7 @@ func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSe
 
 	regexPattern, err := regexp.Compile(searchPattern)
 	if err != nil {
-		return nil, fmt.Errorf("invalid regex pattern: %v", err)
+		return nil, fmt.Errorf("invalid regex pattern: %w", err)
 	}
 
 	// First pass: collect all files to search
@@ -547,7 +547,7 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 
 	validPath, err := e.validatePath(path)
 	if err != nil {
-		return "", fmt.Errorf("path validation error: %v", err)
+		return "", fmt.Errorf("path validation error: %w", err)
 	}
 
 	// Check if file exists
@@ -556,7 +556,7 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 		return "", fmt.Errorf("file does not exist: %s", validPath)
 	}
 	if err != nil {
-		return "", fmt.Errorf("failed to stat file: %v", err)
+		return "", fmt.Errorf("failed to stat file: %w", err)
 	}
 
 	if info.IsDir() {
@@ -566,7 +566,7 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 	// Read file
 	content, err := os.ReadFile(validPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read file: %v", err)
+		return "", fmt.Errorf("failed to read file: %w", err)
 	}
 
 	lines := strings.Split(string(content), "\n")
