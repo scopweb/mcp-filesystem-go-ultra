@@ -110,7 +110,7 @@ func TestIntelligentEdit(t *testing.T) {
 	oldText := "world"
 	newText := "universe"
 
-	result, err := engine.IntelligentEdit(ctx, testFile, oldText, newText, false)
+	result, err := engine.IntelligentEdit(ctx, testFile, oldText, newText, true)
 	if err != nil {
 		t.Errorf("IntelligentEdit failed: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestAutoRecoveryEdit(t *testing.T) {
 	oldText := "function test() {"
 	newText := "function testFunction() {"
 
-	result, err := engine.AutoRecoveryEdit(ctx, testFile, oldText, newText, false)
+	result, err := engine.AutoRecoveryEdit(ctx, testFile, oldText, newText, true)
 	if err != nil {
 		t.Errorf("AutoRecoveryEdit failed: %v", err)
 	}

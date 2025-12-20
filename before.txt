@@ -1,0 +1,56 @@
+# github.com/mcp/filesystem-ultra/core [github.com/mcp/filesystem-ultra/core.test]
+core\engine_test.go:113:64: not enough arguments in call to engine.IntelligentEdit
+	have (context.Context, string, string, string)
+	want (context.Context, string, string, string, bool)
+core\engine_test.go:155:65: not enough arguments in call to engine.AutoRecoveryEdit
+	have (context.Context, string, string, string)
+	want (context.Context, string, string, string, bool)
+core\engine_test.go:233:77: cannot use engine.IntelligentEdit (value of type func(ctx context.Context, path string, oldText string, newText string, force bool) (*EditResult, error)) as func(context.Context, string, string, string) (*EditResult, error) value in variable declaration
+core\engine_test.go:234:77: cannot use engine.AutoRecoveryEdit (value of type func(ctx context.Context, path string, oldText string, newText string, force bool) (*EditResult, error)) as func(context.Context, string, string, string) (*EditResult, error) value in variable declaration
+FAIL	github.com/mcp/filesystem-ultra [build failed]
+?   	github.com/mcp/filesystem-ultra/bench	[no test files]
+?   	github.com/mcp/filesystem-ultra/cache	[no test files]
+FAIL	github.com/mcp/filesystem-ultra/core [build failed]
+?   	github.com/mcp/filesystem-ultra/mcp	[no test files]
+?   	github.com/mcp/filesystem-ultra/protocol	[no test files]
+2025/12/20 13:24:07 ⚠️ Access control disabled - full filesystem access allowed
+2025/12/20 13:24:07 🔧 Ultra-fast engine initialized with 2 parallel operations (64KB buffer pool)
+2025/12/20 13:24:07 🧠 Claude Desktop optimizer initialized
+2025/12/20 13:24:07 🔄 WSL auto-sync enabled
+2025/12/20 13:24:07 🔒 Backup manager initialized: C:\Users\DAVID\AppData\Local\Temp\mcp-batch-backups (max age: 7 days, max count: 100)
+goos: windows
+goarch: amd64
+pkg: github.com/mcp/filesystem-ultra/tests
+cpu: Intel(R) Core(TM) i7-14700KF
+BenchmarkTelemetryLogging-28       	2025/12/20 13:24:07 ⚠️ Access control disabled - full filesystem access allowed
+2025/12/20 13:24:07 🔧 Ultra-fast engine initialized with 2 parallel operations (64KB buffer pool)
+2025/12/20 13:24:07 🧠 Claude Desktop optimizer initialized
+2025/12/20 13:24:07 🔄 WSL auto-sync enabled
+2025/12/20 13:24:07 🔒 Backup manager initialized: C:\Users\DAVID\AppData\Local\Temp\mcp-batch-backups (max age: 7 days, max count: 100)
+2025/12/20 13:24:07 ⚠️ Access control disabled - full filesystem access allowed
+2025/12/20 13:24:07 🔧 Ultra-fast engine initialized with 2 parallel operations (64KB buffer pool)
+2025/12/20 13:24:07 🧠 Claude Desktop optimizer initialized
+2025/12/20 13:24:07 🔄 WSL auto-sync enabled
+2025/12/20 13:24:07 🔒 Backup manager initialized: C:\Users\DAVID\AppData\Local\Temp\mcp-batch-backups (max age: 7 days, max count: 100)
+2025/12/20 13:24:07 ⚠️ Access control disabled - full filesystem access allowed
+2025/12/20 13:24:07 🔧 Ultra-fast engine initialized with 2 parallel operations (64KB buffer pool)
+2025/12/20 13:24:07 🧠 Claude Desktop optimizer initialized
+2025/12/20 13:24:07 🔄 WSL auto-sync enabled
+2025/12/20 13:24:07 🔒 Backup manager initialized: C:\Users\DAVID\AppData\Local\Temp\mcp-batch-backups (max age: 7 days, max count: 100)
+2025/12/20 13:24:08 ⚠️ Access control disabled - full filesystem access allowed
+2025/12/20 13:24:08 🔧 Ultra-fast engine initialized with 2 parallel operations (64KB buffer pool)
+2025/12/20 13:24:08 🧠 Claude Desktop optimizer initialized
+2025/12/20 13:24:08 🔄 WSL auto-sync enabled
+2025/12/20 13:24:08 🔒 Backup manager initialized: C:\Users\DAVID\AppData\Local\Temp\mcp-batch-backups (max age: 7 days, max count: 100)
+15077326	        77.85 ns/op	      56 B/op	       2 allocs/op
+BenchmarkEditSafetyValidator-28    	   23295	     50927 ns/op	   32193 B/op	      17 allocs/op
+PASS
+ok  	github.com/mcp/filesystem-ultra/tests	3.043s
+goos: windows
+goarch: amd64
+pkg: github.com/mcp/filesystem-ultra/tests/security
+cpu: Intel(R) Core(TM) i7-14700KF
+BenchmarkSecurityChecks-28    	 9990583	       119.8 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/mcp/filesystem-ultra/tests/security	1.334s
+FAIL
