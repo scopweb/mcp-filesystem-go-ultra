@@ -52,7 +52,7 @@ func (e *UltraFastEngine) SmartSearch(ctx context.Context, request mcp.CallToolR
 		}, nil
 	}
 
-	results, err := e.performSmartSearch(validPath, pattern, includeContent, fileTypes)
+	results, err := e.performSmartSearch(ctx, validPath, pattern, includeContent, fileTypes)
 	if err != nil {
 		return &mcp.CallToolResponse{
 			Content: []mcp.TextContent{
@@ -181,7 +181,12 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 }
 
 // performSmartSearch implements intelligent search with parallelization
-func (e *UltraFastEngine) performSmartSearch(path, pattern string, includeContent bool, fileTypes []string) (string, error) {
+func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern string, includeContent bool, fileTypes []string) (string, error) {
+	// Check context before starting
+	if err := ctx.Err(); err != nil {
+		return "", &ContextError{Op: "search", Details: "operation cancelled before start"}
+	}
+
 	var resultsMu sync.Mutex
 	var results []string
 	var contentMatches []SearchMatch
@@ -197,6 +202,11 @@ func (e *UltraFastEngine) performSmartSearch(path, pattern string, includeConten
 	// First pass: collect all files to search
 	var filesToSearch []string
 	err = filepath.Walk(path, func(currentPath string, info os.FileInfo, err error) error {
+		// Check context in walk callback
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr // Stop walk if context is cancelled
+		}
+
 		if err != nil {
 			return nil // Continue with other files
 		}
@@ -254,6 +264,11 @@ func (e *UltraFastEngine) performSmartSearch(path, pattern string, includeConten
 		var wg sync.WaitGroup
 
 		for _, filePath := range filesToSearch {
+			// Check context in main loop
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				break // Exit if context is cancelled
+			}
+
 			// Check if we've reached max results
 			resultsMu.Lock()
 			if len(contentMatches) >= maxResults {
@@ -267,6 +282,11 @@ func (e *UltraFastEngine) performSmartSearch(path, pattern string, includeConten
 
 			e.workerPool.Submit(func() {
 				defer wg.Done()
+
+				// Check context in worker
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return // Exit worker if context is cancelled
+				}
 
 				// Read file
 				content, err := os.ReadFile(currentFile)
