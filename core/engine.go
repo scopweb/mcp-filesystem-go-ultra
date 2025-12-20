@@ -305,6 +305,11 @@ func (e *UltraFastEngine) releaseOperation(opType string, start time.Time) {
 
 // ReadFileContent implements ultra-fast file reading with intelligent caching
 func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (string, error) {
+	// Check context before starting
+	if err := ctx.Err(); err != nil {
+		return "", &ContextError{Op: "read_file", Details: "operation cancelled before start"}
+	}
+
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
@@ -319,7 +324,7 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 	// Check if path is allowed
 	if len(e.config.AllowedPaths) > 0 {
 		if !e.isPathAllowed(path) {
-			return "", fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
+			return "", &PathError{Op: "read", Path: path, Err: fmt.Errorf("access denied")}
 		}
 	}
 
@@ -333,21 +338,47 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 		return string(cached), nil
 	}
 
-	// Read from disk
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("file read error: %w", err)
+	// Check context before disk I/O
+	if err := ctx.Err(); err != nil {
+		return "", &ContextError{Op: "read_file", Details: "operation cancelled before disk read"}
+	}
+
+	// Read from disk with context awareness
+	type readResult struct {
+		content []byte
+		err     error
+	}
+
+	resultChan := make(chan readResult, 1)
+	go func() {
+		content, err := os.ReadFile(path)
+		resultChan <- readResult{content, err}
+	}()
+
+	var result readResult
+	select {
+	case <-ctx.Done():
+		return "", &ContextError{Op: "read_file", Details: "operation cancelled during disk read"}
+	case result = <-resultChan:
+		if result.err != nil {
+			return "", &PathError{Op: "read", Path: path, Err: result.err}
+		}
 	}
 
 	// Cache the content and track access
-	e.cache.SetFile(path, content)
+	e.cache.SetFile(path, result.content)
 	e.cache.TrackAccess(path)
 
-	return string(content), nil
+	return string(result.content), nil
 }
 
 // WriteFileContent implements atomic file writing
 func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content string) error {
+	// Check context before starting
+	if err := ctx.Err(); err != nil {
+		return &ContextError{Op: "write_file", Details: "operation cancelled before start"}
+	}
+
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
@@ -362,8 +393,13 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 	// Check if path is allowed
 	if len(e.config.AllowedPaths) > 0 {
 		if !e.isPathAllowed(path) {
-			return fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
+			return &PathError{Op: "write", Path: path, Err: fmt.Errorf("access denied")}
 		}
+	}
+
+	// Check context before proceeding with write
+	if err := ctx.Err(); err != nil {
+		return &ContextError{Op: "write_file", Details: "operation cancelled before write"}
 	}
 
 	// Execute pre-write hooks
