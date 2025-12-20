@@ -31,7 +31,9 @@
       "Bash(gh release create:*)",
       "Bash(paste:*)",
       "Bash(sort:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(go doc:*)"
     ],
     "deny": [],
     "ask": []
