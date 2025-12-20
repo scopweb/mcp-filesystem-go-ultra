@@ -142,13 +142,13 @@ func TestWrapperMethodsCallable(t *testing.T) {
 	}
 
 	// Test IntelligentEdit
-	_, err = engine.IntelligentEdit(ctx, testFile, "old", "new")
+	_, err = engine.IntelligentEdit(ctx, testFile, "old", "new", false)
 	if err != nil {
 		t.Logf("IntelligentEdit callable (may have path restriction): %v", err)
 	}
 
 	// Test AutoRecoveryEdit
-	_, err = engine.AutoRecoveryEdit(ctx, testFile, "old", "new")
+	_, err = engine.AutoRecoveryEdit(ctx, testFile, "old", "new", false)
 	if err != nil {
 		t.Logf("AutoRecoveryEdit callable (may have path restriction): %v", err)
 	}
