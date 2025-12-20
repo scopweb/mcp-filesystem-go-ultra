@@ -61,7 +61,7 @@ func WriteFile() {
 		oldText := "return nil"
 		newText := "return content"
 
-		result, err := engine.EditFile(testFile, oldText, newText)
+		result, err := engine.EditFile(testFile, oldText, newText, false)
 		if err != nil {
 			t.Fatalf("EditFile should succeed with valid context, got error: %v", err)
 		}
@@ -80,7 +80,7 @@ func WriteFile() {
 		oldText := "this_text_does_not_exist"
 		newText := "something"
 
-		result, err := engine.EditFile(testFile, oldText, newText)
+		result, err := engine.EditFile(testFile, oldText, newText, false)
 		if err == nil {
 			t.Error("EditFile should fail with invalid context")
 		}
@@ -287,7 +287,7 @@ func GetUser(id string) User {
 		newText := `// Get user from cache or database
 	return cache.Get(id)`
 
-		result, err := engine.EditFile(testFile, oldText, newText)
+		result, err := engine.EditFile(testFile, oldText, newText, false)
 
 		// Should fail because the text doesn't exactly match
 		// (but this tests the context validation logic)
@@ -344,7 +344,7 @@ func TestBug5Summary(t *testing.T) {
 		os.WriteFile(testFile, []byte("test content"), 0644)
 
 		// Should fail with invalid old_text
-		result, err := engine.EditFile(testFile, "nonexistent", "new")
+		result, err := engine.EditFile(testFile, "nonexistent", "new", false)
 		if err != nil && strings.Contains(err.Error(), "context") {
 			t.Log("✅ Phase 3: Context validation implemented")
 		} else {
