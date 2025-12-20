@@ -1,5 +1,20 @@
 # MCP Filesystem Ultra - Propuestas de Mejora
 
+## ✅ ESTADO: COMPLETAMENTE IMPLANTADO (v3.1.0+)
+
+**Fecha de Implementación:** 25 de Octubre de 2025
+**Commit:** `3cbabbb` - "Add v3.1.0: Ultra-Efficient Operations (3 new tools)"
+**Estado:** 🟢 **PRODUCCIÓN - TODAS LAS MEJORAS ACTIVAS**
+
+### Resumen Rápido de Implementación:
+- ✅ `read_file_range` - Implementada y funcional
+- ✅ `count_occurrences` - Implementada y funcional
+- ✅ `replace_nth_occurrence` - Implementada y funcional
+
+**Todas las 3 herramientas críticas están disponibles en producción y listas para usar.**
+
+---
+
 ## 📋 Contexto
 
 Durante pruebas reales de uso del MCP filesystem-ultra, se identificaron limitaciones críticas al trabajar con archivos grandes y búsquedas de ocurrencias específicas.
@@ -267,5 +282,62 @@ Con estas mejoras, el MCP filesystem-ultra sería significativamente más eficie
 
 ---
 
-**Documento generado:** 2025-10-25  
+## 🔍 DETALLES DE IMPLEMENTACIÓN EN CÓDIGO
+
+### Ubicaciones en el Código Fuente
+
+#### 1. Definición de Herramientas (main.go)
+- **Línea 1084**: `readRangeTool := mcp.NewTool("read_file_range", ...)`
+- **Línea 1107**: `countOccurrencesTool := mcp.NewTool("count_occurrences", ...)`
+- **Línea 1141**: `replaceNthTool := mcp.NewTool("replace_nth_occurrence", ...)`
+
+#### 2. Implementaciones de Funciones
+
+**ReadFileRange** (core/file_operations.go)
+```go
+func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startLine, endLine int) (string, error)
+```
+- Lectura eficiente de rangos específicos
+- Normalización automática de rutas (Windows/WSL)
+- Validación de seguridad integrada
+- Manejo inteligente de límites de línea
+
+**CountOccurrences** (core/search_operations.go)
+```go
+func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path string, pattern string, useRegex, returnLineNumbers bool) (interface{}, error)
+```
+- Búsqueda sin cargar archivo completo
+- Soporte para regex o patrones literales
+- Retorno opcional de números de línea
+- Optimización para archivos grandes
+
+**ReplaceNthOccurrence** (core/edit_operations.go)
+```go
+func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path string, pattern, replacement string, occurrence int, wholeWord bool) (string, error)
+```
+- Reemplazos quirúrgicos (primera, última, N-ésima)
+- Backup automático antes de modificar
+- Validación de integridad post-edición
+- Rollback automático en caso de error
+
+### Historial de Commit
+
+**Commit Principal:** `3cbabbb0e6c7d69f6fc400bf450359fb7211b51f`
+```
+Author: David Prats <scopweb@gmail.com>
+Date: Sat Oct 25 10:32:37 2025 +0200
+Subject: Add v3.1.0: Ultra-Efficient Operations (3 new tools)
+```
+
+**Archivos Modificados:**
+- README.md - Documentación actualizada
+- core/edit_operations.go - ReplaceNthOccurrence
+- core/file_operations.go - ReadFileRange
+- core/search_operations.go - CountOccurrences
+- main.go - Registro de herramientas MCP
+
+---
+
+**Documento generado:** 2025-10-25
 **Basado en:** Pruebas reales de uso con archivos SQL de 31K+ líneas
+**Estado del Documento:** ✅ ARCHIVADO - Propuestas implementadas exitosamente
