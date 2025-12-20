@@ -47,8 +47,8 @@ func DefaultChunkingConfig() *ChunkingConfig {
 func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content string) error {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
-	// Quick path for small files - increased threshold for better performance
-	if len(content) <= 256*1024 {
+	// Quick path for small files - use MediumFileThreshold for cutoff
+	if len(content) <= MediumFileThreshold {
 		return e.WriteFileContent(ctx, path, content)
 	}
 
@@ -70,7 +70,7 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 	}
 
 	// Log only for very large files (>5MB) to reduce overhead
-	if totalSize > 5*1024*1024 && !e.config.CompactMode {
+	if totalSize > LargeFileThreshold && !e.config.CompactMode {
 		log.Printf("🚀 Starting streaming write: %s (%s in %d chunks)", path, formatSize(int64(totalSize)), totalChunks)
 	}
 
@@ -148,7 +148,7 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 	operation.Status = "completed"
 
 	// Log only for very large files (>5MB) and if not in compact mode
-	if totalSize > 5*1024*1024 && !e.config.CompactMode {
+	if totalSize > LargeFileThreshold && !e.config.CompactMode {
 		elapsed := time.Since(start)
 		throughput := float64(totalSize) / elapsed.Seconds() / 1024 / 1024
 		log.Printf("✅ Streaming write completed: %s (%v, %.1f MB/s)", path, elapsed, throughput)
@@ -182,7 +182,7 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 
 	start := time.Now()
 	// Log only for very large files and if not in compact mode
-	if fileSize > 5*1024*1024 && !e.config.CompactMode {
+	if fileSize > LargeFileThreshold && !e.config.CompactMode {
 		log.Printf("🚀 Chunked read: %s (%s)", path, formatSize(fileSize))
 	}
 
@@ -217,7 +217,7 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 	}
 
 	// Log only for very large files and if not in compact mode
-	if fileSize > 5*1024*1024 && !e.config.CompactMode {
+	if fileSize > LargeFileThreshold && !e.config.CompactMode {
 		elapsed := time.Since(start)
 		throughput := float64(fileSize) / elapsed.Seconds() / 1024 / 1024
 		log.Printf("✅ Chunked read completed: %s (%v, %.1f MB/s)", path, elapsed, throughput)
