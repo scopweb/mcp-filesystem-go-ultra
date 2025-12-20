@@ -1,5 +1,148 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [3.9.0] - 2025-12-20
+
+### 🔐 Security: Dependency Updates & Enhanced Security Test Suite
+
+#### Dependency Updates
+- Updated `github.com/mark3labs/mcp-go`: v0.42.0 → v0.43.2
+  - Includes latest MCP protocol improvements and security patches
+- Updated `golang.org/x/sync`: v0.17.0 → v0.19.0
+  - Enhanced synchronization primitives and performance
+- Updated `golang.org/x/sys`: v0.37.0 → v0.39.0
+  - Latest system call bindings and OS-level security fixes
+
+#### Security Test Suite Enhancements
+
+**New Tests Added:**
+- `TestOWASPTop10_2024`: Comprehensive OWASP Top 10 2024 vulnerability assessment
+- `TestIntegerOverflowProtection`: CWE-190 integer overflow/wraparound detection
+- `TestNullPointerDefense`: CWE-476 null pointer dereference protection
+- `FuzzPathValidation`: Fuzzing with path traversal attempts and edge cases
+- `FuzzInputValidation`: Fuzzing for command injection protection
+- `FuzzFilePathHandling`: Fuzzing file path handling with special characters
+
+**New Test File:**
+- `tests/security/fuzzing_test.go` (200+ lines)
+  - Security tools integration guide
+  - Vulnerability reporting process documentation
+  - Secure development practices guidelines
+
+**Updated Tests:**
+- `TestSecurityAuditLog`: Enhanced to v2 format with dependency update tracking
+- `TestMainDependencies`: Updated version expectations to latest releases
+
+#### Security Assessment Status
+- ✅ **Critical Issues**: 0
+- ✅ **High Issues**: 0
+- ✅ **Medium Issues**: 0
+- ✅ **Low Issues**: 0
+- ✅ **All Security Tests**: PASS
+
+#### Coverage
+- Path Traversal (CWE-22)
+- Command Injection (CWE-78)
+- Integer Overflow (CWE-190)
+- Null Pointer Dereference (CWE-476)
+- OWASP Top 10 2024 (A01-A10)
+- Race Conditions (CWE-362)
+- Cryptographic Failures (A02:2024)
+
+#### Next Steps for Users
+1. Run security tests regularly: `go test -v ./tests/security/...`
+2. Run race detection: `go test -race ./...`
+3. Install security tools:
+   - `gosec` for static analysis
+   - `nancy` for CVE detection
+   - `syft` for SBOM generation
+4. Monitor dependency updates monthly
+
+---
+
+## [3.8.1] - 2025-12-04
+
+### 🐛 Critical Fix: Risk Assessment Not Blocking Operations (Bug #10 Follow-up)
+
+#### Problem Found
+After implementing the backup and recovery system (v3.8.0), testing revealed a **critical bug**:
+- Risk assessment was **calculating** change impact correctly (e.g., "220.9% change, HIGH risk")
+- BUT it was **NOT blocking** the operations as documented
+- All three edit tools (`edit_file`, `intelligent_edit`, `recovery_edit`) executed HIGH/CRITICAL risk operations without warning or requiring `force: true`
+
+#### Root Cause
+The `EditFile` function calculated risk using `CalculateChangeImpact()` but never validated it:
+```go
+// Calculate change impact for risk assessment
+impact := CalculateChangeImpact(string(content), oldText, newText, e.riskThresholds)
+
+// ❌ MISSING: No validation here - operation continued regardless of risk level
+// ❌ BUG: Never checked impact.IsRisky
+```
+
+#### Fixed
+✅ **Added risk validation** after impact calculation:
+```go
+// Calculate change impact for risk assessment
+impact := CalculateChangeImpact(string(content), oldText, newText, e.riskThresholds)
+
+// ⚠️ RISK VALIDATION: Block HIGH/CRITICAL risk operations unless force=true
+if impact.IsRisky && !force {
+    warning := impact.FormatRiskWarning()
+    return nil, fmt.Errorf("OPERATION BLOCKED - %s\n\nTo proceed anyway, add \"force\": true to the request", warning)
+}
+```
+
+✅ **Added `force` parameter** to all edit tools:
+- `edit_file(path, old_text, new_text, force: bool)`
+- `intelligent_edit(path, old_text, new_text, force: bool)`
+- `recovery_edit(path, old_text, new_text, force: bool)` (deprecated alias)
+
+✅ **Updated function signatures**:
+- `EditFile(path, oldText, newText string, force bool)`
+- `IntelligentEdit(ctx, path, oldText, newText string, force bool)`
+- `AutoRecoveryEdit(ctx, path, oldText, newText string, force bool)`
+
+#### Impact
+- **Before (v3.8.0)**: Risk assessment was "cosmetic" - calculated but never enforced
+- **After (v3.8.1)**: HIGH/CRITICAL risk operations are **blocked** unless explicitly forced
+
+#### Example
+```javascript
+// Without force - BLOCKED
+edit_file({
+  path: "main.go",
+  old_text: "func",  // 50 occurrences, 220% change
+  new_text: "function"
+})
+// → ❌ Error: OPERATION BLOCKED - HIGH RISK: 220.9% of file will change (50 occurrences)
+//    Recommendation: Use analyze_edit first or add force: true
+
+// With force - ALLOWED
+edit_file({
+  path: "main.go",
+  old_text: "func",
+  new_text: "function",
+  force: true
+})
+// → ✅ Success, backup created: 20241204-120000-xyz789
+```
+
+#### Files Modified
+- `core/edit_operations.go` - Added risk validation after impact calculation
+- `core/claude_optimizer.go` - Updated `IntelligentEdit` and `AutoRecoveryEdit` signatures
+- `core/engine.go` - Updated wrapper method signatures
+- `core/streaming_operations.go` - Updated `SmartEditFile` to pass `force=false`
+- `main.go` - Added `force` parameter to 3 MCP tools
+- `tests/bug5_test.go`, `tests/bug8_test.go` - Updated all test calls
+
+#### Severity
+🔴 **CRITICAL** - Risk assessment was completely non-functional in v3.8.0
+
+#### Recommendation
+**All v3.8.0 users should upgrade immediately to v3.8.1**
+
+---
+
 ## [3.8.0] - 2025-12-03
 
 ### 🔒 Major Feature: Backup and Recovery System (Bug #10)
@@ -791,6 +934,6 @@ Estimated speedup for multiple edits:
 
 ---
 
-**Current Version**: 3.7.1
-**Last Updated**: 2025-12-03
+**Current Version**: 3.8.1
+**Last Updated**: 2025-12-04
 **Status**: ✅ Production Ready
