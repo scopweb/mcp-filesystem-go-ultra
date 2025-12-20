@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -816,6 +817,34 @@ func (e *UltraFastEngine) IntelligentRead(ctx context.Context, path string) (str
 // IntelligentEdit wraps optimizer's IntelligentEdit method
 func (e *UltraFastEngine) IntelligentEdit(ctx context.Context, path, oldText, newText string, force bool) (*EditResult, error) {
 	return e.optimizer.IntelligentEdit(ctx, path, oldText, newText, force)
+}
+
+// CopyFileWithBuffer copies a file using the buffer pool for optimal performance
+// Uses io.CopyBuffer with a 64KB buffer from the pool
+func (e *UltraFastEngine) CopyFileWithBuffer(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return &PathError{Op: "copy", Path: src, Err: err}
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return &PathError{Op: "copy", Path: dst, Err: err}
+	}
+	defer destFile.Close()
+
+	// Get buffer from pool
+	bufPtr := e.bufferPool.Get().(*[]byte)
+	defer e.bufferPool.Put(bufPtr)
+
+	// Use io.CopyBuffer with pooled buffer for efficient copying
+	_, err = io.CopyBuffer(destFile, sourceFile, *bufPtr)
+	if err != nil {
+		return &PathError{Op: "copy", Path: dst, Err: err}
+	}
+
+	return nil
 }
 
 // GetOptimizationReport wraps optimizer's GetPerformanceReport method
