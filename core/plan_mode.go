@@ -150,7 +150,7 @@ func (e *UltraFastEngine) AnalyzeEditChange(ctx context.Context, path, oldText, 
 
 	analysis.LinesRemoved = occurrences * oldLines
 	analysis.LinesAdded = occurrences * newLines
-	analysis.LinesModified = occurrences * maxInt(oldLines, newLines)
+	analysis.LinesModified = occurrences * max(oldLines, newLines) // Go 1.21+ built-in
 	analysis.CharactersChanged = occurrences * (len(newText) - len(oldText))
 
 	// Generate preview
@@ -441,8 +441,9 @@ func (e *UltraFastEngine) generateSimpleDiff(oldContent, newContent string) stri
 
 	changesShown := 0
 	maxChanges := 20
+	maxLen := max(len(oldLines), len(newLines)) // Go 1.21+ built-in
 
-	for i := 0; i < maxInt(len(oldLines), len(newLines)) && changesShown < maxChanges; i++ {
+	for i := 0; i < maxLen && changesShown < maxChanges; i++ {
 		oldLine := ""
 		newLine := ""
 
@@ -464,8 +465,8 @@ func (e *UltraFastEngine) generateSimpleDiff(oldContent, newContent string) stri
 		}
 	}
 
-	if maxInt(len(oldLines), len(newLines)) > maxChanges {
-		diff.WriteString(fmt.Sprintf("... (%d more lines)\n", maxInt(len(oldLines), len(newLines))-maxChanges))
+	if maxLen > maxChanges {
+		diff.WriteString(fmt.Sprintf("... (%d more lines)\n", maxLen-maxChanges))
 	}
 
 	return diff.String()
@@ -521,11 +522,4 @@ func abs(n int) int {
 		return -n
 	}
 	return n
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

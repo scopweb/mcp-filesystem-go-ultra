@@ -282,11 +282,3 @@ func (o *ClaudeDesktopOptimizer) GetPerformanceReport() string {
 
 	return report.String()
 }
-
-// min helper function
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
