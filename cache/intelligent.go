@@ -59,11 +59,11 @@ type CacheStats struct {
 func NewIntelligentCache(maxSize int64) (*IntelligentCache, error) {
 	// Initialize bigcache for file content with optimized settings
 	bigConfig := bigcache.Config{
-		Shards:             1024,
-		LifeWindow:         10 * time.Minute,
-		CleanWindow:        2 * time.Minute,
-		MaxEntriesInWindow: 1000 * 10 * 1024, // Adjust based on expected entries
-		MaxEntrySize:       500,              // Max size per entry in bytes, adjust
+		Shards:             256,                    // Reduced from 1024 for better overhead balance
+		LifeWindow:         3 * time.Minute,        // Reduced from 10min for faster cache refresh
+		CleanWindow:        1 * time.Minute,        // Balanced with LifeWindow
+		MaxEntriesInWindow: 1000 * 10 * 1024,      // Adjust based on expected entries
+		MaxEntrySize:       1024 * 1024,            // 1MB per entry (was 500 bytes!)
 		Verbose:            false,
 		HardMaxCacheSize:   int(maxSize / (1024 * 1024)), // Convert to MB
 	}
