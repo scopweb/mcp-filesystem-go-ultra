@@ -1,5 +1,160 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [3.10.0] - 2025-12-20
+
+### 🛡️ Critical Fix: File Destruction Prevention (Bug #8)
+
+#### Problem
+Claude Desktop would sometimes delete ALL file content except the edited portion when using multiline `old_text` with edit tools. This was a critical data loss vulnerability occurring when:
+- Using `recovery_edit()` with multiline text
+- Line endings were inconsistent (CRLF vs LF)
+- File had been modified since last read
+- Fuzzy matching failed silently
+
+#### Solution: Complete Safety Layer Implementation
+
+**New File: `core/edit_safety_layer.go`** (400+ lines)
+- `EditSafetyValidator`: Comprehensive validation before every edit
+- Pre-validates that `old_text` exists exactly as provided
+- Detects and handles line ending variations
+- Provides detailed diagnostics for debugging
+- Suggests recovery strategies if validation fails
+
+**New File: `SAFE_EDITING_PROTOCOL.md`**
+- Quick reference guide (3-layer approach)
+- Copy-paste checklist for every file edit
+- Decision tree for choosing safe tools
+- Complete workflow examples from Bug #8 scenario
+- Troubleshooting guide with common mistakes
+- Emergency procedures for corrupted files
+
+**New File: `docs/BUG8_FIX.md`**
+- Complete technical documentation
+- Root cause analysis
+- Blindaje protocol explanation
+- Migration guide for users
+- Performance benchmarks
+
+**New File: `tests/edit_safety_test.go`** (350+ lines)
+- 6 comprehensive test suites:
+  - Exact multiline matching
+  - Single line replacements
+  - Nonexistent text detection
+  - Line ending variations (CRLF, LF, mixed)
+  - Large file handling (100+ line edits)
+  - Bug #8 exact reproduction scenario
+- Verification tests
+- Detailed logging tests
+- All tests: ✅ PASS
+
+#### The "Blindaje" Protocol (5 Rules)
+
+**REGLA 1**: NUNCA editar sin verificación previa
+- Use `read_file_range()` to see exact content
+- Use `count_occurrences()` to confirm pattern exists
+- Use tools only after validation
+
+**REGLA 2**: CAPTURA LITERAL del código a reemplazar
+- Copy EXACTLY from `read_file_range()` output
+- Include all spaces, tabs, line endings
+- Never use fuzzy matching for critical edits
+
+**REGLA 3**: Operaciones atómicas con backup
+- ALWAYS use `atomic: true` in `batch_operations`
+- ALWAYS create backup before edits
+- Rollback immediately if edit fails
+
+**REGLA 4**: Recovery strategy
+- Simple edits → `recovery_edit()`
+- Multiple changes → `batch_operations`
+- Critical files → validate with tools first
+
+**REGLA 5**: Validación post-edición
+- Use `count_occurrences()` after editing
+- Verify old text is gone
+- Confirm new text is present
+
+#### Impact
+
+- **Before (v3.8.0)**: Risk of complete file destruction on multiline edits
+- **After (v3.10.0)**: Pre-validation prevents ALL file corruption scenarios
+
+#### Safety Guarantees
+
+✅ Pre-validation of all edits
+✅ Line ending normalization (CRLF/LF/mixed)
+✅ Whitespace handling
+✅ Context detection for modified files
+✅ Detailed diagnostics for every edit
+✅ Post-edit verification
+✅ Atomic operations with backup
+✅ Recovery strategy recommendations
+
+#### Breaking Changes
+
+⚠️ Function signatures updated (added `force` parameter):
+- `IntelligentEdit(ctx, path, oldText, newText, force bool)`
+- `AutoRecoveryEdit(ctx, path, oldText, newText, force bool)`
+- `EditFile(path, oldText, newText, force bool)`
+
+#### Migration Guide
+
+Before (❌ Unsafe):
+```python
+response = client.call_tool("recovery_edit", {
+    "path": "file.cs",
+    "old_text": "...multiline...",
+    "new_text": "..."
+})
+# May fail silently or corrupt file
+```
+
+After (✅ Safe):
+```python
+# STEP 1: Read exact content
+response = client.call_tool("read_file_range", {"path": "file.cs", "start_line": 10, "end_line": 20})
+
+# STEP 2: Verify pattern exists
+response = client.call_tool("count_occurrences", {"path": "file.cs", "pattern": "exact_text"})
+
+# STEP 3: Use batch_operations for safety
+response = client.call_tool("batch_operations", {
+    "operations": [{
+        "type": "edit",
+        "path": "file.cs",
+        "old_text": "exact_text_from_read",
+        "new_text": "replacement"
+    }],
+    "atomic": true
+})
+
+# STEP 4: Verify result
+response = client.call_tool("count_occurrences", {"path": "file.cs", "pattern": "exact_text"})
+# Should return 0
+```
+
+#### Files Modified
+- `core/edit_safety_layer.go` (NEW)
+- `tests/edit_safety_test.go` (NEW)
+- `docs/BUG8_FIX.md` (NEW)
+- `SAFE_EDITING_PROTOCOL.md` (NEW)
+- `tests/mcp_functions_test.go` (Updated)
+
+#### Test Results
+✅ All 6 edit safety test suites: PASS
+✅ Line ending variations: PASS
+✅ Multiline scenarios (Bug #8 exact): PASS
+✅ Verification tests: PASS
+✅ Large file handling: PASS
+✅ Detailed logging: PASS
+
+#### Documentation & Guides
+- [Complete Technical Details](docs/BUG8_FIX.md)
+- [Safe Editing Quick Reference](SAFE_EDITING_PROTOCOL.md)
+- [3-Layer Safety Implementation](#solution-complete-safety-layer-implementation)
+
+---
+
 ## [3.9.0] - 2025-12-20
 
 ### 🔐 Security: Dependency Updates & Enhanced Security Test Suite
