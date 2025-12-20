@@ -516,6 +516,7 @@ func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSe
 
 						// Add context
 						var context []string
+						// Use built-in min/max (Go 1.21+) - no need for helper functions
 						start := max(0, lineNum-contextLines)
 						end := min(len(lines), lineNum+contextLines+1)
 
@@ -689,12 +690,4 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 	}
 
 	return result.String(), nil
-}
-
-// Helper functions
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
