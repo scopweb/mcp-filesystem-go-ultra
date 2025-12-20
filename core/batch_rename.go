@@ -62,25 +62,25 @@ func (e *UltraFastEngine) BatchRenameFiles(ctx context.Context, request BatchRen
 
 	// Validate request
 	if err := e.validateBatchRenameRequest(&request); err != nil {
-		return nil, fmt.Errorf("validation error: %v", err)
+		return nil, fmt.Errorf("validation error: %w", err)
 	}
 
 	// Validate path
 	validPath, err := e.validatePath(request.Path)
 	if err != nil {
-		return nil, fmt.Errorf("path validation error: %v", err)
+		return nil, fmt.Errorf("path validation error: %w", err)
 	}
 
 	// Check if path exists
 	info, err := os.Stat(validPath)
 	if err != nil {
-		return nil, fmt.Errorf("path does not exist: %v", err)
+		return nil, fmt.Errorf("path does not exist: %w", err)
 	}
 
 	// Collect files to rename
 	files, err := e.collectFilesForRename(validPath, info.IsDir(), request.Recursive, request.FilePattern)
 	if err != nil {
-		return nil, fmt.Errorf("error collecting files: %v", err)
+		return nil, fmt.Errorf("error collecting files: %w", err)
 	}
 
 	if len(files) == 0 {
@@ -97,7 +97,7 @@ func (e *UltraFastEngine) BatchRenameFiles(ctx context.Context, request BatchRen
 	// Plan rename operations
 	operations, conflicts, err := e.planRenameOperations(files, &request)
 	if err != nil {
-		return nil, fmt.Errorf("error planning operations: %v", err)
+		return nil, fmt.Errorf("error planning operations: %w", err)
 	}
 
 	result := &BatchRenameResult{
@@ -173,7 +173,7 @@ func (e *UltraFastEngine) validateBatchRenameRequest(req *BatchRenameRequest) er
 		}
 		// Test regex pattern
 		if _, err := regexp.Compile(req.Pattern); err != nil {
-			return fmt.Errorf("invalid regex pattern: %v", err)
+			return fmt.Errorf("invalid regex pattern: %w", err)
 		}
 	case "change_extension":
 		if req.Extension == "" {
@@ -200,7 +200,7 @@ func (e *UltraFastEngine) collectFilesForRename(path string, isDir bool, recursi
 		var err error
 		patternRegex, err = regexp.Compile(regexPattern)
 		if err != nil {
-			return nil, fmt.Errorf("invalid file pattern: %v", err)
+			return nil, fmt.Errorf("invalid file pattern: %w", err)
 		}
 	}
 

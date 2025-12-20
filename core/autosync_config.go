@@ -116,7 +116,7 @@ func (m *AutoSyncManager) loadConfig() error {
 			// Config file doesn't exist, use defaults
 			return nil
 		}
-		return fmt.Errorf("failed to read config file: %v", err)
+		return fmt.Errorf("failed to read config file: %w", err)
 	}
 
 	// Parse JSON
@@ -125,7 +125,7 @@ func (m *AutoSyncManager) loadConfig() error {
 	}
 
 	if err := json.Unmarshal(data, &fileConfig); err != nil {
-		return fmt.Errorf("failed to parse config file: %v", err)
+		return fmt.Errorf("failed to parse config file: %w", err)
 	}
 
 	if fileConfig.WSLAutoSync != nil {
@@ -145,7 +145,7 @@ func (m *AutoSyncManager) saveConfig() error {
 	// Create directory if needed
 	configDir := filepath.Dir(configPath)
 	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return fmt.Errorf("failed to create config directory: %v", err)
+		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
 	// Prepare config structure
@@ -158,12 +158,12 @@ func (m *AutoSyncManager) saveConfig() error {
 	// Marshal to JSON with indentation
 	data, err := json.MarshalIndent(fileConfig, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal config: %v", err)
+		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
 	// Write to file
 	if err := os.WriteFile(configPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write config file: %v", err)
+		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
 	return nil

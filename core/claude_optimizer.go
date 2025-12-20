@@ -94,7 +94,7 @@ func (o *ClaudeDesktopOptimizer) IntelligentRead(ctx context.Context, path strin
 // Note: On Windows with Claude Desktop, changes may not persist.
 // For guaranteed persistence, use IntelligentWrite with complete file content instead.
 // See: guides/WINDOWS_FILESYSTEM_PERSISTENCE.md
-func (o *ClaudeDesktopOptimizer) IntelligentEdit(ctx context.Context, path, oldText, newText string) (*EditResult, error) {
+func (o *ClaudeDesktopOptimizer) IntelligentEdit(ctx context.Context, path, oldText, newText string, force bool) (*EditResult, error) {
 	// Normalize path first (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
@@ -112,7 +112,7 @@ func (o *ClaudeDesktopOptimizer) IntelligentEdit(ctx context.Context, path, oldT
 
 	// Auto-select strategy
 	if size <= o.config.MaxDirectFileSize {
-		return o.engine.EditFile(path, oldText, newText)
+		return o.engine.EditFile(path, oldText, newText, force)
 	} else {
 		return o.engine.SmartEditFile(ctx, path, oldText, newText, o.config.MaxDirectFileSize)
 	}
@@ -224,7 +224,7 @@ func (o *ClaudeDesktopOptimizer) BatchOptimizedOperations(ctx context.Context, o
 		case "write":
 			err = o.IntelligentWrite(ctx, op.Path, op.Content)
 		case "edit":
-			_, err = o.IntelligentEdit(ctx, op.Path, op.OldText, op.NewText)
+			_, err = o.IntelligentEdit(ctx, op.Path, op.OldText, op.NewText, false)
 		default:
 			err = fmt.Errorf("unknown operation type: %s", op.Type)
 		}
@@ -259,10 +259,10 @@ func (o *ClaudeDesktopOptimizer) BatchOptimizedOperations(ctx context.Context, o
 // The original recovery logic was deprecated due to persistence issues on Windows.
 // For guaranteed persistence, use IntelligentWrite with complete file content.
 // See: guides/WINDOWS_FILESYSTEM_PERSISTENCE.md
-func (o *ClaudeDesktopOptimizer) AutoRecoveryEdit(ctx context.Context, path, oldText, newText string) (*EditResult, error) {
+func (o *ClaudeDesktopOptimizer) AutoRecoveryEdit(ctx context.Context, path, oldText, newText string, force bool) (*EditResult, error) {
 	log.Printf("⚠️ DEPRECATED: 'recovery_edit' was called. Redirecting to 'intelligent_edit' for stability.")
 	// This function is now an alias for IntelligentEdit to prevent timeouts and instability.
-	return o.IntelligentEdit(ctx, path, oldText, newText)
+	return o.IntelligentEdit(ctx, path, oldText, newText, force)
 }
 
 // GetPerformanceReport generates a performance report for Claude Desktop

@@ -47,7 +47,7 @@ func TestBug8LineEndingNormalization(t *testing.T) {
 		newText := "line2_modified\nline3_modified\nline4_modified"
 
 		// This should succeed now that we normalize line endings in validateEditContext
-		result, err := engine.EditFile(testFile, oldText, newText)
+		result, err := engine.EditFile(testFile, oldText, newText, false)
 		if err != nil {
 			t.Fatalf("EditFile failed with mixed line endings: %v", err)
 		}

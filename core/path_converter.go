@@ -240,19 +240,19 @@ func CopyFileWithConversion(srcPath, dstPath string, createDirs bool) error {
 	if createDirs {
 		dstDir := filepath.Dir(dstPath)
 		if err := os.MkdirAll(dstDir, 0755); err != nil {
-			return fmt.Errorf("failed to create destination directory: %v", err)
+			return fmt.Errorf("failed to create destination directory: %w", err)
 		}
 	}
 
 	// Read source file
 	data, err := os.ReadFile(srcPath)
 	if err != nil {
-		return fmt.Errorf("failed to read source file: %v", err)
+		return fmt.Errorf("failed to read source file: %w", err)
 	}
 
 	// Write to destination
 	if err := os.WriteFile(dstPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write destination file: %v", err)
+		return fmt.Errorf("failed to write destination file: %w", err)
 	}
 
 	return nil

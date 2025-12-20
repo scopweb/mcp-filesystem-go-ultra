@@ -38,18 +38,18 @@ type SearchMatch struct {
 //
 // Context Validation: Validates surrounding context (3-5 lines) to prevent
 // editing stale content that may have been modified since the file was read.
-func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, error) {
+func (e *UltraFastEngine) EditFile(path, oldText, newText string, force bool) (*EditResult, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 	// Validate file
 	if err := e.validateEditableFile(path); err != nil {
-		return nil, fmt.Errorf("file validation failed: %v", err)
+		return nil, fmt.Errorf("file validation failed: %w", err)
 	}
 
 	// Read current content
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("error reading file: %v", err)
+		return nil, fmt.Errorf("error reading file: %w", err)
 	}
 
 	// Validate context: Check if surrounding content suggests file has changed
@@ -61,6 +61,12 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, 
 
 	// Calculate change impact for risk assessment
 	impact := CalculateChangeImpact(string(content), oldText, newText, e.riskThresholds)
+
+	// ⚠️ RISK VALIDATION: Block HIGH/CRITICAL risk operations unless force=true
+	if impact.IsRisky && !force {
+		warning := impact.FormatRiskWarning()
+		return nil, fmt.Errorf("OPERATION BLOCKED - %s\n\nTo proceed anyway, add \"force\": true to the request", warning)
+	}
 
 	// Log telemetry about this edit operation
 	// This helps identify patterns of full-file rewrites vs targeted edits
@@ -86,7 +92,7 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, 
 
 	hookResult, err := e.hookManager.ExecuteHooks(context.Background(), HookPreEdit, hookCtx)
 	if err != nil {
-		return nil, fmt.Errorf("pre-edit hook denied operation: %v", err)
+		return nil, fmt.Errorf("pre-edit hook denied operation: %w", err)
 	}
 
 	// Create persistent backup using BackupManager
@@ -95,14 +101,14 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, 
 		backupID, err = e.backupManager.CreateBackupWithContext(path, "edit_file",
 			fmt.Sprintf("Edit: %d occurrences, %.1f%% change", impact.Occurrences, impact.ChangePercentage))
 		if err != nil {
-			return nil, fmt.Errorf("could not create backup: %v", err)
+			return nil, fmt.Errorf("could not create backup: %w", err)
 		}
 	}
 
 	// Perform intelligent edit
 	result, err := e.performIntelligentEdit(string(content), oldText, newText)
 	if err != nil {
-		return nil, fmt.Errorf("edit failed: %v", err)
+		return nil, fmt.Errorf("edit failed: %w", err)
 	}
 
 	// Apply hook modifications if any
@@ -114,13 +120,13 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string) (*EditResult, 
 	// Write modified content atomically
 	tmpPath := path + ".tmp." + fmt.Sprintf("%d", e.metrics.OperationsTotal)
 	if err := os.WriteFile(tmpPath, []byte(finalContent), 0644); err != nil {
-		return nil, fmt.Errorf("error writing temp file: %v", err)
+		return nil, fmt.Errorf("error writing temp file: %w", err)
 	}
 
 	// Atomic rename
 	if err := os.Rename(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
-		return nil, fmt.Errorf("error finalizing edit: %v", err)
+		return nil, fmt.Errorf("error finalizing edit: %w", err)
 	}
 
 	// Invalidate cache
@@ -153,13 +159,13 @@ func (e *UltraFastEngine) SearchAndReplace(path, pattern, replacement string, ca
 	// Validate path
 	validPath, err := e.validatePath(path)
 	if err != nil {
-		return nil, fmt.Errorf("path validation failed: %v", err)
+		return nil, fmt.Errorf("path validation failed: %w", err)
 	}
 
 	// Check if it's a file or directory
 	info, err := os.Stat(validPath)
 	if err != nil {
-		return nil, fmt.Errorf("error accessing path: %v", err)
+		return nil, fmt.Errorf("error accessing path: %w", err)
 	}
 
 	var results []string
@@ -219,7 +225,7 @@ func (e *UltraFastEngine) validatePath(path string) (string, error) {
 	// Resolve absolute path for security checks
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return "", fmt.Errorf("invalid path: %v", err)
+		return "", fmt.Errorf("invalid path: %w", err)
 	}
 
 	// Enforce allowed paths if configured
@@ -615,19 +621,19 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 
 	// Validate file
 	if err := e.validateEditableFile(path); err != nil {
-		return nil, fmt.Errorf("file validation failed: %v", err)
+		return nil, fmt.Errorf("file validation failed: %w", err)
 	}
 
 	// Read current content once
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("error reading file: %v", err)
+		return nil, fmt.Errorf("error reading file: %w", err)
 	}
 
 	// Create backup once
 	backupPath, err := e.createBackup(path)
 	if err != nil {
-		return nil, fmt.Errorf("could not create backup: %v", err)
+		return nil, fmt.Errorf("could not create backup: %w", err)
 	}
 	defer func() {
 		if backupPath != "" {
@@ -687,19 +693,19 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 
 	// If no edits succeeded, return error
 	if result.SuccessfulEdits == 0 {
-		return result, fmt.Errorf("no edits were successful: %v", result.Errors)
+		return result, fmt.Errorf("no edits were successful: %w", result.Errors)
 	}
 
 	// Write modified content atomically
 	tmpPath := path + ".tmp." + fmt.Sprintf("%d", time.Now().UnixNano())
 	if err := os.WriteFile(tmpPath, []byte(currentContent), 0644); err != nil {
-		return nil, fmt.Errorf("error writing temp file: %v", err)
+		return nil, fmt.Errorf("error writing temp file: %w", err)
 	}
 
 	// Atomic rename
 	if err := os.Rename(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
-		return nil, fmt.Errorf("error finalizing edit: %v", err)
+		return nil, fmt.Errorf("error finalizing edit: %w", err)
 	}
 
 	// Invalidate cache
@@ -736,7 +742,7 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 	// Validate path
 	validPath, err := e.validatePath(path)
 	if err != nil {
-		return nil, fmt.Errorf("path validation error: %v", err)
+		return nil, fmt.Errorf("path validation error: %w", err)
 	}
 
 	// Check if file exists
@@ -745,7 +751,7 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 		return nil, fmt.Errorf("file does not exist: %s", validPath)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat file: %v", err)
+		return nil, fmt.Errorf("failed to stat file: %w", err)
 	}
 
 	if info.IsDir() {
@@ -760,7 +766,7 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 	// Create backup
 	backupPath, err := e.createBackup(validPath)
 	if err != nil {
-		return nil, fmt.Errorf("could not create backup: %v", err)
+		return nil, fmt.Errorf("could not create backup: %w", err)
 	}
 	defer func() {
 		if backupPath != "" {
@@ -771,7 +777,7 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 	// Read file
 	content, err := os.ReadFile(validPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %v", err)
+		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
 	lines := strings.Split(string(content), "\n")
@@ -790,7 +796,7 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 
 	regexPattern, err := regexp.Compile(searchPattern)
 	if err != nil {
-		return nil, fmt.Errorf("invalid pattern: %v", err)
+		return nil, fmt.Errorf("invalid pattern: %w", err)
 	}
 
 	// Find all matches with their line numbers
@@ -851,13 +857,13 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 	// Write modified content atomically
 	tmpPath := validPath + ".tmp." + fmt.Sprintf("%d", time.Now().UnixNano())
 	if err := os.WriteFile(tmpPath, []byte(newContent), info.Mode()); err != nil {
-		return nil, fmt.Errorf("error writing temp file: %v", err)
+		return nil, fmt.Errorf("error writing temp file: %w", err)
 	}
 
 	// Atomic rename
 	if err := os.Rename(tmpPath, validPath); err != nil {
 		os.Remove(tmpPath)
-		return nil, fmt.Errorf("error finalizing edit: %v", err)
+		return nil, fmt.Errorf("error finalizing edit: %w", err)
 	}
 
 	// Invalidate cache

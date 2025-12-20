@@ -383,7 +383,7 @@ func (m *BatchOperationManager) createBackup(operations []FileOperation) (string
 				// El archivo existe, hacer backup
 				backupFile := filepath.Join(backupPath, fmt.Sprintf("op-%d-%s", i, filepath.Base(sourceFile)))
 				if err := copyFile(sourceFile, backupFile); err != nil {
-					return "", fmt.Errorf("failed to backup %s: %v", sourceFile, err)
+					return "", fmt.Errorf("failed to backup %s: %w", sourceFile, err)
 				}
 			}
 		}
