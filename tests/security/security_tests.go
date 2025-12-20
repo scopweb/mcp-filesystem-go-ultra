@@ -99,7 +99,7 @@ func TestGoSumIntegrity(t *testing.T) {
 // TestMainDependencies checks critical dependencies for known issues
 func TestMainDependencies(t *testing.T) {
 	criticalDeps := map[string]string{
-		"github.com/mark3labs/mcp-go":    "v0.42.0", // MCP SDK
+		"github.com/mark3labs/mcp-go":    "v0.43.2", // MCP SDK
 		"github.com/panjf2000/ants/v2":   "v2.11.3", // Goroutine pool
 		"github.com/allegro/bigcache/v3": "v3.1.0",  // Cache
 		"github.com/patrickmn/go-cache":  "v2.1.0",  // Cache
