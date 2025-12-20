@@ -61,7 +61,7 @@ func WriteFile() {
 		oldText := "return nil"
 		newText := "return content"
 
-		result, err := engine.EditFile(testFile, oldText, newText, false)
+		result, err := engine.EditFile(testFile, oldText, newText, true)
 		if err != nil {
 			t.Fatalf("EditFile should succeed with valid context, got error: %v", err)
 		}
