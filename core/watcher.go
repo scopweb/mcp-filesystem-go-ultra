@@ -1,7 +1,7 @@
 package core
 
 import (
-	"log"
+	"log/slog"
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
@@ -80,7 +80,7 @@ func (fw *FileWatcher) processEvents() {
 			if !ok {
 				return
 			}
-			log.Printf("FileWatcher error: %v", err)
+			slog.Error("FileWatcher error", "error", err)
 
 		case <-fw.done:
 			return

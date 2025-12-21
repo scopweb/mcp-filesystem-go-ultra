@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,7 +79,7 @@ func (o *ClaudeDesktopOptimizer) IntelligentRead(ctx context.Context, path strin
 	size := info.Size()
 	// Log solo si debug mode y archivo grande
 	if size > 5*1024*1024 && !o.engine.config.CompactMode {
-		log.Printf("🧠 IntelligentRead: %s (%s)", path, formatSize(size))
+		slog.Info("Intelligent read", "path", path, "size", formatSize(size))
 	}
 
 	// Auto-select strategy
@@ -107,7 +107,7 @@ func (o *ClaudeDesktopOptimizer) IntelligentEdit(ctx context.Context, path, oldT
 	size := info.Size()
 	// Log solo si debug mode y archivo grande
 	if size > 5*1024*1024 && !o.engine.config.CompactMode {
-		log.Printf("🧠 IntelligentEdit: %s (%s)", path, formatSize(size))
+		slog.Info("Intelligent edit", "path", path, "size", formatSize(size))
 	}
 
 	// Auto-select strategy
@@ -260,7 +260,7 @@ func (o *ClaudeDesktopOptimizer) BatchOptimizedOperations(ctx context.Context, o
 // For guaranteed persistence, use IntelligentWrite with complete file content.
 // See: guides/WINDOWS_FILESYSTEM_PERSISTENCE.md
 func (o *ClaudeDesktopOptimizer) AutoRecoveryEdit(ctx context.Context, path, oldText, newText string, force bool) (*EditResult, error) {
-	log.Printf("⚠️ DEPRECATED: 'recovery_edit' was called. Redirecting to 'intelligent_edit' for stability.")
+	slog.Warn("Deprecated API called", "function", "recovery_edit", "redirect", "intelligent_edit")
 	// This function is now an alias for IntelligentEdit to prevent timeouts and instability.
 	return o.IntelligentEdit(ctx, path, oldText, newText, force)
 }

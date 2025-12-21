@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -71,7 +71,7 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 
 	// Log only for very large files (>5MB) to reduce overhead
 	if totalSize > LargeFileThreshold && !e.config.CompactMode {
-		log.Printf("🚀 Starting streaming write: %s (%s in %d chunks)", path, formatSize(int64(totalSize)), totalChunks)
+		slog.Info("Starting streaming write", "path", path, "size", formatSize(int64(totalSize)), "chunks", totalChunks)
 	}
 
 	// Ensure directory exists
@@ -151,7 +151,7 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 	if totalSize > LargeFileThreshold && !e.config.CompactMode {
 		elapsed := time.Since(start)
 		throughput := float64(totalSize) / elapsed.Seconds() / 1024 / 1024
-		log.Printf("✅ Streaming write completed: %s (%v, %.1f MB/s)", path, elapsed, throughput)
+		slog.Info("Streaming write completed", "path", path, "duration", elapsed, "throughput_mbs", throughput)
 	}
 
 	// Auto-sync to Windows if enabled (async, non-blocking)
@@ -183,7 +183,7 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 	start := time.Now()
 	// Log only for very large files and if not in compact mode
 	if fileSize > LargeFileThreshold && !e.config.CompactMode {
-		log.Printf("🚀 Chunked read: %s (%s)", path, formatSize(fileSize))
+		slog.Info("Chunked read started", "path", path, "size", formatSize(fileSize))
 	}
 
 	// Open file
@@ -220,7 +220,7 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 	if fileSize > LargeFileThreshold && !e.config.CompactMode {
 		elapsed := time.Since(start)
 		throughput := float64(fileSize) / elapsed.Seconds() / 1024 / 1024
-		log.Printf("✅ Chunked read completed: %s (%v, %.1f MB/s)", path, elapsed, throughput)
+		slog.Info("Chunked read completed", "path", path, "duration", elapsed, "throughput_mbs", throughput)
 	}
 
 	return result.String(), nil
@@ -254,7 +254,7 @@ func (e *UltraFastEngine) SmartEditFile(ctx context.Context, path, oldText, newT
 func (e *UltraFastEngine) streamingEditLargeFile(ctx context.Context, path, oldText, newText string) (*EditResult, error) {
 	// Log solo si no estamos en compact mode
 	if !e.config.CompactMode {
-		log.Printf("🔧 Large file edit: %s (streaming)", path)
+		slog.Info("Large file edit started", "path", path, "mode", "streaming")
 	}
 
 	// Read in chunks and process
