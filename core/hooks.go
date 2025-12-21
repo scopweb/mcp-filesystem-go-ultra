@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -138,7 +138,7 @@ func (hm *HookManager) LoadConfig(configPath string) error {
 	hm.config = &config
 	hm.enabled = true
 
-	log.Printf("🪝 Loaded hook configuration from %s", configPath)
+	slog.Info("Hook configuration loaded", "path", configPath)
 	return nil
 }
 
@@ -198,7 +198,7 @@ func (hm *HookManager) ExecuteHooks(ctx context.Context, event HookEvent, hookCt
 	}
 
 	if debugMode {
-		log.Printf("🪝 Executing %d hook(s) for event %s on %s", len(matchedHooks), event, hookCtx.FilePath)
+		slog.Debug("Executing hooks", "count", len(matchedHooks), "event", event, "path", hookCtx.FilePath)
 	}
 
 	// Execute hooks in parallel (with deduplication)

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -158,9 +158,9 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 
 	// Log if allowed paths are configured
 	if len(config.AllowedPaths) > 0 {
-		log.Printf("🔒 Access control enabled with %d allowed paths", len(config.AllowedPaths))
+		slog.Info("Access control enabled", "allowed_paths_count", len(config.AllowedPaths))
 	} else {
-		log.Printf("⚠️ Access control disabled - full filesystem access allowed")
+		slog.Warn("Access control disabled - full filesystem access allowed")
 	}
 
 	// Initialize worker pool for parallel operations
@@ -170,32 +170,32 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 	}
 	engine.workerPool = workerPool
 
-	log.Printf("🔧 Ultra-fast engine initialized with %d parallel operations (64KB buffer pool)", config.ParallelOps)
+	slog.Info("Ultra-fast engine initialized", "parallel_ops", config.ParallelOps, "buffer", "64KB")
 
 	// Initialize Claude Desktop optimizer
 	engine.optimizer = NewClaudeDesktopOptimizer(engine)
-	log.Printf("🧠 Claude Desktop optimizer initialized")
+	slog.Info("Claude Desktop optimizer initialized")
 
 	// Initialize hook manager
 	engine.hookManager = NewHookManager()
 	if config.HooksEnabled && config.HooksConfigPath != "" {
 		if err := engine.hookManager.LoadConfig(config.HooksConfigPath); err != nil {
-			log.Printf("⚠️ Failed to load hooks config: %v (hooks disabled)", err)
+			slog.Warn("Failed to load hooks config", "error", err, "status", "disabled")
 		} else {
 			engine.hookManager.SetEnabled(true)
 			engine.hookManager.SetDebugMode(config.DebugMode)
-			log.Printf("🪝 Hook system initialized")
+			slog.Info("Hook system initialized")
 		}
 	}
 
 	// Initialize auto-sync manager
 	engine.autoSyncManager = NewAutoSyncManager()
 	if engine.autoSyncManager.IsEnabled() {
-		log.Printf("🔄 WSL auto-sync enabled")
+		slog.Info("WSL auto-sync enabled")
 	} else {
 		isWSL, _ := DetectEnvironment()
 		if isWSL {
-			log.Printf("💡 WSL detected. Auto-sync is disabled. Enable with: configure_autosync or set MCP_WSL_AUTOSYNC=true")
+			slog.Info("WSL detected - auto-sync disabled", "enable_command", "configure_autosync or MCP_WSL_AUTOSYNC=true")
 		}
 	}
 
@@ -211,11 +211,11 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 
 	backupManager, err := NewBackupManager(config.BackupDir, backupMaxCount, backupMaxAge)
 	if err != nil {
-		log.Printf("⚠️ Failed to initialize backup manager: %v (backups disabled)", err)
+		slog.Warn("Failed to initialize backup manager", "error", err, "status", "disabled")
 	} else {
 		engine.backupManager = backupManager
-		log.Printf("🔒 Backup manager initialized: %s (max age: %d days, max count: %d)",
-			backupManager.backupDir, backupMaxAge, backupMaxCount)
+		slog.Info("Backup manager initialized", "backup_dir", backupManager.backupDir,
+			"max_age_days", backupMaxAge, "max_count", backupMaxCount)
 	}
 
 	// Initialize risk thresholds
@@ -411,7 +411,7 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 	// Try cache first
 	if cached, hit := e.cache.GetFile(path); hit {
 		if e.config.DebugMode {
-			log.Printf("📦 Cache hit for %s", path)
+			slog.Debug("Cache hit", "path", path)
 		}
 		// Track access for predictive prefetching
 		e.cache.TrackAccess(path)
@@ -564,7 +564,7 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 	// Try cache first
 	if cached, hit := e.cache.GetDirectory(path); hit {
 		if e.config.DebugMode {
-			log.Printf("📦 Directory cache hit for %s", path)
+			slog.Debug("Directory cache hit", "path", path)
 		}
 		return cached, nil
 	}
@@ -719,7 +719,7 @@ func (e *UltraFastEngine) isPathAllowed(path string) bool {
 	}
 
 	if e.config.DebugMode {
-		log.Printf("🚫 Access denied to path: %s (not in allowed paths: %v)", path, e.config.AllowedPaths)
+		slog.Debug("Access denied", "path", path, "allowed_paths", e.config.AllowedPaths)
 	}
 	return false
 }
@@ -937,7 +937,7 @@ func (e *UltraFastEngine) LogEditTelemetry(oldTextSize, newTextSize int64, fileP
 
 	// Log to debug if verbose
 	if e.config.DebugMode {
-		log.Printf("[TELEMETRY] %s (avg: %.0f bytes/edit)", e.metrics.LastEditOperation, e.metrics.AverageBytesPerEdit)
+		slog.Debug("Edit telemetry", "operation", e.metrics.LastEditOperation, "avg_bytes_per_edit", e.metrics.AverageBytesPerEdit)
 	}
 }
 
