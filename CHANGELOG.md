@@ -1,5 +1,51 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [3.12.0] - IN DEVELOPMENT
+
+### 🎯 Code Editing Excellence: Phase 1 - Coordinate Tracking
+
+#### Objective
+Enable precise code location and targeting through character-level coordinate tracking in search results. Foundation for v3.12.0's 70-80% token reduction goal.
+
+#### Phase 1: Coordinate Tracking ✅
+
+**New Feature: Character Offset Tracking**
+- Added `calculateCharacterOffset()` helper function
+- Populates `MatchStart` and `MatchEnd` fields in `SearchMatch` struct
+- 0-indexed character offsets relative to line start
+
+**Search Operations Enhanced**
+- `performSmartSearch()`: Now calculates and returns character coordinates
+- `performAdvancedTextSearch()`: Both memory-efficient and context paths now track coordinates
+- Results include exact position within each matched line
+
+**Test Coverage**
+- New file: `tests/coordinate_tracking_test.go`
+- 6 new test cases covering:
+  - SmartSearch coordinate accuracy
+  - AdvancedTextSearch with coordinates
+  - Coordinates with context lines
+  - Edge cases (special characters, multiple occurrences)
+  - Backward compatibility
+  - Position accuracy verification
+- All tests passing, zero regressions
+
+**Impact**
+- Claude Desktop can pinpoint exact edit locations
+- Enables sub-line-level targeting
+- Foundation for Phase 2 diff-based edits
+- 100% backward compatible (no breaking changes)
+
+#### Implementation Details
+- Modified: `core/search_operations.go`
+  - Added `calculateCharacterOffset(line, pattern)` function
+  - Enhanced `performSmartSearch()` line 309-320
+  - Enhanced `performAdvancedTextSearch()` lines 500-510 and 519-527
+- Created: `tests/coordinate_tracking_test.go` (328 lines)
+- No new dependencies, no API changes
+
+---
+
 ## [3.11.0] - 2025-12-21
 
 ### 🚀 Performance & Modernization: P0 & P1 Optimization Initiative
