@@ -136,6 +136,14 @@ type LogOperationMetric struct {
 
 // NewUltraFastEngine creates a new ultra-fast filesystem engine
 func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
+	// Set defaults for missing config values
+	if config.MaxSearchResults == 0 {
+		config.MaxSearchResults = MaxSearchResults // 1000
+	}
+	if config.MaxListItems == 0 {
+		config.MaxListItems = MaxListItems // 10000
+	}
+	
 	engine := &UltraFastEngine{
 		config:    config,
 		cache:     config.Cache,

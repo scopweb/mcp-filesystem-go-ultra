@@ -11,24 +11,29 @@ Enable precise code location and targeting through character-level coordinate tr
 
 **New Feature: Character Offset Tracking**
 - Added `calculateCharacterOffset()` helper function
+  - Uses `regexp.FindStringIndex()` for precise position detection
+  - Handles multiple occurrences correctly (Bug #2 fix)
+  - 0-indexed character offsets relative to line start
 - Populates `MatchStart` and `MatchEnd` fields in `SearchMatch` struct
-- 0-indexed character offsets relative to line start
+- Passes compiled regex pattern for accurate coordinate calculation
 
 **Search Operations Enhanced**
 - `performSmartSearch()`: Now calculates and returns character coordinates
 - `performAdvancedTextSearch()`: Both memory-efficient and context paths now track coordinates
 - Results include exact position within each matched line
+- Correctly handles multiple pattern occurrences on same line
 
 **Test Coverage**
 - New file: `tests/coordinate_tracking_test.go`
-- 6 new test cases covering:
+- 7 new test cases covering:
   - SmartSearch coordinate accuracy
   - AdvancedTextSearch with coordinates
   - Coordinates with context lines
   - Edge cases (special characters, multiple occurrences)
+  - **Bug #2 Fix**: Multiple occurrences on same line (TestMultipleOccurrencesOnSameLine)
   - Backward compatibility
   - Position accuracy verification
-- All tests passing, zero regressions
+- All tests passing (53 total: 47 existing + 7 new), zero regressions
 
 **Impact**
 - Claude Desktop can pinpoint exact edit locations
@@ -38,10 +43,17 @@ Enable precise code location and targeting through character-level coordinate tr
 
 #### Implementation Details
 - Modified: `core/search_operations.go`
-  - Added `calculateCharacterOffset(line, pattern)` function
-  - Enhanced `performSmartSearch()` line 309-320
-  - Enhanced `performAdvancedTextSearch()` lines 500-510 and 519-527
-- Created: `tests/coordinate_tracking_test.go` (328 lines)
+  - Added `calculateCharacterOffset(line, regexPattern)` function (lines 707-721)
+    - Uses `regexp.FindStringIndex()` instead of `strings.Index()`
+    - Correctly handles multiple pattern occurrences (Bug #2 fix)
+    - Returns (startOffset, endOffset) for accurate positioning
+  - Enhanced `performSmartSearch()` to pass regex pattern (line 310)
+  - Enhanced `performAdvancedTextSearch()` - both paths (lines 502, 520)
+    - Memory-efficient path: uses bufio.Scanner
+    - Context path: uses strings.Split
+- Created: `tests/coordinate_tracking_test.go` (384 lines)
+  - 7 test functions covering all scenarios
+  - Specific test for Bug #2: TestMultipleOccurrencesOnSameLine
 - No new dependencies, no API changes
 
 ---

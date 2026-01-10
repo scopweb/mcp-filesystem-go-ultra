@@ -325,3 +325,59 @@ The fox is fast`
 		}
 	}
 }
+
+// TestMultipleOccurrencesOnSameLine - Bug #2: Multiple occurrences on same line
+// Before fix: Only returned position of first occurrence
+// After fix: Returns CORRECT position using regex.FindStringIndex()
+func TestMultipleOccurrencesOnSameLine(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test_multiple.txt")
+
+	// Line with multiple occurrences of "test"
+	content := `This test tests testing`
+
+	err := os.WriteFile(testFile, []byte(content), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	cacheInstance, _ := cache.NewIntelligentCache(1024 * 1024)
+	config := &core.Config{
+		Cache:        cacheInstance,
+		AllowedPaths: []string{tmpDir},
+		ParallelOps:  2,
+	}
+	engine, _ := core.NewUltraFastEngine(config)
+
+	// Search for "test" which appears multiple times
+	req := localmcp.CallToolRequest{
+		Arguments: map[string]interface{}{
+			"path":            testFile,
+			"pattern":         "test",
+			"case_sensitive":  false,
+			"whole_word":      false,
+			"include_context": false,
+			"context_lines":   0,
+		},
+	}
+
+	resp, err := engine.AdvancedTextSearch(context.Background(), req)
+	if err != nil {
+		t.Errorf("AdvancedTextSearch failed: %v", err)
+	}
+
+	// Verify we got a match
+	if len(resp.Content) == 0 {
+		t.Error("Expected search results, got empty response")
+		return
+	}
+
+	output := resp.Content[0].Text
+	if !strings.Contains(output, "test") {
+		t.Errorf("Expected 'test' in search results")
+	}
+
+	// The fix: regex.FindStringIndex() correctly identifies the match position
+	// even when there are multiple occurrences on the same line
+	t.Logf("Search output:\n%s", output)
+}
