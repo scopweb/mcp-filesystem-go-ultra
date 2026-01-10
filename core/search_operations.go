@@ -146,7 +146,7 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 			}
 			match := matches[i]
 			// Use full path instead of just basename
-			result.WriteString(fmt.Sprintf("%s:%d", match.File, match.LineNumber))
+			result.WriteString(fmt.Sprintf("%s:%d[%d:%d]", match.File, match.LineNumber, match.MatchStart, match.MatchEnd))
 		}
 
 		if len(matches) > maxToShow {
@@ -158,7 +158,7 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 
 		for i := 0; i < maxToShow; i++ {
 			match := matches[i]
-			result.WriteString(fmt.Sprintf("📁 %s:%d\n", match.File, match.LineNumber))
+			result.WriteString(fmt.Sprintf("📁 %s:%d [%d:%d]\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd))
 			result.WriteString(fmt.Sprintf("   %s\n", match.Line))
 
 			if includeContext && len(match.Context) > 0 {
@@ -307,11 +307,11 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 					line := scanner.Text()
 					if regexPattern.MatchString(line) {
 						// Calculate character offset of pattern match
-						matchStart, matchEnd := calculateCharacterOffset(line, pattern)
+						matchStart, matchEnd := calculateCharacterOffset(line, regexPattern)
 						match := SearchMatch{
 							File:       currentFile,
 							LineNumber: lineNum,
-							Line:       strings.TrimSpace(line),
+							Line:       line,  // ✅ NO TrimSpace - mantener línea original
 							MatchStart: matchStart,
 							MatchEnd:   matchEnd,
 						}
@@ -390,7 +390,7 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 					}
 					m := contentMatches[i]
 					// Use full path instead of just basename
-					resultBuilder.WriteString(fmt.Sprintf("%s:%d", m.File, m.LineNumber))
+					resultBuilder.WriteString(fmt.Sprintf("%s:%d[%d:%d]", m.File, m.LineNumber, m.MatchStart, m.MatchEnd))
 				}
 			} else {
 				resultBuilder.WriteString(": ")
@@ -399,13 +399,13 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 						resultBuilder.WriteString(", ")
 					}
 					// Use full path instead of just basename
-					resultBuilder.WriteString(fmt.Sprintf("%s:%d", match.File, match.LineNumber))
+					resultBuilder.WriteString(fmt.Sprintf("%s:%d[%d:%d]", match.File, match.LineNumber, match.MatchStart, match.MatchEnd))
 				}
 			}
 		} else {
 			resultBuilder.WriteString(fmt.Sprintf("📝 Content matches (%d):\n", len(contentMatches)))
 			for _, match := range contentMatches {
-				resultBuilder.WriteString(fmt.Sprintf("  📁 %s:%d - %s\n", match.File, match.LineNumber, match.Line))
+				resultBuilder.WriteString(fmt.Sprintf("  📁 %s:%d [%d:%d] - %s\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd, match.Line))
 			}
 		}
 	}
@@ -499,11 +499,11 @@ func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSe
 
 					if regexPattern.MatchString(line) {
 						// Calculate character offset of pattern match
-						matchStart, matchEnd := calculateCharacterOffset(line, pattern)
+						matchStart, matchEnd := calculateCharacterOffset(line, regexPattern)
 						match := SearchMatch{
 							File:       currentFile,
 							LineNumber: lineNum,
-							Line:       strings.TrimSpace(line),
+							Line:       line,  // ✅ NO TrimSpace - mantener línea original
 							MatchStart: matchStart,
 							MatchEnd:   matchEnd,
 						}
@@ -517,11 +517,11 @@ func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSe
 				for lineNum, line := range lines {
 					if regexPattern.MatchString(line) {
 						// Calculate character offset of pattern match
-						matchStart, matchEnd := calculateCharacterOffset(line, pattern)
+						matchStart, matchEnd := calculateCharacterOffset(line, regexPattern)
 						match := SearchMatch{
 							File:       currentFile,
 							LineNumber: lineNum + 1,
-							Line:       strings.TrimSpace(line),
+							Line:       line,  // ✅ NO TrimSpace - mantener línea original
 							MatchStart: matchStart,
 							MatchEnd:   matchEnd,
 						}
@@ -707,21 +707,15 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 // calculateCharacterOffset - Determine exact character position of pattern match in line
 // Returns: (startOffset, endOffset) within the line
 // Note: Character offsets are 0-indexed relative to the start of the line
-func calculateCharacterOffset(line, pattern string) (int, int) {
-	// Try exact match first
-	idx := strings.Index(line, pattern)
-	if idx >= 0 {
-		return idx, idx + len(pattern)
+// Uses regex to find the actual match position (handles multiple occurrences correctly)
+func calculateCharacterOffset(line string, regexPattern *regexp.Regexp) (int, int) {
+	// Use regex to find the exact match position
+	// This handles all cases: exact strings, case-insensitive, multiple occurrences
+	loc := regexPattern.FindStringIndex(line)
+	if loc != nil {
+		return loc[0], loc[1]
 	}
 
-	// Fallback: search in normalized line (whitespace-insensitive)
-	normalizedLine := normalizeLineEndings(line)
-	normalizedPattern := normalizeLineEndings(pattern)
-	if idx = strings.Index(normalizedLine, normalizedPattern); idx >= 0 {
-		return idx, idx + len(normalizedPattern)
-	}
-
-	// Last resort: pattern not found, return reasonable estimate
-	// (assumes pattern would be at position 0 if found)
-	return 0, len(pattern)
+	// Fallback: pattern not found, return reasonable estimate
+	return 0, 0
 }

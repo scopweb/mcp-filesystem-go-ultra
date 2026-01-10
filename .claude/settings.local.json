@@ -33,7 +33,9 @@
       "Bash(sort:*)",
       "Bash(find:*)",
       "Bash(grep:*)",
-      "Bash(go doc:*)"
+      "Bash(go doc:*)",
+      "Bash(gh pr create:*)",
+      "Bash(ls:*)"
     ],
     "deny": [],
     "ask": []

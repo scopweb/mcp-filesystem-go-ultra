@@ -601,8 +601,75 @@ The `edit_file()` tool includes built-in safety:
 
 This is why `edit_file()` is safer than `write_file()` for ongoing edits.
 
+## v3.12.0: Coordinate Tracking (Phase 1)
+
+### What Are Coordinates?
+
+Search results now include **character-level positioning** within matched lines:
+
+```json
+{
+  "file": "main.go",
+  "line_number": 42,
+  "line": "func main() {",
+  "match_start": 5,      // Where match starts in line
+  "match_end": 9         // Where match ends in line
+}
+```
+
+### Why Coordinates Matter
+
+With coordinates, Claude Code can:
+- **Pinpoint exact edits** instead of guessing positions
+- **Avoid editing wrong occurrences** (when multiple on same line)
+- **Combine with read_file_range** for surgical changes
+- **Reduce token usage** significantly (foundation for Phase 2 diffs)
+
+### Using Coordinates with Claude Code
+
+**Example: Replace only one occurrence when multiple exist**
+
+```
+Line 42: "test_value = test_helper()"
+         ^^^^^ (match_start: 0)
+         ^^^^^^^^^^ (first match)
+                    ^^^^^ (match_start: 19)
+                    ^^^^^^^^^^ (second match)
+
+smart_search returns BOTH matches with coordinates.
+Claude Code uses coordinates to pick the CORRECT one.
+```
+
+### Coordinates + Edit Flow
+
+```
+1. smart_search("pattern")
+   → Returns: match_start, match_end for each result
+
+2. Verify coordinates
+   → line[match_start:match_end] == "pattern" ✓
+
+3. read_file_range to get context
+   → Know exactly what's around the match
+
+4. edit_file with confidence
+   → Know precisely which occurrence you're changing
+```
+
+### Technical Details
+
+- **0-indexed**: First character is position 0
+- **Per-line basis**: Coordinates relative to matched line
+- **Always populated**: Both `smart_search` and `advanced_text_search`
+- **Both paths**: With and without context
+- **Backward compatible**: Existing code unaffected
+
+See [CLAUDE_CODE_COORDINATE_TRACKING.md](CLAUDE_CODE_COORDINATE_TRACKING.md) for detailed integration guide.
+
 ## Conclusion
 
 The hooks system provides powerful extensibility for the MCP Filesystem server, enabling automatic code formatting, validation, and custom workflows that integrate seamlessly with Claude Desktop.
+
+With v3.12.0 Phase 1, coordinate tracking enables even more precise editing and reduces token usage significantly.
 
 For questions or issues, please refer to the main [README.md](README.md) or file an issue on GitHub.
