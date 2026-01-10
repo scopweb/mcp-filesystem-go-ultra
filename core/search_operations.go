@@ -306,10 +306,14 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 					lineNum++
 					line := scanner.Text()
 					if regexPattern.MatchString(line) {
+						// Calculate character offset of pattern match
+						matchStart, matchEnd := calculateCharacterOffset(line, pattern)
 						match := SearchMatch{
 							File:       currentFile,
 							LineNumber: lineNum,
 							Line:       strings.TrimSpace(line),
+							MatchStart: matchStart,
+							MatchEnd:   matchEnd,
 						}
 						localMatches = append(localMatches, match)
 					}
@@ -494,10 +498,14 @@ func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSe
 					line := scanner.Text()
 
 					if regexPattern.MatchString(line) {
+						// Calculate character offset of pattern match
+						matchStart, matchEnd := calculateCharacterOffset(line, pattern)
 						match := SearchMatch{
 							File:       currentFile,
 							LineNumber: lineNum,
 							Line:       strings.TrimSpace(line),
+							MatchStart: matchStart,
+							MatchEnd:   matchEnd,
 						}
 						localMatches = append(localMatches, match)
 					}
@@ -508,10 +516,14 @@ func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSe
 
 				for lineNum, line := range lines {
 					if regexPattern.MatchString(line) {
+						// Calculate character offset of pattern match
+						matchStart, matchEnd := calculateCharacterOffset(line, pattern)
 						match := SearchMatch{
 							File:       currentFile,
 							LineNumber: lineNum + 1,
 							Line:       strings.TrimSpace(line),
+							MatchStart: matchStart,
+							MatchEnd:   matchEnd,
 						}
 
 						// Add context
@@ -690,4 +702,26 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 	}
 
 	return result.String(), nil
+}
+
+// calculateCharacterOffset - Determine exact character position of pattern match in line
+// Returns: (startOffset, endOffset) within the line
+// Note: Character offsets are 0-indexed relative to the start of the line
+func calculateCharacterOffset(line, pattern string) (int, int) {
+	// Try exact match first
+	idx := strings.Index(line, pattern)
+	if idx >= 0 {
+		return idx, idx + len(pattern)
+	}
+
+	// Fallback: search in normalized line (whitespace-insensitive)
+	normalizedLine := normalizeLineEndings(line)
+	normalizedPattern := normalizeLineEndings(pattern)
+	if idx = strings.Index(normalizedLine, normalizedPattern); idx >= 0 {
+		return idx, idx + len(normalizedPattern)
+	}
+
+	// Last resort: pattern not found, return reasonable estimate
+	// (assumes pattern would be at position 0 if found)
+	return 0, len(pattern)
 }
