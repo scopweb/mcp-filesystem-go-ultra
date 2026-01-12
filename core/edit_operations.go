@@ -998,3 +998,77 @@ func (e *UltraFastEngine) validateEditContext(currentContent, oldText string) (b
 	// Context validation passed
 	return true, "context valid - file appears unchanged"
 }
+
+// CreateBackup creates a backup of the specified file via MCP interface
+// This is the public MCP tool for creating backups (snake_case for Claude Desktop)
+func (e *UltraFastEngine) CreateBackup(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResponse, error) {
+	if err := e.acquireOperation(ctx, "backup"); err != nil {
+		return nil, err
+	}
+	start := time.Now()
+	defer e.releaseOperation("backup", start)
+
+	// Get path argument
+	path, ok := request.Arguments["path"].(string)
+	if !ok || path == "" {
+		return &mcp.CallToolResponse{
+			Content: []mcp.TextContent{
+				{Text: "❌ Error: path is required"},
+			},
+		}, nil
+	}
+
+	// Validate path
+	validPath, err := e.validatePath(path)
+	if err != nil {
+		return &mcp.CallToolResponse{
+			Content: []mcp.TextContent{
+				{Text: fmt.Sprintf("❌ Error: invalid path - %v", err)},
+			},
+		}, nil
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(validPath); os.IsNotExist(err) {
+		return &mcp.CallToolResponse{
+			Content: []mcp.TextContent{
+				{Text: fmt.Sprintf("❌ Error: file not found - %s", validPath)},
+			},
+		}, nil
+	}
+
+	// Get optional operation context
+	operation := "manual_backup"
+	if op, ok := request.Arguments["operation"].(string); ok && op != "" {
+		operation = op
+	}
+
+	// Create backup using BackupManager (if available)
+	var backupID string
+	if e.backupManager != nil {
+		backupID, err = e.backupManager.CreateBackup(validPath, operation)
+		if err != nil {
+			return &mcp.CallToolResponse{
+				Content: []mcp.TextContent{
+					{Text: fmt.Sprintf("❌ Error creating backup: %v", err)},
+				},
+			}, nil
+		}
+	} else {
+		// Fallback to simple backup
+		backupID, err = e.createBackup(validPath)
+		if err != nil {
+			return &mcp.CallToolResponse{
+				Content: []mcp.TextContent{
+					{Text: fmt.Sprintf("❌ Error creating backup: %v", err)},
+				},
+			}, nil
+		}
+	}
+
+	return &mcp.CallToolResponse{
+		Content: []mcp.TextContent{
+			{Text: fmt.Sprintf("✅ Backup created successfully\n📦 Backup ID: %s\n📄 File: %s\n🏷️ Operation: %s", backupID, validPath, operation)},
+		},
+	}, nil
+}
