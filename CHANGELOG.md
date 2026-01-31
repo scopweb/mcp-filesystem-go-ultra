@@ -1,5 +1,68 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [3.13.0] - 2026-01-31
+
+### Security Audit & Dependency Update
+
+#### Go Toolchain
+- **Toolchain**: `go1.24.6` -> `go1.24.12` - fixes **8 CVEs** in Go standard library:
+  - GO-2026-4340: `crypto/tls` handshake messages processed at incorrect encryption level
+  - GO-2025-4175: `crypto/x509` improper wildcard DNS name constraint validation
+  - GO-2025-4155: `crypto/x509` excessive resource consumption on error string printing
+  - GO-2025-4013: `crypto/x509` panic when validating DSA public keys
+  - GO-2025-4011: `encoding/asn1` DER payload memory exhaustion
+  - GO-2025-4010: `net/url` insufficient IPv6 hostname validation
+  - GO-2025-4008: `crypto/tls` ALPN negotiation information leak
+  - GO-2025-4007: `crypto/x509` quadratic complexity in name constraint checks
+
+#### CRITICAL Security Fixes (5)
+- **Symlink traversal bypass** (`core/engine.go`): `isPathAllowed()` now resolves symlinks
+  via `filepath.EvalSymlinks()` before performing containment checks, preventing sandbox
+  escape through symlinks pointing outside allowed paths
+- **Missing access control on `EditFile()`** (`core/edit_operations.go`): Added
+  `isPathAllowed()` check - previously edits bypassed allowed-path restrictions entirely
+- **Missing access control on `StreamingWriteFile()`** (`core/streaming_operations.go`):
+  Large file writes (>MediumFileThreshold) now enforce allowed-path restrictions
+- **Missing access control on `ChunkedReadFile()`** (`core/streaming_operations.go`):
+  Large file reads now enforce allowed-path restrictions
+- **Missing access control on `SmartEditFile()`** (`core/streaming_operations.go`):
+  Smart edit operations now enforce allowed-path restrictions
+
+#### HIGH Security Fixes (3)
+- **Missing access control on `MultiEdit()`** (`core/edit_operations.go`): Batch edit
+  operations now enforce allowed-path restrictions
+- **Deadlock in `ListBackups()`** (`core/backup_manager.go`): Fixed dangerous
+  RLock->RUnlock->Lock->Unlock->RLock pattern that could cause deadlocks or
+  unlock-of-unlocked-mutex panics under concurrent access
+- **Path traversal via backup IDs** (`core/backup_manager.go`): Added `sanitizeBackupID()`
+  validation to prevent directory traversal attacks through crafted backup IDs
+  (e.g., `../../etc`) in `GetBackupInfo`, `RestoreBackup`, `CompareWithBackup`,
+  `GetBackupPath`
+
+#### MEDIUM Security Fixes (5)
+- **Predictable temp file names** (`core/engine.go`, `core/edit_operations.go`): All
+  temporary files now use `crypto/rand` via `secureRandomSuffix()` instead of predictable
+  timestamps or counters, preventing symlink attacks on temp file paths
+- **Weak backup ID generation** (`core/backup_manager.go`): Backup IDs now use
+  `crypto/rand` (8 bytes / 16 hex chars) instead of `time.Now().UnixNano()%0xFFFFFF`
+- **File permission preservation** (`core/engine.go`, `core/edit_operations.go`,
+  `core/streaming_operations.go`): Write operations now preserve original file permissions
+  instead of always using hardcoded `0644`, preventing sensitive files from becoming
+  world-readable after edits
+- **Symlink following in `copyDirectory()`** (`core/file_operations.go`): Directory copy
+  now skips symlinks to prevent sandbox escape and infinite loops from circular symlinks
+- **Restrictive backup metadata permissions** (`core/backup_manager.go`): Backup
+  `metadata.json` files now created with `0600` instead of `0644`
+
+#### Other
+- **Build fix**: `tests/security/*.go` changed from `package main` to `package security`
+  and renamed `security_tests.go` -> `security_tests_test.go` (pre-existing build error)
+- All dependencies verified at latest stable versions (bigcache v3.1.0, fsnotify v1.9.0,
+  mcp-go v0.43.2, ants v2.11.4)
+- All tests passing (core, tests, tests/security including fuzzing)
+
+---
+
 ## [3.12.0] - IN DEVELOPMENT
 
 ### 🎯 Code Editing Excellence: Phase 1 - Coordinate Tracking

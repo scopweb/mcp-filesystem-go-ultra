@@ -439,10 +439,16 @@ func (e *UltraFastEngine) copyDirectory(src, dst string) error {
 		return fmt.Errorf("failed to read directory: %w", err)
 	}
 
-	// Copy each entry
+	// Copy each entry, skipping symlinks to prevent sandbox escape and infinite loops
 	for _, entry := range entries {
 		sourcePath := filepath.Join(src, entry.Name())
 		destPath := filepath.Join(dst, entry.Name())
+
+		// Skip symlinks to prevent following links outside allowed paths
+		// and to avoid infinite loops from circular symlinks
+		if entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
 
 		if entry.IsDir() {
 			// Recursively copy subdirectory

@@ -47,6 +47,14 @@ func DefaultChunkingConfig() *ChunkingConfig {
 func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content string) error {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
+
+	// Check if path is allowed (access control) - must check before any write path
+	if len(e.config.AllowedPaths) > 0 {
+		if !e.isPathAllowed(path) {
+			return &PathError{Op: "streaming_write", Path: path, Err: fmt.Errorf("access denied")}
+		}
+	}
+
 	// Quick path for small files - use MediumFileThreshold for cutoff
 	if len(content) <= MediumFileThreshold {
 		return e.WriteFileContent(ctx, path, content)
@@ -80,11 +88,17 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	// Create temp file for atomic operation
-	tmpPath := path + ".streaming." + opID
+	// Create temp file for atomic operation with secure random suffix
+	tmpPath := path + ".streaming." + secureRandomSuffix()
+
+	// Preserve original file permissions if file exists, otherwise use 0644
+	fileMode := os.FileMode(0644)
+	if existingInfo, statErr := os.Stat(path); statErr == nil {
+		fileMode = existingInfo.Mode()
+	}
 
 	// Open file for writing with O_SYNC for data integrity
-	file, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	file, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fileMode)
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
@@ -167,6 +181,14 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxChunkSize int) (string, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
+
+	// Check if path is allowed (access control) - must check before any read path
+	if len(e.config.AllowedPaths) > 0 {
+		if !e.isPathAllowed(path) {
+			return "", &PathError{Op: "chunked_read", Path: path, Err: fmt.Errorf("access denied")}
+		}
+	}
+
 	// Get file info
 	info, err := os.Stat(path)
 	if err != nil {
@@ -233,6 +255,14 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 func (e *UltraFastEngine) SmartEditFile(ctx context.Context, path, oldText, newText string, maxFileSize int64) (*EditResult, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
+
+	// Check if path is allowed (access control)
+	if len(e.config.AllowedPaths) > 0 {
+		if !e.isPathAllowed(path) {
+			return nil, &PathError{Op: "smart_edit", Path: path, Err: fmt.Errorf("access denied")}
+		}
+	}
+
 	// Get file info first
 	info, err := os.Stat(path)
 	if err != nil {

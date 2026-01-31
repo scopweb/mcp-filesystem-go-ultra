@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra-Fast
 
-**Version 3.8.1** - CRITICAL FIX: Risk Assessment Now Enforced
+**Version 3.13.0** - Security Hardening & Go Toolchain Update
 
 Un servidor MCP (Model Context Protocol) de alto rendimiento para operaciones de sistema de archivos, diseñado para máxima velocidad y eficiencia. **Especialmente optimizado para Claude Desktop** con soporte completo para archivos grandes sin timeouts ni bloqueos.
 
@@ -8,12 +8,20 @@ Un servidor MCP (Model Context Protocol) de alto rendimiento para operaciones de
 >
 > 🚀 **Inicio Rápido**: Lee esta página y luego ve a [guides/CLAUDE_DESKTOP_SETUP.md](guides/CLAUDE_DESKTOP_SETUP.md)
 
-## 🔒 NOVEDAD v3.8.1: Bug Crítico Corregido
+## 🔒 NOVEDAD v3.13.0: Security Hardening & Go Toolchain Update
 
-### ⚠️ Actualización Urgente Recomendada
+### ⚠️ Actualización de Seguridad Recomendada
+- **Go Toolchain**: Actualizado a `go1.24.12` (corrige 8 CVEs en stdlib)
+- **Symlink Traversal**: `isPathAllowed()` ahora resuelve symlinks con `filepath.EvalSymlinks()` para prevenir escape de sandbox
+- **Access Control**: Añadido control de acceso en `EditFile()`, `MultiEdit()`, `StreamingWriteFile()`, `ChunkedReadFile()`, `SmartEditFile()`
+- **TOCTOU Fixes**: Archivos temporales ahora usan `crypto/rand` en lugar de `time.Now().UnixNano()`
+- **Backup Security**: IDs sanitizados contra path traversal, `generateBackupID()` usa `crypto/rand`, deadlock en `ListBackups` corregido
+- **File Permissions**: Temp files y backups con permisos restrictivos (`0600`), preservación de permisos originales
+- **Copy Safety**: `copyDirectory()` omite symlinks para prevenir traversal
+
+### Anterior: v3.8.1 - Risk Assessment Fix
 - **v3.8.0 BUG**: Risk assessment calculaba pero NO bloqueaba operaciones peligrosas
 - **v3.8.1 FIX**: Ahora HIGH/CRITICAL risk **requiere `force: true`** para ejecutar
-- Todos los usuarios de v3.8.0 deben actualizar inmediatamente
 
 ### Sistema de Backup y Recuperación (v3.8.0+)
 - **Backups automáticos** antes de operaciones destructivas
@@ -1423,12 +1431,12 @@ Se agregará exposición de parámetros avanzados (`case_sensitive`, `include_co
 
 ---
 
-**Versión**: 3.4.0 - Automatic WSL ↔ Windows Sync
-**Fecha de compilación**: 2025-11-15
-**Tamaño del ejecutable**: ~5.5 MB
+**Versión**: 3.13.0 - Security Hardening & Go Toolchain Update
+**Fecha de compilación**: 2026-01-31
+**Tamaño del ejecutable**: ~8.8 MB
 **Estado**: ✅ **OPTIMIZADO PARA CLAUDE DESKTOP** - Sin timeouts, sin bloqueos, auto-sync integrado
+**Seguridad**: ✅ **Go 1.24.12** + 13 vulnerabilidades corregidas (symlink traversal, TOCTOU, path injection, deadlock)
 **Herramientas**: 45 total (6 inteligentes + 4 streaming + 21 core + 3 plan mode + 2 auto-sync + 4 WSL tools)
-**Nuevo**: ✅ **AUTO-SYNC WSL ↔ WINDOWS** (sincronización automática y silenciosa de archivos)
 
 ---
 

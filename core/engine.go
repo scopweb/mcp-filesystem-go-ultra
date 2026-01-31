@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -519,11 +521,17 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	// Atomic write using temp file
-	tmpPath := path + ".tmp." + fmt.Sprintf("%d", time.Now().UnixNano())
+	// Atomic write using temp file with secure random name
+	tmpPath := path + ".tmp." + secureRandomSuffix()
+
+	// Preserve original file permissions if file exists, otherwise use 0644
+	fileMode := os.FileMode(0644)
+	if info, err := os.Stat(path); err == nil {
+		fileMode = info.Mode()
+	}
 
 	// Write to temporary file
-	if err := os.WriteFile(tmpPath, []byte(finalContent), 0644); err != nil {
+	if err := os.WriteFile(tmpPath, []byte(finalContent), fileMode); err != nil {
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
 
@@ -685,13 +693,44 @@ Search Operations: %d`,
 		e.metrics.SearchOperations)
 }
 
-// isPathAllowed checks if the given path is within one of the allowed base paths
+// isPathAllowed checks if the given path is within one of the allowed base paths.
+// It resolves symlinks to prevent sandbox escape via symlink following.
 func (e *UltraFastEngine) isPathAllowed(path string) bool {
 	// Resolve to absolute, cleaned paths to prevent traversal and casing issues
 	targetAbs, err := filepath.Abs(path)
 	if err != nil {
 		return false
 	}
+
+	// Resolve symlinks to prevent symlink-based sandbox escape.
+	// If the path doesn't exist yet (e.g., write to new file or mkdir -p),
+	// walk up the tree to find the first existing ancestor and resolve from there.
+	resolved, err := filepath.EvalSymlinks(targetAbs)
+	if err != nil {
+		// Walk up the directory tree to find the deepest existing ancestor
+		current := targetAbs
+		var suffix []string
+		for {
+			parent := filepath.Dir(current)
+			suffix = append([]string{filepath.Base(current)}, suffix...)
+			if parent == current {
+				// Reached filesystem root without finding existing path
+				break
+			}
+			if parentResolved, parentErr := filepath.EvalSymlinks(parent); parentErr == nil {
+				resolved = parentResolved
+				for _, s := range suffix {
+					resolved = filepath.Join(resolved, s)
+				}
+				break
+			}
+			current = parent
+		}
+		if resolved == "" {
+			return false
+		}
+	}
+	targetAbs = resolved
 
 	// On Windows, compare case-insensitively
 	norm := func(p string) string {
@@ -708,6 +747,10 @@ func (e *UltraFastEngine) isPathAllowed(path string) bool {
 		baseAbs, err := filepath.Abs(allowed)
 		if err != nil {
 			continue
+		}
+		// Also resolve symlinks on the allowed path itself
+		if baseResolved, err := filepath.EvalSymlinks(baseAbs); err == nil {
+			baseAbs = baseResolved
 		}
 		baseAbs = norm(baseAbs)
 
@@ -727,7 +770,7 @@ func (e *UltraFastEngine) isPathAllowed(path string) bool {
 	}
 
 	if e.config.DebugMode {
-		slog.Debug("Access denied", "path", path, "allowed_paths", e.config.AllowedPaths)
+		slog.Debug("Access denied", "path", path)
 	}
 	return false
 }
@@ -782,6 +825,17 @@ func NormalizePath(path string) string {
 
 	// For relative paths or already-normalized paths, just clean
 	return filepath.Clean(path)
+}
+
+// secureRandomSuffix generates a cryptographically random hex suffix for temp files.
+// This prevents symlink attacks on predictable temp file names.
+func secureRandomSuffix() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based if crypto/rand fails (should never happen)
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
 }
 
 // formatSize formats bytes to human readable format

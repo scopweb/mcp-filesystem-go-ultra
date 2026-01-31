@@ -71,6 +71,7 @@ test_output/
 # MCP test data
 test_files/
 filesdelete/
+Revisar_implantar_o_borrar/
 
 # Compiled hooks
 hooks.json
