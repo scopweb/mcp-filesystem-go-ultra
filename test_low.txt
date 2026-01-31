@@ -1,5 +1,0 @@
-Primera línea de texto
-MODIFICADA línea aquí
-Tercera línea de datos
-Cuarta línea final
-Quinta línea extra para contexto

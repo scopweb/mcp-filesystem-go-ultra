@@ -4,9 +4,9 @@
 
 Un servidor MCP (Model Context Protocol) de alto rendimiento para operaciones de sistema de archivos, diseñado para máxima velocidad y eficiencia. **Especialmente optimizado para Claude Desktop** con soporte completo para archivos grandes sin timeouts ni bloqueos.
 
-> 📁 **Proyecto Organizado**: Consulta [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) para ver la estructura completa de carpetas y archivos.
+> 📁 **Proyecto Organizado**: Consulta [CLAUDE.md](CLAUDE.md) para ver la arquitectura y estructura del proyecto.
 >
-> 🚀 **Inicio Rápido**: Lee esta página y luego ve a [guides/CLAUDE_DESKTOP_SETUP.md](guides/CLAUDE_DESKTOP_SETUP.md)
+> 🚀 **Inicio Rápido**: Lee esta página y luego ve a [docs/setup/CLAUDE_DESKTOP_SETUP.md](docs/setup/CLAUDE_DESKTOP_SETUP.md)
 
 ## 🔒 NOVEDAD v3.13.0: Security Hardening & Go Toolchain Update
 
@@ -463,7 +463,7 @@ mcp-filesystem-ultra.exe --hooks-enabled --hooks-config=hooks.json
 - ✅ **Build Verification**: Verificar compilación después de editar
 - ✅ **Protección**: Prevenir eliminación de archivos críticos
 
-**📚 Documentación completa:** Ver [HOOKS.md](HOOKS.md) para guía detallada con ejemplos avanzados.
+**📚 Documentación completa:** Ver [docs/features/HOOKS.md](docs/features/HOOKS.md) para guía detallada con ejemplos avanzados.
 
 ### 🔍 **Plan Mode / Dry-Run (Nuevo en v2.5.0)**
 

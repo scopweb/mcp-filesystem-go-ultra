@@ -1,7 +1,0 @@
-function getData() {
-    const url = "https://api.example.com/data";
-    const response = await fetch(url);
-    const data = await response.json();
-        .then(data => console.log(data))
-        .catch(error => console.error(error));
-}

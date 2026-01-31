@@ -68,6 +68,10 @@ private/
 test_output/
 *.coverage
 
+# Test artifacts
+test_*.txt
+before.txt
+
 # MCP test data
 test_files/
 filesdelete/

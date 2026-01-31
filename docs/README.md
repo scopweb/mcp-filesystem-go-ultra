@@ -1,25 +1,36 @@
-# Documentation / Documentación Técnica
+# Documentation Index
 
-Esta carpeta contiene documentación técnica del proyecto.
+## Setup & Configuration
 
-## Archivos
+- [CLAUDE_DESKTOP_SETUP.md](setup/CLAUDE_DESKTOP_SETUP.md) - Claude Desktop configuration guide
+- [GUIA_RAPIDA_WINDOWS.md](setup/GUIA_RAPIDA_WINDOWS.md) - Quick start guide for Windows (Spanish)
+- [WINDOWS_PATH_FIX.md](setup/WINDOWS_PATH_FIX.md) - Windows path resolution fixes
 
-- **BUG10_RESOLUTION.md** - Resolución del Bug #10: Sistema de backup y recuperación completo (2025-12-03)
-- **BUG9_RESOLUTION.md** - Resolución del Bug #9: Parámetros opcionales de búsqueda expuestos (2025-12-03)
-- **BUG8_RESOLUTION.md** - Resolución del Bug #8: Correcciones de rutas WSL
-- **BUG5_RESOLUTION_SUMMARY.md** - Resumen de resolución del Bug #5
-- **TOKEN_ANALYSIS.md** - Análisis detallado del uso de tokens en todas las herramientas
-- **PHASE3_TOKEN_OPTIMIZATIONS.md** - Documentación completa de las optimizaciones de Fase 3
-- **TOKEN_OPTIMIZATION_SUMMARY.md** - Resumen de optimizaciones de tokens (v2.2.0)
-- **benchmarks.md** - Resultados de benchmarks de rendimiento
-- **RESULTADO_FINAL.md** - Resumen final del proyecto
-- **PERFORMANCE_IMPROVEMENT_PLAN.md** - Plan de mejoras de rendimiento
-- **WSL_AUTO_SYNC_GUIDE.md** - Guía de sincronización automática WSL
-- **WSL_AUTO_SYNC_EXAMPLES.md** - Ejemplos de auto-sincronización WSL
-- **WSL_AUTO_SYNC_TESTS.md** - Tests de auto-sincronización WSL
-- **ParaClaudeRules.md** - Reglas para uso con Claude
-- **PasosSiguientesParaSubirAHuggingFace.txt** - Notas para publicación en HuggingFace
+## Features
 
-## Para Usuarios
+- [HOOKS.md](features/HOOKS.md) - Pre/post operation hook system (12 event types)
+- [BATCH_OPERATIONS_GUIDE.md](features/BATCH_OPERATIONS_GUIDE.md) - Batch file operations with rollback
+- [BACKUP_RECOVERY_GUIDE.md](features/BACKUP_RECOVERY_GUIDE.md) - Backup and recovery system
+- [CLAUDE_CODE_COORDINATE_TRACKING.md](features/CLAUDE_CODE_COORDINATE_TRACKING.md) - Coordinate tracking for search results
 
-Si eres usuario del MCP, consulta mejor la carpeta `/guides` que contiene guías prácticas de uso.
+## AI Agent Integration
+
+- [AI_AGENT_INSTRUCTIONS.md](ai-integration/AI_AGENT_INSTRUCTIONS.md) - Instructions for AI agents (English)
+- [AI_AGENT_INSTRUCTIONS_ES.md](ai-integration/AI_AGENT_INSTRUCTIONS_ES.md) - Instructions for AI agents (Spanish)
+- [INITIAL_PROMPT_FOR_AI.md](ai-integration/INITIAL_PROMPT_FOR_AI.md) - Initial prompt template (English)
+- [INITIAL_PROMPT_FOR_AI_ES.md](ai-integration/INITIAL_PROMPT_FOR_AI_ES.md) - Initial prompt template (Spanish)
+- [SYSTEM_PROMPT_COMPACT.txt](ai-integration/SYSTEM_PROMPT_COMPACT.txt) - Compact system prompt (English)
+- [SYSTEM_PROMPT_COMPACT_ES.txt](ai-integration/SYSTEM_PROMPT_COMPACT_ES.txt) - Compact system prompt (Spanish)
+- [PREVENT_UNNECESSARY_SEARCHES.md](ai-integration/PREVENT_UNNECESSARY_SEARCHES.md) - Guidelines to reduce unnecessary search operations
+
+## WSL Integration
+
+- [WSL_AUTO_SYNC_GUIDE.md](wsl/WSL_AUTO_SYNC_GUIDE.md) - Automatic WSL-Windows synchronization setup
+- [WSL_AUTO_SYNC_EXAMPLES.md](wsl/WSL_AUTO_SYNC_EXAMPLES.md) - Auto-sync usage examples
+- [WSL_AUTO_SYNC_TESTS.md](wsl/WSL_AUTO_SYNC_TESTS.md) - Auto-sync test documentation
+
+## Top-Level Docs
+
+- [Roadmap.md](Roadmap.md) - Project roadmap and planned features
+- [SAFE_EDITING_PROTOCOL.md](SAFE_EDITING_PROTOCOL.md) - Safe editing protocol and guidelines
+- [SECURITY_TESTING_SUMMARY.md](SECURITY_TESTING_SUMMARY.md) - Security testing results summary
