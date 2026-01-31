@@ -1,7 +1,0 @@
-Diferencias Clave de v3.0 → v3.1.0 (ES):
-Aspecto	v3.0 (Antiguo)	v3.1.0 (Nuevo)
-Enfoque	max_lines + batch	smart_search + read_file_range
-Regla de Oro	Optimiza tokens (genérico)	Ediciones quirúrgicas = 98% ahorro
-Contexto	Windows persistence	Context validation en edit_file
-Telemetría	No	get_edit_telemetry para monitoreo
-Herramientas claves	intelligent_read, recovery_edit	smart_search, read_file_range, edit_file

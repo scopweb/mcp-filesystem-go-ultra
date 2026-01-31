@@ -4,11 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mcp/filesystem-ultra/cache"
 	"github.com/mcp/filesystem-ultra/core"
+	localmcp "github.com/mcp/filesystem-ultra/mcp"
 )
 
 // setupTestEngine creates a test engine for MCP function testing
@@ -189,4 +191,440 @@ func TestCompilationSuccess(t *testing.T) {
 	}
 
 	t.Logf("✅ ParseInt working correctly: chunkSize=%d, fileSize=%d", chunkSize, fileSize)
+}
+
+// --- Consolidated from bug5_test.go ---
+
+// TestContextValidation tests the context validation feature for EditFile
+func TestContextValidation(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test_context.go")
+
+	content := `package main
+
+func ReadFile() {
+	return nil
+}
+
+func WriteFile() {
+	return nil
+}
+`
+
+	err := os.WriteFile(testFile, []byte(content), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	cacheInstance, err := cache.NewIntelligentCache(1024 * 1024)
+	if err != nil {
+		t.Fatalf("Failed to create cache: %v", err)
+	}
+
+	cfg := &core.Config{
+		Cache:       cacheInstance,
+		ParallelOps: 2,
+		DebugMode:   false,
+	}
+
+	engine, err := core.NewUltraFastEngine(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create engine: %v", err)
+	}
+
+	t.Run("ValidContext", func(t *testing.T) {
+		oldText := "return nil"
+		newText := "return content"
+
+		result, err := engine.EditFile(testFile, oldText, newText, true)
+		if err != nil {
+			t.Fatalf("EditFile should succeed with valid context, got error: %v", err)
+		}
+
+		if result.ReplacementCount == 0 {
+			t.Error("Expected at least one replacement")
+		}
+
+		if result.MatchConfidence == "none" {
+			t.Error("Expected non-zero match confidence")
+		}
+	})
+
+	t.Run("InvalidContext", func(t *testing.T) {
+		oldText := "this_text_does_not_exist"
+		newText := "something"
+
+		result, err := engine.EditFile(testFile, oldText, newText, false)
+		if err == nil {
+			t.Error("EditFile should fail with invalid context")
+		}
+
+		if result != nil && result.ReplacementCount != 0 {
+			t.Error("Expected no replacements for non-existent text")
+		}
+	})
+}
+
+// TestEditTelemetry tests the telemetry system
+func TestEditTelemetry(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test_telemetry.go")
+
+	content := `package main
+
+func SmallChange() {
+	return nil
+}
+
+func LargeChange() {
+	return nil
+}
+`
+
+	err := os.WriteFile(testFile, []byte(content), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	cacheInstance, err := cache.NewIntelligentCache(1024 * 1024)
+	if err != nil {
+		t.Fatalf("Failed to create cache: %v", err)
+	}
+
+	cfg := &core.Config{
+		Cache:       cacheInstance,
+		ParallelOps: 2,
+		DebugMode:   false,
+	}
+
+	engine, err := core.NewUltraFastEngine(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create engine: %v", err)
+	}
+
+	t.Run("TargetedEditDetection", func(t *testing.T) {
+		oldText := "return nil"
+		newText := "return content"
+
+		engine.LogEditTelemetry(int64(len(oldText)), int64(len(newText)), testFile)
+
+		summary := engine.GetEditTelemetrySummary()
+
+		if total, ok := summary["total_edits"].(int64); !ok || total != 1 {
+			t.Logf("Telemetry recorded - total_edits type: %T, value: %v", summary["total_edits"], summary["total_edits"])
+		}
+
+		if _, ok := summary["targeted_edits"]; !ok {
+			t.Error("Expected targeted_edits in summary")
+		}
+	})
+
+	t.Run("FullRewriteDetection", func(t *testing.T) {
+		largeOldText := string(make([]byte, 1001))
+		largeNewText := string(make([]byte, 1001))
+
+		engine.LogEditTelemetry(int64(len(largeOldText)), int64(len(largeNewText)), testFile)
+
+		summary := engine.GetEditTelemetrySummary()
+
+		if _, ok := summary["full_rewrites"]; !ok {
+			t.Error("Expected full_rewrites in summary")
+		}
+	})
+
+	t.Run("TelemetrySummaryFormat", func(t *testing.T) {
+		summary := engine.GetEditTelemetrySummary()
+
+		requiredFields := []string{
+			"total_edits",
+			"full_rewrites",
+			"average_bytes_per_edit",
+			"recommendation",
+		}
+
+		for _, field := range requiredFields {
+			if _, ok := summary[field]; !ok {
+				t.Logf("Field %s present: %v", field, ok)
+			}
+		}
+	})
+}
+
+// BenchmarkTelemetryLogging benchmarks the telemetry system
+func BenchmarkTelemetryLogging(b *testing.B) {
+	cacheInstance, _ := cache.NewIntelligentCache(1024 * 1024)
+	cfg := &core.Config{
+		Cache:       cacheInstance,
+		ParallelOps: 2,
+		DebugMode:   false,
+	}
+
+	engine, _ := core.NewUltraFastEngine(cfg)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		engine.LogEditTelemetry(int64(50*i), int64(50*i+10), "/tmp/test.go")
+	}
+}
+
+// --- Consolidated from bug9_test.go ---
+
+// createSearchTestEngine creates an engine for search tests
+func createSearchTestEngine(t *testing.T) *core.UltraFastEngine {
+	cacheInstance, err := cache.NewIntelligentCache(1024 * 1024)
+	if err != nil {
+		t.Fatalf("Failed to create cache: %v", err)
+	}
+
+	cfg := &core.Config{
+		Cache:            cacheInstance,
+		ParallelOps:      2,
+		DebugMode:        false,
+		CompactMode:      false,
+		MaxSearchResults: 100,
+	}
+
+	engine, err := core.NewUltraFastEngine(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create engine: %v", err)
+	}
+
+	return engine
+}
+
+// TestSmartSearchWithIncludeContent tests smart_search with include_content parameter
+func TestSmartSearchWithIncludeContent(t *testing.T) {
+	testDir := t.TempDir()
+
+	testFile1 := filepath.Join(testDir, "file1.go")
+	testFile2 := filepath.Join(testDir, "file2.txt")
+	testFile3 := filepath.Join(testDir, "other.md")
+
+	if err := os.WriteFile(testFile1, []byte("package main\nfunc TestFunction() {}\n"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+	if err := os.WriteFile(testFile2, []byte("This is a test file\nwith TestFunction mentioned\n"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+	if err := os.WriteFile(testFile3, []byte("# Documentation\nNo matches here\n"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	engine := createSearchTestEngine(t)
+	ctx := context.Background()
+
+	t.Run("SmartSearch without include_content", func(t *testing.T) {
+		req := localmcp.CallToolRequest{
+			Arguments: map[string]interface{}{
+				"path":            testDir,
+				"pattern":         "TestFunction",
+				"include_content": false,
+			},
+		}
+
+		resp, err := engine.SmartSearch(ctx, req)
+		if err != nil {
+			t.Fatalf("SmartSearch failed: %v", err)
+		}
+
+		result := resp.Content[0].Text
+		if strings.Contains(result, "Content matches") {
+			t.Errorf("Expected no content matches when include_content=false, got: %s", result)
+		}
+	})
+
+	t.Run("SmartSearch with include_content", func(t *testing.T) {
+		req := localmcp.CallToolRequest{
+			Arguments: map[string]interface{}{
+				"path":            testDir,
+				"pattern":         "TestFunction",
+				"include_content": true,
+			},
+		}
+
+		resp, err := engine.SmartSearch(ctx, req)
+		if err != nil {
+			t.Fatalf("SmartSearch failed: %v", err)
+		}
+
+		result := resp.Content[0].Text
+		if !strings.Contains(result, "Content matches") && !strings.Contains(result, "content matches") {
+			t.Errorf("Expected content matches when include_content=true, got: %s", result)
+		}
+
+		if !strings.Contains(result, "file1.go") {
+			t.Errorf("Expected to find file1.go in results")
+		}
+		if !strings.Contains(result, "file2.txt") {
+			t.Errorf("Expected to find file2.txt in results")
+		}
+	})
+}
+
+// TestSmartSearchWithFileTypes tests smart_search with file_types parameter
+func TestSmartSearchWithFileTypes(t *testing.T) {
+	testDir := t.TempDir()
+
+	testFile1 := filepath.Join(testDir, "search.go")
+	testFile2 := filepath.Join(testDir, "search.txt")
+	testFile3 := filepath.Join(testDir, "search.md")
+
+	if err := os.WriteFile(testFile1, []byte("package main\n"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+	if err := os.WriteFile(testFile2, []byte("text content\n"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+	if err := os.WriteFile(testFile3, []byte("# Markdown\n"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	engine := createSearchTestEngine(t)
+	ctx := context.Background()
+
+	t.Run("SmartSearch with file_types filter", func(t *testing.T) {
+		req := localmcp.CallToolRequest{
+			Arguments: map[string]interface{}{
+				"path":            testDir,
+				"pattern":         "search",
+				"include_content": true,
+				"file_types":      []interface{}{".go", ".txt"},
+			},
+		}
+
+		resp, err := engine.SmartSearch(ctx, req)
+		if err != nil {
+			t.Fatalf("SmartSearch failed: %v", err)
+		}
+
+		result := resp.Content[0].Text
+
+		if !strings.Contains(result, "search.go") {
+			t.Errorf("Expected to find search.go in results")
+		}
+		if !strings.Contains(result, "search.txt") {
+			t.Errorf("Expected to find search.txt in results")
+		}
+
+		if strings.Contains(result, "search.md") {
+			t.Errorf("Should not find search.md when filtering by .go and .txt, got: %s", result)
+		}
+	})
+}
+
+// TestAdvancedTextSearchCaseSensitive tests advanced_text_search with case_sensitive parameter
+func TestAdvancedTextSearchCaseSensitive(t *testing.T) {
+	testDir := t.TempDir()
+
+	testFile := filepath.Join(testDir, "test.txt")
+	content := "Hello World\nhello world\nHELLO WORLD\n"
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	engine := createSearchTestEngine(t)
+	ctx := context.Background()
+
+	t.Run("AdvancedTextSearch case insensitive", func(t *testing.T) {
+		req := localmcp.CallToolRequest{
+			Arguments: map[string]interface{}{
+				"path":           testDir,
+				"pattern":        "hello",
+				"case_sensitive": false,
+			},
+		}
+
+		resp, err := engine.AdvancedTextSearch(ctx, req)
+		if err != nil {
+			t.Fatalf("AdvancedTextSearch failed: %v", err)
+		}
+
+		result := resp.Content[0].Text
+		matchCount := strings.Count(result, "test.txt:")
+		if matchCount < 3 {
+			t.Errorf("Expected at least 3 matches for case-insensitive search, got %d. Result: %s", matchCount, result)
+		}
+	})
+
+	t.Run("AdvancedTextSearch case sensitive", func(t *testing.T) {
+		req := localmcp.CallToolRequest{
+			Arguments: map[string]interface{}{
+				"path":           testDir,
+				"pattern":        "hello",
+				"case_sensitive": true,
+			},
+		}
+
+		resp, err := engine.AdvancedTextSearch(ctx, req)
+		if err != nil {
+			t.Fatalf("AdvancedTextSearch failed: %v", err)
+		}
+
+		result := resp.Content[0].Text
+		if !strings.Contains(result, "No matches") {
+			matchCount := strings.Count(result, "test.txt:")
+			if matchCount != 1 {
+				t.Errorf("Expected exactly 1 match for case-sensitive 'hello', got %d. Result: %s", matchCount, result)
+			}
+		}
+	})
+}
+
+// TestAdvancedTextSearchWithContext tests advanced_text_search with include_context parameter
+func TestAdvancedTextSearchWithContext(t *testing.T) {
+	testDir := t.TempDir()
+
+	testFile := filepath.Join(testDir, "test.txt")
+	content := "line 1\nline 2\nMATCH HERE\nline 4\nline 5\n"
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	engine := createSearchTestEngine(t)
+	ctx := context.Background()
+
+	t.Run("AdvancedTextSearch without context", func(t *testing.T) {
+		req := localmcp.CallToolRequest{
+			Arguments: map[string]interface{}{
+				"path":            testDir,
+				"pattern":         "MATCH",
+				"include_context": false,
+			},
+		}
+
+		resp, err := engine.AdvancedTextSearch(ctx, req)
+		if err != nil {
+			t.Fatalf("AdvancedTextSearch failed: %v", err)
+		}
+
+		result := resp.Content[0].Text
+		if strings.Contains(result, "Context:") {
+			t.Errorf("Should not include context when include_context=false, got: %s", result)
+		}
+	})
+
+	t.Run("AdvancedTextSearch with context", func(t *testing.T) {
+		req := localmcp.CallToolRequest{
+			Arguments: map[string]interface{}{
+				"path":            testDir,
+				"pattern":         "MATCH",
+				"include_context": true,
+				"context_lines":   2,
+			},
+		}
+
+		resp, err := engine.AdvancedTextSearch(ctx, req)
+		if err != nil {
+			t.Fatalf("AdvancedTextSearch failed: %v", err)
+		}
+
+		result := resp.Content[0].Text
+		if !strings.Contains(result, "Context:") {
+			t.Errorf("Expected to include context when include_context=true, got: %s", result)
+		}
+
+		if !strings.Contains(result, "line 2") || !strings.Contains(result, "line 4") {
+			t.Errorf("Expected context lines 2 and 4, got: %s", result)
+		}
+	})
 }

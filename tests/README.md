@@ -1,26 +1,28 @@
-# Tests / Pruebas
+# Tests
 
-Esta carpeta contiene archivos relacionados con testing del proyecto.
+## Test Files
 
-## Archivos
+- **mcp_functions_test.go** - Core MCP function tests, parameter parsing, context validation, telemetry, and search parameters
+- **edit_safety_test.go** - Edit safety validation (multiline, line endings, large files)
+- **coordinate_tracking_test.go** - Coordinate tracking in search results
+- **large_file_processor_test.go** - Large file processing (in-memory, line-by-line, dry-run, auto-selection)
+- **regex_transformer_test.go** - Regex transformation with capture groups, limits, case sensitivity
+- **security/** - Security tests and fuzzing
 
-- **mcp_functions_test.go** - Tests unitarios de funciones MCP
-- **test_new_features.md** - Documentación de pruebas de nuevas características
-
-## Ejecutar Tests
+## Run Tests
 
 ```bash
-go test ./...
+go test ./tests/... ./core/...
 ```
 
-## Ejecutar Tests con Coverage
+## Run with Race Detector
 
 ```bash
-go test -cover ./...
+go test -race ./...
 ```
 
-## Ejecutar Tests Específicos
+## Run Specific Test
 
 ```bash
-go test -v ./tests/
+go test ./tests/ -run TestName -v
 ```
