@@ -42,6 +42,14 @@ type SearchMatch struct {
 func (e *UltraFastEngine) EditFile(path, oldText, newText string, force bool) (*EditResult, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
+
+	// Check if path is allowed (access control)
+	if len(e.config.AllowedPaths) > 0 {
+		if !e.isPathAllowed(path) {
+			return nil, &PathError{Op: "edit", Path: path, Err: fmt.Errorf("access denied")}
+		}
+	}
+
 	// Validate file
 	if err := e.validateEditableFile(path); err != nil {
 		return nil, fmt.Errorf("file validation failed: %w", err)
@@ -118,9 +126,16 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string, force bool) (*
 		finalContent = hookResult.ModifiedContent
 	}
 
-	// Write modified content atomically
-	tmpPath := path + ".tmp." + fmt.Sprintf("%d", e.metrics.OperationsTotal)
-	if err := os.WriteFile(tmpPath, []byte(finalContent), 0644); err != nil {
+	// Write modified content atomically with secure random temp name
+	tmpPath := path + ".tmp." + secureRandomSuffix()
+
+	// Preserve original file permissions
+	fileMode := os.FileMode(0644)
+	if info, statErr := os.Stat(path); statErr == nil {
+		fileMode = info.Mode()
+	}
+
+	if err := os.WriteFile(tmpPath, []byte(finalContent), fileMode); err != nil {
 		return nil, fmt.Errorf("error writing temp file: %w", err)
 	}
 
@@ -253,14 +268,19 @@ func (e *UltraFastEngine) validateEditableFile(path string) error {
 	return nil
 }
 
-// createBackup creates a backup of a file
+// createBackup creates a backup of a file, preserving original permissions
 func (e *UltraFastEngine) createBackup(path string) (string, error) {
 	backupPath := path + ".backup"
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
-	err = os.WriteFile(backupPath, content, 0644)
+	// Preserve original file permissions for backup
+	fileMode := os.FileMode(0600) // restrictive default for backups
+	if info, statErr := os.Stat(path); statErr == nil {
+		fileMode = info.Mode()
+	}
+	err = os.WriteFile(backupPath, content, fileMode)
 	return backupPath, err
 }
 
@@ -538,8 +558,8 @@ func (e *UltraFastEngine) searchAndReplaceInFile(filePath, pattern, replacement 
 	// Perform replacement
 	newContent := re.ReplaceAllString(contentStr, replacement)
 
-	// Write back to file atomically
-	tmpPath := filePath + ".tmp"
+	// Write back to file atomically with secure random temp name
+	tmpPath := filePath + ".tmp." + secureRandomSuffix()
 	if err := os.WriteFile(tmpPath, []byte(newContent), info.Mode()); err != nil {
 		return 0, err
 	}
@@ -635,6 +655,13 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
+	// Check if path is allowed (access control)
+	if len(e.config.AllowedPaths) > 0 {
+		if !e.isPathAllowed(path) {
+			return nil, &PathError{Op: "multi_edit", Path: path, Err: fmt.Errorf("access denied")}
+		}
+	}
+
 	// Validate file
 	if err := e.validateEditableFile(path); err != nil {
 		return nil, fmt.Errorf("file validation failed: %w", err)
@@ -712,9 +739,16 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		return result, fmt.Errorf("no edits were successful: %v", result.Errors)
 	}
 
-	// Write modified content atomically
-	tmpPath := path + ".tmp." + fmt.Sprintf("%d", time.Now().UnixNano())
-	if err := os.WriteFile(tmpPath, []byte(currentContent), 0644); err != nil {
+	// Write modified content atomically with secure random temp name
+	tmpPath := path + ".tmp." + secureRandomSuffix()
+
+	// Preserve original file permissions
+	fileMode := os.FileMode(0644)
+	if info, statErr := os.Stat(path); statErr == nil {
+		fileMode = info.Mode()
+	}
+
+	if err := os.WriteFile(tmpPath, []byte(currentContent), fileMode); err != nil {
 		return nil, fmt.Errorf("error writing temp file: %w", err)
 	}
 

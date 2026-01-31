@@ -211,6 +211,11 @@ func main() {
 		log.Fatalf("Failed to register tools: %v", err)
 	}
 
+	// Register large file processing tools (modular - new in v3.12.0)
+	if err := registerLargeFileTools(s, engine); err != nil {
+		log.Fatalf("Failed to register large file tools: %v", err)
+	}
+
 	// Setup graceful shutdown
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -2671,6 +2676,99 @@ func formatBatchResult(result core.BatchResult) string {
 	}
 
 	return sb.String()
+}
+
+// ============================================================================
+// LARGE FILE PROCESSING TOOLS (Modular - v3.12.0)
+// ============================================================================
+
+// registerLargeFileTools registers large file processing tools
+func registerLargeFileTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
+	// Create modular processor
+	regexTransform := core.NewRegexTransformer(engine)
+
+	// Tool 1: regex_transform_file - Advanced regex transformations
+	regexTransformTool := mcp.NewTool("regex_transform_file",
+		mcp.WithDescription("Apply advanced regex transformations with capture groups. Optimized for 2-10MB files."),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file to transform")),
+		mcp.WithString("patterns_json", mcp.Required(),
+			mcp.Description("JSON array of patterns: [{\"pattern\": \"regex\", \"replacement\": \"$1...\", \"limit\": -1}]")),
+		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive matching (default: true)")),
+		mcp.WithBoolean("create_backup", mcp.Description("Create backup before transformation (default: true)")),
+		mcp.WithBoolean("dry_run", mcp.Description("Validate without applying changes (default: false)")),
+	)
+	s.AddTool(regexTransformTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+		patternsJSON, err := request.RequireString("patterns_json")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid patterns_json: %v", err)), nil
+		}
+
+		// Parse patterns
+		var patterns []core.TransformPattern
+		if err := json.Unmarshal([]byte(patternsJSON), &patterns); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to parse patterns JSON: %v", err)), nil
+		}
+
+		// Get optional parameters
+		caseSensitive := true
+		createBackup := true
+		dryRun := false
+
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if cs, ok := args["case_sensitive"].(bool); ok {
+				caseSensitive = cs
+			}
+			if cb, ok := args["create_backup"].(bool); ok {
+				createBackup = cb
+			}
+			if dr, ok := args["dry_run"].(bool); ok {
+				dryRun = dr
+			}
+		}
+
+		// Execute transformation
+		result, err := regexTransform.Transform(ctx, core.RegexTransformConfig{
+			FilePath:      path,
+			Patterns:      patterns,
+			Mode:          core.ModeSequential,
+			CaseSensitive: caseSensitive,
+			CreateBackup:  createBackup,
+			DryRun:        dryRun,
+		})
+
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Transformation failed: %v", err)), nil
+		}
+
+		// Format result
+		var output strings.Builder
+		output.WriteString("🔄 Regex Transformation Complete\n")
+		output.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+		output.WriteString(fmt.Sprintf("File: %s\n", result.FilePath))
+		output.WriteString(fmt.Sprintf("Patterns Applied: %d/%d\n", result.PatternsApplied, len(patterns)))
+		output.WriteString(fmt.Sprintf("Total Replacements: %d\n", result.TotalReplacements))
+		output.WriteString(fmt.Sprintf("Lines Affected: %d\n", result.LinesAffected))
+		output.WriteString(fmt.Sprintf("Duration: %v\n", result.Duration))
+
+		if result.BackupID != "" {
+			output.WriteString(fmt.Sprintf("\n💾 Backup ID: %s\n", result.BackupID))
+		}
+
+		if len(result.Errors) > 0 {
+			output.WriteString("\n❌ Errors:\n")
+			for _, err := range result.Errors {
+				output.WriteString(fmt.Sprintf("  • %s\n", err))
+			}
+		}
+
+		return mcp.NewToolResultText(output.String()), nil
+	})
+
+	return nil
 }
 
 // truncateContent truncates content based on mode and max lines

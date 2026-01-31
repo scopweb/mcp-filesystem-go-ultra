@@ -1,6 +1,7 @@
 package core
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -219,17 +220,17 @@ func (bm *BackupManager) CreateBatchBackup(paths []string, operation string, use
 
 // ListBackups lista backups con filtros opcionales
 func (bm *BackupManager) ListBackups(limit int, filterOperation string, filterPath string, newerThanHours int) ([]BackupInfo, error) {
+	// Refresh cache under write lock if stale, before acquiring read lock.
+	// This avoids the dangerous RLock->RUnlock->Lock->Unlock->RLock pattern
+	// which can cause deadlocks or unlock-of-unlocked-mutex panics.
+	bm.mutex.Lock()
+	if time.Since(bm.cacheLastScan) > 5*time.Minute {
+		bm.refreshCache()
+	}
+	bm.mutex.Unlock()
+
 	bm.mutex.RLock()
 	defer bm.mutex.RUnlock()
-
-	// Refrescar cache si es necesario
-	if time.Since(bm.cacheLastScan) > 5*time.Minute {
-		bm.mutex.RUnlock()
-		bm.mutex.Lock()
-		bm.refreshCache()
-		bm.mutex.Unlock()
-		bm.mutex.RLock()
-	}
 
 	var results []BackupInfo
 	cutoffTime := time.Now().Add(-time.Duration(newerThanHours) * time.Hour)
@@ -273,8 +274,32 @@ func (bm *BackupManager) ListBackups(limit int, filterOperation string, filterPa
 	return results, nil
 }
 
+// sanitizeBackupID validates that a backup ID contains only safe characters
+// to prevent path traversal attacks via malicious backup IDs.
+func sanitizeBackupID(backupID string) error {
+	if backupID == "" {
+		return fmt.Errorf("backup ID cannot be empty")
+	}
+	// Backup IDs should only contain alphanumeric chars, hyphens, and underscores
+	for _, c := range backupID {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			return fmt.Errorf("invalid backup ID: contains illegal character '%c'", c)
+		}
+	}
+	// Also reject if it contains path separators or traversal patterns
+	if strings.Contains(backupID, "..") || strings.ContainsAny(backupID, `/\`) {
+		return fmt.Errorf("invalid backup ID: contains path traversal characters")
+	}
+	return nil
+}
+
 // GetBackupInfo obtiene información de un backup específico
 func (bm *BackupManager) GetBackupInfo(backupID string) (*BackupInfo, error) {
+	// Sanitize backup ID to prevent path traversal
+	if err := sanitizeBackupID(backupID); err != nil {
+		return nil, err
+	}
+
 	bm.mutex.RLock()
 	defer bm.mutex.RUnlock()
 
@@ -295,6 +320,11 @@ func (bm *BackupManager) GetBackupInfo(backupID string) (*BackupInfo, error) {
 
 // RestoreBackup restaura archivos desde un backup
 func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, createBackup bool) ([]string, error) {
+	// Sanitize backup ID to prevent path traversal
+	if err := sanitizeBackupID(backupID); err != nil {
+		return nil, err
+	}
+
 	// Obtener información del backup
 	info, err := bm.GetBackupInfo(backupID)
 	if err != nil {
@@ -360,6 +390,11 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 
 // CompareWithBackup compara un archivo actual con su versión en el backup
 func (bm *BackupManager) CompareWithBackup(backupID string, filePath string) (string, error) {
+	// Sanitize backup ID to prevent path traversal
+	if err := sanitizeBackupID(backupID); err != nil {
+		return "", err
+	}
+
 	info, err := bm.GetBackupInfo(backupID)
 	if err != nil {
 		return "", err
@@ -450,6 +485,10 @@ func (bm *BackupManager) CleanupOldBackups(olderThanDays int, dryRun bool) (int,
 
 // GetBackupPath retorna la ruta completa de un backup
 func (bm *BackupManager) GetBackupPath(backupID string) string {
+	// Sanitize backup ID - return empty string on invalid ID
+	if err := sanitizeBackupID(backupID); err != nil {
+		return ""
+	}
 	return filepath.Join(bm.backupDir, backupID)
 }
 
@@ -460,7 +499,8 @@ func (bm *BackupManager) saveBackupMetadata(backupDir string, info *BackupInfo) 
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(metadataPath, data, 0644)
+	// Use 0600 to protect backup metadata from unauthorized reads/writes
+	return os.WriteFile(metadataPath, data, 0600)
 }
 
 // loadBackupMetadata carga la metadata de un backup
@@ -542,8 +582,13 @@ func (bm *BackupManager) cleanupIfNeeded() {
 
 func generateBackupID() string {
 	timestamp := time.Now().Format("20060102-150405")
-	random := fmt.Sprintf("%x", time.Now().UnixNano()%0xFFFFFF)
-	return fmt.Sprintf("%s-%s", timestamp, random)
+	// Use crypto/rand for unpredictable backup IDs (8 bytes = 16 hex chars)
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback if crypto/rand fails (should never happen)
+		return fmt.Sprintf("%s-%x", timestamp, time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%s-%s", timestamp, hex.EncodeToString(b))
 }
 
 func copyFile(src, dst string) error {
