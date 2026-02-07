@@ -1,5 +1,78 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [3.13.2] - 2026-02-07
+
+### Performance & Toolchain Update
+
+#### Go Toolchain
+- **Go version**: `1.24.0` → `1.25.7`
+- Compiled with latest Go stable release
+
+#### Dependency Updates
+- **ants/v2**: `v2.11.4` → `v2.11.5` (goroutine worker pool)
+
+#### Performance Optimization: `isTextFile()`
+- **O(1) lookup**: Refactored from slice iteration to global `map[string]bool`
+- **Before**: Linear search through slice of extensions
+- **After**: Constant-time map lookup
+
+#### Extended File Type Support
+Added 70+ modern file extensions for text search recognition:
+
+| Category | Extensions Added |
+|----------|------------------|
+| **Rust/Systems** | `.rs`, `.zig`, `.nim`, `.v` |
+| **Frontend** | `.vue`, `.svelte`, `.astro`, `.tsx`, `.jsx` |
+| **Mobile** | `.kt`, `.swift`, `.dart` |
+| **Backend** | `.php`, `.rb`, `.scala`, `.groovy`, `.clj` |
+| **Config/IaC** | `.tf`, `.hcl`, `.toml`, `.ini`, `.env` |
+| **Data** | `.graphql`, `.prisma`, `.proto` |
+| **Shell** | `.zsh`, `.fish`, `.ps1`, `.psm1` |
+| **DevOps** | `.dockerfile`, `Dockerfile`, `Makefile`, `Jenkinsfile` |
+| **Docs** | `.rst`, `.adoc`, `.org`, `.tex` |
+
+#### Files Modified
+- `go.mod` - Updated Go version and ants dependency
+- `core/search_operations.go` - Optimized `isTextFile()` with map lookup + new extensions
+- `CLAUDE.md` - Updated version references
+
+#### Test Results
+- ✅ All tests passing
+- ✅ Build successful
+- ✅ No breaking changes
+
+---
+
+## [3.13.1] - 2026-02-03
+
+### Bug Fix: `include_context` ignored in compact mode
+
+#### Problem
+`advanced_text_search` with `include_context: true` and `context_lines: N` only returned positions (`file:line[start:end]`) when `--compact-mode` was enabled (default for Claude Desktop). Context lines were collected during the search phase but discarded by the compact formatter. Users had to make additional `read_file_range` calls to see surrounding code.
+
+#### Root Cause
+The compact mode formatting branch in `AdvancedTextSearch` (`core/search_operations.go:133-154`) did not check `includeContext` — it always used the position-only format regardless of the parameter.
+
+#### Fix
+When `include_context=true`, compact mode now uses a condensed context format:
+```
+1 matches
+/path/file.go:10[5:10] matched line content
+  | context line before
+  | context line after
+```
+When `include_context=false` (default), behavior is unchanged — comma-separated positions.
+
+#### Files Modified
+- `core/search_operations.go` — Compact mode formatter now respects `include_context`
+- `tests/mcp_functions_test.go` — Added `TestAdvancedTextSearchCompactModeContext` (compact mode + context regression test)
+
+#### Test Results
+- All existing tests: PASS
+- New compact mode context test: PASS
+
+---
+
 ## [3.13.0] - 2026-01-31
 
 ### Security Audit & Dependency Update
@@ -1334,6 +1407,6 @@ Estimated speedup for multiple edits:
 
 ---
 
-**Current Version**: 3.8.1
-**Last Updated**: 2025-12-04
-**Status**: ✅ Production Ready
+**Current Version**: 3.13.2
+**Last Updated**: 2026-02-07
+**Status**: Production Ready
