@@ -134,19 +134,31 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 		// Compact format: minimal output but with full paths
 		result.WriteString(fmt.Sprintf("%d matches", len(matches)))
 		if len(matches) > 20 {
-			result.WriteString(" (first 20): ")
+			result.WriteString(" (first 20)")
 			maxToShow = 20
-		} else {
-			result.WriteString(": ")
 		}
+		result.WriteString("\n")
 
-		for i := 0; i < maxToShow; i++ {
-			if i > 0 {
-				result.WriteString(", ")
+		if includeContext {
+			// Compact-with-context: one line per match + condensed context
+			for i := 0; i < maxToShow; i++ {
+				match := matches[i]
+				result.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd, match.Line))
+				if len(match.Context) > 0 {
+					for _, ctxLine := range match.Context {
+						result.WriteString(fmt.Sprintf("  | %s\n", ctxLine))
+					}
+				}
 			}
-			match := matches[i]
-			// Use full path instead of just basename
-			result.WriteString(fmt.Sprintf("%s:%d[%d:%d]", match.File, match.LineNumber, match.MatchStart, match.MatchEnd))
+		} else {
+			// Compact without context: comma-separated positions
+			for i := 0; i < maxToShow; i++ {
+				if i > 0 {
+					result.WriteString(", ")
+				}
+				match := matches[i]
+				result.WriteString(fmt.Sprintf("%s:%d[%d:%d]", match.File, match.LineNumber, match.MatchStart, match.MatchEnd))
+			}
 		}
 
 		if len(matches) > maxToShow {
@@ -558,21 +570,65 @@ func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSe
 	return matches, nil
 }
 
+// textExtensionsMap is a pre-computed map for O(1) text extension lookup
+// Initialized once, used by isTextFile for fast extension checking
+var textExtensionsMap = map[string]bool{
+	// Documentation & Text
+	".txt": true, ".md": true, ".rst": true, ".asciidoc": true,
+	// Go
+	".go": true, ".mod": true, ".sum": true,
+	// JavaScript/TypeScript ecosystem
+	".js": true, ".ts": true, ".jsx": true, ".tsx": true, ".mjs": true, ".cjs": true,
+	".vue": true, ".svelte": true, ".astro": true,
+	// Python
+	".py": true, ".pyi": true, ".pyw": true,
+	// JVM languages
+	".java": true, ".kt": true, ".kts": true, ".scala": true, ".groovy": true,
+	// C/C++
+	".c": true, ".cpp": true, ".cc": true, ".cxx": true, ".h": true, ".hpp": true, ".hxx": true,
+	// Rust
+	".rs": true,
+	// Ruby
+	".rb": true, ".erb": true, ".rake": true,
+	// PHP
+	".php": true, ".phtml": true,
+	// Swift/Objective-C
+	".swift": true, ".m": true, ".mm": true,
+	// .NET
+	".cs": true, ".fs": true, ".vb": true,
+	// Web
+	".css": true, ".scss": true, ".sass": true, ".less": true,
+	".html": true, ".htm": true, ".xhtml": true,
+	// Data formats
+	".xml": true, ".json": true, ".jsonc": true, ".json5": true,
+	".yaml": true, ".yml": true, ".toml": true, ".ini": true,
+	// Shell/Scripts
+	".sh": true, ".bash": true, ".zsh": true, ".fish": true,
+	".bat": true, ".cmd": true, ".ps1": true, ".psm1": true,
+	// Database
+	".sql": true, ".prisma": true,
+	// Other
+	".log": true, ".csv": true, ".tsv": true,
+	".conf": true, ".config": true, ".cfg": true,
+	".dockerfile": true, ".containerfile": true,
+	".gitignore": true, ".gitattributes": true, ".gitmodules": true,
+	".editorconfig": true, ".env": true, ".envrc": true,
+	".makefile": true, ".cmake": true,
+	".graphql": true, ".gql": true, ".proto": true,
+	".tf": true, ".tfvars": true, // Terraform
+	".hcl": true,                 // HashiCorp
+	".lua": true, ".vim": true, ".el": true, // Scripting
+	".r": true, ".rmd": true, // R
+	".dart": true, ".ex": true, ".exs": true, // Dart, Elixir
+	".zig": true, ".nim": true, ".v": true, // Modern languages
+}
+
 // isTextFile determines if a file is likely a text file
 func (e *UltraFastEngine) isTextFile(path string) bool {
-	// Check by extension first (fast)
+	// Check by extension first (O(1) map lookup - very fast)
 	ext := strings.ToLower(filepath.Ext(path))
-	textExtensions := []string{
-		".txt", ".md", ".go", ".js", ".ts", ".py", ".java", ".c", ".cpp", ".h", ".hpp",
-		".css", ".html", ".htm", ".xml", ".json", ".yaml", ".yml", ".toml", ".ini",
-		".sh", ".bat", ".ps1", ".sql", ".log", ".csv", ".tsv", ".conf", ".config",
-		".dockerfile", ".gitignore", ".gitattributes", ".editorconfig", ".env",
-	}
-
-	for _, textExt := range textExtensions {
-		if ext == textExt {
-			return true
-		}
+	if textExtensionsMap[ext] {
+		return true
 	}
 
 	// If no extension or unknown extension, check content (slower)
