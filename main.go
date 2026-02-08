@@ -92,7 +92,8 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("MCP Filesystem Server Ultra-Fast v3.7.0\n")
+		fmt.Printf("MCP Filesystem Server Ultra-Fast v3.13.2\n")
+		fmt.Printf("Protocol: MCP 2025-11-25\n")
 		fmt.Printf("Build: %s\n", time.Now().Format("2006-01-02"))
 		fmt.Printf("Go: %s\n", runtime.Version())
 		fmt.Printf("Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
@@ -202,8 +203,8 @@ func main() {
 	// Create MCP server using mark3labs SDK
 	s := server.NewMCPServer(
 		"filesystem-ultra",
-		"3.4.1",
-		server.WithToolCapabilities(true),
+		"3.13.2",
+		server.WithToolCapabilities(true), // listChanged=true enables tools/list_changed notifications
 	)
 
 	// Register tools
