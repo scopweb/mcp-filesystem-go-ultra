@@ -1,342 +1,322 @@
-# 🗺️ Roadmap: MCP Filesystem Ultra-Fast
+# Roadmap: MCP Filesystem Ultra
 
-**Última actualización:** 2025-01-10
-**Versión actual:** v3.11.0
-**Estado:** Production-ready, Optimized & Modernized
-
----
-
-## 📍 Versión Actual: v3.11.0 ✅
-
-### Logros
-- ✅ **Modernización Completa** - Go 1.21+ features, slog logging
-- ✅ **Optimizaciones P0/P1** - 30-40% memory savings, 2-3x speed improvements
-- ✅ **Error Handling Mejorado** - Error wrapping, context cancellation
-- ✅ **Dependency Updates** - Go 1.24.0, ants v2.11.4, golang.org/x/sys v0.40.0
-- ✅ **Zero Breaking Changes** - Full backward compatibility
-
-### Métricas
-| Métrica | Mejora |
-|---------|--------|
-| Memoria (archivos grandes) | ↓ 30-40% |
-| Velocidad (operaciones) | ↑ 2-3x |
-| Tiempo respuesta P99 | ↓ 15-25% |
-| Cache hit rate | ↑ 60% → 75%+ |
-
-### Sección Crítica
-- Risk assessment system bloqueando operaciones peligrosas
-- Backup system persistente y auditable
-- Full Windows compatibility (WSL + native)
+**Last updated:** February 2026
+**Current version:** v3.13.2
+**Status:** Production-ready, Security Hardened
 
 ---
 
-## 🎯 Próxima Versión: v3.12.0
+## Current Version: v3.13.2
 
-### Tema: "Code Editing Excellence"
-**Objetivo:** 70-80% reducción en consumo de tokens para ediciones
+### Achievements
 
-### Propuesta Principal: Bug 5 - 6 Fases
+- **Security Audit and Hardening** - Go toolchain updated to go1.25.7 (8 CVEs resolved)
+- **5 CRITICAL security fixes** - Symlink traversal bypass, access control in EditFile, StreamingWriteFile, ChunkedReadFile, SmartEditFile
+- **3 HIGH security fixes** - MultiEdit access control, deadlock in ListBackups, path traversal via backup IDs
+- **5 MEDIUM security fixes** - Temp files with crypto/rand, secure backup IDs, permissions preserved, symlinks in copyDirectory, metadata 0600
+- **56 MCP tools** registered
+- **Complete modernization** - Go 1.21+ features, slog logging, custom error types
+- **Optimized performance** - 30-40% memory savings, 2-3x speed improvements
+- **Zero breaking changes** since v3.11.0
 
-#### FASE 1: Búsqueda Estructurada (2-3 días)
-**Impacto:** 40% reducción tokens
+### Metrics
 
-Nueva herramienta `structured_code_search`:
-```go
-type CodeLocation struct {
-    FilePath    string
-    StartLine   int
-    EndLine     int
-    StartByte   int
-    EndByte     int
-    CodeSnippet string
-    MatchType   string  // "function", "struct", "block", "line"
-}
-```
-
-**Beneficio:** Claude obtiene ubicación exacta sin leer archivo completo
-
-**Estimado:** 2-3 días | 200 LOC
+| Metric | Status |
+|--------|--------|
+| MCP Tools | 56 |
+| CVEs resolved (Go toolchain) | 8 |
+| Critical vulnerabilities fixed | 5 |
+| High vulnerabilities fixed | 3 |
+| Medium vulnerabilities fixed | 5 |
+| Passing tests | 53+ |
+| Regressions | 0 |
 
 ---
 
-#### FASE 2: Edición Basada en Diff (4-5 días)
-**Impacto:** 60% reducción tokens
+## Completed Features
 
-Nueva herramienta `apply_diff_patch`:
-```go
-type DiffPatch struct {
-    FilePath    string
-    OldContent  string  // 3-5 líneas contexto
-    NewContent  string
-    LineStart   int
-}
-```
+The following features are fully implemented and tested:
 
-**Beneficio:** En lugar de 500KB, envía 2KB de cambios
+### Streaming and Large File Support
 
-**Estimado:** 4-5 días | 300 LOC
+| Feature | Tool | Status |
+|---------|------|--------|
+| Streaming writes | `streaming_write_file` | Implemented |
+| Chunked reads | `chunked_read_file` | Implemented |
+| Large file editing | `smart_edit_file` | Implemented |
+| Intelligent auto-selection | `intelligent_read`, `intelligent_write`, `intelligent_edit` | Implemented |
+| Large file processor | Internal engine | Implemented with tests |
+
+### Advanced Editing
+
+| Feature | Tool | Status |
+|---------|------|--------|
+| Recovery editing | `recovery_edit` | Implemented |
+| Multi-edit | `multi_edit` | Implemented |
+| Regex transformations | `regex_transform_file` | Implemented with tests |
+| Batch operations | `batch_operations` | Implemented |
+| Batch renaming | `batch_rename_files` | Implemented with preview mode |
+
+### Analysis and Telemetry
+
+| Feature | Tool | Status |
+|---------|------|--------|
+| File analysis | `analyze_file` | Implemented |
+| Write analysis | `analyze_write` | Implemented |
+| Edit analysis | `analyze_edit` | Implemented |
+| Delete analysis | `analyze_delete` | Implemented |
+| Edit telemetry | `get_edit_telemetry` | Implemented |
+| Optimization suggestions | `get_optimization_suggestion` | Implemented |
+| Performance stats | `performance_stats` | Implemented |
+
+### Backup System
+
+| Feature | Tool | Status |
+|---------|------|--------|
+| List backups | `list_backups` | Implemented |
+| Restore with preview | `restore_backup` | Implemented with preview mode |
+| Compare with backup | `compare_with_backup` | Implemented |
+| Cleanup backups | `cleanup_backups` | Implemented |
+| Backup info | `get_backup_info` | Implemented |
+
+### WSL Integration
+
+| Feature | Tool | Status |
+|---------|------|--------|
+| WSL to Windows copy | `wsl_to_windows_copy` | Implemented |
+| Windows to WSL copy | `windows_to_wsl_copy` | Implemented |
+| Workspace sync | `sync_claude_workspace` | Implemented |
+| Status check | `wsl_windows_status` | Implemented |
+| Auto-sync config | `configure_autosync`, `autosync_status` | Implemented |
 
 ---
 
-#### FASE 3: Modo Preview (1 día)
-**Impacto:** 20% reducción errores
+## Recent Version History
 
-Parámetro `preview: true` en:
-- `intelligent_write`
-- `smart_edit_file`
+### v3.11.0 (2025-12-21): "Performance & Modernization"
+- Custom error types (PathError, ValidationError, CacheError, EditError, ContextError)
+- Context cancellation in search operations
+- Environment detection caching (5min TTL)
+- Buffer pool helper, BigCache config fix, regex compilation cache
+- bufio.Scanner for 30-40% memory savings on large files
+- Go 1.21+ built-in min/max, slog structured logging
+- **47 passing tests**
 
-Genera diff sin escribir al disco
+### v3.12.0 (Partial): "Code Editing Excellence"
+- **Phase 1 completed**: Coordinate tracking in search results
+  - `calculateCharacterOffset()` with `regexp.FindStringIndex()`
+  - Coordinates in `performSmartSearch()` and `performAdvancedTextSearch()`
+  - Bug #2 fix: multiple occurrences on same line
+  - 7 new tests (53 total)
+- **Phases 2-4 pending** (see next section)
 
-**Estimado:** 1 día | 50 LOC
+### v3.13.0 (2026-01-31): "Security Audit & Hardening"
+- Go toolchain go1.24.6 -> go1.24.12 (8 CVEs)
+- 13 security fixes (5 CRITICAL + 3 HIGH + 5 MEDIUM)
+- Symlink resolution before containment checks
+- crypto/rand for all temp files and backup IDs
+- File permissions preserved on write operations
+- Build fix in tests/security/
+
+### v3.13.2 (2026-02): "Performance & Extensions"
+- Go toolchain updated to go1.25.7
+- Optimized isTextFile() function
+- Added 70+ file extensions support
+- Tests for large_file_processor and regex_transformer
 
 ---
 
-#### FASE 4: Herramientas Alto Nivel (3-4 días)
-**Impacto:** 30% simplificación
+## In Progress: v3.14.0
 
-Nuevas funciones wrapper:
+### Theme: "Code Editing Excellence Completion"
+
+The coordinate tracking (Phase 1) was completed in v3.12.0. Remaining phases:
+
+### Phase 2: Diff-Based Editing (Planned)
+
+New tool `apply_diff_patch`:
+- Send only changes (2KB) instead of full content (500KB)
+- Use coordinates from Phase 1 for precise targeting
+- **Estimated impact:** 60% token reduction
+- Approximately 300 lines of code
+
+### Phase 3: Preview Mode (Partially Complete)
+
+Preview mode (`preview: true` or `dry_run: true` parameter):
+
+| Tool | Preview Mode |
+|------|--------------|
+| `restore_backup` | Implemented |
+| `batch_rename_files` | Implemented |
+| `regex_transform_file` | Implemented (via `dry_run`) |
+| `intelligent_write` | Planned |
+| `smart_edit_file` | Planned |
+
+Remaining work: Add preview mode to `intelligent_write` and `smart_edit_file`.
+
+### Phase 4: High-Level Tools (Planned)
+
+Wrapper functions for common tasks:
 - `find_and_replace(path, find, replace, scope)`
 - `replace_function_body(path, name, newBody)`
 - `rename_symbol(path, oldName, newName, scope)`
+- **Estimated impact:** 30% workflow simplification
+- Approximately 150 lines of code
 
-**Beneficio:** Tareas comunes en 1 llamada vs 3-4
+### v3.14.0 Summary
 
-**Estimado:** 3-4 días | 150 LOC
-
----
-
-#### FASE 5: Telemetría (1 día)
-**Impacto:** Análisis y optimización continua
-
-Sistema de logging:
-- Detecta full rewrites vs targeted edits
-- Calcula eficiencia de operaciones
-- Genera reportes de patrones de uso
-
-**Estimado:** 1 día | 50 LOC
+| Aspect | Details |
+|--------|---------|
+| **Breaking Changes** | None |
+| **Risk** | LOW (incremental improvements) |
+| **Token Impact** | 60-80% reduction in editing workflows |
 
 ---
 
-#### FASE 6: Documentación (1 día)
-**Impacto:** Adopción correcta
+## Future Roadmap
 
-Actualizar:
-- HOOKS.md - Workflows eficientes
-- README.md - Mejores prácticas
-- Crear guides/EFFICIENT_EDIT_WORKFLOWS.md
+### v3.15.0: "Advanced Search"
 
-**Estimado:** 1 día
-
----
-
-### Resumen v3.12.0
-
-| Aspecto | Detalles |
-|---------|----------|
-| **Tiempo Total** | 12-15 días |
-| **Líneas de Código** | ~750 LOC |
-| **Breaking Changes** | Ninguno |
-| **Riesgo** | BAJO (cambios internos) |
-| **Impacto Tokens** | 70-80% reducción |
-| **Impacto Errores** | 30-45% reducción |
+Enhanced search capabilities:
+- [ ] Full-text search with indexes
+- [ ] AST-aware code search (functions, variables, types)
+- [ ] Optimized multi-file search
+- [ ] Complete Phase 4 high-level tools
 
 ---
 
-## 🔮 Roadmap Futuro
+### v3.16.0: "AI-Assisted Refactoring"
 
-### v3.13.0: "Batch Operations Enhanced" (Q2 2025)
-
-Mejoras para operaciones en lote:
-- [ ] Parallelization para múltiples archivos
-- [ ] Progress reporting en tiempo real
-- [ ] Rollback granular por operación
-- [ ] Transactional semantics
-
-**Impacto esperado:** 5-10x speedup para batch ops
-
----
-
-### v3.14.0: "Advanced Search" (Q2-Q3 2025)
-
-Búsqueda mejorada:
-- [ ] Full-text search con índices
-- [ ] Regex patterns con captura de grupos
-- [ ] Búsqueda de código AST-aware (funciones, variables, tipos)
-- [ ] Búsqueda en múltiples archivos optimizada
-
-**Impacto esperado:** 90% reducción en tiempo de búsqueda
-
----
-
-### v3.15.0: "AI-Assisted Refactoring" (Q3 2025)
-
-Refactoring inteligente:
-- [ ] Code pattern detection y rewrite
+Intelligent refactoring:
+- [ ] Code pattern detection and rewrite
 - [ ] Namespace/package renaming
 - [ ] Automatic import optimization
 - [ ] Dependency graph analysis
 
-**Impacto esperado:** Automatizar refactoring complejos
-
 ---
 
-### v4.0.0: "Enterprise Grade" (Q4 2025)
+### v4.0.0: "Enterprise Grade"
 
-Características enterprise:
+Enterprise features:
 - [ ] Role-based access control (RBAC)
-- [ ] Audit logging con compliance
-- [ ] Encryption at rest y in transit
+- [ ] Audit logging with compliance
+- [ ] Encryption at rest and in transit
 - [ ] Multi-user concurrent access
-- [ ] File versioning y merge conflict resolution
+- [ ] File versioning and merge conflict resolution
 
 ---
 
-## 📊 Métricas de Evolución
+## Known Issues
+
+| Issue | Description | Severity |
+|-------|-------------|----------|
+| `create_backup` not exposed | The `CreateBackup` function is public but not exposed as an independent MCP tool. Backups are created automatically during edit operations. | LOW (functionality available indirectly) |
+
+---
+
+## Evolution Metrics
+
+### MCP Tools
+
+```
+v2.0.0  ████░░░░░░ (32 tools)
+v3.1.0  █████░░░░░ (36 tools)
+v3.4.0  ██████░░░░ (45 tools)
+v3.7.0  ███████░░░ (50 tools)
+v3.8.0  ████████░░ (55 tools)
+v3.13.2 ████████░░ (56 tools) <- Current
+```
+
+### Security
+
+```
+v3.8.0  ████░░░░░░ (Risk assessment, backups)
+v3.9.0  ██████░░░░ (Security tests, OWASP, fuzzing)
+v3.10.0 ███████░░░ (Edit safety layer)
+v3.13.0 ██████████ (Full security audit, 13 fixes, crypto/rand)
+```
 
 ### Performance
+
 ```
-v3.8.0  ████████░░ (80 Req/s)
-v3.11.0 ██████████ (200+ Req/s) ← Aquí
-v3.12.0 ██████████ (200+ Req/s, más eficiente en tokens)
-v3.14.0 ████████████ (300+ Req/s con búsqueda optimizada)
-v4.0.0  ████████████████ (500+ Req/s con clustering)
+v3.5.0  ██████░░░░ (Memory-efficient I/O, buffer pools)
+v3.6.0  ███████░░░ (multi_edit, cache prefetching)
+v3.11.0 █████████░ (bufio.Scanner, regex cache, slog)
+v3.13.2 █████████░ (Maintained, no regressions)
 ```
 
-### Características
-```
-v3.8.0  ████░░░░░░ (Risk management)
-v3.11.0 ███████░░░ (Modernized, optimized)
-v3.12.0 ████████░░ (Smart editing)
-v3.14.0 █████████░ (Advanced search)
-v4.0.0  ██████████ (Enterprise-ready)
-```
+### Test Coverage
 
-### Coverage
 ```
-v3.8.0  ░░░░░░░░░░ (18%)
-v3.11.0 ░░░░░░░░░░ (18%)
-v3.12.0 ███░░░░░░░ (35%)
-v3.14.0 █████░░░░░ (50%)
-v4.0.0  ██████░░░░ (70%+)
+v3.8.0  ██░░░░░░░░ (~18%)
+v3.11.0 ██░░░░░░░░ (~18%)
+v3.12.0 ███░░░░░░░ (~22%, +7 coordinate tests)
+v3.13.2 ████░░░░░░ (~25%, large_file + regex tests)
 ```
 
 ---
 
-## 🎯 Decisiones Arquitectónicas
+## Architectural Decisions
 
-### Mantener
-- ✅ MCP protocol como base (bien diseñado)
-- ✅ BigCache para file caching (funcional)
-- ✅ Buffer pools para memory efficiency
-- ✅ Windows/WSL compatibility layer
+### Maintain
 
-### Mejorar
-- 🔄 Error handling (modernizar a Go 1.13+ errors)
-- 🔄 Search operations (agregar structure awareness)
-- 🔄 Edit operations (agregar diff-based approach)
-- 🔄 Documentation (más ejemplos, mejores prácticas)
+- MCP protocol 2025-11-25 compliant (mcp-go v0.43.2)
+- Tools capability with listChanged notifications
+- BigCache for file content caching (3-tier cache)
+- Buffer pools (sync.Pool) for memory efficiency
+- Windows/WSL compatibility layer
+- ants/v2 worker pool for concurrency
+- crypto/rand for secure ID generation
 
-### Reemplazar (Futuro)
-- ⚠️ Logger (log → log/slog, ✅ DONE en v3.11.0)
-- ⚠️ Custom helpers (usar Go 1.21 built-ins, ✅ DONE en v3.11.0)
+### Improved (Completed)
 
----
+- Custom error types with Go 1.13+ wrapping (v3.11.0)
+- slog structured logging (v3.11.0)
+- Go 1.21 built-in functions (v3.11.0)
+- Full security audit with 13 fixes (v3.13.0)
+- crypto/rand for all temp files (v3.13.0)
+- Tests for large file processor and regex transformer (v3.13.2)
+- MCP 2025-11-25 specification compliance verified (v3.13.2)
 
-## 🔗 Dependencias de Release
+### Pending Improvements
 
-### v3.12.0 Bloqueantes
-- ✅ v3.11.0 must be released first (risk system stable)
-- ⏳ Bug 5 analysis complete (✅ DONE)
-- ⏳ Team approval on 6-phase plan
-
-### v3.14.0 Bloqueantes
-- v3.12.0 released + 1 month in production
-- Performance metrics collected
-- User feedback incorporated
+- Search operations (add structure awareness, AST)
+- Edit operations (add diff-based approach)
+- Test coverage (increase from ~25% to 50%+)
+- Tool titles with `WithTitleAnnotation()` for better UI display (optional, MCP 2025-11-25)
+- Output schemas for structured tool results (optional, MCP 2025-11-25)
 
 ---
 
-## 📈 Success Metrics
+## Release Schedule
 
-### Para v3.12.0
-- [ ] 70%+ reduction in tokens for edit workflows
-- [ ] 0 regression in existing test suite
-- [ ] <1% error rate on diff patch operations
-- [ ] >90% adoption of new tools (by usage)
+| Version | Status | Theme |
+|---------|--------|-------|
+| v3.11.0 | Released (2025-12-21) | Performance and Modernization |
+| v3.12.0 | Partial (Phase 1 completed) | Code Editing Excellence |
+| v3.13.0 | Released (2026-01-31) | Security Audit and Hardening |
+| v3.13.2 | Released (2026-02) | Performance optimization, extended file extensions |
+| v3.14.0 | Next | Complete Code Editing |
+| v3.15.0 | Planned | Advanced Search |
+| v3.16.0 | Planned | AI-Assisted Refactoring |
+| v4.0.0 | Vision | Enterprise Grade |
 
-### Para v3.14.0
-- [ ] 90% faster search on 10K+ files
-- [ ] Index size <5% of total files
-- [ ] <100ms search latency (p99)
-
-### Para v4.0.0
-- [ ] RBAC fully functional
-- [ ] Audit log 100% comprehensive
-- [ ] 99.99% uptime SLA achievable
-- [ ] 500+ concurrent connections
+**Note:** No estimated dates for future versions. Quality over speed.
 
 ---
 
-## 📝 Documentación Roadmap
+## How to Contribute
 
-### Inmediato (v3.12.0)
-- [ ] guides/EFFICIENT_EDIT_WORKFLOWS.md
-- [ ] Update HOOKS.md con nuevas herramientas
-- [ ] TELEMETRY_ANALYSIS.md
-
-### Corto Plazo (v3.13-14)
-- [ ] ADVANCED_SEARCH.md
-- [ ] REFACTORING_PATTERNS.md
-- [ ] PERFORMANCE_TUNING.md
-
-### Largo Plazo (v4.0)
-- [ ] ENTERPRISE_SETUP.md
-- [ ] RBAC_CONFIGURATION.md
-- [ ] AUDIT_COMPLIANCE.md
+1. Report issues/ideas as GitHub issues
+2. Review the list of known issues above
+3. Feature requests with: specific use case, expected impact, estimated effort, risk assessment
+4. Security issues through Security Policy
 
 ---
 
-## 🚀 Release Schedule
-
-| Versión | Estado | ETA | Tema |
-|---------|--------|-----|------|
-| v3.11.0 | ✅ Released | 2025-01-08 | Modernization |
-| v3.12.0 | ⏳ Planned | Q1 2025 (4-5 semanas) | Code Editing Excellence |
-| v3.13.0 | 📋 Planned | Q2 2025 | Batch Ops Enhanced |
-| v3.14.0 | 📋 Planned | Q2-Q3 2025 | Advanced Search |
-| v3.15.0 | 📋 Planned | Q3 2025 | AI-Assisted Refactoring |
-| v4.0.0 | 🎯 Vision | Q4 2025 | Enterprise Grade |
-
----
-
-## 🤝 Cómo Contribuir
-
-### Para v3.12.0
-1. Review el plan detallado en `Revisar_implantar_o_borrar/REPORTE_LIMPIEZA_2025-01-10.md`
-2. Proponer mejoras al plan (antes de implementar)
-3. Reportar issues/ideas como GitHub issues
-
-### Para v3.14.0 y más allá
-- Open feature requests con:
-  - Use case específico
-  - Expected impact
-  - Estimated effort
-  - Risk assessment
-
----
-
-## 📞 Contact & Feedback
-
-- 🐛 **Bug Reports:** GitHub Issues
-- 💡 **Feature Requests:** GitHub Discussions
-- 📧 **Security Issues:** [Security Policy]
-
----
-
-**Last Updated:** 2025-01-10
-**Next Review:** After v3.12.0 planning starts
+**Last Updated:** February 2026
 **Maintained By:** David Prats
 
 ---
 
-*Este roadmap es una guía viva que evoluciona con el proyecto. Cambios significativos serán comunicados en CHANGELOG.md*
+*This roadmap is a living guide that evolves with the project. Significant changes will be communicated in CHANGELOG.md*
