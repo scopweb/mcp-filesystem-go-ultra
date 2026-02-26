@@ -253,6 +253,10 @@ cache/
 
 ---
 
+## Documentation
+
+Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)**.
+
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
