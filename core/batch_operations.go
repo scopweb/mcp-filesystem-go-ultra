@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -429,15 +430,15 @@ func (m *BatchOperationManager) executeEdit(op FileOperation, result *OperationR
 		return err
 	}
 
-	originalSize := len(content)
+	original := string(content)
+	newContent := strings.Replace(original, op.OldText, op.NewText, 1)
+	if newContent == original {
+		return fmt.Errorf("old_text not found in file: %s", op.Path)
+	}
 
-	// TODO: Implementar lógica de edit más sofisticada
-	// Por ahora, reemplazo simple
-	newContent := []byte(op.NewText)
-
-	err = os.WriteFile(op.Path, newContent, 0644)
+	err = os.WriteFile(op.Path, []byte(newContent), 0644)
 	if err == nil {
-		result.BytesAffected = int64(len(newContent) - originalSize)
+		result.BytesAffected = int64(len(newContent) - len(original))
 	}
 	return err
 }
