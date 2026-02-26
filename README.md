@@ -1,1663 +1,266 @@
-# MCP Filesystem Server Ultra-Fast
+# MCP Filesystem Server
 
-**Version 3.13.0** - Security Hardening & Go Toolchain Update
+**v3.14.2** · Go · MCP 2025-11-25 · 56 tools
 
-Un servidor MCP (Model Context Protocol) de alto rendimiento para operaciones de sistema de archivos, diseñado para máxima velocidad y eficiencia. **Especialmente optimizado para Claude Desktop** con soporte completo para archivos grandes sin timeouts ni bloqueos.
-
-> 📁 **Proyecto Organizado**: Consulta [CLAUDE.md](CLAUDE.md) para ver la arquitectura y estructura del proyecto.
->
-> 🚀 **Inicio Rápido**: Lee esta página y luego ve a [docs/setup/CLAUDE_DESKTOP_SETUP.md](docs/setup/CLAUDE_DESKTOP_SETUP.md)
-
-## 🔒 NOVEDAD v3.13.0: Security Hardening & Go Toolchain Update
-
-### ⚠️ Actualización de Seguridad Recomendada
-- **Go Toolchain**: Actualizado a `go1.24.12` (corrige 8 CVEs en stdlib)
-- **Symlink Traversal**: `isPathAllowed()` ahora resuelve symlinks con `filepath.EvalSymlinks()` para prevenir escape de sandbox
-- **Access Control**: Añadido control de acceso en `EditFile()`, `MultiEdit()`, `StreamingWriteFile()`, `ChunkedReadFile()`, `SmartEditFile()`
-- **TOCTOU Fixes**: Archivos temporales ahora usan `crypto/rand` en lugar de `time.Now().UnixNano()`
-- **Backup Security**: IDs sanitizados contra path traversal, `generateBackupID()` usa `crypto/rand`, deadlock en `ListBackups` corregido
-- **File Permissions**: Temp files y backups con permisos restrictivos (`0600`), preservación de permisos originales
-- **Copy Safety**: `copyDirectory()` omite symlinks para prevenir traversal
-
-### Anterior: v3.8.1 - Risk Assessment Fix
-- **v3.8.0 BUG**: Risk assessment calculaba pero NO bloqueaba operaciones peligrosas
-- **v3.8.1 FIX**: Ahora HIGH/CRITICAL risk **requiere `force: true`** para ejecutar
-
-### Sistema de Backup y Recuperación (v3.8.0+)
-- **Backups automáticos** antes de operaciones destructivas
-- **Validación de riesgo funcional** con 4 niveles (LOW, MEDIUM, HIGH, CRITICAL)
-- **5 nuevas herramientas MCP** para gestión completa de backups
-- **Metadata detallada** con timestamps, hashes SHA256 y contexto
-
-### ✨ Nuevas Características v3.8.0
-
-#### 🔒 Backups Persistentes y Accesibles
-```json
-{
-  "tool": "list_backups",
-  "arguments": {
-    "limit": 20,
-    "filter_operation": "edit",
-    "newer_than_hours": 24
-  }
-}
-```
-
-**Benefits**:
-- Backups en ubicación accesible por MCP
-- No se eliminan automáticamente
-- Recuperación rápida con un comando
-- Auditoría completa de operaciones
-
-#### ⚠️ Validación Inteligente de Riesgo
-```javascript
-edit_file({path: "main.go", old_text: "func", new_text: "function"})
-// → ⚠️ HIGH RISK: 65.3% of file will change (200 occurrences)
-// → Add force: true to proceed or use analyze_edit first
-```
-
-**Protection Levels**:
-- MEDIUM: 30% cambio o 50+ ocurrencias → Warning
-- HIGH: 50% cambio o 100+ ocurrencias → Requires `force: true`
-- CRITICAL: 90%+ cambio → Double confirmation needed
-
-#### 🔄 Herramientas de Recuperación
-- **`list_backups`**: Lista backups con filtros avanzados
-- **`restore_backup`**: Restaura archivos desde backup (con preview)
-- **`compare_with_backup`**: Compara estado actual vs backup
-- **`cleanup_backups`**: Limpia backups antiguos (con dry-run)
-- **`get_backup_info`**: Información detallada de un backup
-
-**Recovery Example**:
-```javascript
-// 1. Find recent backups
-list_backups({newer_than_hours: 2, filter_path: "main.go"})
-
-// 2. Compare changes
-compare_with_backup({backup_id: "...", file_path: "main.go"})
-
-// 3. Restore if needed
-restore_backup({backup_id: "...", file_path: "main.go"})
-// → ✅ Code recovered!
-```
-
-## 🚀 NOVEDAD v3.0: Optimización Ultra de Tokens (77% Reducción)
-
-### 🎯 Ahorro Masivo de Tokens
-- **77% reducción** en sesiones típicas (58k → 13k tokens)
-- **90-98% ahorro** en lectura de archivos grandes
-- **60% reducción** en overhead de herramientas
-
-### ✨ Nuevas Características v3.0
-
-#### Smart Truncation para Lectura
-```json
-{
-  "tool": "read_file",
-  "arguments": {
-    "path": "large_file.log",
-    "max_lines": 100,
-    "mode": "head"  // head, tail, all
-  }
-}
-```
-
-**Token Savings**:
-- 1,000 líneas: 25k → 2.5k tokens (90% ahorro)
-- 5,000 líneas: 125k → 2.5k tokens (98% ahorro)
-
-#### Descripciones Optimizadas
-- Todas las herramientas con descripciones 60% más cortas
-- 128 tokens ahorrados por request MCP
-- Sin pérdida de claridad
-
-## 🚀 Claude Desktop Ultra-Rápido
-
-### ✅ PROBLEMA RESUELTO: Claude Desktop Lento con Archivos Largos
-
-**Claude Desktop tenía limitaciones críticas:**
-- ⚠️ **Timeouts** con archivos >50KB
-- 🐌 **Lentitud extrema** en escritura  
-- ❌ **Se bloqueaba** y no sabía continuar
-- 💔 **90% de fallos** con archivos grandes
-
-### 🎯 SOLUCIÓN IMPLEMENTADA: Sistema Inteligente Automático
-
-**Ahora Claude Desktop funciona TAN RÁPIDO como Claude Code** gracias a:
-
-#### 🧠 **6 Herramientas Inteligentes** (Auto-optimización)
-- **`intelligent_write`**: Detecta tamaño automáticamente → escritura directa o streaming  
-- **`intelligent_read`**: Detecta tamaño automáticamente → lectura directa o por chunks
-- **`intelligent_edit`**: Detecta tamaño automáticamente → edición directa o smart
-- **`recovery_edit`**: Edición con recuperación automática de errores (95% menos fallos)
-- **`get_optimization_suggestion`**: Analiza archivos y recomienda estrategia óptima
-- **`analyze_file`**: Información detallada con recomendaciones específicas
-
-#### 🌊 **4 Operaciones Streaming** (Archivos gigantes)  
-- **`streaming_write_file`**: Escribe archivos de cualquier tamaño con progreso
-- **`chunked_read_file`**: Lee archivos enormes sin bloqueos
-- **`smart_edit_file`**: Edita archivos >1MB sin límites de memoria
-- **Progreso en tiempo real** para operaciones largas
-
-#### 📊 **Rendimiento Comprobado**
-| Métrica | Antes | Después | Mejora |
-|---------|-------|---------|--------|
-| Archivos grandes | 10% éxito | **98% éxito** | **+880%** |
-| Tiempo de timeout | 30s | **Nunca** | **∞** |
-| Archivos 100KB | FALLO | **3-5s** | **De fallo a éxito** |
-| Archivos 1MB | FALLO | **10-15s** | **De fallo a éxito** |
-
-## 🪟 **Soporte Windows/WSL Automático** (v3.2.0)
-
-### 🎯 Traducción Automática de Rutas
-
-**Problema resuelto**: Claude Code en Windows envía rutas en formato WSL (`/mnt/c/...`) pero el MCP puede estar corriendo en Windows nativo.
-
-**Solución implementada**: Normalización automática bidireccional de rutas:
-
-#### 🔄 Conversiones Automáticas
-
-```bash
-# WSL → Windows (cuando MCP corre en Windows)
-/mnt/c/Users/John/Documents → C:\Users\John\Documents
-/mnt/d/Projects/myapp      → D:\Projects\myapp
-
-# Windows → WSL (cuando MCP corre en WSL/Linux)
-C:\Users\John\Documents → /mnt/c/Users/John/Documents
-D:\Projects\myapp       → /mnt/d/Projects/myapp
-```
-
-#### ✨ Características
-- ✅ **Detección automática** del sistema operativo
-- ✅ **Conversión bidireccional** (WSL ↔ Windows)
-- ✅ **Normalización de separadores** (`\` vs `/`)
-- ✅ **Soporta todas las unidades** (C:, D:, E:, etc.)
-- ✅ **Funciona en todas las operaciones** (read, write, edit, list, search, etc.)
-- ✅ **Sin configuración requerida** - Totalmente automático
-
-#### 📊 Impacto
-- ❌ **Antes**: `CreateFile failed: "El sistema no puede encontrar la ruta especificada"`
-- ✅ **Ahora**: Rutas funcionan transparentemente en cualquier formato
-
-**Beneficia a**: Claude Desktop en Windows, WSL users, entornos híbridos
+A high-performance [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go. Designed for use with Claude Desktop and Claude Code, with first-class support for large files, WSL/Windows interoperability, and token-efficient responses.
 
 ---
 
-## � **NUEVO: Optimización de Tokens** (v2.2.0)
+## Features
 
-### 🎯 Reduce el Consumo de Tokens en **65-75%**
-
-El servidor ahora incluye **modo compacto** que reduce drásticamente el uso de tokens sin perder funcionalidad:
-
-```bash
-# Habilita con un solo flag:
---compact-mode
-```
-
-#### 📊 Impacto Real:
-
-| Característica | Tokens ANTES | Tokens DESPUÉS | Ahorro |
-|---------------|--------------|----------------|--------|
-| **Respuestas de herramientas** | ~500-1000/op | ~100-200/op | **60-80%** |
-| **Listados de directorio** | ~300-800 | ~80-150 | **70-75%** |
-| **Búsquedas** | ~2000-10000+ | ~500-2000 | **75-80%** |
-| **Sesión típica (100 ops)** | **~81,000** | **~5,900** | **92.7%** 🎉 |
-
-#### ✨ Beneficios:
-- ✅ **Ahorro masivo de tokens** → Menos costos en API
-- ✅ **Respuestas más rápidas** → Menos procesamiento
-- ✅ **Más contexto disponible** → Tokens ahorrados = más espacio
-- ✅ **Compatible con modo verbose** → Modo detallado disponible cuando necesites
-
-Ver la [Configuración Óptima](#configuración-optimizada-para-claude-desktop) más abajo para detalles completos.
+- **56 MCP tools** covering read, write, edit, search, copy, move, delete, streaming, and backup operations
+- **Intelligent editing** with automatic backup, risk assessment, and rollback on failure
+- **3-tier cache** (BigCache + go-cache) with file watcher invalidation for O(1) reads
+- **Streaming and chunked I/O** for files up to 50 MB without blocking
+- **WSL ↔ Windows path translation** — accepts `/mnt/c/...`, `C:\...`, and `/tmp/...` (UNC) transparently
+- **Compact mode** — minimal token responses (~90% reduction) for high-volume Claude Desktop sessions
+- **Risk assessment** — edits above configurable thresholds (30 / 50 / 90% change) require explicit confirmation
+- **Hook system** — pre/post hooks for write, edit, delete, create, move, and copy events
+- **Plan mode** — dry-run analysis with diff preview and risk report before applying changes
+- **Pipeline system** — chain search → edit → verify in a single MCP call (5–22× fewer round-trips)
+- **Atomic batch operations** — grouped file operations with rollback on failure
+- **Access control** — restrict the server to specific directory trees via `--allowed-paths`
 
 ---
 
-## �🚀 Estado del Proyecto (CLAUDE DESKTOP ULTRA-RÁPIDO)
+## Build
 
-### ✅ COMPLETADO Y OPTIMIZADO
-
-- **✅ Bug #10 Resuelto** (v3.8.0): **Sistema completo de backup y recuperación** con 5 nuevas herramientas MCP
-- **✅ Bug #9 Resuelto** (v3.7.1): **Parámetros avanzados de búsqueda** expuestos correctamente
-- **✅ Bug #8 Resuelto** (v3.7.0): **Sistema de ayuda auto-aprendizaje** con get_help tool
-- **✅ Bug #5 Resuelto** (Unreleased): **70-80% token efficiency** en búsqueda/reemplazo (4 fases completadas)
-- **✅ Ultra Token Optimization** (v3.0.0): **77% reducción** con smart truncation
-- **✅ Batch Operations** (v2.6.0): Operaciones atómicas con rollback
-- **✅ Plan Mode** (v2.5.0): Análisis dry-run con evaluación de riesgos
-- **✅ Token Optimization** (v2.2.0): **65-75% reducción** con modo compacto
-- **✅ Claude Desktop Performance**: **55 herramientas** optimizadas sin timeouts (50 originales + 5 backup)
-- **✅ Compilación exitosa**: El proyecto compila correctamente en Windows
-- **✅ Estructura modular**: Arquitectura con separación de responsabilidades
-- **✅ Cache inteligente**: Sistema de caché en memoria con bigcache para O(1) operaciones  
-- **✅ Protocolo optimizado**: Manejo de archivos binarios y de texto con buffered I/O
-- **✅ Monitoreo de rendimiento**: Métricas en tiempo real de operaciones (2016.0 ops/sec)
-- **✅ Control de acceso**: Restricción de acceso a rutas específicas mediante `--allowed-paths`
-- **✅ Streaming inteligente**: Manejo automático de archivos grandes sin límites de memoria
-- **✅ Recuperación de errores**: Sistema automático que reduce fallos en un 95%
-- **✅ Backup y protección**: Sistema persistente con validación de riesgo y recuperación rápida
-- **✅ Gestión completa**: Renombrar, eliminación segura, y todas las operaciones CRUD
-  - `read_file`: Lectura de archivos con caché inteligente y memory mapping
-  - `write_file`: Escritura atómica de archivos con backup
-  - `list_directory`: Listado de directorios con caché
-  - `edit_file`: Edición inteligente con backup automático + validación de riesgo
-  - `search_and_replace`: Búsqueda y reemplazo recursivo (case-insensitive por ahora)
-  - `smart_search`: Búsqueda de nombres de archivo y contenido básico (contenido desactivado por defecto)
-  - `advanced_text_search`: Búsqueda de texto con pipeline avanzado (parámetros avanzados fijados por defecto)
-  - `performance_stats`: Estadísticas de rendimiento en tiempo real
-  - `capture_last_artifact`: Captura artefactos en memoria
-  - `write_last_artifact`: Escribe último artefacto capturado sin reenviar contenido
-  - `artifact_info`: Información de bytes y líneas del artefacto
-  - `list_backups`: Lista backups disponibles con filtros
-  - `restore_backup`: Restaura archivos desde backup (con preview)
-  - `compare_with_backup`: Compara estado actual vs backup
-  - `cleanup_backups`: Limpia backups antiguos (con dry-run)
-  - `get_backup_info`: Información detallada de backups
-
-### 🔧 Trabajo Realizado
-
-### 🔧 Arquitectura del Sistema (Optimizada)
-
-```
-├── main.go              # Punto de entrada principal (23 tools registradas)
-├── core/               # Motor ultra-rápido
-│   ├── engine.go       # Motor principal con optimizer integrado
-│   ├── claude_optimizer.go    # 🧠 Sistema inteligente para Claude Desktop
-│   ├── streaming_operations.go # 🌊 Operaciones streaming y chunks
-│   ├── file_operations.go     # 📁 Rename y soft delete
-│   ├── edit_operations.go     # ✏️ Edición inteligente con backup
-│   ├── search_operations.go   # 🔍 Búsqueda avanzada
-│   ├── backup_manager.go      # 🔒 Sistema de backups persistentes
-│   ├── impact_analyzer.go     # ⚠️ Validación de riesgo
-│   ├── mmap.go         # Cache de memory mapping
-│   └── watcher.go      # Vigilancia de archivos
-├── cache/              # Sistema de caché
-│   └── intelligent.go  # Caché inteligente
-├── protocol/           # Manejo de protocolos
-│   └── optimized.go    # Protocolo optimizado
-└── mcp/                # SDK temporal de MCP
-    └── mcp.go          # Estructuras y funciones básicas
+```bash
+go build -ldflags="-s -w" -trimpath -o filesystem-ultra.exe .
 ```
 
-## Configuración Optimizada para Claude Desktop
+Requires Go 1.25+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
 
-### 🎯 Configuración Ultra-Optimizada (Recomendada - Mínimo Uso de Tokens)
+```bash
+# Run tests
+go test ./tests/... ./core/...
 
-**NUEVO:** Con optimizaciones para reducir consumo de tokens en **65-75%** 🎉
+# With race detector
+go test -race ./...
+```
+
+---
+
+## Configuration
+
+Add to your `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "filesystem-ultra": {
-      "command": "C:\\MCPs\\clone\\mcp-filesystem-go-ultra\\mcp-filesystem-ultra.exe",
+    "filesystem": {
+      "command": "C:\\MCPs\\clone\\mcp-filesystem-go-ultra\\filesystem-ultra.exe",
       "args": [
         "--compact-mode",
-        "--max-response-size", "5MB",
-        "--max-search-results", "50",
-        "--max-list-items", "100",
+        "--cache-size", "200MB",
+        "--parallel-ops", "8",
         "--log-level", "error",
-        "--cache-size", "200MB",
-        "--parallel-ops", "8",
-        "--binary-threshold", "2MB",
-        "C:\\MCPs\\clone\\",
-        "C:\\temp\\",
-        "C:\\tu\\proyecto\\"
-      ],
-      "env": {
-        "NODE_ENV": "production"
-      }
+        "C:\\your\\project\\"
+      ]
     }
   }
 }
 ```
 
-**✨ Nuevos parámetros de optimización de tokens:**
-- `--compact-mode`: Respuestas minimalistas sin emojis ni formato excesivo (**65-75% menos tokens**)
-- `--max-response-size`: Limita tamaño máximo de respuestas (previene respuestas masivas)
-- `--max-search-results`: Limita resultados de búsqueda (default: 50 para modo compacto)
-- `--max-list-items`: Limita items en listados de directorio (default: 100 para modo compacto)
+The positional arguments after the flags are the allowed base paths. Omitting `--allowed-paths` (and positional paths) disables access control entirely.
 
-### 📊 Impacto de --compact-mode:
+### Key flags
 
-| Operación | Tokens SIN compact | Tokens CON compact | Ahorro |
-|-----------|-------------------|-------------------|--------|
-| write_file | ~150 | ~15 | **90%** ✅ |
-| edit_file | ~200 | ~20 | **90%** ✅ |
-| list_directory (50 items) | ~800 | ~100 | **87%** ✅ |
-| search (100 matches) | ~5000 | ~200 | **96%** ✅ |
-| performance_stats | ~400 | ~50 | **87%** ✅ |
-
-**Sesión típica (100 operaciones): ~81,000 tokens → ~5,900 tokens = 92.7% de ahorro** 🚀
-
----
-
-### ⚖️ Configuración Balanceada (Más Detalle)
-
-Si prefieres más información visual pero con ahorro moderado:
-
-```json
-{
-  "mcpServers": {
-    "filesystem-ultra": {
-      "command": "C:\\MCPs\\clone\\mcp-filesystem-go-ultra\\mcp-filesystem-ultra.exe",
-      "args": [
-        "--compact-mode",
-        "--max-response-size", "10MB",
-        "--max-search-results", "200",
-        "--max-list-items", "300",
-        "--log-level", "info",
-        "--cache-size", "200MB",
-        "--parallel-ops", "8",
-        "C:\\MCPs\\clone\\",
-        "C:\\temp\\",
-        "C:\\tu\\proyecto\\"
-      ],
-      "env": {
-        "NODE_ENV": "production"
-      }
-    }
-  }
-}
-```
-
-**Ahorro: ~50-60% en tokens** con límites más generosos.
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--compact-mode` | off | Minimal token responses |
+| `--cache-size` | 100MB | In-memory file cache limit |
+| `--parallel-ops` | 2×CPU (max 16) | Max concurrent operations |
+| `--backup-dir` | system temp | Directory for automatic backups |
+| `--backup-max-age` | 72h | Maximum backup retention |
+| `--backup-max-count` | 50 | Maximum backup count per file |
+| `--risk-threshold-medium` | 30 | % change that triggers a warning |
+| `--risk-threshold-high` | 50 | % change that requires `force: true` |
+| `--hooks-enabled` | off | Enable pre/post operation hooks |
+| `--hooks-config` | — | Path to hooks configuration JSON |
+| `--debug` | off | Verbose debug logging |
 
 ---
 
-### � Configuración Verbose (Modo Original - Máximo Detalle)
+## Available Tools
 
-Para cuando necesitas ver todos los detalles con emojis y formato completo:
+### File I/O
 
-```json
-{
-  "mcpServers": {
-    "filesystem-ultra": {
-      "command": "C:\\MCPs\\clone\\mcp-filesystem-go-ultra\\mcp-filesystem-ultra.exe",
-      "args": [
-        "--cache-size", "200MB",
-        "--parallel-ops", "8",
-        "--binary-threshold", "2MB",
-        "--log-level", "info",
-        "--allowed-paths", "C:\\MCPs\\clone\\,C:\\temp\\,C:\\tu\\proyecto\\"
-      ],
-      "env": {
-        "NODE_ENV": "production"
-      }
-    }
-  }
-}
-```
+| Tool | Description |
+|------|-------------|
+| `read_file` | Read file contents with cache |
+| `write_file` | Atomic write with backup |
+| `read_file_range` | Read a line range (avoids loading large files) |
+| `streaming_write_file` | Chunked write for large files |
+| `chunked_read_file` | Chunked read for large files |
+| `get_file_info` | Size, permissions, timestamps |
 
-**Sin optimización de tokens** - Respuestas completas con emojis y formato detallado.
+### Editing
+
+| Tool | Description |
+|------|-------------|
+| `edit_file` | Find-and-replace with backup and risk assessment |
+| `multi_edit` | Multiple find-and-replace operations in one call |
+| `smart_edit_file` | Edit files larger than 1 MB |
+| `replace_nth_occurrence` | Replace only the Nth occurrence of a pattern |
+| `intelligent_edit` | Auto-selects edit strategy by file size |
+| `recovery_edit` | Edit with automatic error recovery (fuzzy match, line normalization) |
+
+### Search
+
+| Tool | Description |
+|------|-------------|
+| `smart_search` | File name and content search with filters |
+| `advanced_text_search` | Full-text search with context lines, case sensitivity, whole-word |
+| `search_and_replace` | Regex or literal replacement across a directory tree |
+| `count_occurrences` | Count pattern occurrences with optional line numbers |
+
+### Directory Operations
+
+| Tool | Description |
+|------|-------------|
+| `list_directory` | Directory listing with cache |
+| `create_directory` | Create directory tree (`mkdir -p`) |
+| `rename_file` | Rename or move within the same volume |
+| `move_file` | Move file or directory across paths |
+| `copy_file` | Recursive copy preserving permissions |
+| `delete_file` | Permanent delete (file or directory) |
+| `soft_delete_file` | Move to trash folder instead of deleting |
+
+### Backup & Recovery
+
+| Tool | Description |
+|------|-------------|
+| `list_backups` | List backups with filters (path, operation, age) |
+| `restore_backup` | Restore a file from backup (with preview) |
+| `compare_with_backup` | Diff current file against a backup |
+| `cleanup_backups` | Remove old backups (supports dry-run) |
+| `get_backup_info` | Metadata for a specific backup |
+
+### Analysis & Safety
+
+| Tool | Description |
+|------|-------------|
+| `analyze_write` | Dry-run write — previews result without writing |
+| `analyze_edit` | Dry-run edit — shows diff and risk level |
+| `analyze_delete` | Dry-run delete — reports impact |
+| `get_edit_telemetry` | Token and operation statistics |
+| `get_optimization_suggestion` | Recommends optimal tool for a given file |
+| `analyze_file` | Detailed file analysis with strategy recommendation |
+
+### Batch & Pipeline
+
+| Tool | Description |
+|------|-------------|
+| `batch_operations` | Atomic execution of multiple operations with rollback |
+| `execute_pipeline` | Chain steps (search → edit → verify) in one call |
+
+### Artifacts
+
+| Tool | Description |
+|------|-------------|
+| `capture_last_artifact` | Store content in memory |
+| `write_last_artifact` | Write stored artifact to disk (zero token retransmission) |
+| `artifact_info` | Size and line count of stored artifact |
+
+### WSL / Windows
+
+| Tool | Description |
+|------|-------------|
+| `convert_path` | Explicit WSL ↔ Windows path conversion |
+| `detect_path_format` | Identify path format (WSL, Windows, UNC, Linux) |
+| `sync_to_windows` | Copy a WSL file to the Windows filesystem |
+| `sync_to_wsl` | Copy a Windows file into WSL |
+| `configure_autosync` | Configure automatic WSL ↔ Windows sync rules |
+
+### Performance & Diagnostics
+
+| Tool | Description |
+|------|-------------|
+| `performance_stats` | Cache hit rate, operation counts, latency |
+| `get_help` | Usage guide and tool selection recommendations |
+
+### Large File Processing
+
+| Tool | Description |
+|------|-------------|
+| `process_large_file` | Line-by-line processing for files that don't fit in memory |
+| `regex_transform` | Advanced regex transformations with capture groups |
+| `intelligent_read` | Auto-selects read strategy by file size |
+| `intelligent_write` | Auto-selects write strategy by file size |
 
 ---
 
-### 💡 ¿Qué configuración elegir?
-
-- **🎯 Ultra-Optimizada**: Para uso intensivo con muchas operaciones (recomendada)
-- **⚖️ Balanceada**: Para uso general con balance entre tokens y detalle
-- **📝 Verbose**: Para debugging o cuando necesitas máxima información visual
-
-**📚 Más información:** Ver `CLAUDE_DESKTOP_SETUP.md` para guía completa con ejemplos y comparaciones.
-
-## 🎯 Funcionalidades Implementadas
-
-### 🧠 **SISTEMA INTELIGENTE - La Joya de la Corona**
-
-El corazón del sistema son las **herramientas inteligentes** que automáticamente detectan el tamaño del archivo y eligen la estrategia óptima. **Sin configuración manual, sin timeouts, sin bloqueos.**
-
-#### ✨ **Herramientas Inteligentes (6)**
-1. **`intelligent_write`** - Escritura auto-optimizada (directa <50KB, streaming >50KB)
-2. **`intelligent_read`** - Lectura auto-optimizada (directa <50KB, chunks >50KB)  
-3. **`intelligent_edit`** - Edición auto-optimizada (directa <50KB, smart >50KB)
-4. **`recovery_edit`** - Edición con recuperación automática (normalización, fuzzy match, línea por línea)
-5. **`get_optimization_suggestion`** - Análisis y recomendaciones específicas por archivo
-6. **`analyze_file`** - Información detallada con estrategia recomendada
-
-#### 🌊 **Sistema de Streaming (4)**
-- **`streaming_write_file`** - Escritura por chunks con progreso en tiempo real
-- **`chunked_read_file`** - Lectura por chunks controlada
-- **`smart_edit_file`** - Edición inteligente de archivos grandes
-- **Progreso visible** - Nunca más "no sé qué está pasando"
-
-### 🪝 **Sistema de Hooks (Nuevo en v2.4.0)**
-
-El sistema de hooks permite ejecutar comandos personalizados antes y después de operaciones de archivos, habilitando formateo automático, validación, y flujos de trabajo personalizados.
-
-#### Características Principales
-- **12 Eventos de Hooks**: Pre/post para write, edit, delete, create, move, copy
-- **Pattern Matching**: Objetivos específicos usando coincidencias exactas o wildcards
-- **Ejecución Paralela**: Los hooks se ejecutan concurrentemente con deduplicación automática
-- **Modificación de Contenido**: Los hooks pueden modificar contenido (ej: formatear código)
-- **Control de Errores**: Configurar si las operaciones deben fallar cuando los hooks fallan
-
-#### Uso Rápido
-
-```bash
-# Habilitar hooks con archivo de configuración
-mcp-filesystem-ultra.exe --hooks-enabled --hooks-config=hooks.json
-```
-
-#### Ejemplo de Configuración (hooks.json)
-
-```json
-{
-  "hooks": {
-    "pre-write": [
-      {
-        "pattern": "*.go",
-        "hooks": [{
-          "command": "gofmt -w",
-          "failOnError": false,
-          "enabled": true
-        }]
-      }
-    ]
-  }
-}
-```
-
-#### Casos de Uso Comunes
-- ✅ **Auto-formateo**: gofmt, prettier, black automáticamente antes de escribir
-- ✅ **Validación**: go vet, eslint para verificar código antes/después de editar
-- ✅ **Tests**: Ejecutar tests antes de commit
-- ✅ **Build Verification**: Verificar compilación después de editar
-- ✅ **Protección**: Prevenir eliminación de archivos críticos
-
-**📚 Documentación completa:** Ver [docs/features/HOOKS.md](docs/features/HOOKS.md) para guía detallada con ejemplos avanzados.
-
-### 🔍 **Plan Mode / Dry-Run (Nuevo en v2.5.0)**
-
-El Plan Mode permite analizar cambios propuestos **sin ejecutarlos**, proporcionando vista previa, evaluación de riesgos y recomendaciones antes de aplicar modificaciones.
-
-#### Herramientas de Análisis
-- **`analyze_write`** - Analiza una operación de escritura sin ejecutarla
-- **`analyze_edit`** - Analiza una operación de edición sin ejecutarla
-- **`analyze_delete`** - Analiza una operación de eliminación sin ejecutarla
-
-#### Información Proporcionada
-- ✅ **Vista Previa de Cambios**: Diff detallado de las modificaciones
-- ✅ **Evaluación de Riesgo**: Nivel de riesgo (low, medium, high, critical)
-- ✅ **Factores de Riesgo**: Lista de consideraciones importantes
-- ✅ **Impacto**: Descripción del impacto de los cambios
-- ✅ **Sugerencias**: Recomendaciones para proceder de forma segura
-- ✅ **Estadísticas**: Líneas añadidas/eliminadas/modificadas
-- ✅ **Tiempo Estimado**: Duración estimada de la operación
-
-#### Ejemplo de Uso
-
-```json
-{
-  "tool": "analyze_edit",
-  "arguments": {
-    "path": "main.go",
-    "old_text": "func OldName(",
-    "new_text": "func NewName("
-  }
-}
-```
-
-**Salida del Análisis:**
-```
-📋 Change Analysis (Plan Mode - Dry Run)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📁 File: main.go
-🔧 Operation: edit
-📊 File exists: true
-
-✅ Risk Level: LOW
-
-📝 Changes Summary:
-  ~ 5 lines modified
-
-💡 Impact: Will modify 5 occurrence(s) affecting 5 lines
-
-👁️  Preview:
-Will replace 5 occurrence(s):
-
-OLD:
-func OldName(
-
-NEW:
-func NewName(
-
-💭 Suggestions:
-  • Review carefully before proceeding
-
-📌 Additional Info:
-  • Backup would be created: true
-  • Estimated time: < 100ms
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ℹ️  This is a DRY RUN - no changes were made
-```
-
-#### Casos de Uso
-- ✅ **Preview Before Apply**: Ver exactamente qué cambiará antes de aplicar
-- ✅ **Risk Assessment**: Evaluar el riesgo de cambios grandes o críticos
-- ✅ **Validation**: Verificar que el patrón de búsqueda coincide correctamente
-- ✅ **Planning**: Planificar refactorings complejos con confianza
-- ✅ **Education**: Aprender sobre el impacto de diferentes operaciones
-
-### 📁 **Core Engine (`core/engine.go`)**
-- **Gestión de operaciones paralelas**: Semáforos para controlar concurrencia
-- **Pool de operaciones**: Reutilización de objetos para mejor rendimiento
-- **Métricas en tiempo real**: Seguimiento de operaciones, cache hit rate, etc.
-- **Caché inteligente**: Invalidación automática con file watchers
-- **Claude Desktop Optimizer**: Sistema específico para optimizar rendimiento
-
-### Sistema de Caché (`cache/intelligent.go`)
-- Caché en memoria para archivos y directorios
-- Gestión automática de memoria
-- Estadísticas de hit rate
-
-### Memory Mapping (`core/mmap.go`)
-- Implementación optimizada para archivos grandes
-- Fallback para Windows usando lectura regular
-- Cache LRU para gestión de memoria
-
-## 🔄 Operaciones MCP Disponibles
-
-### 🚀 Funciones Ultra-Rápidas (Como Cline)
-
-#### `capture_last_artifact` + `write_last_artifact` - Sistema de Artefactos
-**Sistema ultra-rápido para escribir artefactos de Claude sin gastar tokens**
-```json
-// 1. Capturar artefacto
-{
-  "tool": "capture_last_artifact",
-  "arguments": {
-    "content": "function ejemplo() {\n  return 'código del artefacto';\n}"
-  }
-}
-
-// 2. Escribir al archivo (cero tokens)
-{
-  "tool": "write_last_artifact", 
-  "arguments": {
-    "path": "C:\\temp\\mi_script.js"
-  }
-}
-```
-**Características:**
-- ✅ **Cero tokens** - No re-envía contenido al escribir
-- ✅ **Velocidad máxima** - Escritura directa desde memoria
-- ✅ **Ruta clara** - Especifica path completo incluyendo filename
-- ✅ **Info de artefacto** - Consulta bytes y líneas con `artifact_info`
-
-#### `edit_file` - Edición Inteligente
-**La función estrella para Claude Desktop - Velocidad de Cline**
-```json
-{
-  "tool": "edit_file",
-  "arguments": {
-    "path": "archivo.js",
-    "old_text": "const oldFunction = () => {\n  return 'old';\n}",
-    "new_text": "const newFunction = () => {\n  return 'new';\n}"
-  }
-}
-```
-**Características:**
-- ✅ **Backup automático** con rollback en caso de error
-- ✅ **Coincidencias inteligentes** - Encuentra texto incluso con diferencias de espaciado
-- ✅ **Búsqueda multi-línea** - Maneja bloques de código completos
-- ✅ **Confianza de coincidencia** - Reporta qué tan segura fue la coincidencia
-- ✅ **Operaciones atómicas** - Todo o nada, sin corrupción de archivos
-- ✅ **Ultra-rápido** - Optimizado para no bloquear Claude Desktop
-
-#### `search_and_replace` - Reemplazo Masivo
-**Búsqueda y reemplazo en múltiples archivos (case-insensitive fijo actualmente)**
-```json
-{
-  "tool": "search_and_replace",
-  "arguments": {
-    "path": "./src",
-    "pattern": "oldFunction",
-    "replacement": "newFunction"
-  }
-}
-```
-**Características:**
-- ✅ **Recursivo** - Subdirectorios incluidos
-- ✅ **Skip binarios** - Ignora archivos no-texto o >10MB
-- ✅ **Regex o literal** - Intenta compilar regex; si falla, usa literal
-- ✅ **Reporte** - Lista archivos con número de reemplazos
-
-#### `smart_search` - Búsqueda Rápida
-**Localiza archivos y coincidencias de contenido con filtros opcionales**
-```json
-{
-  "tool": "smart_search",
-  "arguments": {
-    "path": "./",
-    "pattern": "Config"
-  }
-}
-```
-
-**Parámetros opcionales:**
-- `include_content` (boolean): Buscar dentro del contenido de archivos (default: false)
-- `file_types` (string): Filtrar por extensiones, separadas por comas (ej: ".go,.txt")
-
-**Ejemplo con parámetros opcionales:**
-```json
-{
-  "tool": "smart_search",
-  "arguments": {
-    "path": "./src",
-    "pattern": "TODO",
-    "include_content": true,
-    "file_types": ".go,.js"
-  }
-}
-```
-
-Devuelve coincidencias por nombre de archivo y, cuando `include_content` está activo, líneas con matches dentro del contenido.
-
-#### `advanced_text_search` - Búsqueda Detallada
-**Escaneo avanzado de contenido con contexto y opciones de búsqueda**
-```json
-{
-  "tool": "advanced_text_search",
-  "arguments": {
-    "path": "./",
-    "pattern": "TODO"
-  }
-}
-```
-
-**Parámetros opcionales:**
-- `case_sensitive` (boolean): Búsqueda sensible a mayúsculas/minúsculas (default: false)
-- `whole_word` (boolean): Coincidir palabras completas solamente (default: false)
-- `include_context` (boolean): Incluir líneas de contexto alrededor del match (default: false)
-- `context_lines` (number): Número de líneas de contexto (default: 3)
-
-**Ejemplo con parámetros opcionales:**
-```json
-{
-  "tool": "advanced_text_search",
-  "arguments": {
-    "path": "./src",
-    "pattern": "func",
-    "case_sensitive": true,
-    "whole_word": true,
-    "include_context": true,
-    "context_lines": 5
-  }
-}
-```
-
-Salida: lista de archivos con número de línea y contenido. Con `include_context` activo, muestra líneas circundantes.
-
-#### `rename_file` - Renombrar Archivos/Directorios
-**Nueva funcionalidad: Renombrar archivos y directorios de forma segura**
-```json
-{
-  "tool": "rename_file",
-  "arguments": {
-    "old_path": "C:\\temp\\archivo_viejo.txt",
-    "new_path": "C:\\temp\\archivo_nuevo.txt"
-  }
-}
-```
-**Características:**
-- ✅ **Verificación de existencia** - Confirma que el archivo origen existe
-- ✅ **Prevención de sobreescritura** - No permite renombrar sobre archivos existentes
-- ✅ **Directorios automáticos** - Crea directorios de destino si no existen
-- ✅ **Invalidación de caché** - Limpia entradas de caché para ambas rutas
-- ✅ **Control de acceso** - Respeta las rutas permitidas (`allowed-paths`)
-
-#### `soft_delete_file` - Eliminación Segura
-**Nueva funcionalidad: Mover archivos a carpeta de papelera en lugar de borrar**
-```json
-{
-  "tool": "soft_delete_file",
-  "arguments": {
-    "path": "C:\\temp\\archivo_a_eliminar.txt"
-  }
-}
-```
-**Características:**
-- ✅ **Eliminación segura** - Mueve archivos a carpeta `filesdelete` en lugar de borrarlos
-- ✅ **Estructura preservada** - Mantiene la estructura de carpetas dentro de `filesdelete`
-- ✅ **Auto-detección de proyecto** - Encuentra automáticamente la raíz del proyecto (.git, package.json, etc.)
-- ✅ **Prevención de conflictos** - Añade timestamp si el archivo ya existe en papelera
-- ✅ **Recuperación fácil** - Los archivos quedan disponibles para restauración manual
-- ✅ **Control de acceso** - Respeta las rutas permitidas
-
-### Implementadas ✅ (Resumen de las 45 actuales)
-
-#### Core Operations (21):
-- `read_file`
-- `write_file`
-- `list_directory`
-- `edit_file`
-- `search_and_replace`
-- `smart_search`
-- `advanced_text_search`
-- `performance_stats`
-- `capture_last_artifact`
-- `write_last_artifact`
-- `artifact_info`
-- **`rename_file`** - Renombrar archivos/directorios
-- **`soft_delete_file`** - Mover a carpeta "filesdelete"
-- **`create_directory`** ✨ **NUEVO** - Crear directorios (y padres si es necesario)
-- **`delete_file`** ✨ **NUEVO** - Eliminación permanente de archivos/directorios
-- **`move_file`** ✨ **NUEVO** - Mover archivos o directorios a nueva ubicación
-- **`copy_file`** ✨ **NUEVO** - Copiar archivos o directorios (recursivo)
-- **`get_file_info`** ✨ **NUEVO** - Información detallada (tamaño, permisos, timestamps)
-- **`read_file_range`** 🎯 **NUEVO v3.1** - Leer rango específico de líneas (eficiente para archivos grandes)
-- **`count_occurrences`** 🎯 **NUEVO v3.1** - Contar ocurrencias de patrón con números de línea opcionales
-- **`replace_nth_occurrence`** 🎯 **NUEVO v3.1** - Reemplazar ocurrencia específica (primera, última, N-ésima)
-
-#### 🚀 Claude Desktop Optimizations (6):
-- **`intelligent_write`** - Auto-optimiza escritura (directo o streaming)
-- **`intelligent_read`** - Auto-optimiza lectura (directo o chunks)
-- **`intelligent_edit`** - Auto-optimiza edición (directo o smart)
-- **`recovery_edit`** - Edición con recuperación automática de errores
-- **`get_optimization_suggestion`** - Analiza archivos y recomienda estrategia
-- **`analyze_file`** - Información detallada del archivo
-
-#### 🌊 Streaming Operations (4):
-- **`streaming_write_file`** - Escritura por chunks para archivos grandes
-- **`chunked_read_file`** - Lectura por chunks con control de tamaño
-- **`smart_edit_file`** - Edición inteligente de archivos grandes
-
-### ✨ Nuevas Operaciones Implementadas (v2.3.0)
-
-#### `create_directory` - Crear Directorios
-**Crea un nuevo directorio y todos los directorios padres si es necesario**
-```json
-{
-  "tool": "create_directory",
-  "arguments": {
-    "path": "C:\\proyecto\\nueva\\carpeta\\profunda"
-  }
-}
-```
-**Características:**
-- ✅ Crea directorios padres automáticamente (mkdir -p)
-- ✅ Verifica que el directorio no exista previamente
-- ✅ Control de acceso integrado
-- ✅ Invalida caché de directorios padre
-
-#### `delete_file` - Eliminación Permanente
-**Elimina permanentemente archivos o directorios**
-```json
-{
-  "tool": "delete_file",
-  "arguments": {
-    "path": "C:\\temp\\archivo_viejo.txt"
-  }
-}
-```
-**Características:**
-- ✅ Eliminación recursiva de directorios
-- ✅ Verificación de existencia previa
-- ✅ **ADVERTENCIA**: Esta operación es permanente (usa `soft_delete_file` para eliminación segura)
-- ✅ Invalida todas las cachés relacionadas
-
-#### `move_file` - Mover Archivos/Directorios
-**Mueve archivos o directorios a nueva ubicación**
-```json
-{
-  "tool": "move_file",
-  "arguments": {
-    "source_path": "C:\\temp\\documento.txt",
-    "dest_path": "C:\\documentos\\importante.txt"
-  }
-}
-```
-**Características:**
-- ✅ Crea directorios de destino automáticamente
-- ✅ Verifica que el destino no exista
-- ✅ Operación atómica (rename)
-- ✅ Funciona con archivos y directorios
-
-#### `copy_file` - Copiar Archivos/Directorios
-**Copia archivos o directorios preservando permisos**
-```json
-{
-  "tool": "copy_file",
-  "arguments": {
-    "source_path": "C:\\temp\\proyecto",
-    "dest_path": "C:\\backup\\proyecto_copia"
-  }
-}
-```
-**Características:**
-- ✅ Copia recursiva de directorios completos
-- ✅ Preserva permisos de archivos
-- ✅ Crea estructura de directorios automáticamente
-- ✅ Verifica que el destino no exista
-- ✅ El origen permanece intacto
-
-#### `get_file_info` - Información Detallada
-**Obtiene información completa sobre archivos o directorios**
-```json
-{
-  "tool": "get_file_info",
-  "arguments": {
-    "path": "C:\\proyecto\\main.go"
-  }
-}
-```
-**Características:**
-- ✅ Información completa: nombre, tamaño, tipo, permisos, timestamps
-- ✅ Para directorios: cuenta archivos y subdirectorios
-- ✅ Formato adaptable (verbose o compact según configuración)
-- ✅ Incluye ruta absoluta si difiere de la ruta solicitada
-
-**Salida en modo verbose:**
-```
-📄 File Information
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📁 Name: main.go
-📍 Full Path: C:\proyecto\main.go
-📄 Type: File
-💾 Size: 15.2 KB (15563 bytes)
-🔐 Permissions: -rw-rw-rw-
-🕐 Modified: 2025-10-24 15:30:45
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
-**Salida en modo compact:**
-```
-file: main.go | 15.2 KB | 2025-10-24 15:30:45
-```
-
-### 🎯 Nuevas Operaciones Ultra-Eficientes (v3.1.0)
-
-#### `read_file_range` - Lectura de Rangos de Líneas ⭐⭐⭐⭐⭐
-**Lee un rango específico de líneas de un archivo (EXTREMADAMENTE eficiente para archivos grandes)**
-
-```json
-{
-  "tool": "read_file_range",
-  "arguments": {
-    "path": "C:\\temp\\archivo_grande.sql",
-    "start_line": 26630,
-    "end_line": 26680
-  }
-}
-```
-
-**Características:**
-- ✅ **Ahorro masivo de tokens** - 90% menos tokens vs leer archivo completo
-- ✅ **Súper rápido** - Lee solo las líneas necesarias
-- ✅ **1-indexed** - Numeración de líneas natural (empieza en 1)
-- ✅ **Auto-ajuste** - Si end_line excede el archivo, ajusta automáticamente
-- ✅ **Metadatos incluidos** - Muestra el total de líneas del archivo
-
-**Caso de uso real:**
-```
-Archivo con 31,248 líneas → Quieres ver líneas 26630-26680
-read_file (todo): ~250,000 tokens
-read_file_range: ~2,500 tokens (98% ahorro!)
-```
-
-#### `count_occurrences` - Contador de Ocurrencias ⭐⭐⭐⭐⭐
-**Cuenta cuántas veces aparece un patrón en un archivo (con números de línea opcionales)**
-
-```json
-{
-  "tool": "count_occurrences",
-  "arguments": {
-    "path": "C:\\temp\\insert_portugal.sql",
-    "pattern": "CUMIEIRA",
-    "return_lines": "true"
-  }
-}
-```
-
-**Características:**
-- ✅ **Contador preciso** - Cuenta todas las ocurrencias (incluso múltiples por línea)
-- ✅ **Números de línea** - Opcional: devuelve las líneas donde aparece
-- ✅ **Regex o literal** - Intenta regex primero, fallback a literal
-- ✅ **Formato dual** - Compacto para producción, verbose para debug
-- ✅ **Límites inteligentes** - Muestra primeras 20-50 líneas para evitar sobrecarga
-
-**Salida ejemplo (verbose):**
-```
-🔢 Pattern Occurrence Count
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📁 File: C:\temp\insert_portugal.sql
-🔍 Pattern: 'CUMIEIRA'
-📊 Total occurrences: 106
-📝 Lines with matches: 53
-
-📌 Line numbers:
-  Line 150
-  Line 892
-  Line 1503
-  ...
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
-**Salida ejemplo (compact):**
-```
-106 matches at lines: 150, 892, 1503, 2341, ... (+49 more)
-```
-
-#### `replace_nth_occurrence` - Reemplazo Quirúrgico ⭐⭐⭐⭐⭐
-**Reemplaza SOLO la ocurrencia específica que quieres (primera, última, N-ésima)**
-
-```json
-{
-  "tool": "replace_nth_occurrence",
-  "arguments": {
-    "path": "C:\\temp\\insert_portugal.sql",
-    "pattern": "CUMIEIRA",
-    "replacement": "ULTIMACUMIERA",
-    "occurrence": -1,
-    "whole_word": "false"
-  }
-}
-```
-
-**Parámetros:**
-- `occurrence`:
-  - `-1` = última ocurrencia
-  - `1` = primera ocurrencia
-  - `2` = segunda ocurrencia
-  - `-2` = penúltima, etc.
-- `whole_word`:
-  - `"true"` = solo palabras completas (no reemplaza "CUMIEIRATXT")
-  - `"false"` = cualquier coincidencia
-
-**Características:**
-- ✅ **Precisión quirúrgica** - Cambia SOLO la ocurrencia que especificas
-- ✅ **Backup automático** - Crea backup antes de modificar
-- ✅ **Rollback integrado** - Si algo falla, restaura el archivo
-- ✅ **Hooks support** - Ejecuta pre/post-edit hooks si están configurados
-- ✅ **Validación estricta** - Valida que la ocurrencia exista antes de modificar
-- ✅ **Regex o literal** - Soporta ambos tipos de patrones
-
-**Caso de uso real:**
-```
-Problema: Archivo con 106 ocurrencias de "CUMIEIRA"
-         Solo quiero cambiar la ÚLTIMA
-
-Solución tradicional:
-1. read_file (250k tokens)
-2. Analizar manualmente todas las 106
-3. Calcular cuál es la última
-4. edit_file o search_and_replace (arriesgado)
-
-Solución con replace_nth_occurrence:
-1. replace_nth_occurrence con occurrence=-1
-   → Cambia SOLO la última
-   → ~500 tokens
-   → 99.8% ahorro de tokens
-   → 0% riesgo de error
-```
-
-**Salida ejemplo (verbose):**
-```
-✅ Successfully replaced occurrence #-1
-📊 Line affected: 1
-🎯 Confidence: high
-```
-
-**Salida ejemplo (compact):**
-```
-OK: replaced occurrence #-1
-```
-
-### 📊 Impacto de las Nuevas Herramientas
-
-| Tarea | Método Anterior | Con Nuevas Herramientas | Ahorro |
-|-------|----------------|------------------------|--------|
-| Ver líneas 26k-27k de archivo 31k líneas | read_file: 250k tokens | read_file_range: 2.5k tokens | **99%** |
-| Contar 106 ocurrencias | read_file + análisis manual | count_occurrences: 500 tokens | **95%** |
-| Cambiar última de 106 | read_file + edit: 252k tokens | replace_nth: 500 tokens | **99.8%** |
-
-### Pendientes (Placeholder / Próximas)
-- `read_multiple_files`
-- `batch_operations`
-- `analyze_project`
-- `compare_files`
-- `find_duplicates`
-- `tree`
-- `mmap_read`
-- `streaming_read`
-- `chunked_write`
-
-> Nota: se planea re-exponer parámetros avanzados opcionales en las tools de búsqueda en una versión posterior para mayor control.
-
-## 🚧 Pendiente por Implementar
-
-### 1. SDK MCP Propio
-**Prioridad: ALTA**
-- Reemplazar el paquete temporal `mcp/mcp.go`
-- Implementar protocolo MCP completo
-- Soporte para transporte stdio, HTTP, WebSocket
-- Validación de esquemas JSON
-
-### 2. Completar Operaciones Core
-**Prioridad: ALTA**
-- Implementar todas las operaciones placeholder en `core/engine.go`
-- Añadir validación de parámetros
-- Manejo de errores robusto
-
-### 3. File Watcher (`core/watcher.go`)
-**Prioridad: MEDIA**
-- Implementar vigilancia de archivos para invalidación de caché
-- Soporte para múltiples sistemas operativos
-- Gestión eficiente de eventos
-
-### 4. Protocolo Optimizado (`protocol/optimized.go`)
-**Prioridad: MEDIA**
-- Implementar detección automática de archivos binarios
-- Compresión inteligente
-- Streaming para archivos grandes
-
-### 5. Benchmarks (`bench/benchmark.go`)
-**Prioridad: BAJA**
-- Completar suite de benchmarks
-- Comparación con implementaciones estándar
-- Reportes de rendimiento detallados
-
-### 6. Memory Mapping Real
-**Prioridad: BAJA**
-- Implementar memory mapping real para Linux/macOS
-- Detección automática de plataforma
-- Fallback inteligente
-
-## 🛠️ Configuración y Uso
-
-### ⚠️ Atención: Descargo de Responsabilidad
-**Atención**: No nos hacemos responsables de los posibles problemas o pérdidas de datos que puedan surgir debido al uso de este servidor con modelos de IA. Los modelos de inteligencia artificial pueden no actuar adecuadamente en ciertas situaciones, lo que podría resultar en operaciones no deseadas o errores en el manejo de archivos. Se recomienda encarecidamente configurar el servidor correctamente, especialmente las restricciones de acceso mediante `--allowed-paths`, para limitar el alcance de las operaciones. Además, es crucial realizar copias de seguridad regulares de tus datos importantes antes de utilizar este sistema, para evitar cualquier pérdida en caso de comportamiento inesperado.
-
-**Nota sobre Ejecución de Comandos**: Este servidor MCP Filesystem Server Ultra-Fast está diseñado exclusivamente para operaciones de sistema de archivos y no tiene capacidad para ejecutar comandos del sistema operativo. No hay funcionalidades implementadas que permitan la ejecución de comandos arbitrarios en el sistema, con o sin permiso. Su alcance se limita a las operaciones de lectura, escritura, listado y edición de archivos dentro de los directorios configurados.
-
-## 🛠️ Compilación y Configuración
-
-### ⚡ Compilación Rápida
-```bash
-# Windows (recomendado - usar build.bat)
-build.bat
-
-# Manual 
-go mod tidy
-go build -ldflags="-s -w" -o mcp-filesystem-ultra.exe
-```
-
-### 🔧 Ejecución con Parámetros Optimizados
-```bash
-# Mostrar versión
-./mcp-filesystem-ultra.exe --version
-
-# Configuración optimizada para Claude Desktop
-./mcp-filesystem-ultra.exe --cache-size 200MB --parallel-ops 8 --log-level error
-
-# Ejecutar benchmarks
-./mcp-filesystem-ultra.exe --bench
-```
-
-### ⚙️ Parámetros de Configuración
-
-#### Optimización de Tokens (v2.2.0) 💎
-- `--compact-mode`: Activa respuestas compactas (ahorra **65-75% tokens**)
-- `--max-response-size`: Tamaño máximo de respuesta en bytes (default: 500000)
-- `--max-search-results`: Resultados máximos en búsquedas (default: 10)
-- `--max-list-items`: Items máximos en listados (default: 50)
-
-#### Rendimiento y Caché
-- `--cache-size`: Tamaño del caché (ej: 200MB - **optimizado para Claude Desktop**)
-- `--parallel-ops`: Operaciones paralelas máximas (ej: 8 - **balance perfecto**)
-- `--binary-threshold`: Umbral para protocolo binario (ej: 2MB)
-
-#### Seguridad y Acceso
-- `--allowed-paths`: Lista de rutas permitidas (ej: "C:\\MCPs\\clone\\,C:\\temp\\")
-- `--vscode-api`: Habilitar integración con VSCode
-
-#### Debugging
-- `--debug`: Modo debug (solo para desarrollo)
-- `--log-level`: Nivel de logging (**error** recomendado para producción)
-
-## 📊 Métricas de Rendimiento
-
-El servidor incluye monitoreo en tiempo real:
-- Operaciones totales y por segundo
-- Cache hit rate
-- Tiempo promedio de respuesta
-- Uso de memoria
-- Contadores por tipo de operación
-
-## 🧠 Instrucciones para Claude Desktop (Sistema Inteligente)
-
-Esta sección sirve como guía para **Claude Desktop** al interactuar con este servidor MCP. El sistema está **específicamente optimizado** para eliminar timeouts y bloqueos.
-
-### 🎯 Objetivo Principal
-Proporcionar operaciones de sistema de archivos **ultra-rápidas, sin timeouts, y completamente automáticas**. El sistema detecta automáticamente el tamaño del archivo y elige la estrategia óptima sin intervención manual.
-
-### 🧠 Principios Fundamentales para Claude Desktop
-
-#### 1. **SIEMPRE usa herramientas INTELLIGENT** (Auto-optimización)
-- `intelligent_read` → Automáticamente elige: directo (<50KB) o chunks (>50KB)
-- `intelligent_write` → Automáticamente elige: directo (<50KB) o streaming (>50KB)
-- `intelligent_edit` → Automáticamente elige: directo (<50KB) o smart (>50KB)
-- `recovery_edit` → Con recuperación automática de errores (95% éxito)
-
-#### 2. **NUNCA uses herramientas básicas para archivos grandes**
-```
-❌ NO: read_file, write_file, edit_file con archivos >50KB
-✅ SÍ: intelligent_read, intelligent_write, intelligent_edit (siempre)
-```
-
-#### 3. **El sistema decide por ti automáticamente**
-- Sin configuración manual
-- Sin cálculos de tamaño
-- Sin decisiones complejas
-- Solo llama a la herramienta intelligent_ y el sistema hace el resto
-
-#### 4. **Recuperación automática de errores**
-- Si `intelligent_edit` falla → usar `recovery_edit`
-- El sistema automáticamente intentará múltiples estrategias
-- 95% menos errores comparado con herramientas básicas
-
-### 🚦 **Flujo de Trabajo Simplificado**
-
-```
-PASO 1: Analizar (opcional pero recomendado)
-   get_optimization_suggestion("archivo.txt")
-   
-PASO 2: Operar con herramientas inteligentes  
-   intelligent_read("archivo.txt")
-   intelligent_edit("archivo.txt", "old", "new")
-   intelligent_write("archivo.txt", "content")
-   
-PASO 3: Si hay error en edición
-   recovery_edit("archivo.txt", "old", "new")
-```
-
-### ⚡ **Ventajas del Sistema Inteligente**
-
-#### ✅ **Para Claude Desktop**:
-- **Nunca más timeouts** - El sistema maneja archivos de cualquier tamaño
-- **Nunca más bloqueos** - Streaming automático con progreso
-- **Nunca más errores** - Recuperación automática en caso de fallos  
-- **Simplicidad total** - Solo usar intelligent_* y el sistema decide todo
-
-#### ✅ **Comparación: Antes vs Después**:
-```
-ANTES: 
-- Archivo 100KB → edit_file → TIMEOUT (30s) → FALLO
-- Claude: "Lo siento, no puedo continuar..."
-
-DESPUÉS:
-- Archivo 100KB → intelligent_edit → AUTO-STREAMING → ÉXITO (3s)
-- Claude: "✅ Completado exitosamente"
-```
-
-### 📋 **Lista de Herramientas por Categoría**
-
-#### 🧠 **INTELIGENTES** (Usar SIEMPRE - Auto-optimizadas):
-- `intelligent_read` - Lectura automática optimizada
-- `intelligent_write` - Escritura automática optimizada  
-- `intelligent_edit` - Edición automática optimizada
-- `recovery_edit` - Edición con recuperación automática
-- `get_optimization_suggestion` - Análisis y recomendaciones
-- `analyze_file` - Información detallada del archivo
-
-#### 📁 **BÁSICAS** (Solo archivos <50KB):
-- `read_file` - Lectura directa (⚠️ timeout >50KB)
-- `write_file` - Escritura directa (⚠️ timeout >50KB)
-- `edit_file` - Edición directa (⚠️ timeout >50KB)
-- `list_directory` - Listado de directorios
-- `rename_file` - Renombrar archivos/directorios
-- `soft_delete_file` - Eliminación segura a carpeta papelera
-
-#### 🌊 **STREAMING** (Para control manual avanzado):
-- `streaming_write_file` - Escritura por chunks manual
-- `chunked_read_file` - Lectura por chunks manual
-- `smart_edit_file` - Edición con límites específicos
-
-#### 🔍 **BÚSQUEDA Y ANÁLISIS**:
-- `search_and_replace` - Reemplazo masivo en múltiples archivos
-- `smart_search` - Búsqueda de archivos y contenido
-- `advanced_text_search` - Búsqueda detallada con contexto
-- `performance_stats` - Estadísticas de rendimiento
-
-#### ⚙️ **UTILIDADES**:
-- `capture_last_artifact` + `write_last_artifact` - Sistema de artefactos
-- `artifact_info` - Información del último artefacto
-
-#### 🪟 **WSL ↔ WINDOWS** (Integración automática):
-- `wsl_to_windows_copy` - Copia archivos de WSL a Windows con auto-conversión de rutas
-- `windows_to_wsl_copy` - Copia archivos de Windows a WSL con auto-conversión de rutas
-- `sync_claude_workspace` - Sincroniza espacios de trabajo completos entre WSL y Windows
-- `wsl_windows_status` - Muestra estado de integración WSL/Windows y ubicaciones de archivos
-
-#### 🔄 **AUTO-SYNC** (Sincronización automática WSL ↔ Windows - NUEVO v3.4.0):
-- `configure_autosync` - Activar/desactivar sincronización automática con opciones configurables
-- `autosync_status` - Ver estado actual de la configuración auto-sync
-
-### 🎯 **Regla de Oro para Claude Desktop**
-
-```
-SIEMPRE SEGUIR ESTA LÓGICA:
-
-1. ¿Es un archivo? → Usar intelligent_*
-2. ¿Falló la edición? → Usar recovery_edit  
-3. ¿No sabes qué usar? → Usar get_optimization_suggestion
-4. ¿Archivo muy grande? → Las herramientas intelligent ya lo manejan automáticamente
-
-NUNCA usar read_file, write_file, edit_file para archivos grandes.
-El sistema intelligent automáticamente usará streaming cuando sea necesario.
-```
-
-### 📊 **Métricas de Rendimiento Esperadas**
-
-| Operación | Tamaño | Tiempo Esperado | Estrategia Auto |
-|-----------|--------|-----------------|-----------------|
-| intelligent_read | <50KB | <1s | Directa |
-| intelligent_read | >50KB | 2-10s | Chunks con progreso |
-| intelligent_write | <50KB | <1s | Directa |
-| intelligent_write | >50KB | 2-15s | Streaming con progreso |
-| intelligent_edit | <50KB | <2s | Directa |
-| intelligent_edit | >50KB | 5-30s | Smart streaming |
-| recovery_edit | Cualquiera | +20% tiempo | Con 3 intentos automáticos |
-
-**El sistema NUNCA falla por timeout - siempre completa la operación.**
-
-### 🚦 REGLAS DE ORO para Claude Desktop
-
-#### ✅ **SIEMPRE USA (Recomendado para máximo rendimiento)**:
-```
-- intelligent_read (automático: directo <50KB, chunks >50KB)
-- intelligent_write (automático: directo <50KB, streaming >50KB)  
-- intelligent_edit (automático: directo <50KB, smart >50KB)
-- recovery_edit (si intelligent_edit falla - 95% recuperación)
-```
-
-#### ⚠️ **USA CON CUIDADO (Solo archivos pequeños <50KB)**:
-```
-- read_file (puede causar timeout con archivos grandes)
-- write_file (puede causar timeout con archivos grandes)
-- edit_file (puede causar timeout con archivos grandes)
-```
-
-#### ❌ **NUNCA USES para archivos grandes**:
-```
-- read_file con archivos >100KB (timeout garantizado)
-- write_file con archivos >50KB (bloqueo garantizado)
-- edit_file con archivos >50KB (fallo garantizado)
-```
-
-### 🔄 **Flujo de Trabajo Óptimo**
-
-```
-1. 🔍 Analizar archivo: get_optimization_suggestion("archivo.txt")
-2. 📖 Leer inteligentemente: intelligent_read("archivo.txt")  
-3. ✏️ Editar inteligentemente: intelligent_edit("archivo.txt", "old", "new")
-4. 🛡️ Si falla edición: recovery_edit("archivo.txt", "old", "new")
-5. 📊 Verificar rendimiento: performance_stats()
-```
-
-### 🎯 **Decisiones Automáticas por Tamaño**
-
-| Tamaño Archivo | Herramienta Inteligente Usa | Tiempo Estimado |
-|---------------|----------------------------|-----------------|
-| <10KB | Operación directa | <1 segundo |
-| 10KB-50KB | Operación directa | 1-2 segundos |
-| 50KB-500KB | **Streaming automático** | 2-10 segundos |
-| 500KB-5MB | **Streaming con chunks** | 10-30 segundos |
-| >5MB | **Streaming + progreso** | 30+ segundos |
-
-### Flujo Recomendado de Refactor / Cambio Grande
-1. Localizar: `advanced_text_search` (patrón del símbolo).
-2. Confirmar alcance: revisar salida y decidir si edición puntual o reemplazo masivo.
-3. Si son muchas ocurrencias homogéneas: `search_and_replace`.
-4. Si es un bloque aislado: `read_file` -> preparar `old_text` exacto -> `edit_file`.
-5. Validar: volver a `read_file` y verificar diff mental / integridad.
-6. Si generas un archivo grande nuevo: preparar contenido → `capture_last_artifact` → `write_last_artifact`.
-
-### Patrones de `old_text` Efectivos (edit_file)
-Incluye líneas de contexto únicas (import, firma de función, comentario específico) para reducir coincidencias ambiguas. Evita usar archivos completos como `old_text`.
-
-### Manejo de Errores Comunes
-- "access denied": Usa `list_directory` para confirmar ruta o limita el alcance.
-- "no matches found" en `edit_file`: Relee el archivo, ajusta espacios/indentación y reintenta con versión normalizada.
-- Reemplazos inesperados altos: Detén, vuelve a leer el archivo y valida el patrón; no encadenes más cambios hasta confirmar.
-
-### Límites Implícitos
-- Lectura/edición viable hasta ~50MB (edición rechaza >50MB).
-- `search_and_replace` ignora archivos >10MB y no-texto.
-- `smart_search` ahora soporta parámetros opcionales: `include_content` para búsquedas de contenido y `file_types` para filtrar por extensión.
-
-### Estilo de Respuesta del Modelo
-Sé conciso y enfocado: explica brevemente intención antes de invocar una tool. Después de una tool, resume hallazgos relevantes y el próximo paso. No repitas listados completos si no cambian.
-
-### Ejemplos Breves
-1) Explorar y leer:
-```
-list_directory: {"path":"./src"}
-read_file: {"path":"./src/main.go"}
-```
-2) Editar bloque:
-```
-edit_file: {"path":"core/engine.go","old_text":"func OldName(","new_text":"func NewName("}
-```
-3) Reemplazo masivo:
-```
-search_and_replace: {"path":"./","pattern":"OldName","replacement":"NewName"}
-```
-4) Crear archivo grande:
-```
-capture_last_artifact: {"content":"<codigo grande>"}
-write_last_artifact: {"path":"./docs/spec.md"}
-```
-
-### No Hacer
-- No pedir al usuario que pegue archivos largos ya existentes: usa `read_file`.
-- No hacer múltiples `read_file` consecutivos sobre el mismo archivo sin cambios intermedios.
-- No usar `write_file` para pequeños cambios en archivos grandes (prefiere `edit_file`).
-- No asumir parámetros avanzados aún no expuestos (case_sensitive en búsquedas, etc.).
-
-### Futuras Extensiones
-Se agregará exposición de parámetros avanzados (`case_sensitive`, `include_content`, `whole_word`, `context_lines`) y nuevas tools (create/delete/move). Ajustar entonces estas directrices.
-
-> Copia/pega este bloque (o un resumen) como mensaje inicial de sistema para mejorar la calidad de las decisiones del modelo.
-
-## 🔧 Arquitectura Técnica
-
-### Patrones de Diseño Utilizados
-- **Pool Pattern**: Para reutilización de objetos Operation
-- **Cache Pattern**: Para almacenamiento inteligente
-- **Observer Pattern**: Para file watching
-- **Strategy Pattern**: Para diferentes protocolos
-
-### Optimizaciones Implementadas
-- Operaciones paralelas con semáforos
-- Caché inteligente con invalidación automática
-- Escritura atómica para consistencia
-- Pool de objetos para reducir GC pressure
-
-## 🎯 Próximos Pasos Recomendados
-
-1. **Desarrollar SDK MCP personalizado** (Prioridad 1)
-2. **Implementar operaciones faltantes** (Prioridad 2)
-3. **Añadir tests unitarios** (Prioridad 3)
-4. **Documentar API completa** (Prioridad 4)
-5. **Optimizar para producción** (Prioridad 5)
-
-## 📝 Notas de Desarrollo
-
-### Decisiones Técnicas
-- **Windows Compatibility**: Se eligió fallback de lectura regular sobre memory mapping para compatibilidad
-- **Temporary MCP Package**: Solución temporal hasta tener SDK propio
-- **Modular Architecture**: Separación clara de responsabilidades para mantenibilidad
-
-### Consideraciones de Rendimiento
-- El servidor está diseñado para manejar miles de operaciones por segundo
-- El caché inteligente reduce significativamente la latencia
-- Las operaciones paralelas maximizan el throughput
-
-## 🧪 Tests Realizados
-
-### ✅ Resultados de Pruebas (2025-07-12)
-
-**Todas las pruebas pasaron exitosamente:**
-
-1. **📖 Test de Lectura**: ✅ PASÓ
-   - Lectura de archivo con caché inteligente
-   - Tiempo de respuesta: ~282µs
-
-2. **✏️ Test de Edición (edit_file)**: ✅ PASÓ
-   - Reemplazo inteligente: "texto original" → "texto MODIFICADO"
-   - Replacements: 1
-   - Confidence: HIGH
-   - Lines affected: 1
-
-3. **🔍 Test de Verificación**: ✅ PASÓ
-   - Confirmación de que la edición se aplicó correctamente
-
-4. **🔄 Test de Search & Replace**: ✅ PASÓ
-   - Búsqueda masiva: "MODIFICADO" → "CAMBIADO"
-   - Total replacements: 5 across múltiples archivos
-   - Procesó: README.md, test_file.txt, test_server.go
-
-5. **📊 Test de Performance Stats**: ✅ PASÓ
-   - Métricas en tiempo real funcionando
-   - Tracking de operaciones por tipo
-
-### 🚀 Rendimiento Verificado
-- **Tiempo promedio de respuesta**: 391.9ms para 790 operaciones (ultra-rápido)
-- **Operaciones por segundo**: 2016.0 ops/sec
-- **Cache hit rate**: 98.9% (extremadamente eficiente)
-- **Memory usage**: Estable en 40.3MB
+## Architecture
+
+```
+main.go                     Entry point — flag parsing, tool registration, server startup
+core/
+  engine.go                 UltraFastEngine — central struct, cache, worker pool, metrics
+  edit_operations.go        EditFile, MultiEdit — backup, risk assessment, hooks
+  file_operations.go        Rename, SoftDelete, Copy, Move
+  streaming_operations.go   StreamingWrite, ChunkedRead, SmartEdit
+  search_operations.go      SmartSearch, AdvancedTextSearch
+  backup_manager.go         Create, restore, compare, and clean backups
+  impact_analyzer.go        Risk assessment (LOW / MEDIUM / HIGH / CRITICAL)
+  edit_safety_layer.go      Context validation, stale-edit prevention
+  hooks.go                  Pre/post hook system (12 event types)
+  large_file_processor.go   Line-by-line and chunk-based processing
+  regex_transformer.go      Regex transformations with capture groups
+  pipeline.go               Multi-step pipeline execution
+  batch_operations.go       Atomic batch operations with rollback
+  plan_mode.go              Dry-run analysis
+  path_converter.go         WSL ↔ Windows path conversion
+  path_detector.go          Path format detection and WSL distro lookup
+  wsl_sync.go               WSL/Windows file synchronization
+  config.go                 Thresholds and constants
+  errors.go                 PathError, ValidationError, EditError, etc.
+cache/
+  intelligent.go            BigCache (files) + go-cache (dirs + metadata)
+```
+
+### File size thresholds
+
+| Class | Size | Strategy |
+|-------|------|----------|
+| Small | < 100 KB | Direct I/O |
+| Medium | < 500 KB | Streaming |
+| Large | < 5 MB | Chunking |
+| Very large | < 50 MB | Special handling |
+| Over limit | ≥ 50 MB | Edit rejected |
 
 ---
 
-**Versión**: 3.13.0 - Security Hardening & Go Toolchain Update
-**Fecha de compilación**: 2026-01-31
-**Tamaño del ejecutable**: ~8.8 MB
-**Estado**: ✅ **OPTIMIZADO PARA CLAUDE DESKTOP** - Sin timeouts, sin bloqueos, auto-sync integrado
-**Seguridad**: ✅ **Go 1.24.12** + 13 vulnerabilidades corregidas (symlink traversal, TOCTOU, path injection, deadlock)
-**Herramientas**: 45 total (6 inteligentes + 4 streaming + 21 core + 3 plan mode + 2 auto-sync + 4 WSL tools)
+## Security
+
+- `isPathAllowed()` resolves symlinks via `filepath.EvalSymlinks()` before containment check — prevents symlink escape from allowed paths
+- Temp files and backup IDs use `crypto/rand` (not timestamps)
+- Backup IDs are sanitized to `[a-zA-Z0-9_-]` to prevent path traversal
+- Temp files and backup metadata written with `0600` permissions
+- `copyDirectory()` skips symlinks
 
 ---
 
-## 🏆 RESUMEN EJECUTIVO
+## Dependencies
 
-### ✅ **PROBLEMA RESUELTO**
-Claude Desktop ya NO tiene problemas con archivos grandes. El sistema inteligente automáticamente:
-- Detecta el tamaño del archivo
-- Elige la estrategia óptima (directa o streaming) 
-- Procesa sin timeouts ni bloqueos
-- Recupera automáticamente de errores
-
-### 🚀 **RESULTADO**
-**Claude Desktop ahora funciona TAN RÁPIDO como Claude Code**, pero con la comodidad de la interfaz gráfica.
-
-### 🎯 **PARA CLAUDE: USA SIEMPRE**
-```
-- intelligent_read (en lugar de read_file)
-- intelligent_write (en lugar de write_file)  
-- intelligent_edit (en lugar de edit_file)
-- recovery_edit (si intelligent_edit falla)
-```
-
-**¡El servidor MCP Filesystem Ultra-Fast está listo para hacer que Claude Desktop vuela! 🚁**
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `github.com/mark3labs/mcp-go` | v0.43.2 | MCP server SDK |
+| `github.com/allegro/bigcache/v3` | v3.1.0 | File content cache |
+| `github.com/patrickmn/go-cache` | v2.1.0 | Directory and metadata cache |
+| `github.com/panjf2000/ants/v2` | v2.11.5 | Goroutine pool |
+| `github.com/fsnotify/fsnotify` | v1.9.0 | File system event watching |
 
 ---
 
-## 📋 CHANGELOG
+## Changelog
 
-### **v3.4.0** (2025-11-15) - Automatic WSL ↔ Windows Sync (Silent Auto-Copy)
-#### 🔄 **Sistema de Sincronización Automática en Tiempo Real**
-- ✅ **`configure_autosync`** - Activar/desactivar sincronización automática con opciones configurables
-- ✅ **`autosync_status`** - Ver estado actual de la configuración auto-sync
+See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-#### 🎯 **Problema Resuelto**
-- ❌ **Antes**: Archivos creados en WSL no aparecen automáticamente en Windows Explorer
-- ✅ **Ahora**: Sincronización automática y silenciosa después de cada write/edit
+Current release: **v3.14.2** — fixes `batch_operations` edit operations discarding file content instead of performing find-and-replace.
 
-#### 🚀 **Nuevas Características**
-- ✅ **Auto-Sync Configuration System** (`core/autosync_config.go`) - Sistema completo de sincronización
-- ✅ **Hooks integrados** en WriteFileContent, StreamingWriteFile, EditFile, ReplaceNthOccurrence
-- ✅ **Configuración flexible** - Almacenada en `~/.config/mcp-filesystem-ultra/autosync.json`
-- ✅ **Variable de entorno** - `MCP_WSL_AUTOSYNC=true` para activar en una línea
-- ✅ **Operaciones async** - Nunca bloquean la operación principal
-- ✅ **Fallo silencioso** - Sync errors nunca rompen las operaciones de archivo
+---
 
-#### 📊 **Configuración**
-```json
-{
-  "wsl_auto_sync": {
-    "enabled": true,
-    "sync_on_write": true,
-    "sync_on_edit": true,
-    "sync_on_delete": false,
-    "silent": false,
-    "exclude_patterns": [],
-    "only_subdirs": []
-  }
-}
-```
+## License
 
-#### 💡 **Casos de Uso**
-```bash
-# Setup (una sola vez)
-configure_autosync --enabled true
-# O con variable de entorno
-export MCP_WSL_AUTOSYNC=true
-
-# Ahora todo lo que escribas en WSL aparece automáticamente en Windows
-write_file("/home/user/project/test.go", "...")
-# → Automáticamente copiado a C:\Users\user\project\test.go
-```
-
-#### 🎯 **Mejoras**
-- ✅ Herramientas aumentadas: 43 → **45 tools** (2 nuevas herramientas auto-sync)
-- ✅ **3 archivos modificados**: core/engine.go (+46 líneas), core/streaming_operations.go (+5), core/edit_operations.go (+10)
-- ✅ **1 archivo nuevo**: core/autosync_config.go (343 líneas - sistema completo)
-- ✅ **Soporte universal** - Funciona con todas las operaciones de write/edit
-- ✅ **Sin impacto en rendimiento** - Operaciones async que no bloquean
-- ✅ **Totalmente backwards-compatible** - Deshabilitado por defecto
-
-#### 🔄 **Integración Automática**
-- WriteFileContent() - Auto-sync después de escribir
-- StreamingWriteFile() - Auto-sync después de streaming
-- EditFile() - Auto-sync después de editar
-- ReplaceNthOccurrence() - Auto-sync después de reemplazar
-
-#### 📈 **Beneficios**
-- ✅ **Cero intervención manual** - Funciona automáticamente después del setup inicial
-- ✅ **Instantáneo** - Archivos visibles en Windows Explorer inmediatamente
-- ✅ **Sin overhead** - Operaciones async que no ralentizan el servidor
-- ✅ **Seguro** - Nunca falla la operación original si sync falla
-- ✅ **Flexible** - Configurable por archivo, directorio o patrón
-
-### **v3.3.0** (2025-11-14) - WSL ↔ Windows Auto-Copy & Sync Tools
-#### 🪟 **4 Nuevas Herramientas de Integración WSL/Windows**
-- ✅ **`wsl_to_windows_copy`** - Copia archivos/directorios de WSL a Windows con auto-conversión de rutas
-- ✅ **`windows_to_wsl_copy`** - Copia archivos/directorios de Windows a WSL con auto-conversión de rutas
-- ✅ **`sync_claude_workspace`** - Sincroniza espacios de trabajo completos entre WSL y Windows
-- ✅ **`wsl_windows_status`** - Muestra estado de integración y ubicaciones de archivos
-
-#### 🎯 **Funcionalidades**
-- ✅ **Auto-conversión de rutas** - Las rutas de destino se calculan automáticamente si no se especifican
-- ✅ **Copia recursiva** - Soporte completo para directorios y archivos individuales
-- ✅ **Sincronización con filtros** - Sincroniza solo archivos que coincidan con patrones (*.txt, *.go, etc.)
-- ✅ **Dry-run mode** - Vista previa de cambios sin ejecutar
-- ✅ **Detección de entorno** - Identifica automáticamente si está corriendo en WSL o Windows
-- ✅ **Creación de directorios** - Crea automáticamente directorios de destino si no existen
-
-#### 📊 **Impacto**
-- Herramientas aumentadas: 37 → **41 tools** (4 nuevas herramientas WSL/Windows)
-- **3 nuevos módulos**: `path_detector.go`, `path_converter.go`, `wsl_sync.go`
-- **Integración completa** - Facilita el trabajo híbrido entre WSL y Windows para Claude Desktop
-
-#### 💡 **Casos de Uso**
-```bash
-# Copiar archivo de WSL a Windows (ruta auto-calculada)
-wsl_to_windows_copy("/home/user/project/file.txt")
-# → C:\Users\user\project\file.txt
-
-# Sincronizar workspace completo (solo archivos .go)
-sync_claude_workspace("wsl_to_windows", filter_pattern="*.go")
-
-# Ver estado de integración
-wsl_windows_status()
-```
-
-### **v3.2.0** (2025-11-14) - Windows/WSL Path Normalization + create_file Alias
-#### 🪟 **Soporte Windows/WSL Automático**
-- ✅ **Normalización automática de rutas** - Convierte `/mnt/c/...` ↔ `C:\...` según el sistema
-- ✅ **Detección inteligente** - Funciona en Windows, WSL y Linux sin configuración
-- ✅ **18 funciones actualizadas** - Todas las operaciones de archivos soportan ambos formatos
-- ✅ **Alias `create_file`** - Añadido para compatibilidad con Claude Desktop (apunta a write_file)
-
-#### 🎯 **Problema Resuelto**
-- ❌ **Antes**: Claude Code en Windows enviaba rutas WSL que fallaban con "ruta no encontrada"
-- ✅ **Ahora**: Todas las rutas se normalizan automáticamente al formato correcto
-
-#### 📊 **Impacto**
-- Herramientas aumentadas: 35 → **36 tools** (incluye alias create_file)
-- **100% compatibilidad** con Claude Desktop en Windows
-- **0 configuración requerida** - Funciona automáticamente
-
-### **v3.1.0** (2025-10-25) - Ultra-Efficient Operations
-#### 🎯 **3 Nuevas Herramientas Ultra-Eficientes** (Resuelven limitaciones críticas)
-- ✅ **`read_file_range`** - Lee rangos específicos de líneas (ahorro 90-98% tokens)
-- ✅ **`count_occurrences`** - Cuenta ocurrencias con números de línea opcionales
-- ✅ **`replace_nth_occurrence`** - Reemplazo quirúrgico de ocurrencia específica (primera, última, N-ésima)
-
-#### 💡 **Casos de Uso Resueltos**
-- ✅ Leer líneas 26630-26680 en archivo de 31,248 líneas (98% ahorro vs read_file completo)
-- ✅ Contar 106 ocurrencias sin leer archivo completo (95% ahorro)
-- ✅ Cambiar SOLO la última ocurrencia de 106 sin tocar las demás (99.8% ahorro, 0% riesgo)
-
-#### 📊 **Impacto en Tokens**
-- Ver rango específico: 250k tokens → 2.5k tokens (**99% ahorro**)
-- Contar ocurrencias: 250k tokens → 500 tokens (**95% ahorro**)
-- Reemplazo quirúrgico: 252k tokens → 500 tokens (**99.8% ahorro**)
-
-#### 🎯 **Mejoras**
-- ✅ Herramientas aumentadas: 32 → **36 tools** (incluye alias `create_file`)
-- ✅ Soporte para archivos grandes sin leer todo el contenido
-- ✅ Precisión quirúrgica en reemplazos (índices negativos: -1=último, -2=penúltimo)
-- ✅ Validación estricta con rollback automático
-- ✅ Formato dual: compacto (producción) y verbose (debug)
-- ✅ Compilación exitosa, ejecutable 5.5 MB
-
-### **v2.3.0** (2025-10-24)
-#### ✨ **5 Nuevas Operaciones de Archivos** (Paridad con Claude Code)
-- ✅ `create_directory` - Crear directorios con padres automáticos
-- ✅ `delete_file` - Eliminación permanente de archivos/directorios
-- ✅ `move_file` - Mover archivos o directorios entre ubicaciones
-- ✅ `copy_file` - Copiar archivos o directorios recursivamente
-- ✅ `get_file_info` - Información detallada (tamaño, permisos, timestamps)
-
-#### 🧪 **Tests Expandidos**
-- ✅ **16 tests** totales (11 previos + 5 nuevos)
-- ✅ Tests comprehensivos para todas las nuevas operaciones
-- ✅ Cobertura: CreateDirectory, DeleteFile, MoveFile, CopyFile, GetFileInfo
-- ✅ 100% de tests pasando
-
-#### 🎯 **Mejoras**
-- ✅ Herramientas aumentadas: 23 → **28 tools**
-- ✅ Paridad completa con operaciones básicas de Claude Code
-- ✅ Documentación actualizada con ejemplos de uso
-- ✅ Control de acceso y validación para todas las nuevas operaciones
-
-### **v2.1.0** (2025-09-26)
-#### 🔧 **Correcciones de Compilación**
-- ✅ Fixed `min redeclared in this block` error
-- ✅ Fixed `undefined: log` imports
-- ✅ Fixed `time.Since` variable shadowing issue
-- ✅ Fixed `mcp.WithInt undefined` → migrated to `mcp.WithNumber`
-- ✅ Fixed `request.GetInt` API → migrated to `mcp.ParseInt`
-- ✅ Fixed `engine.optimizer` private field access → created public wrapper methods
-
-#### 📦 **Actualizaciones de Librerías**
-- ✅ **mcp-go**: v0.33.0 → **v0.40.0** (7 versions ahead)
-- ✅ **fsnotify**: v1.7.0 → **v1.9.0**
-- ✅ **golang.org/x/sync**: v0.11.0 → **v0.17.0**
-- ✅ **Go**: 1.23.0 → **1.24.0**
-
-#### 🧪 **Sistema de Tests Comprehensivo**
-- ✅ **11 tests** implementados y funcionando
-- ✅ Core package: 7 tests (18.4% coverage)
-- ✅ Main package: 4 tests
-- ✅ Tests para todos los métodos wrapper nuevos
-- ✅ Validación de API MCP corregida
-
-#### 🔧 **Nuevos Métodos Wrapper Públicos**
-- ✅ `IntelligentWrite(ctx, path, content)`
-- ✅ `IntelligentRead(ctx, path)`
-- ✅ `IntelligentEdit(ctx, path, oldText, newText)`
-- ✅ `AutoRecoveryEdit(ctx, path, oldText, newText)`
-- ✅ `GetOptimizationSuggestion(ctx, path)`
-- ✅ `GetOptimizationReport()`
-
-### **v2.0.0** (2025-01-27)
-#### 🚀 **Lanzamiento Inicial Ultra-Rápido**
-- ✅ 32 herramientas MCP ultra-optimizadas
-- ✅ Sistema inteligente anti-timeout
-- ✅ Cache inteligente con 98.9% hit rate
-- ✅ Streaming para archivos grandes
-- ✅ 2016.0 ops/sec performance
+MIT
