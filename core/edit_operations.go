@@ -582,6 +582,17 @@ func normalizeLineEndings(s string) string {
 	return s
 }
 
+// trimTrailingSpacesPerLine strips trailing spaces and tabs from each line.
+// Used as a whitespace-tolerant comparison fallback: editors and LLMs often
+// disagree on whether lines should carry trailing whitespace.
+func trimTrailingSpacesPerLine(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " \t")
+	}
+	return strings.Join(lines, "\n")
+}
+
 func getIndentation(line string) string {
 	trimmed := strings.TrimLeft(line, " \t")
 	return line[:len(line)-len(trimmed)]
@@ -965,9 +976,31 @@ func (e *UltraFastEngine) validateEditContext(currentContent, oldText string) (b
 	normalizedContent := normalizeLineEndings(currentContent)
 	normalizedOldText := normalizeLineEndings(oldText)
 
-	// If oldText not found at all, it's definitely invalid
-	if !strings.Contains(normalizedContent, normalizedOldText) {
-		return false, "old_text not found in current file - file has likely changed"
+	// Level 1: exact normalized match (fastest, most common case)
+	exactMatch := strings.Contains(normalizedContent, normalizedOldText)
+
+	if !exactMatch {
+		// Level 2: trailing-whitespace-tolerant match.
+		// Editors and LLMs often disagree on trailing spaces/tabs per line.
+		// If the text matches when trailing whitespace is stripped, the file
+		// has NOT changed — only the whitespace representation differs.
+		// performIntelligentEdit handles the actual replacement via OPTIMIZATION 6.
+		trimmedContent := trimTrailingSpacesPerLine(normalizedContent)
+		trimmedOld := trimTrailingSpacesPerLine(normalizedOldText)
+		if !strings.Contains(trimmedContent, trimmedOld) {
+			// Not found even with whitespace tolerance — file has genuinely changed
+			// or old_text is wrong. Provide actionable diagnostics.
+			lineCount := strings.Count(normalizedOldText, "\n") + 1
+			return false, fmt.Sprintf(
+				"old_text not found in current file (%d line(s)) - "+
+					"file has likely changed or old_text has encoding differences "+
+					"(BOM, non-breaking spaces, Unicode normalization). "+
+					"Re-read with read_file_range to get exact current content",
+				lineCount,
+			)
+		}
+		// Whitespace-tolerant match found — proceed to context check.
+		// performIntelligentEdit will resolve the actual replacement.
 	}
 
 	// Extract a snippet with surrounding context (3-5 lines before and after)

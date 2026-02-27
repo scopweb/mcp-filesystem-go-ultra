@@ -1,5 +1,33 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [3.14.4] - 2026-02-27
+
+### Bug Fixes
+
+#### Bug #14 — `edit_file` rejected valid edits due to trailing whitespace in `validateEditContext`
+
+- **Root cause**: `validateEditContext` acted as a strict gatekeeper using a byte-exact CRLF-normalized `strings.Contains` check. If the file had trailing spaces on any line but Claude's `old_text` did not (or vice versa), the check failed immediately — before `performIntelligentEdit` could attempt its own fallbacks (including OPTIMIZATION 6's flexible regex, which handles exactly this case).
+- **Symptoms**: Claude retried the edit after a forced re-read, which succeeded because it copied exact bytes. First attempt always failed despite the file being unchanged, wasting tokens and a tool call.
+- **Fix**: Added Level 2 check in `validateEditContext`: after the exact normalized check fails, `trimTrailingSpacesPerLine` is applied to both content and `old_text`. If the trimmed comparison matches, validation passes and `performIntelligentEdit`'s fallbacks perform the actual replacement. Added `trimTrailingSpacesPerLine` helper.
+- **Error message improved**: when both levels fail, the message now includes old_text line count and lists actionable root causes (BOM, non-breaking spaces, Unicode normalization).
+- **Files changed**: `core/edit_operations.go`
+
+---
+
+## [3.14.3] - 2026-02-27
+
+### Bug Fixes
+
+#### Bug #13 — `smart_search` / `advanced_text_search` slow on large projects
+
+- **Root cause (1)**: Both walk callbacks called `validatePath` on every file and directory visited. `validatePath` calls `isPathAllowed`, which calls `filepath.EvalSymlinks` — a real I/O syscall per file. On a project with thousands of files this produced thousands of unnecessary syscalls; the root path is already validated before the walk starts.
+- **Root cause (2)**: Neither walk pruned common build-artifact directories. `bin/`, `obj/`, `.vs/`, `packages/`, `node_modules/`, `.git/` and others were traversed in full, each containing hundreds to thousands of files that cannot contain source-code matches.
+- **Root cause (3)**: Common .NET/web extensions (`.aspx`, `.cshtml`, `.razor`, `.resx`, `.csproj`, `.sln`, `.xaml`, `.targets`, `.props`, `.nuspec`, `.ascx`, `.ashx`, `.asmx`, `.asax`, `.vbhtml`) were missing from `textExtensionsMap`. Every file with an unrecognised extension fell through to the binary-detection path, which opens the file and reads 512 bytes — one extra `Open`+`Read` per unknown file.
+- **Fix**: Removed `validatePath` from both walk callbacks (security unchanged — root validated once before walk). Added `searchSkipDirs` map; both walks return `filepath.SkipDir` for any directory in the set. Added 14 ASP.NET/MSBuild extensions to `textExtensionsMap`.
+- **Files changed**: `core/search_operations.go`
+
+---
+
 ## [3.14.2] - 2026-02-26
 
 ### Bug Fixes
