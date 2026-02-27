@@ -225,13 +225,11 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 			return nil // Continue with other files
 		}
 
-		// Validate path
-		if _, err := e.validatePath(currentPath); err != nil {
-			return nil
-		}
-
-		// Skip directories for content search
+		// Prune common large/irrelevant directories to avoid walking thousands of binaries
 		if info.IsDir() {
+			if searchSkipDirs[info.Name()] {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 
@@ -459,12 +457,15 @@ func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSe
 	// First pass: collect all files to search
 	var filesToSearch []string
 	err = filepath.Walk(path, func(currentPath string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		if err != nil {
 			return nil
 		}
 
-		// Validate path
-		if _, err := e.validatePath(currentPath); err != nil {
+		// Prune common large/irrelevant directories
+		if info.IsDir() {
+			if searchSkipDirs[info.Name()] {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 
@@ -570,6 +571,24 @@ func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSe
 	return matches, nil
 }
 
+// searchSkipDirs are directories that should be skipped during search walks.
+// These are typically build artifacts, dependency caches, or VCS internals
+// that contain large numbers of files irrelevant to source-code searches.
+var searchSkipDirs = map[string]bool{
+	// Version control
+	".git": true, ".svn": true, ".hg": true,
+	// JS/Node
+	"node_modules": true, ".next": true, ".nuxt": true, "dist": true,
+	// .NET / Visual Studio
+	"bin": true, "obj": true, ".vs": true, "packages": true, ".nuget": true,
+	// Java / Maven / Gradle
+	"target": true, ".gradle": true,
+	// Python
+	"__pycache__": true, ".venv": true, "venv": true, ".eggs": true,
+	// General build/cache dirs
+	"build": true, ".cache": true, ".tmp": true,
+}
+
 // textExtensionsMap is a pre-computed map for O(1) text extension lookup
 // Initialized once, used by isTextFile for fast extension checking
 var textExtensionsMap = map[string]bool{
@@ -596,6 +615,11 @@ var textExtensionsMap = map[string]bool{
 	".swift": true, ".m": true, ".mm": true,
 	// .NET
 	".cs": true, ".fs": true, ".vb": true,
+	".csproj": true, ".vbproj": true, ".fsproj": true, ".sln": true,
+	".aspx": true, ".ascx": true, ".ashx": true, ".asmx": true, ".asax": true,
+	".cshtml": true, ".vbhtml": true, ".razor": true,
+	".resx": true, ".xaml": true, ".axaml": true,
+	".targets": true, ".props": true, ".nuspec": true,
 	// Web
 	".css": true, ".scss": true, ".sass": true, ".less": true,
 	".html": true, ".htm": true, ".xhtml": true,
