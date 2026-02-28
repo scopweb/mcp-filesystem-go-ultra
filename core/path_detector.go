@@ -231,6 +231,36 @@ func GetWindowsHome() (wslStyle string, windowsStyle string) {
 	return wslStyle, windowsStyle
 }
 
+// wslDistroOnce and wslDistroName cache the default WSL distro name.
+// Populated on first call to getDefaultWSLDistro().
+var (
+	wslDistroOnce sync.Once
+	wslDistroName string
+)
+
+// getDefaultWSLDistro returns the name of the default WSL distro by running
+// "wsl.exe -l --quiet". The result is cached after the first successful call.
+// Returns empty string if WSL is not available or no distros are installed.
+func getDefaultWSLDistro() string {
+	wslDistroOnce.Do(func() {
+		cmd := exec.Command("wsl.exe", "-l", "--quiet")
+		output, err := cmd.Output()
+		if err != nil {
+			return
+		}
+		// wsl.exe outputs UTF-16LE on Windows; strip embedded null bytes
+		cleaned := strings.ReplaceAll(string(output), "\x00", "")
+		for _, line := range strings.Split(cleaned, "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				wslDistroName = line
+				return
+			}
+		}
+	})
+	return wslDistroName
+}
+
 // GetWindowsUserDocuments returns the Windows Documents folder path
 func GetWindowsUserDocuments() (wslStyle string, windowsStyle string) {
 	wslHome, winHome := GetWindowsHome()

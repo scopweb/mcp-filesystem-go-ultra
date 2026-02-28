@@ -130,8 +130,17 @@ func (c *IntelligentCache) SetFile(path string, content []byte) {
 	}
 }
 
-// GetDirectory retrieves a directory listing from cache
-func (c *IntelligentCache) GetDirectory(path string) (string, bool) {
+// dirCacheEntry pairs a directory listing with the directory's mtime at cache time.
+// The mtime is used by callers to detect external modifications (e.g. bash writes).
+type dirCacheEntry struct {
+	Listing string
+	Mtime   time.Time
+}
+
+// GetDirectory retrieves a directory listing from cache.
+// Returns the listing, the directory mtime recorded when the entry was cached,
+// and whether it was a cache hit.
+func (c *IntelligentCache) GetDirectory(path string) (string, time.Time, bool) {
 	c.updateAccessStats()
 
 	if item, found := c.dirCache.Get(path); found {
@@ -139,22 +148,24 @@ func (c *IntelligentCache) GetDirectory(path string) (string, bool) {
 		c.stats.DirHits++
 		c.stats.mu.Unlock()
 
-		// Update access time
-		c.dirCache.Set(path, item, gocache.DefaultExpiration)
+		entry := item.(dirCacheEntry)
+		// Refresh TTL without changing the stored mtime
+		c.dirCache.Set(path, entry, gocache.DefaultExpiration)
 
-		return item.(string), true
+		return entry.Listing, entry.Mtime, true
 	}
 
 	c.stats.mu.Lock()
 	c.stats.DirMisses++
 	c.stats.mu.Unlock()
 
-	return "", false
+	return "", time.Time{}, false
 }
 
-// SetDirectory stores a directory listing in cache
-func (c *IntelligentCache) SetDirectory(path string, listing string) {
-	c.dirCache.Set(path, listing, gocache.DefaultExpiration)
+// SetDirectory stores a directory listing in cache together with the directory's
+// current mtime so that stale entries can be detected on the next read.
+func (c *IntelligentCache) SetDirectory(path string, listing string, mtime time.Time) {
+	c.dirCache.Set(path, dirCacheEntry{Listing: listing, Mtime: mtime}, gocache.DefaultExpiration)
 }
 
 // GetMetadata retrieves metadata from cache
