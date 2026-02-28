@@ -1,5 +1,18 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [3.14.5] - 2026-02-28
+
+### Bug Fixes
+
+#### Bug #15 — `mcp_edit` ignored `force: true`, always blocked high-risk edits
+
+- **Root cause**: `mcp_edit` is an alias for `edit_file` but was missing the `force` parameter entirely. The tool schema did not declare it, so AI clients had no way to pass it. The handler hardcoded `false` as the force argument to `EditFile`, meaning any edit that exceeded the 30% change threshold was permanently blocked regardless of what the caller sent.
+- **Symptoms**: Claude received the "OPERATION BLOCKED" error with the instruction to add `"force": true`, attempted a second call with `force: true`, but the server silently ignored the parameter and returned the same error. The only workaround was to fall back to `mcp_write` (full file rewrite), losing the surgical edit semantics.
+- **Fix**: Added `mcp.WithBoolean("force", ...)` to the `mcp_edit` tool schema and the corresponding `args["force"].(bool)` extraction in the handler, matching the pattern already used by `edit_file`, `intelligent_edit`, and `auto_recovery_edit`. Security unchanged — the 30%/50%/90% risk thresholds remain active by default; `force: true` must be explicitly passed to override.
+- **Files changed**: `main.go`
+
+---
+
 ## [3.14.4] - 2026-02-27
 
 ### Bug Fixes
