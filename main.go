@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -92,7 +93,7 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("MCP Filesystem Server Ultra-Fast v3.13.2\n")
+		fmt.Printf("MCP Filesystem Server Ultra-Fast v3.14.0\n")
 		fmt.Printf("Protocol: MCP 2025-11-25\n")
 		fmt.Printf("Build: %s\n", time.Now().Format("2006-01-02"))
 		fmt.Printf("Go: %s\n", runtime.Version())
@@ -325,6 +326,59 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultText(fmt.Sprintf("OK: %s written", formatSize(int64(len(content))))), nil
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Successfully created %d bytes in %s", len(content), path)), nil
+	})
+
+	// Write base64 tool - for binary files from container/sandbox environments
+	writeBase64Tool := mcp.NewTool("write_base64",
+		mcp.WithDescription("Write binary file from base64 content. Use this to copy files from Linux container to Windows: first base64-encode the file in the container, then pass the encoded content here."),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Destination path (Windows format, e.g., C:\\Users\\...)")),
+		mcp.WithString("content_base64", mcp.Required(), mcp.Description("File content encoded in base64")),
+	)
+	s.AddTool(writeBase64Tool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+
+		contentBase64, err := request.RequireString("content_base64")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid content_base64: %v", err)), nil
+		}
+
+		// Validate base64 before passing to engine (fast fail)
+		if _, decodeErr := base64.StdEncoding.DecodeString(contentBase64); decodeErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid base64: %v", decodeErr)), nil
+		}
+
+		bytesWritten, err := engine.WriteBase64(ctx, path, contentBase64)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+		if engine.IsCompactMode() {
+			return mcp.NewToolResultText(fmt.Sprintf("OK: %s written", formatSize(int64(bytesWritten)))), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Successfully wrote %d bytes (from base64) to %s", bytesWritten, path)), nil
+	})
+
+	// Read base64 tool - for binary files to container/sandbox environments
+	readBase64Tool := mcp.NewTool("read_base64",
+		mcp.WithDescription("Read file as base64. Use this to copy binary files from Windows to Linux container: read the file as base64, then decode it in the container."),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to read (Windows format)")),
+	)
+	s.AddTool(readBase64Tool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+
+		encoded, originalSize, err := engine.ReadBase64(ctx, path)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+		if engine.IsCompactMode() {
+			return mcp.NewToolResultText(encoded), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("# File: %s (%d bytes)\n# Base64 encoded:\n%s", path, originalSize, encoded)), nil
 	})
 
 	// List directory tool
@@ -1713,6 +1767,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file (WSL or Windows format)")),
 		mcp.WithString("old_text", mcp.Required(), mcp.Description("Text to be replaced")),
 		mcp.WithString("new_text", mcp.Required(), mcp.Description("New text to replace with")),
+		mcp.WithBoolean("force", mcp.Description("Force operation even if HIGH/CRITICAL risk (default: false)")),
 	)
 	s.AddTool(mcpEditTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -1727,7 +1782,14 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid new_text: %v", err)), nil
 		}
-		result, err := engine.EditFile(path, oldText, newText, false)
+		args := request.GetArguments()
+		force := false
+		if args != nil {
+			if f, ok := args["force"].(bool); ok {
+				force = f
+			}
+		}
+		result, err := engine.EditFile(path, oldText, newText, force)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
@@ -2769,7 +2831,195 @@ func registerLargeFileTools(s *server.MCPServer, engine *core.UltraFastEngine) e
 		return mcp.NewToolResultText(output.String()), nil
 	})
 
+	// 56. execute_pipeline - Execute multi-step file transformation pipeline
+	pipelineTool := mcp.NewTool("execute_pipeline",
+		mcp.WithDescription("Execute multi-step file transformation pipeline. "+
+			"Supports: search, read_ranges, edit, multi_edit, count_occurrences, "+
+			"regex_transform, copy, rename, delete. Reduces token usage 4x by combining multiple operations. "+
+			"Use verbose:true to return intermediate data (file contents, per-file counts). "+
+			"Example: {\"name\":\"refactor\",\"steps\":[{\"id\":\"find\",\"action\":\"search\",\"params\":{\"pattern\":\"old\"}},"+
+			"{\"id\":\"edit\",\"action\":\"edit\",\"input_from\":\"find\",\"params\":{\"old_text\":\"old\",\"new_text\":\"new\"}}]}"),
+		mcp.WithString("pipeline_json", mcp.Required(),
+			mcp.Description("JSON-encoded pipeline definition with name, steps, and optional flags (dry_run, force, stop_on_error, create_backup, verbose)")),
+	)
+	s.AddTool(pipelineTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Extract pipeline_json parameter
+		pipelineJSON, err := request.RequireString("pipeline_json")
+		if err != nil {
+			return mcp.NewToolResultError("pipeline_json parameter is required"), nil
+		}
+
+		// Parse JSON into PipelineRequest
+		var pipelineReq core.PipelineRequest
+		if err := json.Unmarshal([]byte(pipelineJSON), &pipelineReq); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid pipeline JSON: %v", err)), nil
+		}
+
+		// Execute pipeline
+		executor := core.NewPipelineExecutor(engine)
+		result, err := executor.Execute(ctx, pipelineReq)
+		if err != nil && result == nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Pipeline execution failed: %v", err)), nil
+		}
+
+		// Format response
+		responseText := formatPipelineResult(result, engine.IsCompactMode())
+
+		// Return error if pipeline failed
+		if !result.Success {
+			return mcp.NewToolResultError(responseText), nil
+		}
+
+		return mcp.NewToolResultText(responseText), nil
+	})
+
 	return nil
+}
+
+// formatPipelineResult formats pipeline execution results for display
+func formatPipelineResult(result *core.PipelineResult, compact bool) string {
+	if result == nil {
+		return "ERROR: No result returned"
+	}
+
+	if compact && !result.Verbose {
+		// Compact mode: one-line summary
+		status := "OK"
+		if !result.Success {
+			status = "FAIL"
+		}
+		riskInfo := ""
+		if result.OverallRiskLevel != "" && result.OverallRiskLevel != "LOW" {
+			riskInfo = fmt.Sprintf(" | %s risk", strings.ToLower(result.OverallRiskLevel))
+		}
+		return fmt.Sprintf("%s: %d/%d steps | %d files | %d edits%s",
+			status, result.CompletedSteps, result.TotalSteps,
+			len(result.FilesAffected), result.TotalEdits, riskInfo)
+	}
+
+	// Verbose mode: detailed output
+	var output strings.Builder
+
+	if result.DryRun {
+		output.WriteString("🔍 DRY RUN - No changes made\n")
+	}
+
+	output.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	output.WriteString(fmt.Sprintf("📋 Pipeline: %s\n", result.Name))
+
+	if result.Success {
+		output.WriteString("✅ Success: true\n")
+	} else {
+		output.WriteString("❌ Success: false\n")
+	}
+
+	output.WriteString(fmt.Sprintf("📊 Steps: %d/%d completed\n", result.CompletedSteps, result.TotalSteps))
+	output.WriteString(fmt.Sprintf("⏱️  Duration: %v\n", result.TotalDuration))
+
+	if result.BackupID != "" {
+		output.WriteString(fmt.Sprintf("💾 Backup: %s\n", result.BackupID))
+	}
+
+	if result.RollbackPerformed {
+		output.WriteString("🔄 Rollback: performed\n")
+	}
+
+	output.WriteString("\n📝 Step Results:\n\n")
+
+	for i, stepResult := range result.Results {
+		stepNum := i + 1
+		status := "✅"
+		if !stepResult.Success {
+			status = "❌"
+		}
+
+		output.WriteString(fmt.Sprintf("%d. %s [%s] %s\n",
+			stepNum, stepResult.StepID, stepResult.Action, status))
+		output.WriteString(fmt.Sprintf("   Duration: %v\n", stepResult.Duration))
+
+		if len(stepResult.FilesMatched) > 0 {
+			output.WriteString(fmt.Sprintf("   Files: %d matched\n", len(stepResult.FilesMatched)))
+			if len(stepResult.FilesMatched) <= 5 {
+				for _, f := range stepResult.FilesMatched {
+					output.WriteString(fmt.Sprintf("     - %s\n", f))
+				}
+			} else {
+				for j := 0; j < 3; j++ {
+					output.WriteString(fmt.Sprintf("     - %s\n", stepResult.FilesMatched[j]))
+				}
+				output.WriteString(fmt.Sprintf("     ... and %d more\n", len(stepResult.FilesMatched)-3))
+			}
+		}
+
+		if stepResult.EditsApplied > 0 {
+			output.WriteString(fmt.Sprintf("   Edits: %d replacements\n", stepResult.EditsApplied))
+		}
+
+		if len(stepResult.Counts) > 0 {
+			totalCount := 0
+			for _, count := range stepResult.Counts {
+				totalCount += count
+			}
+			output.WriteString(fmt.Sprintf("   Counts: %d total occurrences\n", totalCount))
+
+			// Verbose: per-file counts
+			if result.Verbose {
+				for file, count := range stepResult.Counts {
+					output.WriteString(fmt.Sprintf("     %s: %d\n", file, count))
+				}
+			}
+		}
+
+		// Verbose: include file contents from read_ranges
+		if result.Verbose && len(stepResult.Content) > 0 {
+			for file, content := range stepResult.Content {
+				output.WriteString(fmt.Sprintf("   --- %s ---\n", file))
+				// Truncate content to avoid massive output
+				lines := strings.Split(content, "\n")
+				if len(lines) > 50 {
+					for _, line := range lines[:25] {
+						output.WriteString(fmt.Sprintf("   %s\n", line))
+					}
+					output.WriteString(fmt.Sprintf("   ... (%d lines omitted) ...\n", len(lines)-50))
+					for _, line := range lines[len(lines)-25:] {
+						output.WriteString(fmt.Sprintf("   %s\n", line))
+					}
+				} else {
+					for _, line := range lines {
+						output.WriteString(fmt.Sprintf("   %s\n", line))
+					}
+				}
+			}
+		}
+
+		// Verbose: full file list when more than 5
+		if result.Verbose && len(stepResult.FilesMatched) > 5 {
+			output.WriteString("   All files:\n")
+			for _, f := range stepResult.FilesMatched {
+				output.WriteString(fmt.Sprintf("     - %s\n", f))
+			}
+		}
+
+		if stepResult.RiskLevel != "" && stepResult.RiskLevel != "LOW" {
+			output.WriteString(fmt.Sprintf("   ⚠️  Risk: %s\n", stepResult.RiskLevel))
+		}
+
+		if stepResult.Error != "" {
+			output.WriteString(fmt.Sprintf("   ❌ Error: %s\n", stepResult.Error))
+		}
+
+		output.WriteString("\n")
+	}
+
+	output.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	output.WriteString(fmt.Sprintf("📁 Files affected: %d\n", len(result.FilesAffected)))
+	output.WriteString(fmt.Sprintf("✏️  Total edits: %d\n", result.TotalEdits))
+
+	if result.OverallRiskLevel != "" {
+		output.WriteString(fmt.Sprintf("⚠️  Overall risk: %s\n", result.OverallRiskLevel))
+	}
+
+	return output.String()
 }
 
 // truncateContent truncates content based on mode and max lines
