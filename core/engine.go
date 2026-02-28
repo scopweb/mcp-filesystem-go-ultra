@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -557,6 +558,150 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 	return nil
 }
 
+// WriteFileBytes writes raw bytes to a file atomically.
+// This is useful for binary files where content comes from base64 decoding.
+// The path is normalized for WSL/Windows compatibility.
+func (e *UltraFastEngine) WriteFileBytes(ctx context.Context, path string, data []byte) error {
+	// Check context before starting
+	if err := ctx.Err(); err != nil {
+		return &ContextError{Op: "write_bytes", Details: "operation cancelled before start"}
+	}
+
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
+
+	// Acquire semaphore
+	if err := e.acquireOperation(ctx, "write"); err != nil {
+		return err
+	}
+
+	start := time.Now()
+	defer e.releaseOperation("write", start)
+
+	// Check if path is allowed
+	if len(e.config.AllowedPaths) > 0 {
+		if !e.isPathAllowed(path) {
+			return &PathError{Op: "write_bytes", Path: path, Err: fmt.Errorf("access denied")}
+		}
+	}
+
+	// Check context before proceeding with write
+	if err := ctx.Err(); err != nil {
+		return &ContextError{Op: "write_bytes", Details: "operation cancelled before write"}
+	}
+
+	// Ensure directory exists
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Atomic write using temp file with secure random name
+	tmpPath := path + ".tmp." + secureRandomSuffix()
+
+	// Preserve original file permissions if file exists, otherwise use 0644
+	fileMode := os.FileMode(0644)
+	if info, err := os.Stat(path); err == nil {
+		fileMode = info.Mode()
+	}
+
+	// Write to temporary file
+	if err := os.WriteFile(tmpPath, data, fileMode); err != nil {
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+
+	// Atomic rename
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath) // Clean up temp file
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+
+	// Invalidate cache
+	e.cache.InvalidateFile(path)
+
+	// Auto-sync to Windows if enabled (async, non-blocking)
+	if e.autoSyncManager != nil {
+		_ = e.autoSyncManager.AfterWrite(path)
+	}
+
+	return nil
+}
+
+// ReadFileBytes reads a file and returns its raw bytes.
+// This is useful for binary files that need to be base64 encoded.
+// The path is normalized for WSL/Windows compatibility.
+func (e *UltraFastEngine) ReadFileBytes(ctx context.Context, path string) ([]byte, error) {
+	// Check context before starting
+	if err := ctx.Err(); err != nil {
+		return nil, &ContextError{Op: "read_bytes", Details: "operation cancelled before start"}
+	}
+
+	// Normalize path (handles WSL ↔ Windows conversion)
+	path = NormalizePath(path)
+
+	// Acquire semaphore
+	if err := e.acquireOperation(ctx, "read"); err != nil {
+		return nil, err
+	}
+
+	start := time.Now()
+	defer e.releaseOperation("read", start)
+
+	// Check if path is allowed
+	if len(e.config.AllowedPaths) > 0 {
+		if !e.isPathAllowed(path) {
+			return nil, &PathError{Op: "read_bytes", Path: path, Err: fmt.Errorf("access denied")}
+		}
+	}
+
+	// Check file info
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, &PathError{Op: "read_bytes", Path: path, Err: err}
+	}
+
+	if info.IsDir() {
+		return nil, &ValidationError{Field: "path", Value: path, Message: "path is a directory, not a file"}
+	}
+
+	// Read file bytes
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, &PathError{Op: "read_bytes", Path: path, Err: err}
+	}
+
+	return data, nil
+}
+
+// WriteBase64 decodes base64 content and writes it to a file atomically.
+// This enables copying binary files from environments where only text transfer is possible.
+func (e *UltraFastEngine) WriteBase64(ctx context.Context, path, contentBase64 string) (int, error) {
+	// Decode base64
+	data, err := base64.StdEncoding.DecodeString(contentBase64)
+	if err != nil {
+		return 0, &ValidationError{Field: "content_base64", Value: "(invalid)", Message: fmt.Sprintf("invalid base64: %v", err)}
+	}
+
+	// Write the decoded bytes
+	if err := e.WriteFileBytes(ctx, path, data); err != nil {
+		return 0, err
+	}
+
+	return len(data), nil
+}
+
+// ReadBase64 reads a file and returns its content as base64.
+// This enables reading binary files in environments where only text transfer is possible.
+func (e *UltraFastEngine) ReadBase64(ctx context.Context, path string) (string, int64, error) {
+	data, err := e.ReadFileBytes(ctx, path)
+	if err != nil {
+		return "", 0, err
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(data)
+	return encoded, int64(len(data)), nil
+}
+
 // ListDirectoryContent implements intelligent directory listing with caching
 func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string) (string, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
@@ -577,15 +722,29 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 		}
 	}
 
-	// Try cache first
-	if cached, hit := e.cache.GetDirectory(path); hit {
-		if e.config.DebugMode {
-			slog.Debug("Directory cache hit", "path", path)
+	// Stat the directory once; used both for existence check and mtime validation.
+	dirInfo, statErr := os.Stat(path)
+
+	// Try cache first, but validate against directory mtime to detect external writes
+	// (e.g. files copied by bash/cp outside the MCP server's control).
+	if cached, cachedMtime, hit := e.cache.GetDirectory(path); hit {
+		if statErr == nil && !dirInfo.ModTime().After(cachedMtime) {
+			if e.config.DebugMode {
+				slog.Debug("Directory cache hit", "path", path)
+			}
+			return cached, nil
 		}
-		return cached, nil
+		// Directory was modified externally since the cache was populated.
+		if e.config.DebugMode {
+			slog.Debug("Directory cache invalidated (external write detected)", "path", path)
+		}
+		e.cache.InvalidateDirectory(path)
 	}
 
 	// Read directory
+	if statErr != nil {
+		return "", fmt.Errorf("failed to read directory: %w", statErr)
+	}
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to read directory: %w", err)
@@ -648,8 +807,9 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 
 	responseText := result.String()
 
-	// Cache the result
-	e.cache.SetDirectory(path, responseText)
+	// Cache the result together with the directory's current mtime so future
+	// reads can detect external modifications.
+	e.cache.SetDirectory(path, responseText, dirInfo.ModTime())
 
 	return responseText, nil
 }
@@ -821,6 +981,19 @@ func NormalizePath(path string) string {
 		}
 		// If running on Windows, normalize separators
 		return filepath.Clean(path)
+	}
+
+	// Handle pure Linux/WSL paths (e.g. /tmp/..., /home/...) when running on Windows.
+	// filepath.Clean() would corrupt them to \tmp\... which is not a valid Windows path.
+	// Convert to a UNC path \\wsl.localhost\<distro>\<path> so the file is accessible.
+	if os.PathSeparator == '\\' && len(path) > 0 && path[0] == '/' {
+		if distro := getDefaultWSLDistro(); distro != "" {
+			// filepath.FromSlash turns /tmp/foo into \tmp\foo; prepend the UNC prefix.
+			return `\\wsl.localhost\` + distro + filepath.FromSlash(path)
+		}
+		// WSL not available: return unchanged so error messages stay meaningful
+		// (e.g. "source does not exist: /tmp/..." instead of "\tmp\...").
+		return path
 	}
 
 	// For relative paths or already-normalized paths, just clean
@@ -1064,4 +1237,11 @@ func (e *UltraFastEngine) GetAutoSyncStatus() map[string]interface{} {
 // GetBackupManager returns the backup manager instance
 func (e *UltraFastEngine) GetBackupManager() *BackupManager {
 	return e.backupManager
+}
+
+// ExecutePipeline executes a multi-step file transformation pipeline
+// This is a convenience wrapper around PipelineExecutor
+func (e *UltraFastEngine) ExecutePipeline(ctx context.Context, request PipelineRequest) (*PipelineResult, error) {
+	executor := NewPipelineExecutor(e)
+	return executor.Execute(ctx, request)
 }

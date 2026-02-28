@@ -628,3 +628,316 @@ func TestAdvancedTextSearchWithContext(t *testing.T) {
 		}
 	})
 }
+
+// TestAdvancedTextSearchCompactModeContext tests that include_context works in compact mode
+func TestAdvancedTextSearchCompactModeContext(t *testing.T) {
+	testDir := t.TempDir()
+
+	testFile := filepath.Join(testDir, "test.txt")
+	content := "line 1\nline 2\nMATCH HERE\nline 4\nline 5\n"
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Create engine with CompactMode enabled (like Claude Desktop)
+	cacheInstance, err := cache.NewIntelligentCache(1024 * 1024)
+	if err != nil {
+		t.Fatalf("Failed to create cache: %v", err)
+	}
+	cfg := &core.Config{
+		Cache:            cacheInstance,
+		ParallelOps:      2,
+		DebugMode:        false,
+		CompactMode:      true,
+		MaxSearchResults: 100,
+	}
+	engine, err := core.NewUltraFastEngine(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create engine: %v", err)
+	}
+	ctx := context.Background()
+
+	t.Run("CompactMode without context", func(t *testing.T) {
+		req := localmcp.CallToolRequest{
+			Arguments: map[string]interface{}{
+				"path":            testDir,
+				"pattern":         "MATCH",
+				"include_context": false,
+			},
+		}
+
+		resp, err := engine.AdvancedTextSearch(ctx, req)
+		if err != nil {
+			t.Fatalf("AdvancedTextSearch failed: %v", err)
+		}
+
+		result := resp.Content[0].Text
+		// Should NOT contain context lines
+		if strings.Contains(result, "line 2") || strings.Contains(result, "line 4") {
+			t.Errorf("Compact mode without context should not include context lines, got: %s", result)
+		}
+	})
+
+	t.Run("CompactMode with context", func(t *testing.T) {
+		req := localmcp.CallToolRequest{
+			Arguments: map[string]interface{}{
+				"path":            testDir,
+				"pattern":         "MATCH",
+				"include_context": true,
+				"context_lines":   2,
+			},
+		}
+
+		resp, err := engine.AdvancedTextSearch(ctx, req)
+		if err != nil {
+			t.Fatalf("AdvancedTextSearch failed: %v", err)
+		}
+
+		result := resp.Content[0].Text
+		// Should contain the matched line content
+		if !strings.Contains(result, "MATCH HERE") {
+			t.Errorf("Compact mode with context should include the matched line, got: %s", result)
+		}
+		// Should contain context lines
+		if !strings.Contains(result, "line 2") || !strings.Contains(result, "line 4") {
+			t.Errorf("Compact mode with context should include context lines 2 and 4, got: %s", result)
+		}
+	})
+}
+
+// --- Base64 Read/Write Tests (Bug 11 fix) ---
+
+// TestWriteBase64 tests writing binary content from base64 encoding
+func TestWriteBase64(t *testing.T) {
+	tempDir := t.TempDir()
+
+	cacheInstance, err := cache.NewIntelligentCache(1024 * 1024)
+	if err != nil {
+		t.Fatalf("Failed to create cache: %v", err)
+	}
+
+	cfg := &core.Config{
+		Cache:        cacheInstance,
+		AllowedPaths: []string{tempDir},
+		ParallelOps:  2,
+	}
+
+	engine, err := core.NewUltraFastEngine(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create engine: %v", err)
+	}
+
+	ctx := context.Background()
+
+	t.Run("Write text file from base64", func(t *testing.T) {
+		testPath := filepath.Join(tempDir, "test_text.txt")
+		// "Hello, World!" in base64
+		contentBase64 := "SGVsbG8sIFdvcmxkIQ=="
+
+		bytesWritten, err := engine.WriteBase64(ctx, testPath, contentBase64)
+		if err != nil {
+			t.Fatalf("WriteBase64 failed: %v", err)
+		}
+
+		if bytesWritten != 13 { // "Hello, World!" is 13 bytes
+			t.Errorf("Expected 13 bytes written, got %d", bytesWritten)
+		}
+
+		// Verify content
+		content, err := os.ReadFile(testPath)
+		if err != nil {
+			t.Fatalf("Failed to read file: %v", err)
+		}
+
+		if string(content) != "Hello, World!" {
+			t.Errorf("Expected 'Hello, World!', got '%s'", string(content))
+		}
+	})
+
+	t.Run("Write binary file from base64", func(t *testing.T) {
+		testPath := filepath.Join(tempDir, "test_binary.bin")
+		// Binary data: [0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD]
+		contentBase64 := "AAEC//79"
+
+		bytesWritten, err := engine.WriteBase64(ctx, testPath, contentBase64)
+		if err != nil {
+			t.Fatalf("WriteBase64 failed: %v", err)
+		}
+
+		if bytesWritten != 6 {
+			t.Errorf("Expected 6 bytes written, got %d", bytesWritten)
+		}
+
+		// Verify content
+		content, err := os.ReadFile(testPath)
+		if err != nil {
+			t.Fatalf("Failed to read file: %v", err)
+		}
+
+		expected := []byte{0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD}
+		if len(content) != len(expected) {
+			t.Errorf("Expected %d bytes, got %d", len(expected), len(content))
+		}
+		for i, b := range content {
+			if b != expected[i] {
+				t.Errorf("Byte %d: expected 0x%02X, got 0x%02X", i, expected[i], b)
+			}
+		}
+	})
+
+	t.Run("Invalid base64 should fail", func(t *testing.T) {
+		testPath := filepath.Join(tempDir, "test_invalid.txt")
+		invalidBase64 := "This is not valid base64!!!"
+
+		_, err := engine.WriteBase64(ctx, testPath, invalidBase64)
+		if err == nil {
+			t.Error("Expected error for invalid base64, got nil")
+		}
+	})
+
+	t.Run("Auto-create directory", func(t *testing.T) {
+		testPath := filepath.Join(tempDir, "subdir", "nested", "file.txt")
+		contentBase64 := "dGVzdA==" // "test"
+
+		_, err := engine.WriteBase64(ctx, testPath, contentBase64)
+		if err != nil {
+			t.Fatalf("WriteBase64 failed to create directories: %v", err)
+		}
+
+		// Verify file exists
+		if _, err := os.Stat(testPath); os.IsNotExist(err) {
+			t.Error("File should exist after write")
+		}
+	})
+}
+
+// TestReadBase64 tests reading files as base64 encoding
+func TestReadBase64(t *testing.T) {
+	tempDir := t.TempDir()
+
+	cacheInstance, err := cache.NewIntelligentCache(1024 * 1024)
+	if err != nil {
+		t.Fatalf("Failed to create cache: %v", err)
+	}
+
+	cfg := &core.Config{
+		Cache:        cacheInstance,
+		AllowedPaths: []string{tempDir},
+		ParallelOps:  2,
+	}
+
+	engine, err := core.NewUltraFastEngine(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create engine: %v", err)
+	}
+
+	ctx := context.Background()
+
+	t.Run("Read text file as base64", func(t *testing.T) {
+		testPath := filepath.Join(tempDir, "test_read.txt")
+		content := "Hello, World!"
+		err := os.WriteFile(testPath, []byte(content), 0644)
+		if err != nil {
+			t.Fatalf("Failed to create test file: %v", err)
+		}
+
+		encoded, size, err := engine.ReadBase64(ctx, testPath)
+		if err != nil {
+			t.Fatalf("ReadBase64 failed: %v", err)
+		}
+
+		if size != 13 {
+			t.Errorf("Expected size 13, got %d", size)
+		}
+
+		// "Hello, World!" in base64
+		expectedBase64 := "SGVsbG8sIFdvcmxkIQ=="
+		if encoded != expectedBase64 {
+			t.Errorf("Expected '%s', got '%s'", expectedBase64, encoded)
+		}
+	})
+
+	t.Run("Read binary file as base64", func(t *testing.T) {
+		testPath := filepath.Join(tempDir, "test_binary_read.bin")
+		content := []byte{0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD}
+		err := os.WriteFile(testPath, content, 0644)
+		if err != nil {
+			t.Fatalf("Failed to create test file: %v", err)
+		}
+
+		encoded, size, err := engine.ReadBase64(ctx, testPath)
+		if err != nil {
+			t.Fatalf("ReadBase64 failed: %v", err)
+		}
+
+		if size != 6 {
+			t.Errorf("Expected size 6, got %d", size)
+		}
+
+		expectedBase64 := "AAEC//79"
+		if encoded != expectedBase64 {
+			t.Errorf("Expected '%s', got '%s'", expectedBase64, encoded)
+		}
+	})
+
+	t.Run("Read nonexistent file should fail", func(t *testing.T) {
+		testPath := filepath.Join(tempDir, "nonexistent.txt")
+
+		_, _, err := engine.ReadBase64(ctx, testPath)
+		if err == nil {
+			t.Error("Expected error for nonexistent file, got nil")
+		}
+	})
+
+	t.Run("Read directory should fail", func(t *testing.T) {
+		_, _, err := engine.ReadBase64(ctx, tempDir)
+		if err == nil {
+			t.Error("Expected error when trying to read directory, got nil")
+		}
+	})
+}
+
+// TestBase64RoundTrip tests writing and reading back via base64
+func TestBase64RoundTrip(t *testing.T) {
+	tempDir := t.TempDir()
+
+	cacheInstance, err := cache.NewIntelligentCache(1024 * 1024)
+	if err != nil {
+		t.Fatalf("Failed to create cache: %v", err)
+	}
+
+	cfg := &core.Config{
+		Cache:        cacheInstance,
+		AllowedPaths: []string{tempDir},
+		ParallelOps:  2,
+	}
+
+	engine, err := core.NewUltraFastEngine(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create engine: %v", err)
+	}
+
+	ctx := context.Background()
+
+	t.Run("Write then read binary data", func(t *testing.T) {
+		testPath := filepath.Join(tempDir, "roundtrip.bin")
+		// Some complex binary data
+		originalBase64 := "AAEC//79/P38+vr5+Pj4"
+
+		// Write
+		_, err := engine.WriteBase64(ctx, testPath, originalBase64)
+		if err != nil {
+			t.Fatalf("WriteBase64 failed: %v", err)
+		}
+
+		// Read back
+		readBase64, _, err := engine.ReadBase64(ctx, testPath)
+		if err != nil {
+			t.Fatalf("ReadBase64 failed: %v", err)
+		}
+
+		if readBase64 != originalBase64 {
+			t.Errorf("Round-trip failed: wrote '%s', read '%s'", originalBase64, readBase64)
+		}
+	})
+}

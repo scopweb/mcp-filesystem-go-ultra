@@ -41,4 +41,18 @@ const (
 
 	// Regex cache limits
 	MaxRegexPatterns = 100 // Maximum compiled patterns to keep in cache
+
+	// Pipeline execution limits
+	MaxPipelineSteps = 20  // Maximum number of steps per pipeline
+	MaxPipelineFiles = 100 // Maximum number of files affected by a pipeline
+
+	// Pipeline risk assessment thresholds (based on number of files)
+	PipelineRiskMedium   = 30  // 30+ files = MEDIUM risk
+	PipelineRiskHigh     = 50  // 50+ files = HIGH risk
+	PipelineRiskCritical = 80  // 80+ files = CRITICAL risk
+
+	// Pipeline edit thresholds (based on number of edits)
+	PipelineEditsMedium   = 100  // 100+ edits = MEDIUM risk
+	PipelineEditsHigh     = 500  // 500+ edits = HIGH risk
+	PipelineEditsCritical = 1000 // 1000+ edits = CRITICAL risk
 )
