@@ -27,8 +27,8 @@ type RiskThresholds struct {
 // DefaultRiskThresholds retorna los umbrales por defecto
 func DefaultRiskThresholds() RiskThresholds {
 	return RiskThresholds{
-		MediumPercentage:  30.0,
-		HighPercentage:    50.0,
+		MediumPercentage:  20.0,
+		HighPercentage:    75.0,
 		MediumOccurrences: 50,
 		HighOccurrences:   100,
 	}
@@ -217,20 +217,9 @@ func (ci *ChangeImpact) FormatRiskWarning() string {
 	}
 
 	warning.WriteString("Recommended Actions:\n")
-
-	if ci.RiskLevel == "critical" {
-		warning.WriteString("  1. ⚠️  Use 'analyze_edit' first to see full preview\n")
-		warning.WriteString("  2. ⚠️  Verify the change is intentional\n")
-		warning.WriteString("  3. ⚠️  Add 'force: true' to confirm if certain\n")
-	} else if ci.RiskLevel == "high" {
-		warning.WriteString("  1. Use 'analyze_edit' to preview changes\n")
-		warning.WriteString("  2. Add 'force: true' to proceed\n")
-	} else {
-		warning.WriteString("  1. Review the change carefully\n")
-		warning.WriteString("  2. Add 'force: true' to proceed\n")
-		warning.WriteString("  3. Or use 'analyze_edit' for preview\n")
-	}
-
+	warning.WriteString("  1. Use 'analyze_edit' first to see full preview\n")
+	warning.WriteString("  2. Verify the change is intentional\n")
+	warning.WriteString("  3. Add 'force: true' to confirm if certain\n")
 	warning.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 
 	return warning.String()
@@ -280,29 +269,52 @@ func (bci *BatchChangeImpact) FormatBatchRiskWarning() string {
 	return warning.String()
 }
 
-// ShouldBlockOperation determina si una operación debe ser bloqueada
+// ShouldBlockOperation determina si una operación debe ser bloqueada.
+// Only CRITICAL risk (>=90% file rewrite) blocks the operation.
+// MEDIUM and HIGH risk auto-proceed with backup + warning (Bug #16).
 func (ci *ChangeImpact) ShouldBlockOperation(force bool) bool {
-	if !ci.IsRisky {
-		return false
-	}
-
 	if force {
 		return false
 	}
+	return ci.RiskLevel == "critical"
+}
 
-	// Bloquear si es high o critical sin force
-	return ci.RiskLevel == "high" || ci.RiskLevel == "critical"
+// FormatRiskNotice generates a non-blocking warning appended to success responses.
+// Used for MEDIUM and HIGH risk operations that auto-proceed with backup (Bug #16).
+func (ci *ChangeImpact) FormatRiskNotice(backupID string) string {
+	if !ci.IsRisky || ci.RiskLevel == "low" {
+		return ""
+	}
+
+	var notice strings.Builder
+
+	if ci.RiskLevel == "high" {
+		notice.WriteString(fmt.Sprintf("\n⚠️  RISK WARNING [%s]\n", strings.ToUpper(ci.RiskLevel)))
+	} else {
+		notice.WriteString(fmt.Sprintf("\n⚠️  Risk notice [%s]\n", ci.RiskLevel))
+	}
+	notice.WriteString(fmt.Sprintf("  %.1f%% of file changed (%d occurrence(s), ~%d chars)\n",
+		ci.ChangePercentage, ci.Occurrences, ci.CharactersChanged))
+	if backupID != "" {
+		notice.WriteString(fmt.Sprintf("  Auto-backup: %s\n", backupID))
+		notice.WriteString("  Restore with: restore_backup(backup_id)\n")
+	}
+	for _, factor := range ci.RiskFactors {
+		notice.WriteString(fmt.Sprintf("  %s\n", factor))
+	}
+
+	return notice.String()
 }
 
 // GetRecommendation retorna una recomendación basada en el riesgo
 func (ci *ChangeImpact) GetRecommendation() string {
 	switch ci.RiskLevel {
 	case "critical":
-		return "CRITICAL risk detected. Use analyze_edit first, then add force: true to confirm."
+		return "CRITICAL risk detected. Operation blocked. Use analyze_edit first, then add force: true to confirm."
 	case "high":
-		return "HIGH risk detected. Preview with analyze_edit or add force: true to proceed."
+		return "HIGH risk - auto-backup created. Review changes and use restore_backup if needed."
 	case "medium":
-		return "MEDIUM risk detected. Consider using analyze_edit or add force: true."
+		return "MEDIUM risk - auto-backup created. Use restore_backup if needed."
 	default:
 		return "Low risk operation."
 	}

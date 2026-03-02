@@ -85,15 +85,15 @@ func main() {
 		backupMaxCount = flag.Int("backup-max-count", 100, "Max number of backups to keep")
 
 		// Risk thresholds
-		riskThresholdMedium   = flag.Float64("risk-threshold-medium", 30.0, "Percentage change threshold for medium risk")
-		riskThresholdHigh     = flag.Float64("risk-threshold-high", 50.0, "Percentage change threshold for high risk")
+		riskThresholdMedium   = flag.Float64("risk-threshold-medium", 20.0, "Percentage change threshold for medium risk")
+		riskThresholdHigh     = flag.Float64("risk-threshold-high", 75.0, "Percentage change threshold for high risk")
 		riskOccurrencesMedium = flag.Int("risk-occurrences-medium", 50, "Number of occurrences threshold for medium risk")
 		riskOccurrencesHigh   = flag.Int("risk-occurrences-high", 100, "Number of occurrences threshold for high risk")
 	)
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("MCP Filesystem Server Ultra-Fast v3.14.0\n")
+		fmt.Printf("MCP Filesystem Server Ultra-Fast v3.15.0\n")
 		fmt.Printf("Protocol: MCP 2025-11-25\n")
 		fmt.Printf("Build: %s\n", time.Now().Format("2006-01-02"))
 		fmt.Printf("Go: %s\n", runtime.Version())
@@ -401,11 +401,11 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Edit file tool
 	editTool := mcp.NewTool("edit_file",
-		mcp.WithDescription("Edit file (smart, backup, risk validation)"),
+		mcp.WithDescription("Edit file (smart, auto-backup, risk validation). Only blocks CRITICAL risk (>=90% change). MEDIUM/HIGH auto-proceed with backup + warning."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
 		mcp.WithString("old_text", mcp.Required(), mcp.Description("Text to be replaced")),
 		mcp.WithString("new_text", mcp.Required(), mcp.Description("New text to replace with")),
-		mcp.WithBoolean("force", mcp.Description("Force operation even if HIGH/CRITICAL risk (default: false)")),
+		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 	)
 	s.AddTool(editTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -437,10 +437,24 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		}
 
 		if engine.IsCompactMode() {
-			return mcp.NewToolResultText(fmt.Sprintf("OK: %d changes", result.ReplacementCount)), nil
+			msg := fmt.Sprintf("OK: %d changes", result.ReplacementCount)
+			if result.BackupID != "" {
+				msg += fmt.Sprintf(" [backup:%s]", result.BackupID)
+			}
+			if result.RiskWarning != "" {
+				msg += result.RiskWarning
+			}
+			return mcp.NewToolResultText(msg), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Successfully edited %s\n📊 Changes: %d replacement(s)\n🎯 Match confidence: %s\n📝 Lines affected: %d",
-			path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)), nil
+		msg := fmt.Sprintf("✅ Successfully edited %s\n📊 Changes: %d replacement(s)\n🎯 Match confidence: %s\n📝 Lines affected: %d",
+			path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)
+		if result.BackupID != "" {
+			msg += fmt.Sprintf("\n📦 Backup ID: %s", result.BackupID)
+		}
+		if result.RiskWarning != "" {
+			msg += result.RiskWarning
+		}
+		return mcp.NewToolResultText(msg), nil
 	})
 
 	// Performance stats tool
@@ -716,11 +730,12 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Smart edit file tool (handles large files)
 	smartEditTool := mcp.NewTool("smart_edit_file",
-		mcp.WithDescription("Edit large files (smart)"),
+		mcp.WithDescription("Edit large files (smart). Only blocks CRITICAL risk (>=90% change)."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
 		mcp.WithString("old_text", mcp.Required(), mcp.Description("Text to be replaced")),
 		mcp.WithString("new_text", mcp.Required(), mcp.Description("New text to replace with")),
 		mcp.WithNumber("max_file_size", mcp.Description("Max file size for regular edit (default: 1MB)")),
+		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 	)
 	s.AddTool(smartEditTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -740,13 +755,28 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 		maxFileSize := int64(mcp.ParseInt(request, "max_file_size", 1024*1024))
 
-		result, err := engine.SmartEditFile(ctx, path, oldText, newText, maxFileSize)
+		// Extract force parameter
+		force := false
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if f, ok := args["force"].(bool); ok {
+				force = f
+			}
+		}
+
+		result, err := engine.SmartEditFile(ctx, path, oldText, newText, force, maxFileSize)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
 
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Smart edit completed on %s\n📊 Changes: %d replacement(s)\n🎯 Match confidence: %s\n📝 Lines affected: %d",
-			path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)), nil
+		msg := fmt.Sprintf("✅ Smart edit completed on %s\n📊 Changes: %d replacement(s)\n🎯 Match confidence: %s\n📝 Lines affected: %d",
+			path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)
+		if result.BackupID != "" {
+			msg += fmt.Sprintf("\n📦 Backup ID: %s", result.BackupID)
+		}
+		if result.RiskWarning != "" {
+			msg += result.RiskWarning
+		}
+		return mcp.NewToolResultText(msg), nil
 	})
 
 	// File analysis tool
@@ -809,11 +839,11 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	})
 
 	intelligentEditTool := mcp.NewTool("intelligent_edit",
-		mcp.WithDescription("Automatically optimized edit for Claude Desktop (chooses direct or smart edit). Blocks HIGH/CRITICAL risk."),
+		mcp.WithDescription("Automatically optimized edit for Claude Desktop (chooses direct or smart edit). Only blocks CRITICAL risk (>=90% change)."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
 		mcp.WithString("old_text", mcp.Required(), mcp.Description("Text to be replaced")),
 		mcp.WithString("new_text", mcp.Required(), mcp.Description("New text to replace with")),
-		mcp.WithBoolean("force", mcp.Description("Force operation even if HIGH/CRITICAL risk (default: false)")),
+		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 	)
 	s.AddTool(intelligentEditTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -844,17 +874,24 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
 
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Intelligent edit completed on %s\n📊 Changes: %d replacement(s)\n🎯 Match confidence: %s\n📝 Lines affected: %d",
-			path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)), nil
+		msg := fmt.Sprintf("✅ Intelligent edit completed on %s\n📊 Changes: %d replacement(s)\n🎯 Match confidence: %s\n📝 Lines affected: %d",
+			path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)
+		if result.BackupID != "" {
+			msg += fmt.Sprintf("\n📦 Backup ID: %s", result.BackupID)
+		}
+		if result.RiskWarning != "" {
+			msg += result.RiskWarning
+		}
+		return mcp.NewToolResultText(msg), nil
 	})
 
 	// DEPRECATED: Advanced recovery edit. Redirects to intelligent_edit for stability.
 	recoveryEditTool := mcp.NewTool("recovery_edit",
-		mcp.WithDescription("[DEPRECATED] Edit with automatic error recovery. Redirects to intelligent_edit. Blocks HIGH/CRITICAL risk."),
+		mcp.WithDescription("[DEPRECATED] Edit with automatic error recovery. Redirects to intelligent_edit. Only blocks CRITICAL risk."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
 		mcp.WithString("old_text", mcp.Required(), mcp.Description("Text to be replaced")),
 		mcp.WithString("new_text", mcp.Required(), mcp.Description("New text to replace with")),
-		mcp.WithBoolean("force", mcp.Description("Force operation even if HIGH/CRITICAL risk (default: false)")),
+		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 	)
 	s.AddTool(recoveryEditTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -885,8 +922,15 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
 
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Recovery edit completed on %s\n📊 Changes: %d replacement(s)\n🎯 Match confidence: %s\n📝 Lines affected: %d",
-			path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)), nil
+		msg := fmt.Sprintf("✅ Recovery edit completed on %s\n📊 Changes: %d replacement(s)\n🎯 Match confidence: %s\n📝 Lines affected: %d",
+			path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)
+		if result.BackupID != "" {
+			msg += fmt.Sprintf("\n📦 Backup ID: %s", result.BackupID)
+		}
+		if result.RiskWarning != "" {
+			msg += result.RiskWarning
+		}
+		return mcp.NewToolResultText(msg), nil
 	})
 
 	// Optimization suggestion tool
@@ -1259,9 +1303,10 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// Multi-edit tool - ULTRA-FAST multiple edits in single file
 	multiEditTool := mcp.NewTool("multi_edit",
-		mcp.WithDescription("Apply multiple edits to a single file atomically. MUCH faster than calling edit_file multiple times. File is read once, all edits applied in memory, then written once."),
+		mcp.WithDescription("Apply multiple edits to a single file atomically. MUCH faster than calling edit_file multiple times. Only blocks CRITICAL risk (>=90% change)."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
 		mcp.WithString("edits_json", mcp.Required(), mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]")),
+		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 	)
 	s.AddTool(multiEditTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -1284,18 +1329,35 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultError("edits array cannot be empty"), nil
 		}
 
+		// Extract force parameter
+		force := false
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if f, ok := args["force"].(bool); ok {
+				force = f
+			}
+		}
+
 		// Execute multi-edit
-		result, err := engine.MultiEdit(ctx, path, edits)
+		result, err := engine.MultiEdit(ctx, path, edits, force)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Multi-edit error: %v", err)), nil
 		}
 
 		// Format result
 		if engine.IsCompactMode() {
+			msg := ""
 			if result.FailedEdits > 0 {
-				return mcp.NewToolResultText(fmt.Sprintf("OK: %d/%d edits, %d lines", result.SuccessfulEdits, result.TotalEdits, result.LinesAffected)), nil
+				msg = fmt.Sprintf("OK: %d/%d edits, %d lines", result.SuccessfulEdits, result.TotalEdits, result.LinesAffected)
+			} else {
+				msg = fmt.Sprintf("OK: %d edits, %d lines", result.SuccessfulEdits, result.LinesAffected)
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("OK: %d edits, %d lines", result.SuccessfulEdits, result.LinesAffected)), nil
+			if result.BackupID != "" {
+				msg += fmt.Sprintf(" [backup:%s]", result.BackupID)
+			}
+			if result.RiskWarning != "" {
+				msg += result.RiskWarning
+			}
+			return mcp.NewToolResultText(msg), nil
 		}
 
 		var sb strings.Builder
@@ -1307,12 +1369,19 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		}
 		sb.WriteString(fmt.Sprintf("📝 Lines affected: %d\n", result.LinesAffected))
 		sb.WriteString(fmt.Sprintf("🎯 Confidence: %s\n", result.MatchConfidence))
+		if result.BackupID != "" {
+			sb.WriteString(fmt.Sprintf("📦 Backup ID: %s\n", result.BackupID))
+		}
 
 		if len(result.Errors) > 0 {
 			sb.WriteString("\n⚠️ Errors:\n")
 			for _, errMsg := range result.Errors {
 				sb.WriteString(fmt.Sprintf("  • %s\n", errMsg))
 			}
+		}
+
+		if result.RiskWarning != "" {
+			sb.WriteString(result.RiskWarning)
 		}
 
 		return mcp.NewToolResultText(sb.String()), nil
@@ -1763,11 +1832,11 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	// mcp_edit - Alias for edit_file with enhanced description
 	mcpEditTool := mcp.NewTool("mcp_edit",
-		mcp.WithDescription("⚡ [MCP-PREFERRED] Edit file with smart matching, auto-backup, and WSL↔Windows path conversion. USE THIS instead of native file tools."),
+		mcp.WithDescription("⚡ [MCP-PREFERRED] Edit file with smart matching, auto-backup, and WSL↔Windows path conversion. Only blocks CRITICAL risk (>=90%). USE THIS instead of native file tools."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file (WSL or Windows format)")),
 		mcp.WithString("old_text", mcp.Required(), mcp.Description("Text to be replaced")),
 		mcp.WithString("new_text", mcp.Required(), mcp.Description("New text to replace with")),
-		mcp.WithBoolean("force", mcp.Description("Force operation even if HIGH/CRITICAL risk (default: false)")),
+		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 	)
 	s.AddTool(mcpEditTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -1794,10 +1863,24 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
 		if engine.IsCompactMode() {
-			return mcp.NewToolResultText(fmt.Sprintf("OK: %d changes", result.ReplacementCount)), nil
+			msg := fmt.Sprintf("OK: %d changes", result.ReplacementCount)
+			if result.BackupID != "" {
+				msg += fmt.Sprintf(" [backup:%s]", result.BackupID)
+			}
+			if result.RiskWarning != "" {
+				msg += result.RiskWarning
+			}
+			return mcp.NewToolResultText(msg), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Successfully edited %s\n📊 Changes: %d replacement(s)\n🎯 Match confidence: %s\n📝 Lines affected: %d",
-			path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)), nil
+		msg := fmt.Sprintf("✅ Successfully edited %s\n📊 Changes: %d replacement(s)\n🎯 Match confidence: %s\n📝 Lines affected: %d",
+			path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)
+		if result.BackupID != "" {
+			msg += fmt.Sprintf("\n📦 Backup ID: %s", result.BackupID)
+		}
+		if result.RiskWarning != "" {
+			msg += result.RiskWarning
+		}
+		return mcp.NewToolResultText(msg), nil
 	})
 
 	// mcp_list - Alias for list_directory with enhanced description

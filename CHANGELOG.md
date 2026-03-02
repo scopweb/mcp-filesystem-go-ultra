@@ -1,5 +1,44 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [3.15.1] - 2026-03-02
+
+### Bug Fix: #16 — Edit risk model only blocks CRITICAL
+
+- **Changed**: Default risk thresholds: MEDIUM=20% (was 30%), HIGH=75% (was 50%). CRITICAL remains at 90%.
+- **Changed**: Only CRITICAL (>=90%) risk operations are blocked and require `force: true`. MEDIUM and HIGH risk operations now auto-proceed with automatic backup and a non-blocking warning in the response.
+- **Fixed**: Backup is now created BEFORE the blocking decision. Previously, blocked operations had no backup. Now even CRITICAL-blocked edits report their backup ID in the error message.
+- **Added**: `RiskWarning` field in `EditResult` and `MultiEditResult` for non-blocking risk notices appended to success responses.
+- **Added**: `FormatRiskNotice()` method on `ChangeImpact` for MEDIUM/HIGH warning formatting.
+- **Added**: `force` parameter to `smart_edit_file` and `multi_edit` MCP tools (previously missing).
+- **Changed**: `MultiEdit()` now uses persistent `BackupManager` instead of temporary `.backup` files that were deleted on success.
+- **Changed**: `streamingEditLargeFile()` now performs risk assessment and creates backups (previously bypassed both).
+- **Changed**: All edit tool responses now include backup ID and risk warnings when applicable.
+- **Files changed**: `core/impact_analyzer.go`, `core/edit_operations.go`, `core/streaming_operations.go`, `core/claude_optimizer.go`, `core/engine.go`, `core/pipeline.go`, `main.go`
+- **Tests**: `tests/bug16_test.go` — 10 regression tests covering all risk levels, blocking, force override, backup-before-block, MultiEdit, and FormatRiskNotice.
+
+---
+
+## [3.15.0] - 2026-02-28
+
+### Performance Optimizations
+
+#### 1. Cache resolved AllowedPaths in `isPathAllowed()`
+- **Before**: `filepath.EvalSymlinks()` called per allowed path in loop, on every operation (read/write/edit/delete/list). 5 allowed paths x 1,000 ops = 5,000 unnecessary I/O syscalls.
+- **After**: Allowed paths resolved once at engine startup via `resolveAllowedPaths()`. Loop in `isPathAllowed()` now iterates pre-resolved strings with zero syscalls. Target path still resolved per-call (symlink escape prevention unchanged).
+- **Files changed**: `core/engine.go`
+
+#### 2. Use `CompileRegex` cache in search functions
+- **Before**: `performSmartSearch()`, `performAdvancedTextSearch()`, and `CountOccurrences()` called `regexp.Compile()` directly, recompiling the same pattern on every call.
+- **After**: All three now use `e.CompileRegex()` with RWMutex-protected cache. Repeated searches with the same pattern skip compilation entirely.
+- **Files changed**: `core/search_operations.go`
+
+#### 3. Replace `isTextFile()`/`isBinaryFile()` O(n) linear search with O(1) map lookup
+- **Before**: Standalone `isTextFile()` and `isBinaryFile()` in `streaming_operations.go` scanned 45-entry slices linearly.
+- **After**: Deleted both functions. Callers now use `textExtensionsMap` (70+ entries, already existed in `search_operations.go`) and new `binaryExtensionsMap`, both O(1). Added 3 missing extensions (`.lock`, `.pl`, `.emacs`).
+- **Files changed**: `core/streaming_operations.go`, `core/claude_optimizer.go`, `core/search_operations.go`
+
+---
+
 ## [3.14.5] - 2026-02-28
 
 ### Bug Fixes
