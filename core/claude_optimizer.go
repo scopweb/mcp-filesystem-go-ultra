@@ -114,7 +114,7 @@ func (o *ClaudeDesktopOptimizer) IntelligentEdit(ctx context.Context, path, oldT
 	if size <= o.config.MaxDirectFileSize {
 		return o.engine.EditFile(path, oldText, newText, force)
 	} else {
-		return o.engine.SmartEditFile(ctx, path, oldText, newText, o.config.MaxDirectFileSize)
+		return o.engine.SmartEditFile(ctx, path, oldText, newText, force, o.config.MaxDirectFileSize)
 	}
 }
 
@@ -181,10 +181,10 @@ func (o *ClaudeDesktopOptimizer) GetOptimizationSuggestion(ctx context.Context, 
 
 	// File type recommendations
 	suggestion.WriteString("\n📄 File Type Analysis:\n")
-	if isTextFile(ext) {
+	if textExtensionsMap[ext] {
 		suggestion.WriteString("• Type: Text file (fully editable)\n")
 		suggestion.WriteString("• All operations supported\n")
-	} else if isBinaryFile(ext) {
+	} else if binaryExtensionsMap[ext] {
 		suggestion.WriteString("• Type: Binary file\n")
 		suggestion.WriteString("• Recommended: Read-only operations\n")
 		suggestion.WriteString("• Editing may corrupt file\n")

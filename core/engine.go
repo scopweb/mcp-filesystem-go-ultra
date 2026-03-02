@@ -95,6 +95,10 @@ type UltraFastEngine struct {
 		cache map[string]*regexp.Regexp
 		mu    sync.RWMutex
 	}
+
+	// Pre-resolved allowed paths (resolved once at startup via Abs + EvalSymlinks + norm)
+	// Only base allowed paths are cached; target paths are still resolved per-call for security.
+	resolvedAllowedPaths []string
 }
 
 // PerformanceMetrics tracks real-time performance statistics
@@ -170,6 +174,7 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 	// Log if allowed paths are configured
 	if len(config.AllowedPaths) > 0 {
 		slog.Info("Access control enabled", "allowed_paths_count", len(config.AllowedPaths))
+		engine.resolveAllowedPaths()
 	} else {
 		slog.Warn("Access control disabled - full filesystem access allowed")
 	}
@@ -233,12 +238,12 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 	if config.RiskThresholdMedium > 0 {
 		engine.riskThresholds.MediumPercentage = config.RiskThresholdMedium
 	} else {
-		engine.riskThresholds.MediumPercentage = 30.0
+		engine.riskThresholds.MediumPercentage = 20.0
 	}
 	if config.RiskThresholdHigh > 0 {
 		engine.riskThresholds.HighPercentage = config.RiskThresholdHigh
 	} else {
-		engine.riskThresholds.HighPercentage = 50.0
+		engine.riskThresholds.HighPercentage = 75.0
 	}
 	if config.RiskOccurrencesMedium > 0 {
 		engine.riskThresholds.MediumOccurrences = config.RiskOccurrencesMedium
@@ -252,6 +257,31 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 	}
 
 	return engine, nil
+}
+
+// resolveAllowedPaths pre-resolves all AllowedPaths using Abs + EvalSymlinks + normalization.
+// Called once at engine initialization. Avoids repeated EvalSymlinks syscalls in isPathAllowed().
+func (e *UltraFastEngine) resolveAllowedPaths() {
+	norm := func(p string) string {
+		p = filepath.Clean(p)
+		if os.PathSeparator == '\\' {
+			return strings.ToLower(p)
+		}
+		return p
+	}
+
+	e.resolvedAllowedPaths = make([]string, 0, len(e.config.AllowedPaths))
+	for _, allowed := range e.config.AllowedPaths {
+		baseAbs, err := filepath.Abs(allowed)
+		if err != nil {
+			slog.Warn("Failed to resolve allowed path", "path", allowed, "error", err)
+			continue
+		}
+		if baseResolved, err := filepath.EvalSymlinks(baseAbs); err == nil {
+			baseAbs = baseResolved
+		}
+		e.resolvedAllowedPaths = append(e.resolvedAllowedPaths, norm(baseAbs))
+	}
 }
 
 // Close gracefully shuts down the engine
@@ -856,6 +886,11 @@ Search Operations: %d`,
 // isPathAllowed checks if the given path is within one of the allowed base paths.
 // It resolves symlinks to prevent sandbox escape via symlink following.
 func (e *UltraFastEngine) isPathAllowed(path string) bool {
+	// Re-resolve if AllowedPaths changed at runtime (e.g., tests append paths after init)
+	if len(e.resolvedAllowedPaths) != len(e.config.AllowedPaths) {
+		e.resolveAllowedPaths()
+	}
+
 	// Resolve to absolute, cleaned paths to prevent traversal and casing issues
 	targetAbs, err := filepath.Abs(path)
 	if err != nil {
@@ -903,17 +938,7 @@ func (e *UltraFastEngine) isPathAllowed(path string) bool {
 
 	targetAbs = norm(targetAbs)
 
-	for _, allowed := range e.config.AllowedPaths {
-		baseAbs, err := filepath.Abs(allowed)
-		if err != nil {
-			continue
-		}
-		// Also resolve symlinks on the allowed path itself
-		if baseResolved, err := filepath.EvalSymlinks(baseAbs); err == nil {
-			baseAbs = baseResolved
-		}
-		baseAbs = norm(baseAbs)
-
+	for _, baseAbs := range e.resolvedAllowedPaths {
 		// Quick equality check
 		if targetAbs == baseAbs {
 			return true
@@ -922,7 +947,6 @@ func (e *UltraFastEngine) isPathAllowed(path string) bool {
 		// Safe containment check using filepath.Rel; ensures boundary-aware prefix
 		rel, err := filepath.Rel(baseAbs, targetAbs)
 		if err == nil {
-			// Not outside if rel doesn't start with .. or ..<sep>
 			if rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 				return true
 			}

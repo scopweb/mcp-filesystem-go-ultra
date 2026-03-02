@@ -20,6 +20,7 @@ type EditResult struct {
 	MatchConfidence  string
 	LinesAffected    int
 	BackupID         string // ID of backup created before edit
+	RiskWarning      string // Non-blocking risk warning for MEDIUM/HIGH (empty if LOW/none)
 }
 
 // SearchMatch represents a text search match
@@ -71,10 +72,27 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string, force bool) (*
 	// Calculate change impact for risk assessment
 	impact := CalculateChangeImpact(string(content), oldText, newText, e.riskThresholds)
 
-	// ⚠️ RISK VALIDATION: Block HIGH/CRITICAL risk operations unless force=true
-	if impact.IsRisky && !force {
+	// Create persistent backup BEFORE blocking decision (Bug #16)
+	// Ensures backup exists even for blocked CRITICAL operations
+	var backupID string
+	if e.backupManager != nil {
+		backupID, err = e.backupManager.CreateBackupWithContext(path, "edit_file",
+			fmt.Sprintf("Edit: %d occurrences, %.1f%% change, risk=%s",
+				impact.Occurrences, impact.ChangePercentage, impact.RiskLevel))
+		if err != nil {
+			return nil, fmt.Errorf("could not create backup: %w", err)
+		}
+	}
+
+	// RISK VALIDATION: Only CRITICAL (>=90%) blocks without force=true (Bug #16)
+	// MEDIUM/HIGH auto-proceed with backup + warning appended to response
+	if impact.ShouldBlockOperation(force) {
 		warning := impact.FormatRiskWarning()
-		return nil, fmt.Errorf("OPERATION BLOCKED - %s\n\nTo proceed anyway, add \"force\": true to the request", warning)
+		backupMsg := ""
+		if backupID != "" {
+			backupMsg = fmt.Sprintf("\nBackup created: %s", backupID)
+		}
+		return nil, fmt.Errorf("OPERATION BLOCKED - %s%s\n\nTo proceed anyway, add \"force\": true to the request", warning, backupMsg)
 	}
 
 	// Log telemetry about this edit operation
@@ -102,16 +120,6 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string, force bool) (*
 	hookResult, err := e.hookManager.ExecuteHooks(context.Background(), HookPreEdit, hookCtx)
 	if err != nil {
 		return nil, fmt.Errorf("pre-edit hook denied operation: %w", err)
-	}
-
-	// Create persistent backup using BackupManager
-	var backupID string
-	if e.backupManager != nil {
-		backupID, err = e.backupManager.CreateBackupWithContext(path, "edit_file",
-			fmt.Sprintf("Edit: %d occurrences, %.1f%% change", impact.Occurrences, impact.ChangePercentage))
-		if err != nil {
-			return nil, fmt.Errorf("could not create backup: %w", err)
-		}
 	}
 
 	// Perform intelligent edit
@@ -164,6 +172,11 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string, force bool) (*
 
 	// Store backup ID in result
 	result.BackupID = backupID
+
+	// Attach non-blocking risk warning for MEDIUM/HIGH (Bug #16)
+	if impact.IsRisky && !impact.ShouldBlockOperation(false) {
+		result.RiskWarning = impact.FormatRiskNotice(backupID)
+	}
 
 	return result, nil
 }
@@ -653,6 +666,8 @@ type MultiEditResult struct {
 	LinesAffected   int      `json:"lines_affected"`
 	MatchConfidence string   `json:"match_confidence"`
 	Errors          []string `json:"errors,omitempty"`
+	BackupID        string   `json:"backup_id,omitempty"`
+	RiskWarning     string   `json:"risk_warning,omitempty"`
 }
 
 // MultiEdit performs multiple edits on a single file atomically
@@ -662,7 +677,7 @@ type MultiEditResult struct {
 // 3. File is written only once
 // 4. Only one backup is created
 // ULTRA-FAST: Designed for Claude Desktop batch editing
-func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []MultiEditOperation) (*MultiEditResult, error) {
+func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []MultiEditOperation, force bool) (*MultiEditResult, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
@@ -684,16 +699,15 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		return nil, fmt.Errorf("error reading file: %w", err)
 	}
 
-	// Create backup once
-	backupPath, err := e.createBackup(path)
-	if err != nil {
-		return nil, fmt.Errorf("could not create backup: %w", err)
-	}
-	defer func() {
-		if backupPath != "" {
-			os.Remove(backupPath)
+	// Create persistent backup using BackupManager (Bug #16)
+	var backupID string
+	if e.backupManager != nil {
+		backupID, err = e.backupManager.CreateBackupWithContext(path, "multi_edit",
+			fmt.Sprintf("MultiEdit: %d edits", len(edits)))
+		if err != nil {
+			return nil, fmt.Errorf("could not create backup: %w", err)
 		}
-	}()
+	}
 
 	// Apply all edits in order
 	result := &MultiEditResult{
@@ -772,16 +786,15 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	// Invalidate cache
 	e.cache.InvalidateFile(path)
 
-	// Remove backup on success
-	if backupPath != "" {
-		os.Remove(backupPath)
-		backupPath = ""
-	}
+	// DO NOT remove backup - keep it persistent for recovery (Bug #16)
 
 	// Auto-sync to Windows if enabled (async, non-blocking)
 	if e.autoSyncManager != nil {
 		_ = e.autoSyncManager.AfterEdit(path)
 	}
+
+	// Store backup ID in result
+	result.BackupID = backupID
 
 	return result, nil
 }
