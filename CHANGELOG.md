@@ -1,5 +1,25 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [3.16.0] - 2026-03-02
+
+### Bug Fix: #17 — multi_edit misleading success counter + full parity with EditFile
+
+- **Fixed**: `multi_edit` reported "1/2 edits" when overlapping edits caused Edit 2's `oldText` to be absent after Edit 1 subsumed it. Subsumed edits are now detected as `already_present` instead of `failed`.
+- **Added**: `EditDetailStatus` type (`applied`, `already_present`, `failed`) and `EditDetail` struct for per-edit outcome tracking.
+- **Added**: `SkippedEdits` and `EditDetails` fields to `MultiEditResult` (backward compatible — existing fields unchanged).
+- **Added**: Aggregate risk assessment in `MultiEdit()` via new `calculateMultiEditImpact()` — simulates all edits to compute final-vs-original change percentage.
+- **Added**: CRITICAL risk blocking in `MultiEdit()` — requires `force: true` for >=90% file rewrites (parity with `EditFile`).
+- **Added**: Context validation in `MultiEdit()` — validates edits against original content, allows partial success.
+- **Added**: Pre/Post hook execution in `MultiEdit()` — `HookPreEdit` before edit loop, `HookPostEdit` after write.
+- **Added**: Risk warning in `MultiEdit()` response for MEDIUM/HIGH risk operations.
+- **Changed**: Compact mode response now differentiates: `OK: 2 edits (1 applied, 1 already present), 193 lines`.
+- **Changed**: Verbose mode response includes "Edit details:" section with per-edit status.
+- **Optimized**: Skip file write when all edits are `already_present` (no I/O, no file watcher triggers).
+- **Files changed**: `core/edit_operations.go`, `main.go`, `tests/bug17_test.go`, `tests/bug16_test.go`
+- **Tests**: `tests/bug17_test.go` — 9 regression tests covering overlapping edits, independent edits, genuine failures, CRITICAL blocking, force bypass, per-edit details, backward compatibility, all-already-present, and mixed batches.
+
+---
+
 ## [3.15.1] - 2026-03-02
 
 ### Bug Fix: #16 — Edit risk model only blocks CRITICAL
