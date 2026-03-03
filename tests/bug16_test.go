@@ -265,7 +265,8 @@ func TestBug16_BackupCreatedBeforeBlock(t *testing.T) {
 func TestBug16_MultiEditWithForce(t *testing.T) {
 	engine, tempDir := setupBug16Engine(t)
 
-	content := "line1\nline2\nline3\nline4\nline5\n"
+	// Use larger content to avoid CRITICAL risk threshold on small files (Bug #17 added risk assessment)
+	content := strings.Repeat("// padding\n", 20) + "line1\nline2\nline3\nline4\nline5\n" + strings.Repeat("// end\n", 20)
 	testFile := filepath.Join(tempDir, "multi_edit.txt")
 	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
 		t.Fatal(err)

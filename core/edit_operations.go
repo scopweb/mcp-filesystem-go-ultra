@@ -658,16 +658,37 @@ type MultiEditOperation struct {
 	NewText string `json:"new_text"`
 }
 
+// EditDetailStatus represents the outcome of a single edit within MultiEdit
+type EditDetailStatus string
+
+const (
+	EditStatusApplied        EditDetailStatus = "applied"
+	EditStatusAlreadyPresent EditDetailStatus = "already_present"
+	EditStatusFailed         EditDetailStatus = "failed"
+)
+
+// EditDetail captures the per-edit outcome in a MultiEdit batch
+type EditDetail struct {
+	Index           int              `json:"index"`
+	Status          EditDetailStatus `json:"status"`
+	OldTextSnippet  string           `json:"old_text_snippet"`
+	NewTextSnippet  string           `json:"new_text_snippet"`
+	MatchConfidence string           `json:"match_confidence,omitempty"`
+	Error           string           `json:"error,omitempty"`
+}
+
 // MultiEditResult represents the result of a multi-edit operation
 type MultiEditResult struct {
-	TotalEdits      int      `json:"total_edits"`
-	SuccessfulEdits int      `json:"successful_edits"`
-	FailedEdits     int      `json:"failed_edits"`
-	LinesAffected   int      `json:"lines_affected"`
-	MatchConfidence string   `json:"match_confidence"`
-	Errors          []string `json:"errors,omitempty"`
-	BackupID        string   `json:"backup_id,omitempty"`
-	RiskWarning     string   `json:"risk_warning,omitempty"`
+	TotalEdits      int          `json:"total_edits"`
+	SuccessfulEdits int          `json:"successful_edits"`
+	FailedEdits     int          `json:"failed_edits"`
+	SkippedEdits    int          `json:"skipped_edits"`
+	LinesAffected   int          `json:"lines_affected"`
+	MatchConfidence string       `json:"match_confidence"`
+	Errors          []string     `json:"errors,omitempty"`
+	BackupID        string       `json:"backup_id,omitempty"`
+	RiskWarning     string       `json:"risk_warning,omitempty"`
+	EditDetails     []EditDetail `json:"edit_details,omitempty"`
 }
 
 // MultiEdit performs multiple edits on a single file atomically
@@ -677,6 +698,7 @@ type MultiEditResult struct {
 // 3. File is written only once
 // 4. Only one backup is created
 // ULTRA-FAST: Designed for Claude Desktop batch editing
+// Bug #17: Added risk assessment, context validation, hooks, per-edit detail, and "already_present" detection
 func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []MultiEditOperation, force bool) (*MultiEditResult, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
@@ -698,70 +720,180 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	if err != nil {
 		return nil, fmt.Errorf("error reading file: %w", err)
 	}
+	originalContent := string(content)
 
-	// Create persistent backup using BackupManager (Bug #16)
+	// Context validation (Bug #17 — parity with EditFile)
+	// In multi_edit, individual edits may legitimately fail (partial success).
+	// Only hard-block if NO edit passes context validation and none are "already_present".
+	validEditCount := 0
+	for _, edit := range edits {
+		if edit.OldText == "" {
+			continue
+		}
+		contextValid, _ := e.validateEditContext(originalContent, edit.OldText)
+		if contextValid {
+			validEditCount++
+			continue
+		}
+		// Check "already_present" — newText in file, oldText absent
+		normalizedContent := normalizeLineEndings(originalContent)
+		normalizedNew := normalizeLineEndings(edit.NewText)
+		normalizedOld := normalizeLineEndings(edit.OldText)
+		if edit.NewText != "" && strings.Contains(normalizedContent, normalizedNew) && !strings.Contains(normalizedContent, normalizedOld) {
+			validEditCount++
+		}
+		// Otherwise: this edit will fail in the loop — that's OK for partial success
+	}
+	if validEditCount == 0 && len(edits) > 0 {
+		return nil, fmt.Errorf("context validation failed: none of the %d edits match the current file content", len(edits))
+	}
+
+	// Risk assessment: simulate all edits to compute aggregate impact (Bug #17)
+	simContent := originalContent
+	for _, edit := range edits {
+		if edit.OldText == "" {
+			continue
+		}
+		simResult, simErr := e.performIntelligentEdit(simContent, edit.OldText, edit.NewText)
+		if simErr == nil && simResult.ReplacementCount > 0 {
+			simContent = simResult.ModifiedContent
+		}
+	}
+	aggregateImpact := calculateMultiEditImpact(originalContent, simContent, e.riskThresholds)
+
+	// Create persistent backup BEFORE blocking decision (Bug #16)
 	var backupID string
 	if e.backupManager != nil {
 		backupID, err = e.backupManager.CreateBackupWithContext(path, "multi_edit",
-			fmt.Sprintf("MultiEdit: %d edits", len(edits)))
+			fmt.Sprintf("MultiEdit: %d edits, risk=%s", len(edits), aggregateImpact.RiskLevel))
 		if err != nil {
 			return nil, fmt.Errorf("could not create backup: %w", err)
 		}
 	}
 
-	// Apply all edits in order
+	// Risk blocking: only CRITICAL blocks without force (Bug #17 — parity with EditFile)
+	if aggregateImpact.ShouldBlockOperation(force) {
+		warning := aggregateImpact.FormatRiskWarning()
+		backupMsg := ""
+		if backupID != "" {
+			backupMsg = fmt.Sprintf("\nBackup created: %s", backupID)
+		}
+		return nil, fmt.Errorf("OPERATION BLOCKED - %s%s\n\nTo proceed anyway, add \"force\": true to the request", warning, backupMsg)
+	}
+
+	// Execute pre-edit hooks (Bug #17 — parity with EditFile)
+	workingDir, _ := os.Getwd()
+	hookCtx := &HookContext{
+		Event:      HookPreEdit,
+		ToolName:   "multi_edit",
+		FilePath:   path,
+		Operation:  "multi_edit",
+		OldContent: originalContent,
+		Timestamp:  time.Now(),
+		WorkingDir: workingDir,
+		Metadata: map[string]interface{}{
+			"edit_count":     len(edits),
+			"risk_level":     aggregateImpact.RiskLevel,
+			"change_percent": aggregateImpact.ChangePercentage,
+		},
+	}
+	hookResult, err := e.hookManager.ExecuteHooks(ctx, HookPreEdit, hookCtx)
+	if err != nil {
+		return nil, fmt.Errorf("pre-edit hook denied operation: %w", err)
+	}
+
+	// Apply all edits in order with per-edit detail tracking (Bug #17)
 	result := &MultiEditResult{
 		TotalEdits:      len(edits),
 		MatchConfidence: "high",
+		EditDetails:     make([]EditDetail, 0, len(edits)),
 	}
 
-	currentContent := string(content)
+	currentContent := originalContent
 	totalLinesAffected := 0
 
 	for i, edit := range edits {
+		detail := EditDetail{
+			Index:          i,
+			OldTextSnippet: truncateText(edit.OldText, 60),
+			NewTextSnippet: truncateText(edit.NewText, 60),
+		}
+
 		if edit.OldText == "" {
+			detail.Status = EditStatusFailed
+			detail.Error = "old_text cannot be empty"
 			result.FailedEdits++
 			result.Errors = append(result.Errors, fmt.Sprintf("edit %d: old_text cannot be empty", i+1))
+			result.EditDetails = append(result.EditDetails, detail)
 			continue
 		}
 
 		// Apply this edit
-		editResult, err := e.performIntelligentEdit(currentContent, edit.OldText, edit.NewText)
-		if err != nil {
+		editResult, editErr := e.performIntelligentEdit(currentContent, edit.OldText, edit.NewText)
+		if editErr != nil || editResult.ReplacementCount == 0 {
+			// Check "already_present": newText in currentContent AND oldText absent (Bug #17)
+			normalizedCurrent := normalizeLineEndings(currentContent)
+			normalizedNew := normalizeLineEndings(edit.NewText)
+			normalizedOld := normalizeLineEndings(edit.OldText)
+
+			if edit.NewText != "" && strings.Contains(normalizedCurrent, normalizedNew) && !strings.Contains(normalizedCurrent, normalizedOld) {
+				detail.Status = EditStatusAlreadyPresent
+				detail.MatchConfidence = "high"
+				result.SkippedEdits++
+				result.EditDetails = append(result.EditDetails, detail)
+				continue
+			}
+
+			// Genuine failure
+			detail.Status = EditStatusFailed
+			if editErr != nil {
+				detail.Error = editErr.Error()
+				result.Errors = append(result.Errors, fmt.Sprintf("edit %d: %v", i+1, editErr))
+			} else {
+				detail.Error = "no match found for old_text"
+				result.Errors = append(result.Errors, fmt.Sprintf("edit %d: no match found for old_text", i+1))
+			}
 			result.FailedEdits++
-			result.Errors = append(result.Errors, fmt.Sprintf("edit %d: %v", i+1, err))
-			// Lower confidence if some edits fail
 			if result.MatchConfidence == "high" {
 				result.MatchConfidence = "medium"
 			}
+			result.EditDetails = append(result.EditDetails, detail)
 			continue
 		}
 
-		if editResult.ReplacementCount == 0 {
-			result.FailedEdits++
-			result.Errors = append(result.Errors, fmt.Sprintf("edit %d: no match found for old_text", i+1))
-			if result.MatchConfidence == "high" {
-				result.MatchConfidence = "medium"
-			}
-			continue
-		}
-
-		// Update content for next edit
+		// Success: edit applied
+		detail.Status = EditStatusApplied
+		detail.MatchConfidence = editResult.MatchConfidence
 		currentContent = editResult.ModifiedContent
 		result.SuccessfulEdits++
 		totalLinesAffected += editResult.LinesAffected
 
-		// Update confidence based on individual edit
 		if editResult.MatchConfidence == "low" && result.MatchConfidence == "high" {
 			result.MatchConfidence = "medium"
 		}
+		result.EditDetails = append(result.EditDetails, detail)
 	}
 
 	result.LinesAffected = totalLinesAffected
 
-	// If no edits succeeded, return error
-	if result.SuccessfulEdits == 0 {
+	// If no edits succeeded and none were already_present, return error
+	if result.SuccessfulEdits == 0 && result.SkippedEdits == 0 {
 		return result, fmt.Errorf("no edits were successful: %v", result.Errors)
+	}
+
+	// If only "already_present" edits (nothing changed), skip write
+	if result.SuccessfulEdits == 0 {
+		result.BackupID = backupID
+		if aggregateImpact.IsRisky && !aggregateImpact.ShouldBlockOperation(false) {
+			result.RiskWarning = aggregateImpact.FormatRiskNotice(backupID)
+		}
+		return result, nil
+	}
+
+	// Apply hook modifications if any
+	finalContent := currentContent
+	if hookResult.ModifiedContent != "" {
+		finalContent = hookResult.ModifiedContent
 	}
 
 	// Write modified content atomically with secure random temp name
@@ -773,7 +905,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		fileMode = info.Mode()
 	}
 
-	if err := os.WriteFile(tmpPath, []byte(currentContent), fileMode); err != nil {
+	if err := os.WriteFile(tmpPath, []byte(finalContent), fileMode); err != nil {
 		return nil, fmt.Errorf("error writing temp file: %w", err)
 	}
 
@@ -788,15 +920,101 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 
 	// DO NOT remove backup - keep it persistent for recovery (Bug #16)
 
+	// Execute post-edit hooks (Bug #17 — parity with EditFile)
+	hookCtx.Event = HookPostEdit
+	hookCtx.NewContent = finalContent
+	hookCtx.Metadata["backup_id"] = backupID
+	hookCtx.Metadata["successful_edits"] = result.SuccessfulEdits
+	hookCtx.Metadata["skipped_edits"] = result.SkippedEdits
+	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostEdit, hookCtx)
+
 	// Auto-sync to Windows if enabled (async, non-blocking)
 	if e.autoSyncManager != nil {
 		_ = e.autoSyncManager.AfterEdit(path)
 	}
 
-	// Store backup ID in result
+	// Store backup ID and attach risk warning (Bug #17)
 	result.BackupID = backupID
+	if aggregateImpact.IsRisky && !aggregateImpact.ShouldBlockOperation(false) {
+		result.RiskWarning = aggregateImpact.FormatRiskNotice(backupID)
+	}
 
 	return result, nil
+}
+
+// calculateMultiEditImpact computes aggregate risk by comparing original to final content.
+// This avoids double-counting that would occur with per-edit CalculateChangeImpact on overlapping edits.
+func calculateMultiEditImpact(originalContent, finalContent string, thresholds RiskThresholds) *ChangeImpact {
+	impact := &ChangeImpact{
+		TotalLines:  len(strings.Split(originalContent, "\n")),
+		RiskFactors: []string{},
+	}
+
+	if originalContent == finalContent {
+		impact.RiskLevel = "low"
+		return impact
+	}
+
+	// Character-level diff approximation
+	oldLen := len(originalContent)
+	newLen := len(finalContent)
+
+	// Length difference
+	var lenDiff int
+	if oldLen > newLen {
+		lenDiff = oldLen - newLen
+	} else {
+		lenDiff = newLen - oldLen
+	}
+
+	// Count differing characters in the overlapping portion
+	minLen := oldLen
+	if newLen < minLen {
+		minLen = newLen
+	}
+	diffChars := 0
+	for i := 0; i < minLen; i++ {
+		if originalContent[i] != finalContent[i] {
+			diffChars++
+		}
+	}
+
+	impact.CharactersChanged = int64(lenDiff + diffChars)
+
+	if oldLen > 0 {
+		impact.ChangePercentage = (float64(impact.CharactersChanged) / float64(oldLen)) * 100.0
+	}
+
+	// Apply same risk thresholds as CalculateChangeImpact
+	impact.RiskLevel = "low"
+	impact.IsRisky = false
+
+	if impact.ChangePercentage >= 90.0 {
+		impact.RiskLevel = "critical"
+		impact.IsRisky = true
+		impact.RiskFactors = append(impact.RiskFactors,
+			fmt.Sprintf("Almost complete file rewrite (%.1f%%)", impact.ChangePercentage))
+	} else if impact.ChangePercentage >= thresholds.HighPercentage {
+		impact.RiskLevel = "high"
+		impact.IsRisky = true
+		impact.RiskFactors = append(impact.RiskFactors,
+			fmt.Sprintf("Large portion of file affected (%.1f%%)", impact.ChangePercentage))
+	} else if impact.ChangePercentage >= thresholds.MediumPercentage {
+		impact.RiskLevel = "medium"
+		impact.IsRisky = true
+		impact.RiskFactors = append(impact.RiskFactors,
+			fmt.Sprintf("Significant changes (%.1f%% of file)", impact.ChangePercentage))
+	}
+
+	return impact
+}
+
+// truncateText returns the first n characters of s, appending "..." if truncated
+func truncateText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // ReplaceNthOccurrence replaces a specific occurrence of a pattern in a file

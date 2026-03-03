@@ -1343,13 +1343,21 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultError(fmt.Sprintf("Multi-edit error: %v", err)), nil
 		}
 
-		// Format result
+		// Format result (Bug #17: added SkippedEdits and EditDetails)
 		if engine.IsCompactMode() {
 			msg := ""
-			if result.FailedEdits > 0 {
-				msg = fmt.Sprintf("OK: %d/%d edits, %d lines", result.SuccessfulEdits, result.TotalEdits, result.LinesAffected)
+			applied := result.SuccessfulEdits
+			skipped := result.SkippedEdits
+			failed := result.FailedEdits
+			total := result.TotalEdits
+
+			if failed > 0 {
+				msg = fmt.Sprintf("OK: %d/%d edits, %d lines", applied+skipped, total, result.LinesAffected)
+			} else if skipped > 0 {
+				msg = fmt.Sprintf("OK: %d edits (%d applied, %d already present), %d lines",
+					total, applied, skipped, result.LinesAffected)
 			} else {
-				msg = fmt.Sprintf("OK: %d edits, %d lines", result.SuccessfulEdits, result.LinesAffected)
+				msg = fmt.Sprintf("OK: %d edits, %d lines", applied, result.LinesAffected)
 			}
 			if result.BackupID != "" {
 				msg += fmt.Sprintf(" [backup:%s]", result.BackupID)
@@ -1361,22 +1369,39 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		}
 
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("✅ Multi-edit completed on %s\n", path))
-		sb.WriteString(fmt.Sprintf("📊 Total edits: %d\n", result.TotalEdits))
-		sb.WriteString(fmt.Sprintf("✓ Successful: %d\n", result.SuccessfulEdits))
-		if result.FailedEdits > 0 {
-			sb.WriteString(fmt.Sprintf("✗ Failed: %d\n", result.FailedEdits))
+		sb.WriteString(fmt.Sprintf("Multi-edit completed on %s\n", path))
+		sb.WriteString(fmt.Sprintf("Total edits: %d\n", result.TotalEdits))
+		sb.WriteString(fmt.Sprintf("Applied: %d\n", result.SuccessfulEdits))
+		if result.SkippedEdits > 0 {
+			sb.WriteString(fmt.Sprintf("Already present: %d\n", result.SkippedEdits))
 		}
-		sb.WriteString(fmt.Sprintf("📝 Lines affected: %d\n", result.LinesAffected))
-		sb.WriteString(fmt.Sprintf("🎯 Confidence: %s\n", result.MatchConfidence))
+		if result.FailedEdits > 0 {
+			sb.WriteString(fmt.Sprintf("Failed: %d\n", result.FailedEdits))
+		}
+		sb.WriteString(fmt.Sprintf("Lines affected: %d\n", result.LinesAffected))
+		sb.WriteString(fmt.Sprintf("Confidence: %s\n", result.MatchConfidence))
 		if result.BackupID != "" {
-			sb.WriteString(fmt.Sprintf("📦 Backup ID: %s\n", result.BackupID))
+			sb.WriteString(fmt.Sprintf("Backup ID: %s\n", result.BackupID))
+		}
+
+		if len(result.EditDetails) > 0 {
+			sb.WriteString("\nEdit details:\n")
+			for _, detail := range result.EditDetails {
+				switch detail.Status {
+				case core.EditStatusApplied:
+					sb.WriteString(fmt.Sprintf("  edit %d: applied (confidence: %s)\n", detail.Index+1, detail.MatchConfidence))
+				case core.EditStatusAlreadyPresent:
+					sb.WriteString(fmt.Sprintf("  edit %d: already present (subsumed by prior edit)\n", detail.Index+1))
+				case core.EditStatusFailed:
+					sb.WriteString(fmt.Sprintf("  edit %d: FAILED - %s\n", detail.Index+1, detail.Error))
+				}
+			}
 		}
 
 		if len(result.Errors) > 0 {
-			sb.WriteString("\n⚠️ Errors:\n")
+			sb.WriteString("\nErrors:\n")
 			for _, errMsg := range result.Errors {
-				sb.WriteString(fmt.Sprintf("  • %s\n", errMsg))
+				sb.WriteString(fmt.Sprintf("  - %s\n", errMsg))
 			}
 		}
 
