@@ -23,7 +23,7 @@ func (e *UltraFastEngine) SmartSearch(ctx context.Context, request mcp.CallToolR
 	start := time.Now()
 	defer e.releaseOperation("search", start)
 
-	path := request.Arguments["path"].(string)
+	path := NormalizePath(request.Arguments["path"].(string))
 	pattern := request.Arguments["pattern"].(string)
 	includeContent, _ := request.Arguments["include_content"].(bool)
 
@@ -78,7 +78,7 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 	start := time.Now()
 	defer e.releaseOperation("search", start)
 
-	path := request.Arguments["path"].(string)
+	path := NormalizePath(request.Arguments["path"].(string))
 	pattern := request.Arguments["pattern"].(string)
 	caseSensitive, _ := request.Arguments["case_sensitive"].(bool)
 	wholeWord, _ := request.Arguments["whole_word"].(bool)
@@ -689,6 +689,9 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 	start := time.Now()
 	defer e.releaseOperation("count", start)
 
+	// Normalize WSL/Windows paths
+	path = NormalizePath(path)
+
 	validPath, err := e.validatePath(path)
 	if err != nil {
 		return "", fmt.Errorf("path validation error: %w", err)
@@ -703,18 +706,6 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 		return "", fmt.Errorf("failed to stat file: %w", err)
 	}
 
-	if info.IsDir() {
-		return "", fmt.Errorf("path is a directory, not a file: %s", validPath)
-	}
-
-	// Read file
-	content, err := os.ReadFile(validPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read file: %w", err)
-	}
-
-	lines := strings.Split(string(content), "\n")
-
 	// Try to compile as regex first, fallback to literal if fails (uses engine cache)
 	var regexPattern *regexp.Regexp
 	regexPattern, err = e.CompileRegex(pattern)
@@ -723,7 +714,24 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 		regexPattern, _ = e.CompileRegex(regexp.QuoteMeta(pattern))
 	}
 
-	// Count occurrences and track line numbers
+	// Directory mode: count across all text files in directory
+	if info.IsDir() {
+		return e.countOccurrencesInDir(ctx, validPath, pattern, regexPattern, returnLines)
+	}
+
+	// Single file mode
+	return e.countOccurrencesInFile(validPath, pattern, regexPattern, returnLines)
+}
+
+// countOccurrencesInFile counts occurrences in a single file
+func (e *UltraFastEngine) countOccurrencesInFile(filePath, pattern string, regexPattern *regexp.Regexp, returnLines bool) (string, error) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+
 	var matchedLines []int
 	totalOccurrences := 0
 
@@ -732,12 +740,11 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 		if len(matches) > 0 {
 			totalOccurrences += len(matches)
 			if returnLines {
-				matchedLines = append(matchedLines, lineNum+1) // 1-indexed
+				matchedLines = append(matchedLines, lineNum+1)
 			}
 		}
 	}
 
-	// Build response
 	var result strings.Builder
 
 	if e.config.CompactMode {
@@ -763,15 +770,15 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 			}
 		}
 	} else {
-		result.WriteString(fmt.Sprintf("🔢 Pattern Occurrence Count\n"))
-		result.WriteString(fmt.Sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))
-		result.WriteString(fmt.Sprintf("📁 File: %s\n", validPath))
+		result.WriteString("🔢 Pattern Occurrence Count\n")
+		result.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		result.WriteString(fmt.Sprintf("📁 File: %s\n", filePath))
 		result.WriteString(fmt.Sprintf("🔍 Pattern: '%s'\n", pattern))
 		result.WriteString(fmt.Sprintf("📊 Total occurrences: %d\n", totalOccurrences))
 		result.WriteString(fmt.Sprintf("📝 Lines with matches: %d\n", len(matchedLines)))
 
 		if returnLines && len(matchedLines) > 0 {
-			result.WriteString(fmt.Sprintf("\n📌 Line numbers:\n"))
+			result.WriteString("\n📌 Line numbers:\n")
 			maxShow := 50
 			for i := 0; i < len(matchedLines) && i < maxShow; i++ {
 				result.WriteString(fmt.Sprintf("  Line %d\n", matchedLines[i]))
@@ -780,10 +787,132 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 				result.WriteString(fmt.Sprintf("  ... and %d more lines\n", len(matchedLines)-maxShow))
 			}
 		}
-		result.WriteString(fmt.Sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))
+		result.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 	}
 
 	return result.String(), nil
+}
+
+// countOccurrencesInDir counts occurrences across all text files in a directory
+func (e *UltraFastEngine) countOccurrencesInDir(ctx context.Context, dirPath, pattern string, regexPattern *regexp.Regexp, returnLines bool) (string, error) {
+	type fileCount struct {
+		path  string
+		count int
+		lines []int
+	}
+
+	var results []fileCount
+	totalOccurrences := 0
+	filesScanned := 0
+
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // skip errors
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if info.IsDir() {
+			// Skip hidden directories
+			if strings.HasPrefix(info.Name(), ".") && path != dirPath {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !e.isTextFile(path) {
+			return nil
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil // skip unreadable files
+		}
+
+		filesScanned++
+		lines := strings.Split(string(content), "\n")
+		fileOccurrences := 0
+		var matchedLines []int
+
+		for lineNum, line := range lines {
+			matches := regexPattern.FindAllString(line, -1)
+			if len(matches) > 0 {
+				fileOccurrences += len(matches)
+				if returnLines {
+					matchedLines = append(matchedLines, lineNum+1)
+				}
+			}
+		}
+
+		if fileOccurrences > 0 {
+			totalOccurrences += fileOccurrences
+			relPath, _ := filepath.Rel(dirPath, path)
+			if relPath == "" {
+				relPath = path
+			}
+			results = append(results, fileCount{path: relPath, count: fileOccurrences, lines: matchedLines})
+		}
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to walk directory: %w", err)
+	}
+
+	var out strings.Builder
+
+	if e.config.CompactMode {
+		out.WriteString(fmt.Sprintf("%d matches in %d files", totalOccurrences, len(results)))
+		if len(results) > 0 {
+			out.WriteString(": ")
+			maxFiles := 20
+			for i, fc := range results {
+				if i >= maxFiles {
+					out.WriteString(fmt.Sprintf("... (+%d more files)", len(results)-maxFiles))
+					break
+				}
+				if i > 0 {
+					out.WriteString(", ")
+				}
+				out.WriteString(fmt.Sprintf("%s(%d)", fc.path, fc.count))
+			}
+		}
+	} else {
+		out.WriteString("🔢 Pattern Occurrence Count (Directory)\n")
+		out.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		out.WriteString(fmt.Sprintf("📁 Directory: %s\n", dirPath))
+		out.WriteString(fmt.Sprintf("🔍 Pattern: '%s'\n", pattern))
+		out.WriteString(fmt.Sprintf("📊 Total occurrences: %d\n", totalOccurrences))
+		out.WriteString(fmt.Sprintf("📄 Files with matches: %d / %d scanned\n", len(results), filesScanned))
+
+		if len(results) > 0 {
+			out.WriteString("\n📂 Per-file breakdown:\n")
+			maxFiles := 50
+			for i, fc := range results {
+				if i >= maxFiles {
+					out.WriteString(fmt.Sprintf("  ... and %d more files\n", len(results)-maxFiles))
+					break
+				}
+				out.WriteString(fmt.Sprintf("  %s: %d occurrences\n", fc.path, fc.count))
+				if returnLines && len(fc.lines) > 0 {
+					out.WriteString("    Lines: ")
+					maxShow := 10
+					for j, ln := range fc.lines {
+						if j >= maxShow {
+							out.WriteString(fmt.Sprintf("... (+%d more)", len(fc.lines)-maxShow))
+							break
+						}
+						if j > 0 {
+							out.WriteString(", ")
+						}
+						out.WriteString(fmt.Sprintf("%d", ln))
+					}
+					out.WriteString("\n")
+				}
+			}
+		}
+		out.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	}
+
+	return out.String(), nil
 }
 
 // calculateCharacterOffset - Determine exact character position of pattern match in line
