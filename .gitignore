@@ -61,6 +61,7 @@ dist/
 # Personal notes and scratch files
 TODO.md
 NOTES.md
+COMPETITIVE_ANALYSIS.md
 scratch/
 private/
 
@@ -80,3 +81,34 @@ Revisar_implantar_o_borrar/
 # Compiled hooks
 hooks.json
 hooks.local.json
+
+# Claude Code agent artifacts
+.agent/
+.agents/
+.claude/skills/
+.claude/worktrees/
+.mcp.json
+
+# Temporary project docs (not for repo)
+BUILD_SUCCESS.md
+IMPLEMENTATION_VERIFICATION.md
+PIPELINE_IMPLEMENTATION_SUMMARY.md
+PipelinePlan.md
+ROADMAP.md
+
+# Scratch / temp directories
+borrar/
+
+# Stray binary files
+*.swf
+*.png
+*.jpg
+*.gif
+*.ico
+filesystem-ultra.exe___
+
+# Proxy (separate project)
+cmd/proxy/
+
+# docs-website (separate git repo)
+docs-website/

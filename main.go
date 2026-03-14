@@ -682,6 +682,9 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		// Normalize WSL/Windows paths (Bug #19: was missing, causing /mnt/c/ → C:\mnt\c\)
+		path = core.NormalizePath(path)
+
 		pattern, err := request.RequireString("pattern")
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -1231,6 +1234,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 		// Execute batch using batch manager
 		batchManager := core.NewBatchOperationManager("", 10)
+		batchManager.SetEngine(engine)
 		result := batchManager.ExecuteBatch(batchReq)
 
 		// Format result
@@ -2533,9 +2537,22 @@ func formatPipelineResult(result *core.PipelineResult, compact bool) string {
 		if result.OverallRiskLevel != "" && result.OverallRiskLevel != "LOW" {
 			riskInfo = fmt.Sprintf(" | %s risk", strings.ToLower(result.OverallRiskLevel))
 		}
-		return fmt.Sprintf("%s: %d/%d steps | %d files | %d edits%s",
+		// Include error details from failed steps (Bug #21: silent failures)
+		errorInfo := ""
+		if !result.Success {
+			for _, sr := range result.Results {
+				if sr.Error != "" {
+					errorInfo = fmt.Sprintf(" | %s:%s: %s", sr.StepID, sr.Action, sr.Error)
+					break // Show first error only in compact mode
+				}
+			}
+			if errorInfo == "" && result.RollbackPerformed {
+				errorInfo = " | rolled back"
+			}
+		}
+		return fmt.Sprintf("%s: %d/%d steps | %d files | %d edits%s%s",
 			status, result.CompletedSteps, result.TotalSteps,
-			len(result.FilesAffected), result.TotalEdits, riskInfo)
+			len(result.FilesAffected), result.TotalEdits, riskInfo, errorInfo)
 	}
 
 	// Verbose mode: detailed output
