@@ -48,6 +48,18 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
+	// Acquire semaphore for concurrency control
+	if err := e.acquireOperation(ctx, "streaming_write"); err != nil {
+		return err
+	}
+	start := time.Now()
+	defer e.releaseOperation("streaming_write", start)
+
+	// Check context before proceeding
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("operation cancelled: %w", err)
+	}
+
 	// Check if path is allowed (access control) - must check before any write path
 	if len(e.config.AllowedPaths) > 0 {
 		if !e.isPathAllowed(path) {
@@ -60,7 +72,6 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 		return e.WriteFileContent(ctx, path, content)
 	}
 
-	start := time.Now()
 	config := DefaultChunkingConfig()
 
 	// Calculate chunks
@@ -182,6 +193,18 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
+	// Acquire semaphore for concurrency control
+	if err := e.acquireOperation(ctx, "chunked_read"); err != nil {
+		return "", err
+	}
+	start := time.Now()
+	defer e.releaseOperation("chunked_read", start)
+
+	// Check context before proceeding
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("operation cancelled: %w", err)
+	}
+
 	// Check if path is allowed (access control) - must check before any read path
 	if len(e.config.AllowedPaths) > 0 {
 		if !e.isPathAllowed(path) {
@@ -202,7 +225,6 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 		return e.ReadFileContent(ctx, path)
 	}
 
-	start := time.Now()
 	// Log only for very large files and if not in compact mode
 	if fileSize > LargeFileThreshold && !e.config.CompactMode {
 		slog.Info("Chunked read started", "path", path, "size", formatSize(fileSize))
@@ -256,6 +278,11 @@ func (e *UltraFastEngine) SmartEditFile(ctx context.Context, path, oldText, newT
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
+	// Check context before proceeding
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("operation cancelled: %w", err)
+	}
+
 	// Check if path is allowed (access control)
 	if len(e.config.AllowedPaths) > 0 {
 		if !e.isPathAllowed(path) {
@@ -276,8 +303,8 @@ func (e *UltraFastEngine) SmartEditFile(ctx context.Context, path, oldText, newT
 		return e.streamingEditLargeFile(ctx, path, oldText, newText, force)
 	}
 
-	// Use regular edit for smaller files
-	return e.EditFile(path, oldText, newText, force)
+	// Use regular edit for smaller files (EditFile acquires its own semaphore)
+	return e.EditFile(ctx, path, oldText, newText, force)
 }
 
 // streamingEditLargeFile handles editing of very large files

@@ -16,16 +16,19 @@ type PipelineRequest struct {
 	CreateBackup bool           `json:"create_backup"` // Default: true if destructive steps present
 	Force        bool           `json:"force"`         // Bypass risk warnings
 	Verbose      bool           `json:"verbose"`       // Return intermediate data (contents, per-file counts)
+	Parallel     bool           `json:"parallel,omitempty"` // Enable parallel execution via DAG scheduling
 	Steps        []PipelineStep `json:"steps"`         // Pipeline steps to execute
 	validated    bool           // Internal: validation cache
 }
 
 // PipelineStep represents a single operation in the pipeline
 type PipelineStep struct {
-	ID        string                 `json:"id"`                   // Unique identifier (alphanumeric + - _)
-	Action    string                 `json:"action"`               // Action type: search, edit, etc.
-	InputFrom string                 `json:"input_from,omitempty"` // ID of previous step to get input from
-	Params    map[string]interface{} `json:"params"`               // Action-specific parameters
+	ID           string                 `json:"id"`                      // Unique identifier (alphanumeric + - _)
+	Action       string                 `json:"action"`                  // Action type: search, edit, etc.
+	InputFrom    string                 `json:"input_from,omitempty"`    // ID of previous step to get input from
+	InputFromAll []string               `json:"input_from_all,omitempty"` // IDs of multiple steps (for aggregate/merge)
+	Params       map[string]interface{} `json:"params"`                  // Action-specific parameters
+	Condition    *StepCondition         `json:"condition,omitempty"`     // Optional condition for conditional execution
 }
 
 // StepResult represents the result of a single pipeline step
@@ -33,14 +36,17 @@ type StepResult struct {
 	StepID       string            `json:"step_id"`
 	Action       string            `json:"action"`
 	Success      bool              `json:"success"`
+	Skipped      bool              `json:"skipped,omitempty"`         // True if condition evaluated to false
+	SkipReason   string            `json:"skip_reason,omitempty"`     // Why the step was skipped
 	FilesMatched []string          `json:"files_matched,omitempty"`   // Files found/affected
 	Content      map[string]string `json:"content,omitempty"`         // path -> content
 	EditsApplied int               `json:"edits_applied,omitempty"`   // Number of edits made
 	Counts       map[string]int    `json:"counts,omitempty"`          // path -> occurrence count
 	Error        string            `json:"error,omitempty"`           // Error message if failed
 	Duration     time.Duration     `json:"duration"`                  // Step execution time
-	RiskLevel    string            `json:"risk_level,omitempty"`      // LOW/MEDIUM/HIGH/CRITICAL
-	internalData interface{}       `json:"-"`                         // Internal data not serialized
+	RiskLevel          string            `json:"risk_level,omitempty"`          // LOW/MEDIUM/HIGH/CRITICAL
+	AggregatedContent  string            `json:"aggregated_content,omitempty"`  // Combined content from aggregate/merge
+	internalData       interface{}       `json:"-"`                             // Internal data not serialized
 }
 
 // PipelineResult represents the final result of pipeline execution
@@ -138,6 +144,9 @@ var supportedActions = map[string]bool{
 	"copy":               true,
 	"rename":             true,
 	"delete":             true,
+	"aggregate":          true,
+	"diff":               true,
+	"merge":              true,
 }
 
 // Validate validates the entire pipeline request
@@ -203,6 +212,30 @@ func (pr *PipelineRequest) Validate() error {
 				}
 			}
 		}
+
+		// Validate input_from_all references
+		for _, ref := range step.InputFromAll {
+			refIdx, exists := stepIDs[ref]
+			if !exists {
+				return &ValidationError{
+					Field:   "input_from_all",
+					Message: fmt.Sprintf("step '%s' references non-existent step '%s'", step.ID, ref),
+				}
+			}
+			if refIdx >= i {
+				return &ValidationError{
+					Field:   "input_from_all",
+					Message: fmt.Sprintf("step '%s' has forward reference to step '%s'", step.ID, ref),
+				}
+			}
+		}
+
+		// Validate condition references
+		if step.Condition != nil {
+			if err := ValidateCondition(step.Condition, step.ID, stepIDs); err != nil {
+				return err
+			}
+		}
 	}
 
 	pr.validated = true
@@ -263,6 +296,20 @@ func (ps *PipelineStep) validateActionParams() error {
 		ps.Params = make(map[string]interface{})
 	}
 
+	// hasInputFiles checks for input_from, files, or path params
+	hasInputFiles := func() bool {
+		if ps.InputFrom != "" {
+			return true
+		}
+		if _, ok := ps.Params["files"]; ok {
+			return true
+		}
+		if _, ok := ps.Params["path"]; ok {
+			return true
+		}
+		return false
+	}
+
 	switch ps.Action {
 	case "search":
 		// Requires: pattern
@@ -274,18 +321,16 @@ func (ps *PipelineStep) validateActionParams() error {
 		}
 
 	case "read_ranges":
-		// Requires: input_from OR files
-		if ps.InputFrom == "" {
-			if _, ok := ps.Params["files"]; !ok {
-				return &ValidationError{
-					Field:   "params.files",
-					Message: "read_ranges action requires 'input_from' or 'files' parameter",
-				}
+		// Requires: input_from OR files/path
+		if !hasInputFiles() {
+			return &ValidationError{
+				Field:   "params.files",
+				Message: "read_ranges action requires 'input_from', 'files', or 'path' parameter",
 			}
 		}
 
 	case "edit":
-		// Requires: old_text, new_text, and (input_from OR files)
+		// Requires: old_text, new_text, and (input_from OR files/path)
 		if _, ok := ps.Params["old_text"]; !ok {
 			return &ValidationError{
 				Field:   "params.old_text",
@@ -298,108 +343,129 @@ func (ps *PipelineStep) validateActionParams() error {
 				Message: "edit action requires 'new_text' parameter",
 			}
 		}
-		if ps.InputFrom == "" {
-			if _, ok := ps.Params["files"]; !ok {
-				return &ValidationError{
-					Field:   "params.files",
-					Message: "edit action requires 'input_from' or 'files' parameter",
-				}
+		if !hasInputFiles() {
+			return &ValidationError{
+				Field:   "params.files",
+				Message: "edit action requires 'input_from', 'files', or 'path' parameter",
 			}
 		}
 
 	case "multi_edit":
-		// Requires: edits array, and (input_from OR files)
+		// Requires: edits array, and (input_from OR files/path)
 		if _, ok := ps.Params["edits"]; !ok {
 			return &ValidationError{
 				Field:   "params.edits",
 				Message: "multi_edit action requires 'edits' parameter",
 			}
 		}
-		if ps.InputFrom == "" {
-			if _, ok := ps.Params["files"]; !ok {
-				return &ValidationError{
-					Field:   "params.files",
-					Message: "multi_edit action requires 'input_from' or 'files' parameter",
-				}
+		if !hasInputFiles() {
+			return &ValidationError{
+				Field:   "params.files",
+				Message: "multi_edit action requires 'input_from', 'files', or 'path' parameter",
 			}
 		}
 
 	case "count_occurrences":
-		// Requires: pattern, and (input_from OR files)
+		// Requires: pattern, and (input_from OR files/path)
 		if _, ok := ps.Params["pattern"]; !ok {
 			return &ValidationError{
 				Field:   "params.pattern",
 				Message: "count_occurrences action requires 'pattern' parameter",
 			}
 		}
-		if ps.InputFrom == "" {
-			if _, ok := ps.Params["files"]; !ok {
-				return &ValidationError{
-					Field:   "params.files",
-					Message: "count_occurrences action requires 'input_from' or 'files' parameter",
-				}
+		if !hasInputFiles() {
+			return &ValidationError{
+				Field:   "params.files",
+				Message: "count_occurrences action requires 'input_from', 'files', or 'path' parameter",
 			}
 		}
 
 	case "regex_transform":
-		// Requires: patterns array, and (input_from OR files)
+		// Requires: patterns array, and (input_from OR files/path)
 		if _, ok := ps.Params["patterns"]; !ok {
 			return &ValidationError{
 				Field:   "params.patterns",
 				Message: "regex_transform action requires 'patterns' parameter",
 			}
 		}
-		if ps.InputFrom == "" {
-			if _, ok := ps.Params["files"]; !ok {
-				return &ValidationError{
-					Field:   "params.files",
-					Message: "regex_transform action requires 'input_from' or 'files' parameter",
-				}
+		if !hasInputFiles() {
+			return &ValidationError{
+				Field:   "params.files",
+				Message: "regex_transform action requires 'input_from', 'files', or 'path' parameter",
 			}
 		}
 
 	case "copy":
-		// Requires: destination, and (input_from OR files)
+		// Requires: destination, and (input_from OR files/path)
 		if _, ok := ps.Params["destination"]; !ok {
 			return &ValidationError{
 				Field:   "params.destination",
 				Message: "copy action requires 'destination' parameter",
 			}
 		}
-		if ps.InputFrom == "" {
-			if _, ok := ps.Params["files"]; !ok {
-				return &ValidationError{
-					Field:   "params.files",
-					Message: "copy action requires 'input_from' or 'files' parameter",
-				}
+		if !hasInputFiles() {
+			return &ValidationError{
+				Field:   "params.files",
+				Message: "copy action requires 'input_from', 'files', or 'path' parameter",
 			}
 		}
 
 	case "rename":
-		// Requires: destination, and (input_from OR files)
+		// Requires: destination, and (input_from OR files/path)
 		if _, ok := ps.Params["destination"]; !ok {
 			return &ValidationError{
 				Field:   "params.destination",
 				Message: "rename action requires 'destination' parameter",
 			}
 		}
-		if ps.InputFrom == "" {
-			if _, ok := ps.Params["files"]; !ok {
-				return &ValidationError{
-					Field:   "params.files",
-					Message: "rename action requires 'input_from' or 'files' parameter",
-				}
+		if !hasInputFiles() {
+			return &ValidationError{
+				Field:   "params.files",
+				Message: "rename action requires 'input_from', 'files', or 'path' parameter",
 			}
 		}
 
 	case "delete":
-		// Requires: input_from OR files
+		// Requires: input_from OR files/path
+		if !hasInputFiles() {
+			return &ValidationError{
+				Field:   "params.files",
+				Message: "delete action requires 'input_from', 'files', or 'path' parameter",
+			}
+		}
+
+	case "aggregate":
+		// Requires: input_from_all (array of step IDs)
+		if len(ps.InputFromAll) == 0 && ps.InputFrom == "" {
+			return &ValidationError{
+				Field:   "input_from_all",
+				Message: "aggregate action requires 'input_from_all' or 'input_from'",
+			}
+		}
+
+	case "diff":
+		// Requires: two files or input_from with 2 files
 		if ps.InputFrom == "" {
-			if _, ok := ps.Params["files"]; !ok {
+			if _, ok := ps.Params["file_a"]; !ok {
 				return &ValidationError{
-					Field:   "params.files",
-					Message: "delete action requires 'input_from' or 'files' parameter",
+					Field:   "params.file_a",
+					Message: "diff action requires 'input_from' or 'file_a' and 'file_b' parameters",
 				}
+			}
+			if _, ok := ps.Params["file_b"]; !ok {
+				return &ValidationError{
+					Field:   "params.file_b",
+					Message: "diff action requires 'file_b' parameter",
+				}
+			}
+		}
+
+	case "merge":
+		// Requires: input_from_all (array of step IDs)
+		if len(ps.InputFromAll) == 0 && ps.InputFrom == "" {
+			return &ValidationError{
+				Field:   "input_from_all",
+				Message: "merge action requires 'input_from_all' or 'input_from'",
 			}
 		}
 	}
@@ -424,8 +490,16 @@ func (ps *PipelineStep) getInputFiles(ctx *PipelineContext) ([]string, error) {
 		return prevResult.FilesMatched, nil
 	}
 
-	// Try params["files"]
-	if filesParam, ok := ps.Params["files"]; ok {
+	// Try params["files"] or params["path"] (single-file alias)
+	filesParam, ok := ps.Params["files"]
+	if !ok {
+		if pathParam, pok := ps.Params["path"]; pok {
+			// Normalize "path" to a single-element files list
+			filesParam = pathParam
+			ok = true
+		}
+	}
+	if ok {
 		switch v := filesParam.(type) {
 		case []string:
 			return v, nil

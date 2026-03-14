@@ -58,7 +58,17 @@ type RenameOperation struct {
 
 // BatchRenameFiles performs batch file renaming operations
 func (e *UltraFastEngine) BatchRenameFiles(ctx context.Context, request BatchRenameRequest) (*BatchRenameResult, error) {
+	// Acquire semaphore for concurrency control
+	if err := e.acquireOperation(ctx, "batch_rename"); err != nil {
+		return nil, err
+	}
 	start := time.Now()
+	defer e.releaseOperation("batch_rename", start)
+
+	// Check context before proceeding
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("operation cancelled: %w", err)
+	}
 
 	// Validate request
 	if err := e.validateBatchRenameRequest(&request); err != nil {

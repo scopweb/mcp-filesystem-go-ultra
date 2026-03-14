@@ -5,12 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +46,9 @@ type Config struct {
 	RiskThresholdHigh     float64 // % change for high risk
 	RiskOccurrencesMedium int     // Occurrences for medium risk
 	RiskOccurrencesHigh   int     // Occurrences for high risk
+
+	// Logging
+	LogDir string // Directory for audit logs and metrics snapshots (empty = disabled)
 }
 
 // UltraFastEngine implements all filesystem operations with maximum performance
@@ -99,6 +104,9 @@ type UltraFastEngine struct {
 	// Pre-resolved allowed paths (resolved once at startup via Abs + EvalSymlinks + norm)
 	// Only base allowed paths are cached; target paths are still resolved per-call for security.
 	resolvedAllowedPaths []string
+
+	// Audit logger for operation tracking (nil if --log-dir not set)
+	auditLogger *AuditLogger
 }
 
 // PerformanceMetrics tracks real-time performance statistics
@@ -256,6 +264,20 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 		engine.riskThresholds.HighOccurrences = 100
 	}
 
+	// Initialize audit logger if log directory is configured
+	if config.LogDir != "" {
+		auditLogger, err := NewAuditLogger(config.LogDir)
+		if err != nil {
+			slog.Warn("Failed to initialize audit logger", "error", err, "status", "disabled")
+		} else {
+			engine.auditLogger = auditLogger
+			slog.Info("Audit logger initialized", "log_dir", config.LogDir)
+
+			// Start periodic metrics snapshot writer (every 30 seconds)
+			go engine.metricsSnapshotLoop(config.LogDir)
+		}
+	}
+
 	return engine, nil
 }
 
@@ -289,7 +311,55 @@ func (e *UltraFastEngine) Close() error {
 	if e.workerPool != nil {
 		e.workerPool.Release()
 	}
+	if e.auditLogger != nil {
+		e.auditLogger.Close()
+	}
 	return nil
+}
+
+// Audit logs an operation entry to the audit log file (no-op if audit logger not configured)
+func (e *UltraFastEngine) Audit(entry AuditEntry) {
+	if e.auditLogger != nil {
+		e.auditLogger.Log(entry)
+	}
+}
+
+// AuditEnabled returns true when the audit logger is active (--log-dir was set)
+func (e *UltraFastEngine) AuditEnabled() bool {
+	return e.auditLogger != nil
+}
+
+// metricsSnapshotLoop writes a metrics.json snapshot every 30 seconds
+func (e *UltraFastEngine) metricsSnapshotLoop(logDir string) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		e.metrics.mu.RLock()
+		var memStats runtime.MemStats
+		runtime.ReadMemStats(&memStats)
+		snapshot := MetricsSnapshot{
+			UpdatedAt:    time.Now(),
+			OpsTotal:     e.metrics.OperationsTotal,
+			OpsPerSec:    e.metrics.OperationsPerSecond,
+			CacheHitRate: e.metrics.CacheHitRate,
+			MemoryMB:     float64(memStats.Alloc) / (1024 * 1024),
+			Reads:        e.metrics.ReadOperations,
+			Writes:       e.metrics.WriteOperations,
+			Lists:        e.metrics.ListOperations,
+			Searches:     e.metrics.SearchOperations,
+			Edits: MetricsEditSummary{
+				Total:    e.metrics.EditOperations,
+				Targeted: e.metrics.TargetedEdits,
+				Rewrites: e.metrics.FullFileRewrites,
+				AvgBytes: e.metrics.AverageBytesPerEdit,
+			},
+		}
+		e.metrics.mu.RUnlock()
+
+		if err := WriteMetricsSnapshot(logDir, snapshot); err != nil {
+			slog.Debug("Failed to write metrics snapshot", "error", err)
+		}
+	}
 }
 
 // GetEnvironment returns the cached WSL/Windows environment detection result
@@ -886,6 +956,13 @@ Search Operations: %d`,
 // isPathAllowed checks if the given path is within one of the allowed base paths.
 // It resolves symlinks to prevent sandbox escape via symlink following.
 func (e *UltraFastEngine) isPathAllowed(path string) bool {
+	// WSL paths (\\wsl.localhost\..., \\wsl$\...) are always allowed —
+	// they are local virtual machines, not external network shares
+	lowerPath := strings.ToLower(filepath.Clean(path))
+	if strings.HasPrefix(lowerPath, `\\wsl.localhost\`) || strings.HasPrefix(lowerPath, `\\wsl$\`) {
+		return true
+	}
+
 	// Re-resolve if AllowedPaths changed at runtime (e.g., tests append paths after init)
 	if len(e.resolvedAllowedPaths) != len(e.config.AllowedPaths) {
 		e.resolveAllowedPaths()
@@ -1087,6 +1164,98 @@ func (e *UltraFastEngine) GetLastArtifactInfo() string {
 // IsCompactMode returns whether compact mode is enabled
 func (e *UltraFastEngine) IsCompactMode() bool {
 	return e.config.CompactMode
+}
+
+// GetAllowedPaths returns the configured allowed paths
+func (e *UltraFastEngine) GetAllowedPaths() []string {
+	return e.config.AllowedPaths
+}
+
+// ListDirectoryTree returns a recursive JSON tree structure of a directory
+func (e *UltraFastEngine) ListDirectoryTree(ctx context.Context, path string, maxDepth int) (string, error) {
+	path = NormalizePath(path)
+
+	if err := e.acquireOperation(ctx, "tree"); err != nil {
+		return "", err
+	}
+	start := time.Now()
+	defer e.releaseOperation("tree", start)
+
+	if len(e.config.AllowedPaths) > 0 {
+		if !e.isPathAllowed(path) {
+			return "", fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
+		}
+	}
+
+	type TreeNode struct {
+		Name     string      `json:"name"`
+		Type     string      `json:"type"`
+		Size     int64       `json:"size,omitempty"`
+		Children []*TreeNode `json:"children,omitempty"`
+	}
+
+	var buildTree func(dirPath string, depth int) (*TreeNode, error)
+	buildTree = func(dirPath string, depth int) (*TreeNode, error) {
+		if depth > maxDepth {
+			return nil, nil
+		}
+
+		info, err := os.Stat(dirPath)
+		if err != nil {
+			return nil, err
+		}
+
+		node := &TreeNode{
+			Name: filepath.Base(dirPath),
+			Type: "file",
+			Size: info.Size(),
+		}
+
+		if !info.IsDir() {
+			return node, nil
+		}
+
+		node.Type = "directory"
+		node.Size = 0
+
+		entries, err := os.ReadDir(dirPath)
+		if err != nil {
+			return node, nil
+		}
+
+		node.Children = make([]*TreeNode, 0, len(entries))
+		for _, entry := range entries {
+			childPath := filepath.Join(dirPath, entry.Name())
+			if entry.IsDir() {
+				child, err := buildTree(childPath, depth+1)
+				if err == nil && child != nil {
+					node.Children = append(node.Children, child)
+				}
+			} else {
+				childInfo, err := entry.Info()
+				if err == nil {
+					node.Children = append(node.Children, &TreeNode{
+						Name: entry.Name(),
+						Type: "file",
+						Size: childInfo.Size(),
+					})
+				}
+			}
+		}
+		return node, nil
+	}
+
+	tree, err := buildTree(path, 0)
+	if err != nil {
+		return "", fmt.Errorf("failed to build directory tree: %w", err)
+	}
+
+	data, err := json.MarshalIndent(tree, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal tree: %w", err)
+	}
+
+	return string(data), nil
 }
 
 // GetMaxResponseSize returns max response size

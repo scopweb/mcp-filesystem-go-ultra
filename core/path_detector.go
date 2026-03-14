@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -259,6 +260,42 @@ func getDefaultWSLDistro() string {
 		}
 	})
 	return wslDistroName
+}
+
+// CheckLinuxPathAccessible checks if a Linux-style path (e.g. /home/claude/...)
+// is actually accessible from this Windows host. Returns a descriptive error if the
+// path appears to come from an isolated Linux container (claude.ai web) rather than
+// a real WSL instance. Returns nil if the path is accessible or not a Linux path.
+func CheckLinuxPathAccessible(path string) error {
+	// Only relevant on Windows with Linux-style absolute paths (not /mnt/<drive>/)
+	if os.PathSeparator != '\\' || path == "" || path[0] != '/' {
+		return nil
+	}
+	if IsWindowsPath(path) {
+		return nil // /mnt/c/... is a Windows path
+	}
+
+	// This is a pure Linux path like /home/..., /tmp/... on Windows.
+	// Try the UNC path that NormalizePath would produce.
+	normalized := NormalizePath(path)
+
+	// If NormalizePath couldn't convert (no WSL distro), the path is definitely inaccessible
+	if normalized == path {
+		return fmt.Errorf(
+			"path '%s' is a Linux container path not accessible from Windows. "+
+				"This MCP server runs on Windows and cannot reach paths inside an isolated Linux container (claude.ai web). "+
+				"Use mcp_write with the file content as a string parameter instead", path)
+	}
+
+	// NormalizePath produced a UNC path — check if it actually exists
+	if _, err := os.Stat(normalized); err != nil {
+		return fmt.Errorf(
+			"path '%s' (resolved to '%s') is not accessible from Windows. "+
+				"This typically happens when the path is from an isolated Linux container (claude.ai web) rather than a real WSL instance. "+
+				"Use mcp_write with the file content as a string parameter instead", path, normalized)
+	}
+
+	return nil
 }
 
 // GetWindowsUserDocuments returns the Windows Documents folder path

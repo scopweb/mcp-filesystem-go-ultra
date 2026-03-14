@@ -2,13 +2,13 @@
 
 ## Project Overview
 
-MCP Filesystem Server Ultra-Fast (v3.13.2) - A high-performance MCP (Model Context Protocol) filesystem server written in Go, optimized for Claude Desktop and Claude Code. Provides 56 MCP tools for file operations, search, editing, backups, streaming, and WSL/Windows integration.
+MCP Filesystem Server Ultra-Fast (v4.0.0) - A high-performance MCP (Model Context Protocol) filesystem server written in Go, optimized for Claude Desktop and Claude Code. Provides **16 MCP tools** (consolidated from 59 in v3.x) for file operations, search, editing, backups, streaming, and WSL/Windows integration. All tools include MCP spec-compliant annotations (readOnlyHint, destructiveHint, idempotentHint).
 
 ## Build & Test
 
 ```bash
-# Build (Windows)
-go build -ldflags="-s -w" -trimpath -o filesystem-ultra.exe .
+# Build (Windows) — v4 binary
+go build -ldflags="-s -w" -trimpath -o filesystem-ultra-v4.exe .
 
 # Or use the build script
 build-windows.bat
@@ -26,12 +26,42 @@ go test -fuzz=Fuzz ./tests/security
 
 # Run specific test
 go test ./tests/ -run TestName -v
+
+# Build dashboard (separate binary)
+go build -ldflags="-s -w" -trimpath -o dashboard.exe ./cmd/dashboard/
 ```
+
+## Tool Inventory (v4.0.0 — 16 tools)
+
+```
+CORE (5):      read_file, write_file, edit_file, list_directory, search_files
+EDIT+ (1):     multi_edit
+FILES (4):     move_file, copy_file, delete_file, create_directory
+BATCH (1):     batch_operations  (includes pipelines + batch rename)
+BACKUP (1):    backup            (includes restore via action:"restore")
+ANALYSIS (1):  analyze_operation (operations: file, optimize, write, edit, delete)
+WSL (1):       wsl               (includes sync + status via action param)
+UTIL (1):      server_info       (includes help, stats, artifact via action param)
+INFO (1):      get_file_info
+```
+
+### Key consolidations (v3 59 tools → v4 16 tools)
+- `read_file` replaces: `read_file`, `chunked_read_file`, `intelligent_read`, `read_file_range` (start_line/end_line), `read_base64` (encoding:"base64")
+- `write_file` replaces: `write_file`, `create_file`, `streaming_write_file`, `intelligent_write`, `write_base64` (encoding:"base64")
+- `edit_file` replaces: `edit_file`, `smart_edit_file`, `intelligent_edit`, `recovery_edit`, `search_and_replace` (mode:"search_replace"), `replace_nth_occurrence` (occurrence:N), `regex_transform_file` (mode:"regex")
+- `search_files` replaces: `smart_search`, `advanced_text_search`, `count_occurrences` (count_only:true)
+- `move_file` also replaces: `rename_file`
+- `batch_operations` also replaces: `execute_pipeline` (pipeline_json), `batch_rename_files` (rename_json)
+- `backup` also replaces: `restore_backup` (action:"restore"), `list_backups`, `get_backup_info`, `compare_with_backup`, `cleanup_backups`
+- `wsl` replaces: `wsl_sync`, `wsl_status`, `wsl_to_windows_copy`, `windows_to_wsl_copy`, `configure_autosync`
+- `server_info` replaces: `stats`, `get_help`, `artifact`, `performance_stats`, `get_edit_telemetry`
+- `analyze_operation` replaces: `analyze_file`, `analyze_write`, `analyze_edit`, `analyze_delete`, `get_optimization_suggestion`
+- `delete_file` replaces: `soft_delete_file` (soft-delete is now default; use `permanent:true` for hard delete)
 
 ## Architecture
 
 ```
-main.go                    # Entry point: CLI flags, 56 MCP tool registrations, server startup
+main.go                    # Entry point: CLI flags, 30 MCP tool registrations, server startup
 core/
   engine.go                # UltraFastEngine - central struct with cache, worker pool, metrics
   edit_operations.go       # EditFile, MultiEdit with backup, risk assessment, hooks
@@ -46,6 +76,7 @@ core/
   regex_transformer.go     # Advanced regex transformations with capture groups
   batch_operations.go      # Batch file operations with rollback
   batch_rename.go          # Batch file renaming
+  audit_logger.go          # AuditLogger - JSON Lines operation log + MetricsSnapshot writer
   claude_optimizer.go      # Claude Desktop auto-optimization (small/large file strategy)
   plan_mode.go             # Dry-run analysis (analyze_write, analyze_edit, analyze_delete)
   path_converter.go        # WSL <-> Windows path conversion
@@ -65,6 +96,10 @@ tests/
   bug5_test.go - bug9_test.go  # Regression tests
   edit_safety_test.go      # Edit safety validation tests
   security/                # Security & fuzzing tests (package: security)
+cmd/
+  dashboard/
+    main.go              # Separate binary: HTTP dashboard for logs/metrics/backups
+    static/              # Embedded web UI (go:embed) - HTML + vanilla JS + CSS
 ```
 
 ## Key Dependencies
@@ -151,7 +186,160 @@ Key flags parsed in `main.go`:
 - `--hooks-enabled` / `--hooks-config` - Hook system
 - `--backup-dir` / `--backup-max-age` / `--backup-max-count` - Backup config
 - `--risk-threshold-medium` / `--risk-threshold-high` - Risk thresholds
-- `--debug` / `--log-level` - Logging
+- `--debug` / `--log-level` - Logging (debug, info, warn, error — configures slog JSON handler)
+- `--log-dir` - Directory for audit logs and metrics snapshots (enables operation logging)
+
+## Logging & Dashboard
+
+### Audit Logging (--log-dir)
+When `--log-dir` is set, the MCP server writes:
+- `operations.jsonl` — JSON Lines audit log (one entry per tool call, auto-rotates at 10MB, keeps last 3)
+- `metrics.json` — Performance metrics snapshot (updated every 30 seconds)
+
+All 16 tools are wrapped with `auditWrap()` in main.go which records timing, status, path, bytes_in/out, file_size, args summary, risk level, lines_changed, and matches count. Zero overhead when `--log-dir` is not set (fast-path returns the handler unchanged).
+
+### Dashboard Binary
+Separate binary in `cmd/dashboard/` — reads log files and serves a web UI:
+```bash
+# Build
+go build -ldflags="-s -w" -trimpath -o dashboard.exe ./cmd/dashboard/
+
+# Run (or use run-dashboard.bat)
+dashboard.exe --log-dir=<same as MCP server> --backup-dir=<backup path> --port=9100
+```
+- No coupling with MCP server (file-based communication only)
+- Embedded web assets via `go:embed` (single binary)
+- Real-time updates via SSE (Server-Sent Events)
+- Pages: Dashboard (metrics), Operations (audit log), Backups (enterprise recovery), Statistics, Proxy/Tokens, Edit Analysis
+
+### Enterprise Backup Recovery (Dashboard)
+The Backups page provides a full search/filter/recovery system:
+- **Summary cards**: Total Backups, Total Size, Latest Backup, Protected Files
+- **Search**: text filter (file name, backup ID, context), operation type dropdown, date presets (today/24h/7d/30d/custom range)
+- **Content Search**: grep inside backup files with context snippets (2 lines before/after match), 10s timeout
+- **Pagination**: server-side with configurable limit/offset
+- **Unified backup format**: both normal backups (`backup_id` + `files/` subdir) and batch backups (`batch-*` dirs with `op-N-filename` files) are normalized into a common `BackupInfo` structure
+- **Cache**: `backupCache` with 30s TTL avoids repeated disk scans
+- **API endpoints**:
+  - `GET /api/backups` — all backups (cached, unified)
+  - `GET /api/backups/search?q=&operation=&preset=&from=&to=&limit=&offset=` — filtered + paginated
+  - `GET /api/backups/search-content?q=&max_results=` — grep inside backup files
+  - `GET /api/backups/detail/{id}` — single backup with file details
+  - `GET /api/backups/file/{id}/{filename}` — serve backup file (tries `files/` then direct)
+
+## Pipeline Transformation System
+
+The `execute_pipeline` tool provides multi-step file transformation pipelines with 12 actions, conditional logic, template variables, and parallel execution.
+
+### Actions (12)
+
+| Action | Type | Description |
+|--------|------|-------------|
+| `search` | Read | Search files by pattern (regex or literal) |
+| `read_ranges` | Read | Read file contents |
+| `count_occurrences` | Read | Count pattern occurrences per file |
+| `edit` | Write | Search-and-replace across files |
+| `multi_edit` | Write | Multiple edits per file |
+| `regex_transform` | Write | Regex-based transformations with capture groups |
+| `copy` | Write | Copy files to destination |
+| `rename` | Write | Rename/move files |
+| `delete` | Write | Soft-delete files |
+| `aggregate` | Meta | Combine content/files from multiple steps |
+| `diff` | Meta | Line-by-line unified diff between two files |
+| `merge` | Meta | Union or intersection of file lists from multiple steps |
+
+### Chaining
+
+- **`input_from`**: Reference a prior step's `FilesMatched` as input. E.g., search → edit chain.
+- **`input_from_all`**: Reference multiple prior steps (for `aggregate` and `merge`). Array of step IDs.
+
+### Conditional Steps
+
+Steps can include a `condition` object. If the condition evaluates to false, the step is skipped (`success=true, skipped=true`).
+
+**9 condition types:**
+- `has_matches` / `no_matches` — check if referenced step found files
+- `count_gt` / `count_lt` / `count_eq` — compare total count against threshold value
+- `file_exists` / `file_not_exists` — check file existence by path
+- `step_succeeded` / `step_failed` — check prior step's success status
+
+```json
+{"condition": {"type": "count_gt", "step_ref": "count-step", "value": "5"}}
+```
+
+### Template Variables
+
+Step params support `{{step_id.field}}` references that resolve to prior step results at runtime.
+
+**Available fields:** `count` (sum of counts), `files_count`, `files` (comma-separated), `risk`, `edits`
+
+```json
+{"params": {"message": "Found {{find.count}} in {{find.files_count}} files"}}
+```
+
+Unresolved references (unknown step/field) are left as-is. Templates work recursively in nested maps and arrays.
+
+### Parallel Execution
+
+Set `parallel: true` on the pipeline request. The DAG scheduler:
+1. Builds dependency graph from `input_from`, `input_from_all`, and `condition.step_ref`
+2. Groups independent steps into execution levels via topological sort
+3. Runs steps within each level concurrently using the engine's worker pool
+4. Destructive actions (edit, multi_edit, regex_transform, delete, rename) in the same level are serialized into sub-levels for safety
+
+### Risk Thresholds
+
+| Level | Files | Edits |
+|-------|-------|-------|
+| MEDIUM | ≥30 | ≥100 |
+| HIGH | ≥50 | ≥500 |
+| CRITICAL | ≥80 | ≥1000 |
+
+HIGH and CRITICAL operations are blocked unless `force: true` is set.
+
+### Pipeline Flags
+
+- `dry_run: true` — Preview changes without applying
+- `force: true` — Bypass risk warnings
+- `stop_on_error: true` — Stop at first failure (default), triggers rollback if backup exists
+- `create_backup: true` — Auto-backup affected files before destructive steps
+- `verbose: true` — Return intermediate data (file contents, per-file counts)
+- `parallel: true` — Enable DAG-based parallel execution
+
+### Progress Tracking
+
+When `--log-dir` is set, each completed step emits a separate audit entry with `sub_op: "step:N/M:stepID:action"`, enabling real-time per-step visibility in the dashboard.
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `core/pipeline.go` | Executor: sequential/parallel dispatch, action handlers, rollback |
+| `core/pipeline_types.go` | Types: PipelineRequest, PipelineStep, StepResult, validation |
+| `core/pipeline_conditions.go` | 9 condition types: evaluation and validation |
+| `core/pipeline_templates.go` | `{{step_id.field}}` template resolution |
+| `core/pipeline_scheduler.go` | DAG builder, topological sort, destructive step splitting |
+| `core/large_file_processor.go` | In-memory / line-by-line / chunk processing modes |
+| `core/regex_transformer.go` | Sequential/parallel regex transformations |
+| `core/errors.go` | PipelineStepError with step context and hints |
+
+### Example Pipeline
+
+```json
+{
+  "name": "refactor-todos",
+  "parallel": true,
+  "stop_on_error": true,
+  "create_backup": true,
+  "steps": [
+    {"id": "find", "action": "search", "params": {"path": ".", "pattern": "TODO", "file_types": [".go"]}},
+    {"id": "count", "action": "count_occurrences", "input_from": "find", "params": {"pattern": "TODO"}},
+    {"id": "fix", "action": "edit", "input_from": "find",
+     "condition": {"type": "count_gt", "step_ref": "count", "value": "0"},
+     "params": {"old_text": "TODO", "new_text": "DONE"}}
+  ]
+}
+```
 
 ## Security Notes
 

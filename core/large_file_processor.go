@@ -130,12 +130,15 @@ func (p *LargeFileProcessor) ProcessFile(ctx context.Context, config ProcessingC
 	switch mode {
 	case ModeFullFile:
 		result.Mode = "in-memory"
+		AppendSubOp(ctx, "in_memory")
 		processingErr = p.processInMemory(ctx, config, result)
 	case ModeLineByLine:
 		result.Mode = "streaming-line"
+		AppendSubOp(ctx, "line_by_line")
 		processingErr = p.processLineByLine(ctx, config, result)
 	case ModeChunkByChunk:
 		result.Mode = "streaming-chunk"
+		AppendSubOp(ctx, "chunk_by_chunk")
 		processingErr = p.processChunkByChunk(ctx, config, result)
 	default:
 		return nil, fmt.Errorf("unsupported processing mode: %v", mode)

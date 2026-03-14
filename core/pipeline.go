@@ -3,16 +3,34 @@ package core
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
 
+// toInt converts an interface{} (float64 from JSON, string, or int) to int.
+func toInt(v interface{}) int {
+	switch n := v.(type) {
+	case float64:
+		return int(math.Round(n))
+	case int:
+		return n
+	case string:
+		i, _ := strconv.Atoi(n)
+		return i
+	default:
+		return 0
+	}
+}
+
 // PipelineExecutor executes multi-step file transformation pipelines
 type PipelineExecutor struct {
-	engine *UltraFastEngine
+	engine     *UltraFastEngine
+	OnProgress func(stepIndex, totalSteps int, result StepResult) // Optional per-step progress callback
 }
 
 // NewPipelineExecutor creates a new pipeline executor
@@ -41,6 +59,9 @@ func (pe *PipelineExecutor) Execute(ctx context.Context, request PipelineRequest
 
 	// Step 2: Initialize context
 	pipelineCtx := NewPipelineContext()
+
+	// Track pipeline execution in audit sub_op
+	AppendSubOp(ctx, fmt.Sprintf("pipeline:%d_steps", len(request.Steps)))
 
 	// Step 3: Determine if backup is needed
 	needsBackup := request.CreateBackup && pe.hasDestructiveSteps(request.Steps)
@@ -97,7 +118,11 @@ func (pe *PipelineExecutor) Execute(ctx context.Context, request PipelineRequest
 		}
 	}
 
-	// Step 6: Execute steps sequentially
+	// Step 6: Execute steps (parallel or sequential)
+	if request.Parallel {
+		return pe.executeParallelPath(ctx, request, pipelineCtx, backupID, startTime)
+	}
+
 	results := make([]StepResult, 0, len(request.Steps))
 	completedSteps := 0
 	allSuccess := true
@@ -119,6 +144,11 @@ func (pe *PipelineExecutor) Execute(ctx context.Context, request PipelineRequest
 		// Store result
 		pipelineCtx.SetStepResult(step.ID, &stepResult)
 		results = append(results, stepResult)
+
+		// Fire progress callback
+		if pe.OnProgress != nil {
+			pe.OnProgress(i, len(request.Steps), stepResult)
+		}
 
 		if err != nil || !stepResult.Success {
 			allSuccess = false
@@ -197,6 +227,25 @@ func (pe *PipelineExecutor) executeStep(ctx context.Context, step PipelineStep, 
 		Success: false,
 	}
 
+	// Evaluate condition (skip if false)
+	if step.Condition != nil {
+		shouldRun, reason := EvaluateCondition(step.Condition, pipelineCtx)
+		if !shouldRun {
+			result.Success = true
+			result.Skipped = true
+			result.SkipReason = reason
+			result.Duration = time.Since(startTime)
+			AppendSubOp(ctx, step.Action+":skipped")
+			return result, nil
+		}
+	}
+
+	// Resolve template variables in params
+	step.Params = ResolveTemplates(step.Params, pipelineCtx)
+
+	// Track each step action in audit sub_op chain
+	AppendSubOp(ctx, step.Action)
+
 	var err error
 
 	switch step.Action {
@@ -218,8 +267,19 @@ func (pe *PipelineExecutor) executeStep(ctx context.Context, step PipelineStep, 
 		err = pe.executeRename(ctx, step, pipelineCtx, &result, dryRun)
 	case "delete":
 		err = pe.executeDelete(ctx, step, pipelineCtx, &result, dryRun)
+	case "aggregate":
+		err = pe.executeAggregate(ctx, step, pipelineCtx, &result)
+	case "diff":
+		err = pe.executeDiff(ctx, step, pipelineCtx, &result)
+	case "merge":
+		err = pe.executeMerge(ctx, step, pipelineCtx, &result)
 	default:
-		err = fmt.Errorf("unsupported action: %s", step.Action)
+		err = &PipelineStepError{
+			StepID:    step.ID,
+			StepIndex: 0, // index not available here; set by caller if needed
+			Action:    step.Action,
+			Message:   fmt.Sprintf("unsupported action: %s", step.Action),
+		}
 	}
 
 	result.Duration = time.Since(startTime)
@@ -267,7 +327,13 @@ func (pe *PipelineExecutor) executeSearch(ctx context.Context, step PipelineStep
 	// Perform search
 	matches, err := pe.performSmartSearchInternal(ctx, path, pattern, includeContent, fileTypes)
 	if err != nil {
-		return fmt.Errorf("search failed: %w", err)
+		return &PipelineStepError{
+			StepID:  step.ID,
+			Action:  "search",
+			Param:   "pattern",
+			Message: "search failed",
+			Err:     err,
+		}
 	}
 
 	// Populate result
@@ -282,7 +348,7 @@ func (pe *PipelineExecutor) executeSearch(ctx context.Context, step PipelineStep
 	return nil
 }
 
-// executeReadRanges reads file contents
+// executeReadRanges reads file contents, optionally filtered by line ranges
 func (pe *PipelineExecutor) executeReadRanges(ctx context.Context, step PipelineStep, pipelineCtx *PipelineContext, result *StepResult) error {
 	// Get input files
 	files, err := step.getInputFiles(pipelineCtx)
@@ -293,8 +359,42 @@ func (pe *PipelineExecutor) executeReadRanges(ctx context.Context, step Pipeline
 	result.Content = make(map[string]string)
 	result.FilesMatched = files
 
+	// Extract optional range parameters
+	startLine := 0
+	endLine := 0
+	if sl, ok := step.Params["start_line"]; ok {
+		startLine = toInt(sl)
+	}
+	if el, ok := step.Params["end_line"]; ok {
+		endLine = toInt(el)
+	}
+
+	// Parse "ranges" param: array of {start, end} objects for multiple ranges
+	type lineRange struct{ start, end int }
+	var ranges []lineRange
+
+	if r, ok := step.Params["ranges"]; ok {
+		switch rv := r.(type) {
+		case []interface{}:
+			for _, item := range rv {
+				if m, ok := item.(map[string]interface{}); ok {
+					s := toInt(m["start"])
+					e := toInt(m["end"])
+					if s > 0 && e >= s {
+						ranges = append(ranges, lineRange{s, e})
+					}
+				}
+			}
+		}
+	}
+
+	// If single start_line/end_line provided, use as a single range
+	hasRange := startLine > 0 && endLine >= startLine
+	if hasRange && len(ranges) == 0 {
+		ranges = append(ranges, lineRange{startLine, endLine})
+	}
+
 	for _, filePath := range files {
-		// Normalize path
 		normalizedPath := NormalizePath(filePath)
 
 		// Check access
@@ -304,13 +404,40 @@ func (pe *PipelineExecutor) executeReadRanges(ctx context.Context, step Pipeline
 			}
 		}
 
-		// Read file
-		content, err := os.ReadFile(normalizedPath)
-		if err != nil {
-			return fmt.Errorf("failed to read %s: %w", filePath, err)
+		if len(ranges) > 0 {
+			// Read only requested line ranges using engine.ReadFileRange
+			var combined strings.Builder
+			for i, rng := range ranges {
+				if i > 0 {
+					combined.WriteString("\n...\n")
+				}
+				content, err := pe.engine.ReadFileRange(ctx, normalizedPath, rng.start, rng.end)
+				if err != nil {
+					return &PipelineStepError{
+						StepID:  step.ID,
+						Action:  "read_ranges",
+						Param:   "ranges",
+						Message: fmt.Sprintf("failed to read range [%d-%d] from %s", rng.start, rng.end, filePath),
+						Err:     err,
+					}
+				}
+				combined.WriteString(content)
+			}
+			result.Content[filePath] = combined.String()
+		} else {
+			// No range specified — read full file (backward compatible)
+			content, err := os.ReadFile(normalizedPath)
+			if err != nil {
+				return &PipelineStepError{
+					StepID:  step.ID,
+					Action:  "read_ranges",
+					Param:   "path",
+					Message: fmt.Sprintf("failed to read %s", filePath),
+					Err:     err,
+				}
+			}
+			result.Content[filePath] = string(content)
 		}
-
-		result.Content[filePath] = string(content)
 	}
 
 	return nil
@@ -361,8 +488,12 @@ func (pe *PipelineExecutor) executeEdit(ctx context.Context, step PipelineStep, 
 
 	// Check if operation should be blocked
 	if !force && !dryRun && (riskLevel == "HIGH" || riskLevel == "CRITICAL") {
-		return fmt.Errorf("operation blocked due to %s risk (%d files, %d occurrences). Use force=true to proceed",
-			riskLevel, batchImpact.TotalFiles, batchImpact.TotalOccurrences)
+		return &PipelineStepError{
+			StepID:     step.ID,
+			Action:     "edit",
+			Message:    fmt.Sprintf("operation blocked due to %s risk (%d files, %d occurrences)", riskLevel, batchImpact.TotalFiles, batchImpact.TotalOccurrences),
+			Suggestion: "Use force=true to proceed",
+		}
 	}
 
 	// Execute edits (or count for dry-run)
@@ -381,9 +512,14 @@ func (pe *PipelineExecutor) executeEdit(ctx context.Context, step PipelineStep, 
 		} else {
 			// Perform actual edit
 			// Force=true because pipeline already assessed risk at batch level
-			editResult, err := pe.engine.EditFile(normalizedPath, oldText, newText, true)
+			editResult, err := pe.engine.EditFile(ctx, normalizedPath, oldText, newText, true)
 			if err != nil {
-				return fmt.Errorf("edit failed for %s: %w", filePath, err)
+				return &PipelineStepError{
+					StepID:  step.ID,
+					Action:  "edit",
+					Message: fmt.Sprintf("edit failed for %s", filePath),
+					Err:     err,
+				}
 			}
 			result.Counts[filePath] = editResult.ReplacementCount
 			totalEdits += editResult.ReplacementCount
@@ -405,7 +541,12 @@ func (pe *PipelineExecutor) executeMultiEdit(ctx context.Context, step PipelineS
 	// Parse edits array
 	editsParam, ok := step.Params["edits"]
 	if !ok {
-		return fmt.Errorf("edits parameter is required")
+		return &PipelineStepError{
+			StepID:  step.ID,
+			Action:  "multi_edit",
+			Param:   "edits",
+			Message: "edits parameter is required",
+		}
 	}
 
 	var edits []MultiEditOperation
@@ -414,17 +555,32 @@ func (pe *PipelineExecutor) executeMultiEdit(ctx context.Context, step PipelineS
 		for i, item := range v {
 			editMap, ok := item.(map[string]interface{})
 			if !ok {
-				return fmt.Errorf("edits[%d] is not an object", i)
+				return &PipelineStepError{
+					StepID:  step.ID,
+					Action:  "multi_edit",
+					Param:   fmt.Sprintf("edits[%d]", i),
+					Message: "not an object",
+				}
 			}
 			oldText, _ := editMap["old_text"].(string)
 			newText, _ := editMap["new_text"].(string)
 			if oldText == "" {
-				return fmt.Errorf("edits[%d].old_text is required", i)
+				return &PipelineStepError{
+					StepID:  step.ID,
+					Action:  "multi_edit",
+					Param:   fmt.Sprintf("edits[%d].old_text", i),
+					Message: "old_text is required",
+				}
 			}
 			edits = append(edits, MultiEditOperation{OldText: oldText, NewText: newText})
 		}
 	default:
-		return fmt.Errorf("edits parameter has invalid type: %T", v)
+		return &PipelineStepError{
+			StepID:  step.ID,
+			Action:  "multi_edit",
+			Param:   "edits",
+			Message: fmt.Sprintf("invalid type: %T", v),
+		}
 	}
 
 	result.FilesMatched = files
@@ -443,7 +599,12 @@ func (pe *PipelineExecutor) executeMultiEdit(ctx context.Context, step PipelineS
 	result.RiskLevel = riskLevel
 
 	if !force && !dryRun && (riskLevel == "HIGH" || riskLevel == "CRITICAL") {
-		return fmt.Errorf("operation blocked due to %s risk. Use force=true to proceed", riskLevel)
+		return &PipelineStepError{
+			StepID:     step.ID,
+			Action:     "multi_edit",
+			Message:    fmt.Sprintf("operation blocked due to %s risk", riskLevel),
+			Suggestion: "Use force=true to proceed",
+		}
 	}
 
 	// Execute multi-edits
@@ -466,7 +627,12 @@ func (pe *PipelineExecutor) executeMultiEdit(ctx context.Context, step PipelineS
 			// Perform actual multi-edit
 			editResult, err := pe.engine.MultiEdit(ctx, normalizedPath, edits, force)
 			if err != nil {
-				return fmt.Errorf("multi-edit failed for %s: %w", filePath, err)
+				return &PipelineStepError{
+					StepID:  step.ID,
+					Action:  "multi_edit",
+					Message: fmt.Sprintf("multi-edit failed for %s", filePath),
+					Err:     err,
+				}
 			}
 			result.Counts[filePath] = editResult.TotalEdits
 			totalEdits += editResult.TotalEdits
@@ -515,7 +681,12 @@ func (pe *PipelineExecutor) executeRegexTransform(ctx context.Context, step Pipe
 	// Parse patterns array
 	patternsParam, ok := step.Params["patterns"]
 	if !ok {
-		return fmt.Errorf("patterns parameter is required")
+		return &PipelineStepError{
+			StepID:  step.ID,
+			Action:  "regex_transform",
+			Param:   "patterns",
+			Message: "patterns parameter is required",
+		}
 	}
 
 	var patterns []TransformPattern
@@ -524,17 +695,32 @@ func (pe *PipelineExecutor) executeRegexTransform(ctx context.Context, step Pipe
 		for i, item := range v {
 			patternMap, ok := item.(map[string]interface{})
 			if !ok {
-				return fmt.Errorf("patterns[%d] is not an object", i)
+				return &PipelineStepError{
+					StepID:  step.ID,
+					Action:  "regex_transform",
+					Param:   fmt.Sprintf("patterns[%d]", i),
+					Message: "not an object",
+				}
 			}
 			pattern, _ := patternMap["pattern"].(string)
 			replacement, _ := patternMap["replacement"].(string)
 			if pattern == "" {
-				return fmt.Errorf("patterns[%d].pattern is required", i)
+				return &PipelineStepError{
+					StepID:  step.ID,
+					Action:  "regex_transform",
+					Param:   fmt.Sprintf("patterns[%d].pattern", i),
+					Message: "pattern is required",
+				}
 			}
 			patterns = append(patterns, TransformPattern{Pattern: pattern, Replacement: replacement})
 		}
 	default:
-		return fmt.Errorf("patterns parameter has invalid type: %T", v)
+		return &PipelineStepError{
+			StepID:  step.ID,
+			Action:  "regex_transform",
+			Param:   "patterns",
+			Message: fmt.Sprintf("invalid type: %T", v),
+		}
 	}
 
 	result.FilesMatched = files
@@ -553,7 +739,12 @@ func (pe *PipelineExecutor) executeRegexTransform(ctx context.Context, step Pipe
 	result.RiskLevel = riskLevel
 
 	if !force && !dryRun && (riskLevel == "HIGH" || riskLevel == "CRITICAL") {
-		return fmt.Errorf("operation blocked due to %s risk. Use force=true to proceed", riskLevel)
+		return &PipelineStepError{
+			StepID:     step.ID,
+			Action:     "regex_transform",
+			Message:    fmt.Sprintf("operation blocked due to %s risk", riskLevel),
+			Suggestion: "Use force=true to proceed",
+		}
 	}
 
 	// Execute transformations
@@ -573,7 +764,12 @@ func (pe *PipelineExecutor) executeRegexTransform(ctx context.Context, step Pipe
 			if dryRun {
 				continue // Skip errors in dry-run
 			}
-			return fmt.Errorf("regex transform failed for %s: %w", filePath, err)
+			return &PipelineStepError{
+				StepID:  step.ID,
+				Action:  "regex_transform",
+				Message: fmt.Sprintf("regex transform failed for %s", filePath),
+				Err:     err,
+			}
 		}
 		result.Counts[filePath] = transformResult.TotalReplacements
 		totalEdits += transformResult.TotalReplacements
@@ -593,7 +789,12 @@ func (pe *PipelineExecutor) executeCopy(ctx context.Context, step PipelineStep, 
 
 	destination, _ := step.Params["destination"].(string)
 	if destination == "" {
-		return fmt.Errorf("destination parameter is required")
+		return &PipelineStepError{
+			StepID:  step.ID,
+			Action:  "copy",
+			Param:   "destination",
+			Message: "destination parameter is required",
+		}
 	}
 
 	result.FilesMatched = make([]string, 0, len(files))
@@ -611,7 +812,12 @@ func (pe *PipelineExecutor) executeCopy(ctx context.Context, step PipelineStep, 
 		} else {
 			// Perform copy
 			if err := pe.engine.CopyFile(ctx, normalizedSrc, normalizedDest); err != nil {
-				return fmt.Errorf("copy failed for %s: %w", filePath, err)
+				return &PipelineStepError{
+					StepID:  step.ID,
+					Action:  "copy",
+					Message: fmt.Sprintf("copy failed for %s", filePath),
+					Err:     err,
+				}
 			}
 			result.FilesMatched = append(result.FilesMatched, normalizedDest)
 		}
@@ -630,7 +836,12 @@ func (pe *PipelineExecutor) executeRename(ctx context.Context, step PipelineStep
 
 	destination, _ := step.Params["destination"].(string)
 	if destination == "" {
-		return fmt.Errorf("destination parameter is required")
+		return &PipelineStepError{
+			StepID:  step.ID,
+			Action:  "rename",
+			Param:   "destination",
+			Message: "destination parameter is required",
+		}
 	}
 
 	result.FilesMatched = make([]string, 0, len(files))
@@ -647,7 +858,12 @@ func (pe *PipelineExecutor) executeRename(ctx context.Context, step PipelineStep
 		} else {
 			// Perform rename
 			if err := pe.engine.RenameFile(ctx, normalizedSrc, normalizedDest); err != nil {
-				return fmt.Errorf("rename failed for %s: %w", filePath, err)
+				return &PipelineStepError{
+					StepID:  step.ID,
+					Action:  "rename",
+					Message: fmt.Sprintf("rename failed for %s", filePath),
+					Err:     err,
+				}
 			}
 			result.FilesMatched = append(result.FilesMatched, normalizedDest)
 		}
@@ -672,7 +888,12 @@ func (pe *PipelineExecutor) executeDelete(ctx context.Context, step PipelineStep
 		if !dryRun {
 			// Perform soft delete
 			if err := pe.engine.SoftDeleteFile(ctx, normalizedPath); err != nil {
-				return fmt.Errorf("delete failed for %s: %w", filePath, err)
+				return &PipelineStepError{
+					StepID:  step.ID,
+					Action:  "delete",
+					Message: fmt.Sprintf("delete failed for %s", filePath),
+					Err:     err,
+				}
 			}
 		}
 	}
@@ -866,6 +1087,372 @@ func (pe *PipelineExecutor) performSmartSearchInternal(ctx context.Context, path
 	}
 
 	return matches, nil
+}
+
+// executeParallelPath handles the parallel execution branch from Execute()
+func (pe *PipelineExecutor) executeParallelPath(ctx context.Context, request PipelineRequest, pipelineCtx *PipelineContext, backupID string, startTime time.Time) (*PipelineResult, error) {
+	_, results, err := pe.ExecuteParallel(ctx, request, pipelineCtx)
+
+	completedSteps := 0
+	totalEdits := 0
+	allSuccess := true
+	for _, r := range results {
+		if r.Success {
+			completedSteps++
+		} else if !r.Skipped {
+			allSuccess = false
+		}
+		totalEdits += r.EditsApplied
+		if len(r.FilesMatched) > 0 {
+			pipelineCtx.AddAffectedFiles(r.FilesMatched)
+		}
+	}
+
+	affectedFiles := pipelineCtx.GetAffectedFiles()
+	overallRisk := pe.assessPipelineRisk(affectedFiles, totalEdits)
+
+	finalSuccess := allSuccess
+	if !request.StopOnError && completedSteps > 0 {
+		finalSuccess = true
+	}
+
+	pResult := &PipelineResult{
+		Name:             request.Name,
+		Success:          finalSuccess,
+		TotalSteps:       len(request.Steps),
+		CompletedSteps:   completedSteps,
+		Results:          results,
+		BackupID:         backupID,
+		FilesAffected:    affectedFiles,
+		TotalEdits:       totalEdits,
+		OverallRiskLevel: overallRisk,
+		DryRun:           request.DryRun,
+		Verbose:          request.Verbose,
+		TotalDuration:    time.Since(startTime),
+	}
+
+	if err != nil && request.StopOnError && backupID != "" && !request.DryRun {
+		if rollbackErr := pe.rollback(ctx, backupID); rollbackErr == nil {
+			pResult.RollbackPerformed = true
+		}
+	}
+
+	return pResult, err
+}
+
+// ExecuteParallel executes a pipeline using DAG-based parallel scheduling
+func (pe *PipelineExecutor) ExecuteParallel(ctx context.Context, request PipelineRequest, pipelineCtx *PipelineContext) (*PipelineResult, []StepResult, error) {
+	scheduler := NewPipelineScheduler()
+	levels, err := scheduler.BuildExecutionPlan(request.Steps)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	results := make([]StepResult, len(request.Steps))
+	completedSteps := 0
+	allSuccess := true
+	totalEdits := 0
+
+	AppendSubOp(ctx, fmt.Sprintf("parallel:%d_levels", len(levels)))
+
+	for _, level := range levels {
+		if len(level) == 1 {
+			// Single step — run directly
+			idx := level[0]
+			step := request.Steps[idx]
+			stepResult, stepErr := pe.executeStep(ctx, step, pipelineCtx, request.DryRun, request.Force)
+
+			if stepResult.EditsApplied > 0 {
+				totalEdits += stepResult.EditsApplied
+			}
+			if len(stepResult.FilesMatched) > 0 {
+				pipelineCtx.AddAffectedFiles(stepResult.FilesMatched)
+			}
+			pipelineCtx.SetStepResult(step.ID, &stepResult)
+			results[idx] = stepResult
+
+			if stepErr != nil || !stepResult.Success {
+				allSuccess = false
+				if request.StopOnError && !stepResult.Skipped {
+					return nil, results[:idx+1], stepErr
+				}
+			}
+			if stepResult.Success {
+				completedSteps++
+			}
+		} else {
+			// Multiple steps — run in parallel using worker pool
+			type indexedResult struct {
+				idx    int
+				result StepResult
+				err    error
+			}
+
+			ch := make(chan indexedResult, len(level))
+
+			for _, idx := range level {
+				idx := idx // capture
+				step := request.Steps[idx]
+
+				pe.engine.workerPool.Submit(func() {
+					stepResult, stepErr := pe.executeStep(ctx, step, pipelineCtx, request.DryRun, request.Force)
+					ch <- indexedResult{idx: idx, result: stepResult, err: stepErr}
+				})
+			}
+
+			// Collect results
+			for range level {
+				ir := <-ch
+				step := request.Steps[ir.idx]
+
+				if ir.result.EditsApplied > 0 {
+					totalEdits += ir.result.EditsApplied
+				}
+				if len(ir.result.FilesMatched) > 0 {
+					pipelineCtx.AddAffectedFiles(ir.result.FilesMatched)
+				}
+				pipelineCtx.SetStepResult(step.ID, &ir.result)
+				results[ir.idx] = ir.result
+
+				if ir.err != nil || !ir.result.Success {
+					allSuccess = false
+				}
+				if ir.result.Success {
+					completedSteps++
+				}
+			}
+
+			// Check stop_on_error after level completes
+			if !allSuccess && request.StopOnError {
+				return nil, results[:], fmt.Errorf("pipeline failed during parallel level")
+			}
+		}
+	}
+
+	_ = allSuccess
+	return nil, results, nil // caller assembles final PipelineResult
+}
+
+// executeAggregate combines content/files from multiple referenced steps
+func (pe *PipelineExecutor) executeAggregate(ctx context.Context, step PipelineStep, pipelineCtx *PipelineContext, result *StepResult) error {
+	separator := "\n"
+	if sep, ok := step.Params["separator"].(string); ok {
+		separator = sep
+	}
+
+	refs := step.InputFromAll
+	if len(refs) == 0 && step.InputFrom != "" {
+		refs = []string{step.InputFrom}
+	}
+
+	var allFiles []string
+	var contentParts []string
+	filesSeen := make(map[string]bool)
+
+	for _, ref := range refs {
+		refResult, exists := pipelineCtx.GetStepResult(ref)
+		if !exists {
+			return &PipelineStepError{
+				StepID:  step.ID,
+				Action:  "aggregate",
+				Param:   "input_from_all",
+				Message: fmt.Sprintf("referenced step '%s' not found", ref),
+			}
+		}
+
+		// Collect unique files
+		for _, f := range refResult.FilesMatched {
+			if !filesSeen[f] {
+				filesSeen[f] = true
+				allFiles = append(allFiles, f)
+			}
+		}
+
+		// Collect content
+		for _, content := range refResult.Content {
+			contentParts = append(contentParts, content)
+		}
+	}
+
+	result.FilesMatched = allFiles
+	if len(contentParts) > 0 {
+		result.AggregatedContent = strings.Join(contentParts, separator)
+	}
+
+	return nil
+}
+
+// executeDiff produces a unified diff between two files
+func (pe *PipelineExecutor) executeDiff(ctx context.Context, step PipelineStep, pipelineCtx *PipelineContext, result *StepResult) error {
+	var fileA, fileB string
+
+	if step.InputFrom != "" {
+		// Get two files from previous step
+		refResult, exists := pipelineCtx.GetStepResult(step.InputFrom)
+		if !exists {
+			return &PipelineStepError{
+				StepID:  step.ID,
+				Action:  "diff",
+				Param:   "input_from",
+				Message: fmt.Sprintf("referenced step '%s' not found", step.InputFrom),
+			}
+		}
+		if len(refResult.FilesMatched) < 2 {
+			return &PipelineStepError{
+				StepID:     step.ID,
+				Action:     "diff",
+				Param:      "input_from",
+				Message:    fmt.Sprintf("diff requires at least 2 files, got %d", len(refResult.FilesMatched)),
+				Suggestion: "Use file_a and file_b params, or reference a step that matches 2+ files",
+			}
+		}
+		fileA = refResult.FilesMatched[0]
+		fileB = refResult.FilesMatched[1]
+	} else {
+		fileA, _ = step.Params["file_a"].(string)
+		fileB, _ = step.Params["file_b"].(string)
+	}
+
+	fileA = NormalizePath(fileA)
+	fileB = NormalizePath(fileB)
+
+	// Read both files
+	contentA, err := os.ReadFile(fileA)
+	if err != nil {
+		return &PipelineStepError{
+			StepID:  step.ID,
+			Action:  "diff",
+			Param:   "file_a",
+			Message: fmt.Sprintf("failed to read %s", fileA),
+			Err:     err,
+		}
+	}
+
+	contentB, err := os.ReadFile(fileB)
+	if err != nil {
+		return &PipelineStepError{
+			StepID:  step.ID,
+			Action:  "diff",
+			Param:   "file_b",
+			Message: fmt.Sprintf("failed to read %s", fileB),
+			Err:     err,
+		}
+	}
+
+	// Line-by-line unified diff
+	linesA := strings.Split(string(contentA), "\n")
+	linesB := strings.Split(string(contentB), "\n")
+
+	var diffLines []string
+	diffLines = append(diffLines, fmt.Sprintf("--- %s", fileA))
+	diffLines = append(diffLines, fmt.Sprintf("+++ %s", fileB))
+
+	maxLen := len(linesA)
+	if len(linesB) > maxLen {
+		maxLen = len(linesB)
+	}
+
+	changes := 0
+	for i := 0; i < maxLen; i++ {
+		var lineA, lineB string
+		if i < len(linesA) {
+			lineA = linesA[i]
+		}
+		if i < len(linesB) {
+			lineB = linesB[i]
+		}
+
+		if lineA != lineB {
+			changes++
+			if i < len(linesA) {
+				diffLines = append(diffLines, fmt.Sprintf("-%s", lineA))
+			}
+			if i < len(linesB) {
+				diffLines = append(diffLines, fmt.Sprintf("+%s", lineB))
+			}
+		}
+	}
+
+	result.FilesMatched = []string{fileA, fileB}
+	result.AggregatedContent = strings.Join(diffLines, "\n")
+	result.Counts = map[string]int{"changes": changes}
+
+	return nil
+}
+
+// executeMerge combines FilesMatched from multiple steps (union or intersection)
+func (pe *PipelineExecutor) executeMerge(ctx context.Context, step PipelineStep, pipelineCtx *PipelineContext, result *StepResult) error {
+	mode := "union"
+	if m, ok := step.Params["mode"].(string); ok {
+		mode = m
+	}
+
+	refs := step.InputFromAll
+	if len(refs) == 0 && step.InputFrom != "" {
+		refs = []string{step.InputFrom}
+	}
+
+	if mode == "union" {
+		seen := make(map[string]bool)
+		var merged []string
+		for _, ref := range refs {
+			refResult, exists := pipelineCtx.GetStepResult(ref)
+			if !exists {
+				return &PipelineStepError{
+					StepID:  step.ID,
+					Action:  "merge",
+					Param:   "input_from_all",
+					Message: fmt.Sprintf("referenced step '%s' not found", ref),
+				}
+			}
+			for _, f := range refResult.FilesMatched {
+				if !seen[f] {
+					seen[f] = true
+					merged = append(merged, f)
+				}
+			}
+		}
+		result.FilesMatched = merged
+	} else if mode == "intersection" {
+		// Count occurrences across all steps
+		fileCounts := make(map[string]int)
+		for _, ref := range refs {
+			refResult, exists := pipelineCtx.GetStepResult(ref)
+			if !exists {
+				return &PipelineStepError{
+					StepID:  step.ID,
+					Action:  "merge",
+					Param:   "input_from_all",
+					Message: fmt.Sprintf("referenced step '%s' not found", ref),
+				}
+			}
+			seen := make(map[string]bool) // deduplicate within one step
+			for _, f := range refResult.FilesMatched {
+				if !seen[f] {
+					seen[f] = true
+					fileCounts[f]++
+				}
+			}
+		}
+		// Only keep files present in ALL referenced steps
+		var intersection []string
+		for f, count := range fileCounts {
+			if count == len(refs) {
+				intersection = append(intersection, f)
+			}
+		}
+		result.FilesMatched = intersection
+	} else {
+		return &PipelineStepError{
+			StepID:     step.ID,
+			Action:     "merge",
+			Param:      "mode",
+			Message:    fmt.Sprintf("unsupported merge mode '%s'", mode),
+			Suggestion: "Use 'union' or 'intersection'",
+		}
+	}
+
+	return nil
 }
 
 // PipelineSearchMatch represents a search result (internal to pipeline)

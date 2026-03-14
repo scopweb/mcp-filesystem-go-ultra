@@ -1,5 +1,298 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.1.1] - 2026-03-12
+
+### Bug Fix: #19 — write_base64, wsl_sync y copy_file fallan desde contenedor Linux (claude.ai web)
+
+Cuando Claude se usa desde claude.ai (browser), el `bash_tool` corre en un contenedor Linux aislado — no es WSL real. Las rutas `/home/claude/...` no son accesibles desde Windows vía `\\wsl.localhost\...`, causando timeouts y errores confusos.
+
+#### Problema 1: write_base64 timeout con payloads grandes
+
+- **Added**: Constante `MaxBase64PayloadSize = 512KB` en `core/config.go`
+- **Added**: Validación de tamaño antes del decode en `main.go` — retorna error explícito inmediato en vez de timeout
+- **Updated**: Descripción del tool: documenta límite de 512KB, sugiere `mcp_write` para texto y chunking para binarios grandes
+
+#### Problema 2: wsl_sync falla con rutas de contenedor Linux
+
+- **Added**: `CheckLinuxPathAccessible()` en `core/path_detector.go` — detecta si una ruta Linux es accesible desde Windows
+  - Sin WSL distro → error: "path es de contenedor Linux, no accesible desde Windows"
+  - Con WSL pero UNC path inexistente → error: "path no accesible, probablemente contenedor aislado"
+  - Ambos casos sugieren usar `mcp_write` como alternativa
+- **Added**: Llamada a `CheckLinuxPathAccessible()` en handler de `wsl_sync` antes de intentar la copia
+- **Updated**: Descripción del tool: "Requires real WSL (Claude Desktop). Does NOT work from isolated Linux containers"
+
+#### Problema 3: copy_file con rutas de contenedor + error confuso
+
+- **Added**: Llamada a `CheckLinuxPathAccessible()` en handler de `copy_file` antes de `CopyFile()`
+- **Fixed**: Mensaje de error ahora incluye source y dest explícitamente: `copy_file error (source='...', dest='...'): ...`
+- **Updated**: Descripción del tool: documenta que rutas de contenedor Linux no son accesibles
+
+#### Files changed
+
+| File | Changes |
+|------|---------|
+| `core/config.go` | `MaxBase64PayloadSize` constant |
+| `core/path_detector.go` | `CheckLinuxPathAccessible()` function |
+| `main.go` | Size validation in `write_base64`, path checks in `wsl_sync` and `copy_file`, updated descriptions |
+
+---
+
+## [4.1.0] - 2026-03-06
+
+### Pipeline Transformation System v2 — Conditions, Templates, Parallel Execution & 3 New Actions
+
+Major upgrade to `execute_pipeline` expanding it from 9 to 12 actions with conditional logic, template variables, DAG-based parallel execution, and structured error reporting.
+
+#### Phase 1: SubOp Tracking + Structured Errors
+
+- **Added**: `PipelineStepError` structured error type with StepID, StepIndex, Action, Param, Message, Suggestion fields
+- **Added**: `AppendSubOp()` tracking in pipeline executor — sub_op shows full execution path (e.g., `"pipeline:3_steps → search → edit → regex_transform"`)
+- **Added**: SubOp tracking in `LargeFileProcessor` (`in_memory`, `line_by_line`, `chunk_by_chunk`) and `RegexTransformer` (`regex_sequential`, `regex_parallel`)
+- **Files changed**: `core/pipeline.go`, `core/errors.go`, `core/large_file_processor.go`, `core/regex_transformer.go`
+
+#### Phase 2: Conditional Steps + Template Variables
+
+- **Added**: 9 condition types: `has_matches`, `no_matches`, `count_gt`, `count_lt`, `count_eq`, `file_exists`, `file_not_exists`, `step_succeeded`, `step_failed`
+- **Added**: Template variable system — `{{step_id.field}}` resolves to prior step results (fields: `count`, `files_count`, `files`, `risk`, `edits`)
+- **Added**: `Condition *StepCondition` field on PipelineStep — steps can be skipped based on prior results
+- **Added**: `Skipped bool` and `SkipReason string` fields on StepResult
+- **New files**: `core/pipeline_conditions.go`, `core/pipeline_templates.go`
+- **Tests**: `tests/pipeline_conditions_test.go` (14 tests), `tests/pipeline_templates_test.go` (10 tests)
+
+#### Phase 3: Parallel Execution + New Actions
+
+- **Added**: `parallel: true` flag on PipelineRequest — enables DAG-based parallel execution
+- **Added**: DAG scheduler with topological sort (Kahn's algorithm) grouping independent steps into execution levels
+- **Added**: Destructive step splitting — write operations on same level are serialized for safety
+- **Added**: `input_from_all: ["step1", "step2"]` — multi-step references for aggregate/merge
+- **Added**: 3 new actions:
+  - `aggregate` — combines content/files from multiple steps
+  - `diff` — unified diff between two files
+  - `merge` — union/intersection of file lists from multiple steps
+- **New files**: `core/pipeline_scheduler.go`
+- **Tests**: `tests/pipeline_scheduler_test.go` (6 tests), `tests/pipeline_new_actions_test.go` (5 tests)
+
+#### Phase 4: Streaming Progress + Documentation
+
+- **Added**: `OnProgress` callback on PipelineExecutor — fires per-step audit entries
+- **Added**: Per-step audit log entries (`sub_op: "step:1/3:find:search"`) visible in dashboard Operations page
+- **Updated**: `CLAUDE.md` with full Pipeline v2 documentation
+- **Updated**: `main.go` — OnProgress wiring with `engine.AuditEnabled()` check
+- **Updated**: `docs-website/` — Pipeline feature page and API reference updated
+
+#### Summary
+
+- **12 actions** (was 9): search, read_ranges, edit, multi_edit, count_occurrences, regex_transform, copy, rename, delete, aggregate, diff, merge
+- **43 new tests** across 4 test files, all passing
+- **Full backward compatibility** — existing pipeline JSON works unchanged
+
+---
+
+## [4.0.1] - 2026-03-04
+
+### Bug Fix: #18 — Literal escape normalization + parameter aliases for Claude Desktop
+
+Claude Desktop sometimes sends `old_text` with literal `\n` (backslash + n as two characters) instead of real newline characters, causing "no matches found" errors. Also, Claude Desktop occasionally uses `old_str`/`new_str` parameter names (from its native `str_replace` convention) instead of `old_text`/`new_text`.
+
+#### Literal escape normalization (Bug #18a)
+
+- **Added**: `normalizeLiteralEscapes()` function — converts literal `\n` and `\t` to real characters
+- **Safety**: Only converts when string has literal `\n` but NO real newlines (avoids corrupting code containing `\n` string literals)
+- **Applied as fallback** in `performIntelligentEdit()` (OPTIMIZATION 6) — tried only after exact match, TrimSpace, line-by-line, and multiline matching all fail
+- **Applied in** `validateEditContext()` (Level 1.5) — prevents premature rejection before `performIntelligentEdit` has chance to match
+- **Files changed**: `core/edit_operations.go`
+
+#### Compare files operation (new feature)
+
+- **Added**: `analyze_operation(operation:"compare", path:"fileA", path_b:"fileB")` — diff two arbitrary files
+- **Added**: `CompareFiles()` engine method in `core/plan_mode.go`
+- **Added**: `generateComparisonDiff()` — unified-style diff with line numbers (shows up to 40 differences)
+- **Output**: Line counts, size comparison, line-by-line diff preview
+- **Read-only**: No files are modified, risk level always "low"
+- **Tests**: `tests/compare_files_test.go` — 5 tests (different, identical, not found, access denied, larger files)
+
+#### Parameter aliases (Bug #18b)
+
+- **Added**: `mcp_edit` now accepts both `old_text`/`new_text` and `old_str`/`new_str` parameter names
+- **Added**: `multi_edit` edits array now accepts both `{"old_text", "new_text"}` and `{"old_str", "new_str"}` per edit
+- **Files changed**: `main.go`
+
+#### Tests
+
+- **Added**: `tests/bug18_literal_escapes_test.go` — 4 regression tests:
+  - `TestBug18_LiteralNewlineEscapes` — literal `\n` in old_text matches file with real newlines
+  - `TestBug18_LiteralTabEscapes` — literal `\t` in old_text matches file with real tabs
+  - `TestBug18_RealNewlinesStillWork` — real newlines continue to work as before
+  - `TestBug18_CodeWithBackslashN` — code containing `\n` string literals is NOT corrupted
+
+---
+
+## [4.0.0] - 2026-03-03
+
+### BREAKING CHANGE: Tool consolidation — 59 tools reduced to 30
+
+Major refactor to eliminate redundant MCP tool registrations. Claude Desktop uses lazy loading (tool_search) when a server exposes more than ~30 tools, which degrades the user experience. This release consolidates duplicate and overlapping tools into intelligent, auto-routing unified tools — without removing any underlying functionality.
+
+**All engine functions, core logic, and internal optimizations remain unchanged.** Only the MCP tool surface was restructured.
+
+#### Consolidation summary
+
+| Group | Before | After | Removed |
+|-------|--------|-------|---------|
+| READ | 5 tools | 2 tools | -3 |
+| WRITE | 5 tools | 2 tools | -3 (+ upgraded mcp_write) |
+| EDIT | 5 tools | 1 tool | -4 (+ upgraded mcp_edit) |
+| SEARCH | 3 tools | 1 tool | -2 (+ upgraded mcp_search) |
+| LIST | 2 tools | 1 tool | -1 |
+| ANALYSIS | 5 tools | 1 tool | -4 |
+| ARTIFACTS | 3 tools | 1 tool | -2 |
+| BACKUPS | 5 tools | 2 tools | -3 |
+| WSL | 6 tools | 2 tools | -4 |
+| TELEMETRY | 2 tools | 1 tool | -1 |
+| DELETE | 2 tools | 1 tool | -1 |
+| **Total** | **59** | **30** | **-29** |
+
+#### READ — 5 → 2 tools
+
+- **Removed**: `read_file`, `chunked_read_file`, `intelligent_read`
+- **Kept**: `mcp_read` (already called `IntelligentRead` internally, which auto-selects direct vs chunked based on file size), `read_file_range`, `read_base64`
+
+#### WRITE — 5 → 2 tools
+
+- **Removed**: `write_file`, `create_file` (was a literal alias), `streaming_write_file`, `intelligent_write`
+- **Upgraded**: `mcp_write` now calls `engine.IntelligentWrite()` instead of `engine.WriteFileContent()`. Auto-selects between direct write (small files) and streaming write (large files) based on file size threshold.
+- **Kept**: `mcp_write`, `write_base64`
+
+#### EDIT — 5 → 1 tool
+
+- **Removed**: `edit_file`, `smart_edit_file`, `intelligent_edit`, `recovery_edit` (was already deprecated)
+- **Upgraded**: `mcp_edit` now calls `engine.IntelligentEdit()` instead of `engine.EditFile()`. Auto-selects between direct edit (small files) and smart streaming edit (large files) based on file size threshold. Includes risk assessment, auto-backup, and context validation.
+- **Kept**: `mcp_edit`
+
+#### SEARCH — 3 → 1 tool
+
+- **Removed**: `smart_search`, `advanced_text_search`
+- **Upgraded**: `mcp_search` now supports all parameters from both removed tools and auto-routes:
+  - Basic call (path + pattern) → `SmartSearch` (fast filename/content search)
+  - With `include_content`, `file_types` → `SmartSearch` with filters
+  - With `case_sensitive`, `whole_word`, `include_context`, `context_lines` → `AdvancedTextSearch` automatically
+- **Kept**: `mcp_search`
+
+#### LIST — 2 → 1 tool
+
+- **Removed**: `list_directory` (identical to `mcp_list`)
+- **Kept**: `mcp_list`
+
+#### ANALYSIS / Plan Mode — 5 → 1 tool
+
+- **Removed**: `analyze_file`, `get_optimization_suggestion`, `analyze_write`, `analyze_edit`, `analyze_delete`
+- **New**: `analyze_operation` — unified dry-run tool with `operation` parameter:
+  - `operation: "file"` → file analysis and strategy recommendation
+  - `operation: "optimize"` → Claude Desktop optimization suggestions
+  - `operation: "write"` → dry-run write analysis (requires `content`)
+  - `operation: "edit"` → dry-run edit analysis (requires `old_text`, `new_text`)
+  - `operation: "delete"` → dry-run delete analysis
+
+#### ARTIFACTS — 3 → 1 tool
+
+- **Removed**: `capture_last_artifact`, `write_last_artifact`, `artifact_info`
+- **New**: `artifact` — auto-deduces action from parameters provided:
+  - `content` provided → capture artifact in memory
+  - `path` provided → write stored artifact to file
+  - Both `content` + `path` → capture and write in one step (new capability)
+  - No parameters → return artifact info
+
+#### BACKUPS — 5 → 2 tools
+
+- **Removed**: `list_backups`, `get_backup_info`, `compare_with_backup`, `cleanup_backups`
+- **New**: `backup` — auto-deduces action from parameters:
+  - No parameters → list all backups
+  - `backup_id` → show detailed backup info
+  - `backup_id` + `file_path` → compare file with backup (was `compare_with_backup`)
+  - `cleanup: true` → clean up old backups (with `older_than_days`, `dry_run`)
+  - Supports all filter params from original `list_backups`: `limit`, `filter_operation`, `filter_path`, `newer_than_hours`
+- **Kept**: `restore_backup` (with `preview` mode that replaces `compare_with_backup` for pre-restore diff)
+
+#### WSL — 6 → 2 tools
+
+- **Removed**: `wsl_to_windows_copy`, `windows_to_wsl_copy`, `sync_claude_workspace`, `wsl_windows_status`, `configure_autosync`, `autosync_status`
+- **New**: `wsl_sync` — unified copy/sync tool:
+  - `source_path` starting with `/` → WSL-to-Windows copy (auto-detects direction)
+  - `source_path` starting with drive letter → Windows-to-WSL copy (auto-detects direction)
+  - `direction` parameter → workspace sync (wsl_to_windows, windows_to_wsl, bidirectional)
+  - All original params preserved: `dest_path`, `filter_pattern`, `dry_run`, `create_dirs`
+- **New**: `wsl_status` — unified status + autosync config:
+  - No parameters → combined WSL integration status + autosync status
+  - `enabled` parameter → configure autosync (with `sync_on_write`, `sync_on_edit`, `silent`)
+
+#### TELEMETRY — 2 → 1 tool
+
+- **Removed**: `performance_stats`, `get_edit_telemetry`
+- **New**: `stats` — returns performance stats + edit telemetry in a single response
+
+#### DELETE — 2 → 1 tool
+
+- **Removed**: `soft_delete_file`
+- **Changed**: `delete_file` now defaults to safe soft-delete (move to trash). Use `permanent: true` for permanent deletion. Safer by default.
+
+#### Final tool inventory (16 tools)
+
+```
+CORE (5):      read_file, write_file, edit_file, list_directory, search_files
+EDIT+ (1):     multi_edit
+FILES (4):     move_file, copy_file, delete_file, create_directory
+BATCH (1):     batch_operations  (includes pipelines + batch rename)
+BACKUP (1):    backup            (includes restore via action:"restore")
+ANALYSIS (1):  analyze_operation
+WSL (1):       wsl               (includes sync + status via action param)
+UTIL (1):      server_info       (includes help, stats, artifact via action param)
+INFO (1):      get_file_info
+INFO (1):      get_file_info
+RENAME (1):    batch_rename_files
+```
+
+#### Migration guide for existing users
+
+| Old tool | New tool | Notes |
+|----------|----------|-------|
+| `read_file` | `mcp_read` | Same params |
+| `chunked_read_file` | `mcp_read` | Auto-selects chunked for large files |
+| `intelligent_read` | `mcp_read` | Already used internally |
+| `write_file` / `create_file` | `mcp_write` | Same params, now auto-optimized |
+| `streaming_write_file` | `mcp_write` | Auto-selects streaming for large files |
+| `intelligent_write` | `mcp_write` | Already used internally |
+| `edit_file` | `mcp_edit` | Same params, now auto-optimized |
+| `smart_edit_file` | `mcp_edit` | Auto-selects smart edit for large files |
+| `intelligent_edit` | `mcp_edit` | Already used internally |
+| `recovery_edit` | `mcp_edit` | Was already deprecated |
+| `smart_search` | `mcp_search` | Add `include_content`, `file_types` |
+| `advanced_text_search` | `mcp_search` | Add `case_sensitive`, `whole_word`, `include_context` |
+| `list_directory` | `mcp_list` | Same params |
+| `analyze_file` | `analyze_operation(operation:"file")` | |
+| `get_optimization_suggestion` | `analyze_operation(operation:"optimize")` | |
+| `analyze_write` | `analyze_operation(operation:"write")` | |
+| `analyze_edit` | `analyze_operation(operation:"edit")` | |
+| `analyze_delete` | `analyze_operation(operation:"delete")` | |
+| `capture_last_artifact` | `artifact(content:"...")` | |
+| `write_last_artifact` | `artifact(path:"...")` | |
+| `artifact_info` | `artifact()` | |
+| `list_backups` | `backup()` | |
+| `get_backup_info` | `backup(backup_id:"...")` | |
+| `compare_with_backup` | `backup(backup_id, file_path)` | |
+| `cleanup_backups` | `backup(cleanup:true)` | |
+| `wsl_to_windows_copy` | `wsl_sync(source_path:"/home/...")` | Auto-detects direction |
+| `windows_to_wsl_copy` | `wsl_sync(source_path:"C:\\...")` | Auto-detects direction |
+| `sync_claude_workspace` | `wsl_sync(direction:"...")` | |
+| `wsl_windows_status` | `wsl_status()` | |
+| `configure_autosync` | `wsl_status(enabled:true)` | |
+| `autosync_status` | `wsl_status()` | Included in output |
+| `performance_stats` | `stats()` | |
+| `get_edit_telemetry` | `stats()` | Included in output |
+| `soft_delete_file` | `delete_file(path)` | Now default behavior |
+| `delete_file` (permanent) | `delete_file(path, permanent:true)` | Must opt-in |
+
+---
+
 ## [3.16.0] - 2026-03-02
 
 ### Bug Fix: #17 — multi_edit misleading success counter + full parity with EditFile
