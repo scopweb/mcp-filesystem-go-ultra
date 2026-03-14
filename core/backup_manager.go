@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -66,7 +67,7 @@ func NewBackupManager(backupDir string, maxBackups int, maxAgeDays int) (*Backup
 	// Cargar cache inicial
 	if err := bm.refreshCache(); err != nil {
 		// No es crítico si falla el cache
-		fmt.Printf("Warning: failed to refresh backup cache: %v\n", err)
+		slog.Warn("Failed to refresh backup cache", "error", err)
 	}
 
 	return bm, nil
@@ -167,7 +168,7 @@ func (bm *BackupManager) CreateBatchBackup(paths []string, operation string, use
 	for _, path := range paths {
 		fileInfo, err := os.Stat(path)
 		if err != nil {
-			fmt.Printf("Warning: skipping file %s: %v\n", path, err)
+			slog.Warn("Skipping file in backup", "path", path, "error", err)
 			continue
 		}
 
@@ -176,7 +177,7 @@ func (bm *BackupManager) CreateBatchBackup(paths []string, operation string, use
 
 		hash, err := copyFileWithHash(path, backupFilePath)
 		if err != nil {
-			fmt.Printf("Warning: failed to backup %s: %v\n", path, err)
+			slog.Warn("Failed to backup file", "path", path, "error", err)
 			continue
 		}
 
@@ -336,8 +337,9 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 
 	// Si se especificó un archivo, restaurar solo ese
 	if specificFile != "" {
+		normalizedSpecific := filepath.Clean(specificFile)
 		for _, file := range info.Files {
-			if file.OriginalPath == specificFile {
+			if filepath.Clean(file.OriginalPath) == normalizedSpecific {
 				if createBackup {
 					// Crear backup del estado actual antes de restaurar
 					_, err := bm.CreateBackup(file.OriginalPath, "pre_restore")
@@ -373,12 +375,12 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 			// Asegurar que el directorio destino existe
 			destDir := filepath.Dir(file.OriginalPath)
 			if err := os.MkdirAll(destDir, 0755); err != nil {
-				fmt.Printf("Warning: failed to create directory for %s: %v\n", file.OriginalPath, err)
+				slog.Warn("Failed to create directory for restore", "path", file.OriginalPath, "error", err)
 				continue
 			}
 
 			if err := copyFile(backupFilePath, file.OriginalPath); err != nil {
-				fmt.Printf("Warning: failed to restore %s: %v\n", file.OriginalPath, err)
+				slog.Warn("Failed to restore file", "path", file.OriginalPath, "error", err)
 				continue
 			}
 			restoredFiles = append(restoredFiles, file.OriginalPath)
@@ -402,10 +404,11 @@ func (bm *BackupManager) CompareWithBackup(backupID string, filePath string) (st
 
 	backupBaseDir := filepath.Join(bm.backupDir, backupID)
 
-	// Buscar el archivo en el backup
+	// Buscar el archivo en el backup (normalize paths for consistent matching)
+	normalizedFilePath := filepath.Clean(filePath)
 	var backupFile *BackupMetadata
 	for i := range info.Files {
-		if info.Files[i].OriginalPath == filePath {
+		if filepath.Clean(info.Files[i].OriginalPath) == normalizedFilePath {
 			backupFile = &info.Files[i]
 			break
 		}
@@ -470,7 +473,7 @@ func (bm *BackupManager) CleanupOldBackups(olderThanDays int, dryRun bool) (int,
 
 			if !dryRun {
 				if err := os.RemoveAll(backupPath); err != nil {
-					fmt.Printf("Warning: failed to delete backup %s: %v\n", backupID, err)
+					slog.Warn("Failed to delete backup", "backup_id", backupID, "error", err)
 					continue
 				}
 				delete(bm.metadataCache, backupID)

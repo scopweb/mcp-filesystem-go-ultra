@@ -55,4 +55,9 @@ const (
 	PipelineEditsMedium   = 100  // 100+ edits = MEDIUM risk
 	PipelineEditsHigh     = 500  // 500+ edits = HIGH risk
 	PipelineEditsCritical = 1000 // 1000+ edits = CRITICAL risk
+
+	// Maximum base64 payload size accepted by write_base64.
+	// Large payloads can cause MCP transport timeouts. For text files, use mcp_write instead.
+	// For binary files larger than this limit, split into chunks.
+	MaxBase64PayloadSize = 512 * 1024 // 512KB of base64 ≈ 384KB decoded
 )

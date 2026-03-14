@@ -12,7 +12,7 @@ import (
 
 // FileOperation representa una operación individual en un batch
 type FileOperation struct {
-	Type        string                 `json:"type"`        // write, edit, move, delete, create_dir, copy
+	Type        string                 `json:"type"`        // write, edit, search_and_replace, move, delete, create_dir, copy
 	Path        string                 `json:"path"`        // Ruta principal
 	Source      string                 `json:"source"`      // Para move/copy
 	Destination string                 `json:"destination"` // Para move/copy
@@ -65,6 +65,7 @@ type BatchOperationManager struct {
 	maxBackups    int
 	mutex         sync.Mutex
 	currentBackup string
+	engine        *UltraFastEngine // Reference to engine for intelligent edit (Bug #18)
 }
 
 // NewBatchOperationManager crea un nuevo manager de operaciones batch
@@ -79,6 +80,11 @@ func NewBatchOperationManager(backupDir string, maxBackups int) *BatchOperationM
 		backupDir:  backupDir,
 		maxBackups: maxBackups,
 	}
+}
+
+// SetEngine sets the engine reference for intelligent edit support in batch operations.
+func (m *BatchOperationManager) SetEngine(engine *UltraFastEngine) {
+	m.engine = engine
 }
 
 // ExecuteBatch ejecuta un batch de operaciones
@@ -207,6 +213,17 @@ func (m *BatchOperationManager) validateOperations(operations []FileOperation) [
 				errors = append(errors, fmt.Sprintf("Op %d: file does not exist: %s", i, op.Path))
 			}
 
+		case "search_and_replace":
+			if op.Path == "" {
+				errors = append(errors, fmt.Sprintf("Op %d: path is required for search_and_replace", i))
+			}
+			if op.OldText == "" {
+				errors = append(errors, fmt.Sprintf("Op %d: old_text (pattern) is required for search_and_replace", i))
+			}
+			if _, err := os.Stat(op.Path); os.IsNotExist(err) {
+				errors = append(errors, fmt.Sprintf("Op %d: path does not exist: %s", i, op.Path))
+			}
+
 		case "move":
 			if op.Source == "" || op.Destination == "" {
 				errors = append(errors, fmt.Sprintf("Op %d: source and destination required for move", i))
@@ -280,7 +297,7 @@ func (m *BatchOperationManager) prepareRollback(op FileOperation) rollbackData {
 			rb.wasCreated = true
 		}
 
-	case "edit":
+	case "edit", "search_and_replace":
 		rb.originalPath = op.Path
 		// Guardar contenido original
 		if content, err := os.ReadFile(op.Path); err == nil {
@@ -317,7 +334,7 @@ func (m *BatchOperationManager) rollback(rollbackInfo []rollbackData) {
 		rb := rollbackInfo[i]
 
 		switch rb.operationType {
-		case "write", "edit":
+		case "write", "edit", "search_and_replace":
 			if rb.wasCreated {
 				// El archivo fue creado, eliminarlo
 				os.Remove(rb.originalPath)
@@ -373,7 +390,7 @@ func (m *BatchOperationManager) createBackup(operations []FileOperation) (string
 		var sourceFile string
 
 		switch op.Type {
-		case "write", "edit", "delete":
+		case "write", "edit", "search_and_replace", "delete":
 			sourceFile = op.Path
 		case "move":
 			sourceFile = op.Source
@@ -403,6 +420,8 @@ func (m *BatchOperationManager) executeOperation(op FileOperation, result *Opera
 		return m.executeWrite(op, result)
 	case "edit":
 		return m.executeEdit(op, result)
+	case "search_and_replace":
+		return m.executeSearchAndReplace(op, result)
 	case "move":
 		return m.executeMove(op, result)
 	case "copy":
@@ -431,9 +450,29 @@ func (m *BatchOperationManager) executeEdit(op FileOperation, result *OperationR
 	}
 
 	original := string(content)
+
+	// Use performIntelligentEdit when engine is available (Bug #18: literal escapes,
+	// line endings, TrimSpace, flexible regex matching)
+	if m.engine != nil {
+		editResult, editErr := m.engine.performIntelligentEdit(original, op.OldText, op.NewText)
+		if editErr != nil || editResult.ReplacementCount == 0 {
+			return fmt.Errorf("old_text not found in file: %s. "+
+				"ALWAYS read the file with read_file_range BEFORE editing. "+
+				"Copy the exact text from the read result as old_text", op.Path)
+		}
+		err = os.WriteFile(op.Path, []byte(editResult.ModifiedContent), 0644)
+		if err == nil {
+			result.BytesAffected = int64(len(editResult.ModifiedContent) - len(original))
+		}
+		return err
+	}
+
+	// Fallback: simple string replace when engine is not set
 	newContent := strings.Replace(original, op.OldText, op.NewText, 1)
 	if newContent == original {
-		return fmt.Errorf("old_text not found in file: %s", op.Path)
+		return fmt.Errorf("old_text not found in file: %s. "+
+			"ALWAYS read the file with read_file_range BEFORE editing. "+
+			"Copy the exact text from the read result as old_text", op.Path)
 	}
 
 	err = os.WriteFile(op.Path, []byte(newContent), 0644)
@@ -441,6 +480,21 @@ func (m *BatchOperationManager) executeEdit(op FileOperation, result *OperationR
 		result.BytesAffected = int64(len(newContent) - len(original))
 	}
 	return err
+}
+
+func (m *BatchOperationManager) executeSearchAndReplace(op FileOperation, result *OperationResult) error {
+	if m.engine == nil {
+		return fmt.Errorf("search_and_replace requires engine (not available in standalone batch mode)")
+	}
+	replacements, err := m.engine.searchAndReplaceInFile(op.Path, op.OldText, op.NewText, true)
+	if err != nil {
+		return err
+	}
+	if replacements == 0 {
+		return fmt.Errorf("pattern '%s' not found in %s", op.OldText, op.Path)
+	}
+	result.BytesAffected = int64(replacements)
+	return nil
 }
 
 func (m *BatchOperationManager) executeMove(op FileOperation, result *OperationResult) error {

@@ -71,3 +71,32 @@ type ContextError struct {
 func (e *ContextError) Error() string {
 	return fmt.Sprintf("context error in %s: %s", e.Op, e.Details)
 }
+
+// PipelineStepError represents an error during pipeline step execution
+type PipelineStepError struct {
+	StepID     string // Step identifier
+	StepIndex  int    // 0-based step index
+	Action     string // Action that failed
+	Param      string // Which param was wrong (if applicable)
+	Message    string // Error description
+	Suggestion string // Fix suggestion (e.g., "Did you mean 'input_from: step1'?")
+	Err        error  // Underlying error
+}
+
+func (e *PipelineStepError) Error() string {
+	base := fmt.Sprintf("pipeline step %d '%s' (%s): %s", e.StepIndex+1, e.StepID, e.Action, e.Message)
+	if e.Param != "" {
+		base += fmt.Sprintf(" [param: %s]", e.Param)
+	}
+	if e.Suggestion != "" {
+		base += fmt.Sprintf(" — hint: %s", e.Suggestion)
+	}
+	if e.Err != nil {
+		base += fmt.Sprintf(" (caused by: %v)", e.Err)
+	}
+	return base
+}
+
+func (e *PipelineStepError) Unwrap() error {
+	return e.Err
+}

@@ -472,6 +472,161 @@ func (e *UltraFastEngine) generateSimpleDiff(oldContent, newContent string) stri
 	return diff.String()
 }
 
+// CompareFiles compares two files and returns a ChangeAnalysis with a diff preview.
+// This is a read-only operation — no files are modified.
+func (e *UltraFastEngine) CompareFiles(ctx context.Context, pathA, pathB string) (*ChangeAnalysis, error) {
+	pathA = NormalizePath(pathA)
+	pathB = NormalizePath(pathB)
+
+	// Access control
+	if len(e.config.AllowedPaths) > 0 {
+		if !e.isPathAllowed(pathA) {
+			return nil, &PathError{Op: "compare", Path: pathA, Err: fmt.Errorf("access denied")}
+		}
+		if !e.isPathAllowed(pathB) {
+			return nil, &PathError{Op: "compare", Path: pathB, Err: fmt.Errorf("access denied")}
+		}
+	}
+
+	// Read both files
+	contentA, err := os.ReadFile(pathA)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file A (%s): %w", pathA, err)
+	}
+	contentB, err := os.ReadFile(pathB)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file B (%s): %w", pathB, err)
+	}
+
+	strA := string(contentA)
+	strB := string(contentB)
+	linesA := strings.Split(strA, "\n")
+	linesB := strings.Split(strB, "\n")
+
+	// Count differences
+	maxLen := max(len(linesA), len(linesB))
+	diffCount := 0
+	for i := 0; i < maxLen; i++ {
+		lineA := ""
+		lineB := ""
+		if i < len(linesA) {
+			lineA = linesA[i]
+		}
+		if i < len(linesB) {
+			lineB = linesB[i]
+		}
+		if lineA != lineB {
+			diffCount++
+		}
+	}
+
+	// Build analysis
+	analysis := &ChangeAnalysis{
+		FilePath:      pathA,
+		OperationType: "compare",
+		RiskLevel:     "low",
+		FileExists:    true,
+		FileSize:      int64(len(contentA)),
+		Metadata: map[string]interface{}{
+			"path_a":        pathA,
+			"path_b":        pathB,
+			"size_a":        len(contentA),
+			"size_b":        len(contentB),
+			"lines_a":       len(linesA),
+			"lines_b":       len(linesB),
+			"lines_different": diffCount,
+		},
+	}
+
+	if strA == strB {
+		analysis.Impact = fmt.Sprintf("Files are identical (%d lines, %s)", len(linesA), formatBytes(int64(len(contentA))))
+		analysis.Preview = "No differences — files are identical."
+	} else {
+		analysis.LinesModified = diffCount
+		analysis.LinesAdded = max(0, len(linesB)-len(linesA))
+		analysis.LinesRemoved = max(0, len(linesA)-len(linesB))
+		analysis.Impact = fmt.Sprintf("%d lines differ | File A: %d lines (%s) | File B: %d lines (%s)",
+			diffCount, len(linesA), formatBytes(int64(len(contentA))), len(linesB), formatBytes(int64(len(contentB))))
+
+		// Generate diff preview using existing engine method
+		analysis.Preview = e.generateComparisonDiff(strA, strB, filepath.Base(pathA), filepath.Base(pathB))
+	}
+
+	return analysis, nil
+}
+
+// generateComparisonDiff creates a unified-style diff for two file contents.
+func (e *UltraFastEngine) generateComparisonDiff(contentA, contentB, nameA, nameB string) string {
+	linesA := strings.Split(contentA, "\n")
+	linesB := strings.Split(contentB, "\n")
+
+	var diff strings.Builder
+	diff.WriteString(fmt.Sprintf("--- %s\n", nameA))
+	diff.WriteString(fmt.Sprintf("+++ %s\n", nameB))
+	diff.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+
+	changesShown := 0
+	maxChanges := 40
+	maxLen := max(len(linesA), len(linesB))
+
+	for i := 0; i < maxLen && changesShown < maxChanges; i++ {
+		lineA := ""
+		lineB := ""
+		if i < len(linesA) {
+			lineA = linesA[i]
+		}
+		if i < len(linesB) {
+			lineB = linesB[i]
+		}
+
+		if lineA != lineB {
+			diff.WriteString(fmt.Sprintf("@@ line %d @@\n", i+1))
+			if lineA != "" {
+				diff.WriteString(fmt.Sprintf("- %s\n", e.truncateForPreview(lineA, 120)))
+			}
+			if lineB != "" {
+				diff.WriteString(fmt.Sprintf("+ %s\n", e.truncateForPreview(lineB, 120)))
+			}
+			changesShown++
+		}
+	}
+
+	remaining := 0
+	if changesShown >= maxChanges {
+		for i := 0; i < maxLen; i++ {
+			lineA := ""
+			lineB := ""
+			if i < len(linesA) {
+				lineA = linesA[i]
+			}
+			if i < len(linesB) {
+				lineB = linesB[i]
+			}
+			if lineA != lineB {
+				remaining++
+			}
+		}
+		remaining -= changesShown
+		if remaining > 0 {
+			diff.WriteString(fmt.Sprintf("\n... and %d more differences\n", remaining))
+		}
+	}
+
+	return diff.String()
+}
+
+// formatBytes formats a byte count to a human-readable string.
+func formatBytes(b int64) string {
+	switch {
+	case b >= 1024*1024:
+		return fmt.Sprintf("%.1f MB", float64(b)/(1024*1024))
+	case b >= 1024:
+		return fmt.Sprintf("%.1f KB", float64(b)/1024)
+	default:
+		return fmt.Sprintf("%d bytes", b)
+	}
+}
+
 func (e *UltraFastEngine) truncateForPreview(text string, maxLen int) string {
 	if len(text) <= maxLen {
 		return text

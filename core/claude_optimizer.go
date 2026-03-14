@@ -55,12 +55,39 @@ func (o *ClaudeDesktopOptimizer) IntelligentWrite(ctx context.Context, path, con
 	// Normalize path first (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
+	// Bug #19: Detect potential file truncation — warn when overwriting a file
+	// with significantly less content. This catches LLMs that rewrite entire files
+	// after only reading a partial range, potentially losing data.
+	if info, err := os.Stat(path); err == nil {
+		existingSize := info.Size()
+		newSize := int64(len(content))
+		// If existing file is >1KB and new content is <50% of existing size, warn
+		if existingSize > 1024 && newSize > 0 && newSize < existingSize/2 {
+			AppendSubOp(ctx, "truncation_blocked")
+			// Create backup before potentially destructive overwrite
+			if o.engine.backupManager != nil {
+				backupID, backupErr := o.engine.backupManager.CreateBackup(path, "truncation_protection")
+				if backupErr == nil {
+					return fmt.Errorf("WRITE BLOCKED — new content (%d bytes) is less than 50%% of existing file (%d bytes). "+
+						"This looks like accidental file truncation. Use mcp_edit for partial changes, or read the FULL file first. "+
+						"Backup created: %s. To force overwrite, use write_base64 or delete_file first then mcp_write",
+						newSize, existingSize, backupID)
+				}
+			}
+			return fmt.Errorf("WRITE BLOCKED — new content (%d bytes) is less than 50%% of existing file (%d bytes). "+
+				"This looks like accidental file truncation. Use mcp_edit for partial changes, or read the FULL file first",
+				newSize, existingSize)
+		}
+	}
+
 	size := int64(len(content))
 
 	// Auto-select strategy sin logging excesivo
 	if size <= o.config.MaxDirectFileSize {
+		AppendSubOp(ctx, "direct_write")
 		return o.engine.WriteFileContent(ctx, path, content)
 	} else {
+		AppendSubOp(ctx, "streaming_write")
 		return o.engine.StreamingWriteFile(ctx, path, content)
 	}
 }
@@ -84,8 +111,10 @@ func (o *ClaudeDesktopOptimizer) IntelligentRead(ctx context.Context, path strin
 
 	// Auto-select strategy
 	if size <= o.config.MaxDirectFileSize {
+		AppendSubOp(ctx, "direct_read")
 		return o.engine.ReadFileContent(ctx, path)
 	} else {
+		AppendSubOp(ctx, "chunked_read")
 		return o.engine.ChunkedReadFile(ctx, path, o.config.ChunkSize)
 	}
 }
@@ -112,8 +141,10 @@ func (o *ClaudeDesktopOptimizer) IntelligentEdit(ctx context.Context, path, oldT
 
 	// Auto-select strategy
 	if size <= o.config.MaxDirectFileSize {
-		return o.engine.EditFile(path, oldText, newText, force)
+		AppendSubOp(ctx, "direct_edit")
+		return o.engine.EditFile(ctx, path, oldText, newText, force)
 	} else {
+		AppendSubOp(ctx, "smart_edit_large")
 		return o.engine.SmartEditFile(ctx, path, oldText, newText, force, o.config.MaxDirectFileSize)
 	}
 }

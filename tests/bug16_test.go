@@ -133,7 +133,7 @@ func TestBug16_MediumRiskAutoProceeds(t *testing.T) {
 	}
 
 	// Edit with force=false — should NOT block (Bug #16 fix)
-	result, err := engine.EditFile(testFile, strings.Repeat("B", 100), strings.Repeat("D", 100), false)
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 100), strings.Repeat("D", 100), false)
 	if err != nil {
 		t.Fatalf("MEDIUM risk edit should NOT block, got error: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestBug16_HighRiskAutoProceeds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(testFile, strings.Repeat("B", 200), strings.Repeat("D", 200), false)
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 200), strings.Repeat("D", 200), false)
 	if err != nil {
 		t.Fatalf("HIGH risk edit should NOT block, got error: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestBug16_CriticalRiskBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := engine.EditFile(testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), false)
+	_, err := engine.EditFile(context.Background(), testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), false)
 	if err == nil {
 		t.Fatal("CRITICAL risk edit should be blocked without force")
 	}
@@ -209,7 +209,7 @@ func TestBug16_CriticalRiskForceProceeds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), true)
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), true)
 	if err != nil {
 		t.Fatalf("CRITICAL risk edit with force=true should succeed, got error: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestBug16_LowRiskNoWarning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(testFile, "HELLO", "WORLD", false)
+	result, err := engine.EditFile(context.Background(), testFile, "HELLO", "WORLD", false)
 	if err != nil {
 		t.Fatalf("LOW risk edit should succeed, got error: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestBug16_BackupCreatedBeforeBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := engine.EditFile(testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), false)
+	_, err := engine.EditFile(context.Background(), testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), false)
 	if err == nil {
 		t.Fatal("CRITICAL risk should be blocked")
 	}

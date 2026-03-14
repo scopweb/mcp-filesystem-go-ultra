@@ -206,11 +206,11 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 	var contentMatches []SearchMatch
 	maxResults := e.config.MaxSearchResults
 
-	// Compile regex pattern
-	regexPattern, err := regexp.Compile(pattern)
+	// Compile regex pattern (uses engine cache to avoid repeated compilation)
+	regexPattern, err := e.CompileRegex(pattern)
 	if err != nil {
 		// If not valid regex, use literal search
-		regexPattern = regexp.MustCompile(regexp.QuoteMeta(pattern))
+		regexPattern, _ = e.CompileRegex(regexp.QuoteMeta(pattern))
 	}
 
 	// First pass: collect all files to search
@@ -449,7 +449,7 @@ func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSe
 		searchPattern = `\b` + searchPattern + `\b`
 	}
 
-	regexPattern, err := regexp.Compile(searchPattern)
+	regexPattern, err := e.CompileRegex(searchPattern)
 	if err != nil {
 		return nil, fmt.Errorf("invalid regex pattern: %w", err)
 	}
@@ -641,10 +641,12 @@ var textExtensionsMap = map[string]bool{
 	".graphql": true, ".gql": true, ".proto": true,
 	".tf": true, ".tfvars": true, // Terraform
 	".hcl": true,                 // HashiCorp
-	".lua": true, ".vim": true, ".el": true, // Scripting
+	".lua": true, ".vim": true, ".el": true, ".emacs": true, // Scripting
 	".r": true, ".rmd": true, // R
 	".dart": true, ".ex": true, ".exs": true, // Dart, Elixir
 	".zig": true, ".nim": true, ".v": true, // Modern languages
+	".pl": true,   // Perl
+	".lock": true, // Lock files (package-lock.json, yarn.lock, etc.)
 }
 
 // isTextFile determines if a file is likely a text file
@@ -713,12 +715,12 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 
 	lines := strings.Split(string(content), "\n")
 
-	// Try to compile as regex first, fallback to literal if fails
+	// Try to compile as regex first, fallback to literal if fails (uses engine cache)
 	var regexPattern *regexp.Regexp
-	regexPattern, err = regexp.Compile(pattern)
+	regexPattern, err = e.CompileRegex(pattern)
 	if err != nil {
 		// Use literal pattern
-		regexPattern = regexp.MustCompile(regexp.QuoteMeta(pattern))
+		regexPattern, _ = e.CompileRegex(regexp.QuoteMeta(pattern))
 	}
 
 	// Count occurrences and track line numbers

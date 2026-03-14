@@ -86,6 +86,9 @@ func (rt *RegexTransformer) Transform(ctx context.Context, config RegexTransform
 		result.Mode = "parallel"
 	}
 
+	// Track regex mode in audit sub_op
+	AppendSubOp(ctx, "regex_"+result.Mode)
+
 	// Validate and compile all patterns first
 	if err := rt.compilePatterns(&config); err != nil {
 		result.Errors = append(result.Errors, err.Error())

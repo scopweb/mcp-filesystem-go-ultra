@@ -40,9 +40,21 @@ type SearchMatch struct {
 //
 // Context Validation: Validates surrounding context (3-5 lines) to prevent
 // editing stale content that may have been modified since the file was read.
-func (e *UltraFastEngine) EditFile(path, oldText, newText string, force bool) (*EditResult, error) {
+func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText string, force bool) (*EditResult, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
+
+	// Acquire semaphore for concurrency control
+	if err := e.acquireOperation(ctx, "edit"); err != nil {
+		return nil, err
+	}
+	start := time.Now()
+	defer e.releaseOperation("edit", start)
+
+	// Check context before proceeding
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("operation cancelled: %w", err)
+	}
 
 	// Check if path is allowed (access control)
 	if len(e.config.AllowedPaths) > 0 {
@@ -117,7 +129,7 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string, force bool) (*
 		},
 	}
 
-	hookResult, err := e.hookManager.ExecuteHooks(context.Background(), HookPreEdit, hookCtx)
+	hookResult, err := e.hookManager.ExecuteHooks(ctx, HookPreEdit, hookCtx)
 	if err != nil {
 		return nil, fmt.Errorf("pre-edit hook denied operation: %w", err)
 	}
@@ -163,7 +175,7 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string, force bool) (*
 	hookCtx.Event = HookPostEdit
 	hookCtx.NewContent = finalContent
 	hookCtx.Metadata["backup_id"] = backupID
-	_, _ = e.hookManager.ExecuteHooks(context.Background(), HookPostEdit, hookCtx)
+	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostEdit, hookCtx)
 
 	// Auto-sync to Windows if enabled (async, non-blocking)
 	if e.autoSyncManager != nil {
@@ -182,9 +194,22 @@ func (e *UltraFastEngine) EditFile(path, oldText, newText string, force bool) (*
 }
 
 // SearchAndReplace performs search and replace operations across files
-func (e *UltraFastEngine) SearchAndReplace(path, pattern, replacement string, caseSensitive bool) (*mcp.CallToolResponse, error) {
+func (e *UltraFastEngine) SearchAndReplace(ctx context.Context, path, pattern, replacement string, caseSensitive bool) (*mcp.CallToolResponse, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
+
+	// Acquire semaphore for concurrency control
+	if err := e.acquireOperation(ctx, "search_replace"); err != nil {
+		return nil, err
+	}
+	start := time.Now()
+	defer e.releaseOperation("search_replace", start)
+
+	// Check context before proceeding
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("operation cancelled: %w", err)
+	}
+
 	// Validate path
 	validPath, err := e.validatePath(path)
 	if err != nil {
@@ -268,7 +293,19 @@ func (e *UltraFastEngine) validatePath(path string) (string, error) {
 
 // validateEditableFile checks if a file can be edited
 func (e *UltraFastEngine) validateEditableFile(path string) error {
-	info, err := os.Stat(path)
+	var info os.FileInfo
+	var err error
+	// Retry up to 3 times to handle transient Windows file locks
+	// (antivirus, indexer, or concurrent operations can briefly block access)
+	for attempt := 0; attempt < 3; attempt++ {
+		info, err = os.Stat(path)
+		if err == nil {
+			break
+		}
+		if attempt < 2 {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -465,7 +502,65 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 		}, nil
 	}
 
-	// OPTIMIZATION 6: Flexible regex search as last resort (expensive)
+	// OPTIMIZATION 6: Literal escape normalization fallback (Bug #18)
+	// LLMs (especially Claude Desktop) sometimes send old_text with literal \n
+	// (backslash + n as two chars) instead of real newline characters.
+	// Only attempted when: old_text has literal \n but NO real newlines,
+	// meaning the LLM likely flattened a multiline string.
+	// Safety: content is NOT converted (it already has real newlines),
+	// only old_text and new_text are adjusted for matching.
+	convertedOld := normalizeLiteralEscapes(oldText)
+	if convertedOld != oldText {
+		convertedNew := normalizeLiteralEscapes(newText)
+		if idx := strings.Index(content, convertedOld); idx >= 0 {
+			newContent := strings.ReplaceAll(content, convertedOld, convertedNew)
+			replacements := strings.Count(content, convertedOld)
+			return &EditResult{
+				ModifiedContent:  newContent,
+				ReplacementCount: replacements,
+				MatchConfidence:  "high",
+				LinesAffected:    strings.Count(convertedOld, "\n") + 1,
+			}, nil
+		}
+	}
+
+	// OPTIMIZATION 7: Tab ↔ space normalization fallback
+	// LLMs often send spaces when the file uses tabs (or vice versa).
+	// Normalize both content and oldText to spaces, find the match position,
+	// then replace the original content at that position.
+	if strings.ContainsAny(oldText, "\t ") {
+		normalizedContent := normalizeIndentation(content)
+		normalizedOldText := normalizeIndentation(oldText)
+		if idx := strings.Index(normalizedContent, normalizedOldText); idx >= 0 {
+			// Map normalized position back to original content.
+			// Find the real substring by counting characters up to idx in original.
+			origIdx := mapNormalizedIndex(content, normalizedContent, idx)
+			origEnd := mapNormalizedIndex(content, normalizedContent, idx+len(normalizedOldText))
+			if origIdx >= 0 && origEnd > origIdx && origEnd <= len(content) {
+				originalMatch := content[origIdx:origEnd]
+				replacements := 1
+				// Preserve the indentation style of the file in newText
+				fileUseTabs := strings.Count(originalMatch, "\t") > strings.Count(originalMatch, "    ")
+				adjustedNew := newText
+				if fileUseTabs {
+					// File uses tabs — convert leading spaces in newText to tabs
+					adjustedNew = convertLeadingSpacesToTabs(newText)
+				} else {
+					// File uses spaces — convert leading tabs in newText to spaces
+					adjustedNew = convertLeadingTabsToSpaces(newText)
+				}
+				newContent := content[:origIdx] + adjustedNew + content[origEnd:]
+				return &EditResult{
+					ModifiedContent:  newContent,
+					ReplacementCount: replacements,
+					MatchConfidence:  "medium",
+					LinesAffected:    strings.Count(originalMatch, "\n") + 1,
+				}, nil
+			}
+		}
+	}
+
+	// OPTIMIZATION 8: Flexible regex search as last resort (expensive)
 	// Only try if content is not too large (< 100KB for regex)
 	// Compile regex once and reuse
 	if len(content) < 100*1024 {
@@ -595,6 +690,26 @@ func normalizeLineEndings(s string) string {
 	return s
 }
 
+// normalizeLiteralEscapes converts literal escape sequences (\\n, \\t) to real ones.
+// LLMs sometimes send JSON-escaped newlines as literal two-char sequences in old_text.
+// Example: "line1\\nline2" → "line1\nline2"
+// Safety: only converts \\n if the text does NOT already contain real newlines,
+// to avoid double-conversion when the string is already correct.
+func normalizeLiteralEscapes(s string) string {
+	if !strings.Contains(s, `\n`) {
+		return s // No literal \n found, nothing to do
+	}
+	// If the string already has real newlines, the literal \n are likely intentional
+	// (e.g., code that contains the string literal "\\n")
+	if strings.Contains(s, "\n") {
+		return s
+	}
+	// String has literal \n but no real newlines — convert them
+	s = strings.ReplaceAll(s, `\n`, "\n")
+	s = strings.ReplaceAll(s, `\t`, "\t")
+	return s
+}
+
 // trimTrailingSpacesPerLine strips trailing spaces and tabs from each line.
 // Used as a whitespace-tolerant comparison fallback: editors and LLMs often
 // disagree on whether lines should carry trailing whitespace.
@@ -609,6 +724,99 @@ func trimTrailingSpacesPerLine(s string) string {
 func getIndentation(line string) string {
 	trimmed := strings.TrimLeft(line, " \t")
 	return line[:len(line)-len(trimmed)]
+}
+
+// normalizeIndentation converts all leading whitespace to spaces (1 tab = 4 spaces)
+// so that tab-vs-space differences don't block matching.
+func normalizeIndentation(s string) string {
+	lines := strings.Split(s, "\n")
+	var sb strings.Builder
+	sb.Grow(len(s))
+	for i, line := range lines {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+		indent := getIndentation(line)
+		rest := line[len(indent):]
+		normalized := strings.ReplaceAll(indent, "\t", "    ")
+		sb.WriteString(normalized)
+		sb.WriteString(rest)
+	}
+	return sb.String()
+}
+
+// mapNormalizedIndex maps a byte index in normalized text back to the corresponding
+// byte index in the original text. Both texts must have the same line structure
+// (only leading whitespace differs).
+func mapNormalizedIndex(original, normalized string, normIdx int) int {
+	if normIdx <= 0 {
+		return 0
+	}
+	if normIdx >= len(normalized) {
+		return len(original)
+	}
+	// Walk both strings in parallel, character by character
+	oi := 0
+	ni := 0
+	for ni < normIdx && oi < len(original) {
+		if original[oi] == '\n' && normalized[ni] == '\n' {
+			oi++
+			ni++
+			continue
+		}
+		// At start of a line, skip whitespace in both versions together
+		if ni < len(normalized) && (normalized[ni] == ' ' || normalized[ni] == '\t') &&
+			oi < len(original) && (original[oi] == ' ' || original[oi] == '\t') {
+			// Consume the entire leading whitespace on this line in both
+			lineNi := ni
+			lineOi := oi
+			for lineNi < len(normalized) && (normalized[lineNi] == ' ' || normalized[lineNi] == '\t') {
+				lineNi++
+			}
+			for lineOi < len(original) && (original[lineOi] == ' ' || original[lineOi] == '\t') {
+				lineOi++
+			}
+			if normIdx <= lineNi {
+				// Target is inside this whitespace block — proportional map
+				normWS := lineNi - ni
+				origWS := lineOi - oi
+				frac := float64(normIdx-ni) / float64(normWS)
+				return oi + int(frac*float64(origWS))
+			}
+			ni = lineNi
+			oi = lineOi
+			continue
+		}
+		oi++
+		ni++
+	}
+	return oi
+}
+
+// convertLeadingSpacesToTabs converts leading spaces to tabs (4 spaces = 1 tab) per line.
+func convertLeadingSpacesToTabs(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		indent := getIndentation(line)
+		rest := line[len(indent):]
+		// Convert groups of 4 spaces to tabs, leave remainder as spaces
+		spacesOnly := strings.ReplaceAll(indent, "\t", "    ")
+		tabs := strings.Repeat("\t", len(spacesOnly)/4)
+		remainder := strings.Repeat(" ", len(spacesOnly)%4)
+		lines[i] = tabs + remainder + rest
+	}
+	return strings.Join(lines, "\n")
+}
+
+// convertLeadingTabsToSpaces converts leading tabs to spaces (1 tab = 4 spaces) per line.
+func convertLeadingTabsToSpaces(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		indent := getIndentation(line)
+		rest := line[len(indent):]
+		lines[i] = strings.ReplaceAll(indent, "\t", "    ") + rest
+	}
+	return strings.Join(lines, "\n")
 }
 
 func makeFlexiblePattern(escaped string) string {
@@ -1180,7 +1388,7 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 		},
 	}
 
-	_, _ = e.hookManager.ExecuteHooks(context.Background(), HookPostEdit, hookCtx)
+	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostEdit, hookCtx)
 
 	// Auto-sync to Windows if enabled (async, non-blocking)
 	if e.autoSyncManager != nil {
@@ -1206,9 +1414,21 @@ func (e *UltraFastEngine) validateEditContext(currentContent, oldText string) (b
 	// Normalize line endings for validation
 	normalizedContent := normalizeLineEndings(currentContent)
 	normalizedOldText := normalizeLineEndings(oldText)
+	// effectiveOldText is used for context checking — updated if literal escape conversion applies
+	effectiveOldText := normalizedOldText
 
 	// Level 1: exact normalized match (fastest, most common case)
 	exactMatch := strings.Contains(normalizedContent, normalizedOldText)
+
+	if !exactMatch {
+		// Level 1.5: Literal escape normalization (Bug #18)
+		// LLMs may send literal \n instead of real newlines
+		convertedOld := normalizeLiteralEscapes(normalizedOldText)
+		if convertedOld != normalizedOldText && strings.Contains(normalizedContent, convertedOld) {
+			exactMatch = true
+			effectiveOldText = convertedOld
+		}
+	}
 
 	if !exactMatch {
 		// Level 2: trailing-whitespace-tolerant match.
@@ -1219,24 +1439,29 @@ func (e *UltraFastEngine) validateEditContext(currentContent, oldText string) (b
 		trimmedContent := trimTrailingSpacesPerLine(normalizedContent)
 		trimmedOld := trimTrailingSpacesPerLine(normalizedOldText)
 		if !strings.Contains(trimmedContent, trimmedOld) {
-			// Not found even with whitespace tolerance — file has genuinely changed
-			// or old_text is wrong. Provide actionable diagnostics.
-			lineCount := strings.Count(normalizedOldText, "\n") + 1
-			return false, fmt.Sprintf(
-				"old_text not found in current file (%d line(s)) - "+
-					"file has likely changed or old_text has encoding differences "+
-					"(BOM, non-breaking spaces, Unicode normalization). "+
-					"Re-read with read_file_range to get exact current content",
-				lineCount,
-			)
+			// Also try with literal escapes converted + trimmed (Bug #18)
+			convertedOld := normalizeLiteralEscapes(normalizedOldText)
+			trimmedConverted := trimTrailingSpacesPerLine(convertedOld)
+			if convertedOld != normalizedOldText && strings.Contains(trimmedContent, trimmedConverted) {
+				// Match found with literal escape conversion — let performIntelligentEdit handle it
+			} else {
+				lineCount := strings.Count(normalizedOldText, "\n") + 1
+				return false, fmt.Sprintf(
+					"old_text not found in file (%d line(s)). "+
+						"ALWAYS read the file with read_file_range BEFORE editing. "+
+						"Copy the exact text from the read result as old_text",
+					lineCount,
+				)
+			}
 		}
 		// Whitespace-tolerant match found — proceed to context check.
 		// performIntelligentEdit will resolve the actual replacement.
 	}
 
 	// Extract a snippet with surrounding context (3-5 lines before and after)
+	// Use effectiveOldText which may have literal escapes converted (Bug #18)
 	lines := strings.Split(normalizedContent, "\n")
-	oldLines := strings.Split(normalizedOldText, "\n")
+	oldLines := strings.Split(effectiveOldText, "\n")
 
 	if len(oldLines) == 0 {
 		return false, "invalid old_text"
@@ -1275,7 +1500,7 @@ func (e *UltraFastEngine) validateEditContext(currentContent, oldText string) (b
 	}
 
 	if !found {
-		return false, "exact match for old_text not found in current file"
+		return false, "old_text not found. ALWAYS read the file with read_file_range BEFORE editing. Copy the exact text from the read result as old_text"
 	}
 
 	// Check context: verify that surrounding lines are stable

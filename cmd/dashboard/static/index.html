@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP Filesystem Ultra — Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>MCP Filesystem Ultra</h1>
+    <span class="status" id="status">Connecting...</span>
+  </header>
+
+  <nav>
+    <button class="active" data-page="dashboard">Dashboard</button>
+    <button data-page="operations">Operations</button>
+    <button data-page="backups">Backups</button>
+    <button data-page="stats">Statistics</button>
+    <button data-page="proxy">Proxy / Tokens</button>
+    <button data-page="analysis">Edit Analysis</button>
+  </nav>
+
+  <main>
+    <!-- Dashboard Page -->
+    <div class="page active" id="page-dashboard">
+      <div class="cards">
+        <div class="card">
+          <div class="label">Operations/sec</div>
+          <div class="value accent" id="m-ops-sec">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Cache Hit Rate</div>
+          <div class="value green" id="m-cache">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Memory</div>
+          <div class="value" id="m-memory">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Total Operations</div>
+          <div class="value" id="m-total">—</div>
+        </div>
+      </div>
+
+      <div class="cards">
+        <div class="card">
+          <div class="label">Reads</div>
+          <div class="value" id="m-reads">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Writes</div>
+          <div class="value" id="m-writes">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Lists</div>
+          <div class="value" id="m-lists">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Searches</div>
+          <div class="value" id="m-searches">—</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Recent Operations</h2>
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Tool</th><th>Path</th><th>Duration</th><th>Status</th></tr>
+          </thead>
+          <tbody id="recent-ops"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Operations Page -->
+    <div class="page" id="page-operations">
+      <div class="section">
+        <h2>Operation Log (last 200)</h2>
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Tool</th><th>Path</th><th>Duration</th><th>In</th><th>Out</th><th>File</th><th>Status</th><th>Error</th><th></th></tr>
+          </thead>
+          <tbody id="all-ops"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Backups Page -->
+    <div class="page" id="page-backups">
+      <div class="cards">
+        <div class="card">
+          <div class="label">Total Backups</div>
+          <div class="value accent" id="bk-total">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Total Size</div>
+          <div class="value" id="bk-size">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Latest Backup</div>
+          <div class="value green" id="bk-latest" style="font-size:16px;">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Protected Files</div>
+          <div class="value yellow" id="bk-files">—</div>
+        </div>
+      </div>
+
+      <div class="backup-search-bar">
+        <div class="search-row">
+          <input type="text" id="bk-search-q" class="search-input" placeholder="Search by file name, backup ID, or context...">
+          <select id="bk-search-op" class="search-select">
+            <option value="">All Operations</option>
+          </select>
+          <select id="bk-search-preset" class="search-select">
+            <option value="">All Time</option>
+            <option value="today">Today</option>
+            <option value="24h">Last 24h</option>
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+            <option value="custom">Custom Range...</option>
+          </select>
+          <button class="btn-action" id="bk-search-btn" style="padding:8px 16px;">Search</button>
+        </div>
+        <div class="date-range-row" id="bk-date-range" style="display:none;">
+          <label>From: <input type="date" id="bk-date-from" class="search-input" style="width:auto;"></label>
+          <label>To: <input type="date" id="bk-date-to" class="search-input" style="width:auto;"></label>
+        </div>
+      </div>
+
+      <details class="content-search-toggle">
+        <summary>Content Search (search inside backup files)</summary>
+        <div class="search-row" style="margin-top:8px;">
+          <input type="text" id="bk-content-q" class="search-input" placeholder="Search code or text inside backup files...">
+          <button class="btn-action" id="bk-content-btn" style="padding:8px 16px;">Search Content</button>
+        </div>
+        <div id="bk-content-results"></div>
+      </details>
+
+      <div class="search-status" id="bk-status"></div>
+
+      <div class="section">
+        <div id="backups-list"></div>
+      </div>
+
+      <div class="pagination" id="bk-pagination"></div>
+    </div>
+
+    <!-- Statistics Page -->
+    <div class="page" id="page-stats">
+      <div class="cards">
+        <div class="card">
+          <div class="label">Total Operations</div>
+          <div class="value accent" id="s-total-ops">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Error Rate</div>
+          <div class="value" id="s-error-rate">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Avg Duration</div>
+          <div class="value" id="s-avg-duration">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Data In / Out</div>
+          <div class="value" id="s-total-bytes">—</div>
+        </div>
+        <div class="card">
+          <div class="label">~Tokens (est.)</div>
+          <div class="value yellow" id="s-tokens">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Time Span</div>
+          <div class="value" id="s-timespan">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Lines Changed</div>
+          <div class="value green" id="s-total-lines">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Total Matches</div>
+          <div class="value" id="s-total-matches">—</div>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="section">
+          <h2>Performance by Tool</h2>
+          <table>
+            <thead>
+              <tr><th>Tool</th><th>Count</th><th>Errors</th><th>Err%</th><th>Avg</th><th>Min</th><th>Max</th><th>P95</th><th>Data In</th><th>Data Out</th><th>Lines</th></tr>
+            </thead>
+            <tbody id="s-by-tool"></tbody>
+          </table>
+        </div>
+
+        <div class="section">
+          <h2>Top 15 Most Accessed Files</h2>
+          <table>
+            <thead><tr><th>#</th><th>Path</th><th>Count</th></tr></thead>
+            <tbody id="s-top-files"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Operations per Hour (last 48h)</h2>
+        <div id="s-hour-chart" class="hour-chart"></div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="section">
+          <h2>Risk Distribution</h2>
+          <div id="s-risk-dist" class="risk-bars"></div>
+        </div>
+
+        <div class="section">
+          <h2>Top 10 Slowest Operations</h2>
+          <table>
+            <thead><tr><th>Time</th><th>Tool</th><th>Path</th><th>Duration</th><th>Status</th></tr></thead>
+            <tbody id="s-slowest"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Proxy / Tokens Page -->
+    <div class="page" id="page-proxy">
+      <div class="cards">
+        <div class="card">
+          <div class="label">Total Tool Calls</div>
+          <div class="value accent" id="p-total-calls">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Tokens In</div>
+          <div class="value" id="p-tokens-in">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Tokens Out</div>
+          <div class="value yellow" id="p-tokens-out">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Total Tokens</div>
+          <div class="value green" id="p-tokens-total">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Error Rate</div>
+          <div class="value" id="p-error-rate">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Time Span</div>
+          <div class="value" id="p-timespan">—</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>By Model</h2>
+        <table>
+          <thead>
+            <tr><th>Model</th><th>Calls</th><th>Tokens In</th><th>Tokens Out</th><th>Total Tokens</th><th>Errors</th><th>Err%</th><th>Avg Duration</th></tr>
+          </thead>
+          <tbody id="p-by-model"></tbody>
+        </table>
+      </div>
+
+      <div class="stats-grid">
+        <div class="section">
+          <h2>Tokens by Tool</h2>
+          <table>
+            <thead>
+              <tr><th>Tool</th><th>Calls</th><th>Tokens In</th><th>Tokens Out</th><th>Err%</th><th>Avg</th></tr>
+            </thead>
+            <tbody id="p-by-tool"></tbody>
+          </table>
+        </div>
+
+        <div class="section">
+          <h2>Token Distribution by Model</h2>
+          <div id="p-model-chart" class="risk-bars"></div>
+        </div>
+      </div>
+
+      <div class="section" id="p-no-data" style="display:none">
+        <div class="empty">No proxy data. Configure mcp-proxy with --log-dir and --proxy-log-dir on the dashboard.</div>
+      </div>
+    </div>
+
+    <!-- Analysis Page -->
+    <div class="page" id="page-analysis">
+      <div class="cards">
+        <div class="card">
+          <div class="label">Total Edits</div>
+          <div class="value" id="a-total">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Targeted Edits</div>
+          <div class="value green" id="a-targeted">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Full Rewrites</div>
+          <div class="value yellow" id="a-rewrites">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Avg Bytes/Edit</div>
+          <div class="value" id="a-avgbytes">—</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Efficiency Ratio</h2>
+        <div id="efficiency-bar" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+            <div style="flex:1;height:24px;border-radius:4px;overflow:hidden;display:flex;">
+              <div id="bar-targeted" style="background:var(--green);height:100%;transition:width 0.5s;"></div>
+              <div id="bar-rewrites" style="background:var(--yellow);height:100%;transition:width 0.5s;"></div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-dim);">
+            <span>Targeted: <span id="pct-targeted">—</span></span>
+            <span>Rewrites: <span id="pct-rewrites">—</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
