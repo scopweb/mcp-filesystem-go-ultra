@@ -321,6 +321,11 @@ func (e *UltraFastEngine) streamingEditLargeFile(ctx context.Context, path, oldT
 		return nil, err
 	}
 
+	// Normalize line endings so CRLF files match LF search text (Bug #23)
+	content = normalizeLineEndings(content)
+	oldText = normalizeLineEndings(oldText)
+	newText = normalizeLineEndings(newText)
+
 	// Risk assessment + backup for large file edits (Bug #16)
 	impact := CalculateChangeImpact(content, oldText, newText, e.riskThresholds)
 
@@ -334,14 +339,8 @@ func (e *UltraFastEngine) streamingEditLargeFile(ctx context.Context, path, oldT
 		}
 	}
 
-	if impact.ShouldBlockOperation(force) {
-		warning := impact.FormatRiskWarning()
-		backupMsg := ""
-		if backupID != "" {
-			backupMsg = fmt.Sprintf("\nBackup created: %s", backupID)
-		}
-		return nil, fmt.Errorf("OPERATION BLOCKED - %s%s\n\nTo proceed anyway, add \"force\": true to the request", warning, backupMsg)
-	}
+	// Bug #22: streaming edit NEVER blocks — backup is already created, data is safe.
+	// Risk warning is appended to the result instead.
 
 	// Perform replacement
 	replacements := strings.Count(content, oldText)
@@ -369,8 +368,8 @@ func (e *UltraFastEngine) streamingEditLargeFile(ctx context.Context, path, oldT
 		BackupID:         backupID,
 	}
 
-	// Attach non-blocking risk warning for MEDIUM/HIGH
-	if impact.IsRisky && !impact.ShouldBlockOperation(false) {
+	// Attach risk warning for any risky operation (Bug #22: always warn, never block)
+	if impact.IsRisky {
 		result.RiskWarning = impact.FormatRiskNotice(backupID)
 	}
 

@@ -210,6 +210,8 @@ func main() {
 	mux.HandleFunc("/api/backups/detail/", backupDetailHandler(*backupDir))
 	mux.HandleFunc("/api/backups/file/", backupFileHandler(*backupDir))
 	mux.HandleFunc("/api/stats", statsHandler(*logDir))
+	mux.HandleFunc("/api/normalizer", normalizerHandler(*logDir))
+	mux.HandleFunc("/api/error-patterns", errorPatternsHandler(*logDir))
 	mux.HandleFunc("/api/proxy-stats", proxyStatsHandler(*proxyLogDir))
 
 	// Serve embedded static files
@@ -236,6 +238,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 func metricsHandler(logDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 		data, err := os.ReadFile(filepath.Join(logDir, "metrics.json"))
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]string{"error": "no metrics available yet"})
@@ -248,6 +251,7 @@ func metricsHandler(logDir string) http.HandlerFunc {
 func operationsHandler(logDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 
 		limit := 100
 		if l := r.URL.Query().Get("limit"); l != "" {
@@ -724,22 +728,32 @@ func backupFileHandler(backupDir string) http.HandlerFunc {
 	}
 }
 
+// NormalizationApplied mirrors core.NormalizationApplied
+type NormalizationApplied struct {
+	RuleID string `json:"rule_id"`
+	Type   string `json:"type"`
+	Param  string `json:"param"`
+	From   string `json:"from,omitempty"`
+	To     string `json:"to,omitempty"`
+}
+
 // AuditEntry mirrors the core audit entry for parsing operations.jsonl
 type AuditEntry struct {
-	Timestamp    time.Time         `json:"ts"`
-	Tool         string            `json:"tool"`
-	Path         string            `json:"path,omitempty"`
-	DurationMs   int64             `json:"duration_ms"`
-	BytesIn      int64             `json:"bytes_in,omitempty"`
-	BytesOut     int64             `json:"bytes_out,omitempty"`
-	Status       string            `json:"status"`
-	Error        string            `json:"error,omitempty"`
-	RiskLevel    string            `json:"risk,omitempty"`
-	FileSize     int64             `json:"file_size,omitempty"`
-	Args         map[string]string `json:"args,omitempty"`
-	LinesChanged int               `json:"lines_changed,omitempty"`
-	Matches      int               `json:"matches,omitempty"`
-	CacheHit     *bool             `json:"cache_hit,omitempty"`
+	Timestamp      time.Time              `json:"ts"`
+	Tool           string                 `json:"tool"`
+	Path           string                 `json:"path,omitempty"`
+	DurationMs     int64                  `json:"duration_ms"`
+	BytesIn        int64                  `json:"bytes_in,omitempty"`
+	BytesOut       int64                  `json:"bytes_out,omitempty"`
+	Status         string                 `json:"status"`
+	Error          string                 `json:"error,omitempty"`
+	RiskLevel      string                 `json:"risk,omitempty"`
+	FileSize       int64                  `json:"file_size,omitempty"`
+	Args           map[string]string      `json:"args,omitempty"`
+	LinesChanged   int                    `json:"lines_changed,omitempty"`
+	Matches        int                    `json:"matches,omitempty"`
+	CacheHit       *bool                  `json:"cache_hit,omitempty"`
+	Normalizations []NormalizationApplied `json:"norms,omitempty"`
 }
 
 type ToolStats struct {
@@ -1212,6 +1226,234 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 			ByTool:        byTool,
 			ByHour:        byHour,
 			TopFiles:      topFiles,
+		})
+	}
+}
+
+// --- Normalizer Status endpoint ---
+
+func normalizerHandler(logDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+
+		statsPath := filepath.Join(logDir, "normalizer_stats.json")
+		data, err := os.ReadFile(statsPath)
+		if err != nil {
+			// No stats file yet — return empty stats
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"total_processed":  0,
+				"total_normalized": 0,
+				"by_tool":          map[string]int{},
+				"by_rule":          map[string]int{},
+				"recent":           []interface{}{},
+			})
+			return
+		}
+		w.Write(data)
+	}
+}
+
+// --- Error Patterns endpoint ---
+
+// ErrorPattern represents a recurring error pattern detected in audit logs
+type ErrorPattern struct {
+	Pattern       string        `json:"pattern"`
+	Tool          string        `json:"tool"`
+	Count         int64         `json:"count"`
+	FirstSeen     time.Time     `json:"first_seen"`
+	LastSeen      time.Time     `json:"last_seen"`
+	Trend         string        `json:"trend"`
+	SampleErrors  []string      `json:"sample_errors"`
+	SuggestedRule *SuggestedRule `json:"suggested_rule,omitempty"`
+}
+
+// SuggestedRule is a normalizer rule suggestion based on error patterns
+type SuggestedRule struct {
+	Type   string `json:"type"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Reason string `json:"reason"`
+}
+
+// errorPatternNormalizers replace variable parts of error messages with placeholders
+var errorPatternNormalizers = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(?:\/[\w.\-]+)+(?:\.\w+)?`),         // file paths
+	regexp.MustCompile(`\b\d+\b`),                                // numbers
+	regexp.MustCompile(`"[^"]{20,}"`),                             // long quoted strings
+	regexp.MustCompile(`'[^']{20,}'`),                             // long single-quoted strings
+}
+
+func normalizeErrorMessage(msg string) string {
+	result := msg
+	result = errorPatternNormalizers[0].ReplaceAllString(result, "<PATH>")
+	result = errorPatternNormalizers[1].ReplaceAllString(result, "<N>")
+	result = errorPatternNormalizers[2].ReplaceAllString(result, "<STR>")
+	result = errorPatternNormalizers[3].ReplaceAllString(result, "<STR>")
+	return result
+}
+
+func suggestRule(tool, pattern string, samples []string) *SuggestedRule {
+	lp := strings.ToLower(pattern)
+
+	// Parameter not found patterns
+	if strings.Contains(lp, "required") || strings.Contains(lp, "not found") || strings.Contains(lp, "missing") {
+		for _, s := range samples {
+			ls := strings.ToLower(s)
+			// Look for known param aliases
+			if strings.Contains(ls, "old_str") || strings.Contains(ls, "new_str") {
+				return &SuggestedRule{Type: "param_alias", From: "old_str", To: "old_text", Reason: "Client sending old_str instead of old_text"}
+			}
+			if strings.Contains(ls, "type") && tool == "batch_operations" {
+				return &SuggestedRule{Type: "nested_alias", From: "type", To: "action", Reason: "Client sending 'type' instead of 'action' in pipeline steps"}
+			}
+		}
+	}
+
+	// JSON parse errors
+	if strings.Contains(lp, "json") && (strings.Contains(lp, "invalid") || strings.Contains(lp, "parse") || strings.Contains(lp, "unmarshal")) {
+		return &SuggestedRule{Type: "json_accept_both", From: "raw_array", To: "json_string", Reason: "Client may be sending raw JSON array instead of JSON string"}
+	}
+
+	// Type coercion errors
+	if strings.Contains(lp, "bool") || strings.Contains(lp, "boolean") || strings.Contains(lp, "string") && strings.Contains(lp, "expected") {
+		return &SuggestedRule{Type: "type_coerce", From: "string", To: "bool", Reason: "Client sending string where bool expected"}
+	}
+
+	return nil
+}
+
+func errorPatternsHandler(logDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+
+		opsPath := filepath.Join(logDir, "operations.jsonl")
+		f, err := os.Open(opsPath)
+		if err != nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"patterns":        []interface{}{},
+				"total_errors":    0,
+				"unique_patterns": 0,
+				"with_suggestions": 0,
+			})
+			return
+		}
+		defer f.Close()
+
+		type patternData struct {
+			count    int64
+			first    time.Time
+			last     time.Time
+			tool     string
+			samples  []string
+			recent   []time.Time // last 20 timestamps for trend
+		}
+
+		patterns := make(map[string]*patternData) // key: "tool:pattern"
+		totalErrors := int64(0)
+
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+		for scanner.Scan() {
+			var entry AuditEntry
+			if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+				continue
+			}
+			if entry.Status != "error" || entry.Error == "" {
+				continue
+			}
+			totalErrors++
+
+			normalized := normalizeErrorMessage(entry.Error)
+			key := entry.Tool + ":" + normalized
+
+			pd, ok := patterns[key]
+			if !ok {
+				pd = &patternData{
+					first: entry.Timestamp,
+					last:  entry.Timestamp,
+					tool:  entry.Tool,
+				}
+				patterns[key] = pd
+			}
+			pd.count++
+			if entry.Timestamp.Before(pd.first) {
+				pd.first = entry.Timestamp
+			}
+			if entry.Timestamp.After(pd.last) {
+				pd.last = entry.Timestamp
+			}
+			if len(pd.samples) < 3 {
+				pd.samples = append(pd.samples, entry.Error)
+			}
+			pd.recent = append(pd.recent, entry.Timestamp)
+			if len(pd.recent) > 20 {
+				pd.recent = pd.recent[len(pd.recent)-20:]
+			}
+		}
+
+		// Build result
+		result := make([]ErrorPattern, 0, len(patterns))
+		withSuggestions := 0
+
+		for key, pd := range patterns {
+			parts := strings.SplitN(key, ":", 2)
+			pattern := parts[1]
+
+			// Compute trend from recent timestamps
+			trend := "stable"
+			if len(pd.recent) >= 4 {
+				mid := len(pd.recent) / 2
+				firstHalf := pd.recent[:mid]
+				secondHalf := pd.recent[mid:]
+				if len(firstHalf) > 0 && len(secondHalf) > 0 {
+					firstSpan := firstHalf[len(firstHalf)-1].Sub(firstHalf[0])
+					secondSpan := secondHalf[len(secondHalf)-1].Sub(secondHalf[0])
+					if firstSpan > 0 && secondSpan > 0 {
+						firstRate := float64(len(firstHalf)) / firstSpan.Seconds()
+						secondRate := float64(len(secondHalf)) / secondSpan.Seconds()
+						if secondRate > firstRate*1.5 {
+							trend = "increasing"
+						} else if secondRate < firstRate*0.5 {
+							trend = "decreasing"
+						}
+					}
+				}
+			}
+
+			suggested := suggestRule(pd.tool, pattern, pd.samples)
+			if suggested != nil {
+				withSuggestions++
+			}
+
+			result = append(result, ErrorPattern{
+				Pattern:       pattern,
+				Tool:          pd.tool,
+				Count:         pd.count,
+				FirstSeen:     pd.first,
+				LastSeen:      pd.last,
+				Trend:         trend,
+				SampleErrors:  pd.samples,
+				SuggestedRule: suggested,
+			})
+		}
+
+		// Sort by count descending
+		sort.Slice(result, func(i, j int) bool {
+			return result[i].Count > result[j].Count
+		})
+
+		// Limit to 50
+		if len(result) > 50 {
+			result = result[:50]
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"patterns":         result,
+			"total_errors":     totalErrors,
+			"unique_patterns":  len(patterns),
+			"with_suggestions": withSuggestions,
 		})
 	}
 }

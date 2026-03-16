@@ -49,6 +49,9 @@ type Config struct {
 
 	// Logging
 	LogDir string // Directory for audit logs and metrics snapshots (empty = disabled)
+
+	// Normalizer
+	NormalizerRulesPath string // Path to external normalizer rules JSON file (optional)
 }
 
 // UltraFastEngine implements all filesystem operations with maximum performance
@@ -107,6 +110,9 @@ type UltraFastEngine struct {
 
 	// Audit logger for operation tracking (nil if --log-dir not set)
 	auditLogger *AuditLogger
+
+	// Request normalizer for parameter aliasing and coercion
+	normalizer *Normalizer
 }
 
 // PerformanceMetrics tracks real-time performance statistics
@@ -278,6 +284,15 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 		}
 	}
 
+	// Initialize request normalizer (always active — built-in rules have zero overhead if no match)
+	normalizer, normErr := NewNormalizer(config.NormalizerRulesPath, config.LogDir)
+	if normErr != nil {
+		slog.Warn("Failed to load external normalizer rules, using built-in only", "error", normErr)
+		normalizer, _ = NewNormalizer("", config.LogDir)
+	}
+	engine.normalizer = normalizer
+	slog.Info("Request normalizer initialized", "rules", normalizer.RulesCount())
+
 	return engine, nil
 }
 
@@ -327,6 +342,11 @@ func (e *UltraFastEngine) Audit(entry AuditEntry) {
 // AuditEnabled returns true when the audit logger is active (--log-dir was set)
 func (e *UltraFastEngine) AuditEnabled() bool {
 	return e.auditLogger != nil
+}
+
+// GetNormalizer returns the request normalizer
+func (e *UltraFastEngine) GetNormalizer() *Normalizer {
+	return e.normalizer
 }
 
 // metricsSnapshotLoop writes a metrics.json snapshot every 30 seconds

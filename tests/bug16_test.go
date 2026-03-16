@@ -178,8 +178,9 @@ func TestBug16_HighRiskAutoProceeds(t *testing.T) {
 	}
 }
 
-// TestBug16_CriticalRiskBlocked verifies CRITICAL risk edits ARE blocked without force
-func TestBug16_CriticalRiskBlocked(t *testing.T) {
+// TestBug16_CriticalRiskProceeds verifies CRITICAL risk edits auto-proceed with
+// backup and risk warning (Bug #22: never block, always backup).
+func TestBug16_CriticalRiskProceeds(t *testing.T) {
 	engine, tempDir := setupBug16Engine(t)
 
 	// CRITICAL risk: replace the entire file content
@@ -189,13 +190,18 @@ func TestBug16_CriticalRiskBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := engine.EditFile(context.Background(), testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), false)
-	if err == nil {
-		t.Fatal("CRITICAL risk edit should be blocked without force")
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), false)
+	if err != nil {
+		t.Fatalf("CRITICAL risk edit should proceed (Bug #22), got error: %v", err)
 	}
-
-	if !strings.Contains(err.Error(), "OPERATION BLOCKED") {
-		t.Errorf("Error should contain 'OPERATION BLOCKED', got: %v", err)
+	if result.ReplacementCount != 1 {
+		t.Errorf("ReplacementCount: got %d, want 1", result.ReplacementCount)
+	}
+	if result.RiskWarning == "" {
+		t.Error("Expected risk warning for CRITICAL edit, got empty")
+	}
+	if result.BackupID == "" {
+		t.Error("Expected backup for CRITICAL edit, got empty")
 	}
 }
 
@@ -240,24 +246,29 @@ func TestBug16_LowRiskNoWarning(t *testing.T) {
 	}
 }
 
-// TestBug16_BackupCreatedBeforeBlock verifies backup exists even when CRITICAL blocks
-func TestBug16_BackupCreatedBeforeBlock(t *testing.T) {
+// TestBug16_BackupCreatedForCritical verifies backup exists for CRITICAL edits
+// (Bug #22: no longer blocks, but backup is still created)
+func TestBug16_BackupCreatedForCritical(t *testing.T) {
 	engine, tempDir := setupBug16Engine(t)
 
 	content := strings.Repeat("A", 10)
-	testFile := filepath.Join(tempDir, "backup_before_block.txt")
+	testFile := filepath.Join(tempDir, "backup_critical.txt")
 	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := engine.EditFile(context.Background(), testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), false)
-	if err == nil {
-		t.Fatal("CRITICAL risk should be blocked")
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), false)
+	if err != nil {
+		t.Fatalf("CRITICAL edit should proceed (Bug #22): %v", err)
 	}
 
-	// The error message should contain the backup ID
-	if !strings.Contains(err.Error(), "Backup created:") {
-		t.Errorf("Blocked error should mention backup, got: %v", err)
+	// Backup should be created
+	if result.BackupID == "" {
+		t.Error("Expected backup for CRITICAL edit, got empty")
+	}
+	// Risk warning should be attached
+	if result.RiskWarning == "" {
+		t.Error("Expected risk warning for CRITICAL edit, got empty")
 	}
 }
 

@@ -3,6 +3,7 @@ package core
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -96,16 +97,9 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 		}
 	}
 
-	// RISK VALIDATION: Only CRITICAL (>=90%) blocks without force=true (Bug #16)
-	// MEDIUM/HIGH auto-proceed with backup + warning appended to response
-	if impact.ShouldBlockOperation(force) {
-		warning := impact.FormatRiskWarning()
-		backupMsg := ""
-		if backupID != "" {
-			backupMsg = fmt.Sprintf("\nBackup created: %s", backupID)
-		}
-		return nil, fmt.Errorf("OPERATION BLOCKED - %s%s\n\nTo proceed anyway, add \"force\": true to the request", warning, backupMsg)
-	}
+	// Bug #22: edit_file NEVER blocks — backup is already created, data is safe.
+	// Blocking wastes tokens (Claude Desktop must resend the full old_text with force:true).
+	// Risk warning is appended to the result instead.
 
 	// Log telemetry about this edit operation
 	// This helps identify patterns of full-file rewrites vs targeted edits
@@ -185,8 +179,8 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 	// Store backup ID in result
 	result.BackupID = backupID
 
-	// Attach non-blocking risk warning for MEDIUM/HIGH (Bug #16)
-	if impact.IsRisky && !impact.ShouldBlockOperation(false) {
+	// Attach risk warning for any risky operation (Bug #22: always warn, never block)
+	if impact.IsRisky {
 		result.RiskWarning = impact.FormatRiskNotice(backupID)
 	}
 
@@ -860,10 +854,37 @@ func isTextContent(content string) bool {
 	return float64(nullCount)/float64(len(content)) < 0.01
 }
 
-// MultiEditOperation represents a single edit in a batch
+// MultiEditOperation represents a single edit in a batch.
+// Supports both old_text/new_text and old_str/new_str (Claude Desktop alias).
 type MultiEditOperation struct {
 	OldText string `json:"old_text"`
 	NewText string `json:"new_text"`
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling to accept both
+// old_text/new_text and old_str/new_str parameter names.
+// Claude Desktop sometimes uses old_str/new_str (from its native str_replace convention).
+func (m *MultiEditOperation) UnmarshalJSON(data []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Accept old_text or old_str
+	if v, ok := raw["old_text"].(string); ok && v != "" {
+		m.OldText = v
+	} else if v, ok := raw["old_str"].(string); ok && v != "" {
+		m.OldText = v
+	}
+
+	// Accept new_text or new_str
+	if v, ok := raw["new_text"].(string); ok && v != "" {
+		m.NewText = v
+	} else if v, ok := raw["new_str"].(string); ok && v != "" {
+		m.NewText = v
+	}
+
+	return nil
 }
 
 // EditDetailStatus represents the outcome of a single edit within MultiEdit
@@ -947,7 +968,14 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		normalizedContent := normalizeLineEndings(originalContent)
 		normalizedNew := normalizeLineEndings(edit.NewText)
 		normalizedOld := normalizeLineEndings(edit.OldText)
-		if edit.NewText != "" && strings.Contains(normalizedContent, normalizedNew) && !strings.Contains(normalizedContent, normalizedOld) {
+		// Also try with literal escapes converted (Bug #22: LLMs send \n as two chars)
+		convertedOld := normalizeLiteralEscapes(normalizedOld)
+		convertedNew := normalizeLiteralEscapes(normalizedNew)
+
+		oldAbsent := !strings.Contains(normalizedContent, normalizedOld) && !strings.Contains(normalizedContent, convertedOld)
+		newPresent := edit.NewText != "" && (strings.Contains(normalizedContent, normalizedNew) || strings.Contains(normalizedContent, convertedNew))
+
+		if newPresent && oldAbsent {
 			validEditCount++
 		}
 		// Otherwise: this edit will fail in the loop — that's OK for partial success
@@ -979,15 +1007,9 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		}
 	}
 
-	// Risk blocking: only CRITICAL blocks without force (Bug #17 — parity with EditFile)
-	if aggregateImpact.ShouldBlockOperation(force) {
-		warning := aggregateImpact.FormatRiskWarning()
-		backupMsg := ""
-		if backupID != "" {
-			backupMsg = fmt.Sprintf("\nBackup created: %s", backupID)
-		}
-		return nil, fmt.Errorf("OPERATION BLOCKED - %s%s\n\nTo proceed anyway, add \"force\": true to the request", warning, backupMsg)
-	}
+	// Bug #22: multi_edit NEVER blocks — backup is already created, data is safe.
+	// Blocking wastes tokens (Claude Desktop must resend the full old_text with force:true).
+	// Risk warning is appended to the result instead.
 
 	// Execute pre-edit hooks (Bug #17 — parity with EditFile)
 	workingDir, _ := os.Getwd()
@@ -1043,8 +1065,14 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 			normalizedCurrent := normalizeLineEndings(currentContent)
 			normalizedNew := normalizeLineEndings(edit.NewText)
 			normalizedOld := normalizeLineEndings(edit.OldText)
+			// Also try with literal escapes converted (Bug #22)
+			convertedOld := normalizeLiteralEscapes(normalizedOld)
+			convertedNew := normalizeLiteralEscapes(normalizedNew)
 
-			if edit.NewText != "" && strings.Contains(normalizedCurrent, normalizedNew) && !strings.Contains(normalizedCurrent, normalizedOld) {
+			oldAbsent := !strings.Contains(normalizedCurrent, normalizedOld) && !strings.Contains(normalizedCurrent, convertedOld)
+			newPresent := edit.NewText != "" && (strings.Contains(normalizedCurrent, normalizedNew) || strings.Contains(normalizedCurrent, convertedNew))
+
+			if newPresent && oldAbsent {
 				detail.Status = EditStatusAlreadyPresent
 				detail.MatchConfidence = "high"
 				result.SkippedEdits++
@@ -1141,9 +1169,9 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		_ = e.autoSyncManager.AfterEdit(path)
 	}
 
-	// Store backup ID and attach risk warning (Bug #17)
+	// Store backup ID and attach risk warning (Bug #22: always warn, never block)
 	result.BackupID = backupID
-	if aggregateImpact.IsRisky && !aggregateImpact.ShouldBlockOperation(false) {
+	if aggregateImpact.IsRisky {
 		result.RiskWarning = aggregateImpact.FormatRiskNotice(backupID)
 	}
 

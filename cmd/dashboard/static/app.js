@@ -114,7 +114,7 @@ let metricsConnected = false;
 
 async function fetchMetrics() {
   try {
-    const res = await fetch('/api/metrics');
+    const res = await fetch('/api/metrics?_t=' + Date.now());
     const m = await res.json();
 
     if (m.error) {
@@ -161,7 +161,7 @@ async function fetchMetrics() {
 // Operations polling
 async function fetchOperations() {
   try {
-    const res = await fetch('/api/operations?limit=200');
+    const res = await fetch('/api/operations?limit=200&_t=' + Date.now());
     const ops = await res.json();
 
     // Recent ops (dashboard — last 10)
@@ -575,13 +575,26 @@ function connectSSE() {
   source.onmessage = (event) => {
     try {
       const op = JSON.parse(event.data);
-      // Prepend to recent ops
-      const tbody = $('#recent-ops');
-      tbody.insertAdjacentHTML('afterbegin', operationRow(op, false));
-      // Keep max 10 rows
-      while (tbody.children.length > 10) {
-        tbody.removeChild(tbody.lastChild);
+      // Prepend to recent ops (Dashboard page)
+      const recentTbody = $('#recent-ops');
+      if (recentTbody) {
+        recentTbody.insertAdjacentHTML('afterbegin', operationRow(op, false));
+        // Keep max 10 rows
+        while (recentTbody.children.length > 10) {
+          recentTbody.removeChild(recentTbody.lastChild);
+        }
       }
+      // Prepend to all ops (Operations page)
+      const allTbody = $('#all-ops');
+      if (allTbody) {
+        allTbody.insertAdjacentHTML('afterbegin', operationRow(op, true));
+        // Keep max 200 rows
+        while (allTbody.children.length > 400) { // 2 rows per op (data + detail)
+          allTbody.removeChild(allTbody.lastChild);
+        }
+      }
+      // Also refresh metrics on new operation
+      fetchMetrics();
     } catch (e) {
       // ignore parse errors
     }
@@ -624,12 +637,92 @@ document.addEventListener('DOMContentLoaded', () => {
   if (opSel) opSel.addEventListener('change', () => { backupPage.offset = 0; searchBackups(); });
 });
 
+// Normalizer Status
+async function fetchNormalizer() {
+  try {
+    const res = await fetch('/api/normalizer?_t=' + Date.now());
+    const s = await res.json();
+
+    $('#n-total').textContent = (s.total_processed || 0).toLocaleString();
+    $('#n-normalized').textContent = (s.total_normalized || 0).toLocaleString();
+    const rate = s.total_processed > 0
+      ? ((s.total_normalized / s.total_processed) * 100).toFixed(1)
+      : '0.0';
+    $('#n-rate').textContent = rate + '%';
+
+    const byRule = s.by_rule || {};
+    $('#n-rules').textContent = Object.keys(byRule).length;
+
+    // By tool table
+    const byTool = Object.entries(s.by_tool || {}).sort((a, b) => b[1] - a[1]);
+    $('#n-by-tool').innerHTML = byTool.map(([name, count]) => `<tr>
+      <td><span class="badge ${toolBadgeClass(name)}">${name}</span></td>
+      <td>${count.toLocaleString()}</td>
+    </tr>`).join('') || '<tr><td colspan="2" class="empty">No normalizations yet</td></tr>';
+
+    // By rule table
+    const rules = Object.entries(byRule).sort((a, b) => b[1] - a[1]);
+    $('#n-by-rule').innerHTML = rules.map(([id, count]) => `<tr>
+      <td><code>${id}</code></td>
+      <td>${count.toLocaleString()}</td>
+    </tr>`).join('') || '<tr><td colspan="2" class="empty">No rules triggered yet</td></tr>';
+
+    // Recent normalizations
+    const recent = s.recent || [];
+    $('#n-recent').innerHTML = recent.map(r => `<tr>
+      <td>${r.ts ? formatTime(r.ts) : '—'}</td>
+      <td><span class="badge ${toolBadgeClass(r.tool || '')}">${r.tool || '—'}</span></td>
+      <td><code>${r.rule_id || '—'}</code></td>
+      <td>${r.param || '—'}</td>
+      <td><code>${r.from || '—'}</code></td>
+      <td><code>${r.to || '—'}</code></td>
+    </tr>`).join('') || '<tr><td colspan="6" class="empty">No recent normalizations</td></tr>';
+  } catch (e) {
+    // silent
+  }
+}
+
+// Error Patterns
+async function fetchErrorPatterns() {
+  try {
+    const res = await fetch('/api/error-patterns?_t=' + Date.now());
+    const s = await res.json();
+
+    $('#ep-total').textContent = (s.total_errors || 0).toLocaleString();
+    $('#ep-unique').textContent = (s.unique_patterns || 0).toLocaleString();
+    $('#ep-suggestions').textContent = (s.with_suggestions || 0).toLocaleString();
+
+    const patterns = s.patterns || [];
+    const trendIcons = { increasing: '\u2191', decreasing: '\u2193', stable: '\u2192' };
+    const trendColors = { increasing: 'var(--red)', decreasing: 'var(--green)', stable: 'var(--text-dim)' };
+
+    $('#ep-patterns').innerHTML = patterns.map(p => {
+      const suggested = p.suggested_rule
+        ? `<span class="badge" style="background:var(--green)22;color:var(--green)">${p.suggested_rule.type}: ${p.suggested_rule.from} \u2192 ${p.suggested_rule.to}</span>`
+        : '—';
+      return `<tr>
+        <td><span class="badge ${toolBadgeClass(p.tool)}">${p.tool}</span></td>
+        <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(p.pattern)}">${escapeHtml(p.pattern)}</td>
+        <td>${p.count}</td>
+        <td style="color:${trendColors[p.trend] || 'inherit'}">${trendIcons[p.trend] || '—'} ${p.trend}</td>
+        <td>${formatTime(p.first_seen)}</td>
+        <td>${formatTime(p.last_seen)}</td>
+        <td>${suggested}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="7" class="empty">No error patterns detected</td></tr>';
+  } catch (e) {
+    // silent
+  }
+}
+
 // Initial load and polling
 fetchMetrics();
 fetchOperations();
 searchBackups();
 fetchStats();
 fetchProxyStats();
+fetchNormalizer();
+fetchErrorPatterns();
 connectSSE();
 
 // Poll every 5 seconds
@@ -638,3 +731,5 @@ setInterval(fetchOperations, 10000);
 setInterval(searchBackups, 30000);
 setInterval(fetchStats, 15000);
 setInterval(fetchProxyStats, 15000);
+setInterval(fetchNormalizer, 10000);
+setInterval(fetchErrorPatterns, 30000);
