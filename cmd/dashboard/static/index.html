@@ -19,6 +19,8 @@
     <button data-page="stats">Statistics</button>
     <button data-page="proxy">Proxy / Tokens</button>
     <button data-page="analysis">Edit Analysis</button>
+    <button data-page="normalizer">Normalizer</button>
+    <button data-page="error-patterns">Error Patterns</button>
   </nav>
 
   <main>
@@ -321,6 +323,82 @@
             <span>Rewrites: <span id="pct-rewrites">—</span></span>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Normalizer Page -->
+    <div class="page" id="page-normalizer">
+      <div class="cards">
+        <div class="card">
+          <div class="label">Total Processed</div>
+          <div class="value accent" id="n-total">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Normalized</div>
+          <div class="value green" id="n-normalized">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Normalization Rate</div>
+          <div class="value yellow" id="n-rate">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Active Rules</div>
+          <div class="value" id="n-rules">—</div>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="section">
+          <h2>By Tool</h2>
+          <table>
+            <thead><tr><th>Tool</th><th>Normalizations</th></tr></thead>
+            <tbody id="n-by-tool"></tbody>
+          </table>
+        </div>
+
+        <div class="section">
+          <h2>By Rule</h2>
+          <table>
+            <thead><tr><th>Rule ID</th><th>Hits</th></tr></thead>
+            <tbody id="n-by-rule"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Recent Normalizations</h2>
+        <table>
+          <thead><tr><th>Time</th><th>Tool</th><th>Rule</th><th>Param</th><th>From</th><th>To</th></tr></thead>
+          <tbody id="n-recent"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Error Patterns Page -->
+    <div class="page" id="page-error-patterns">
+      <div class="cards">
+        <div class="card">
+          <div class="label">Total Errors</div>
+          <div class="value accent" id="ep-total">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Unique Patterns</div>
+          <div class="value yellow" id="ep-unique">—</div>
+        </div>
+        <div class="card">
+          <div class="label">With Suggestions</div>
+          <div class="value green" id="ep-suggestions">—</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Error Patterns</h2>
+        <table>
+          <thead>
+            <tr><th>Tool</th><th>Pattern</th><th>Count</th><th>Trend</th><th>First Seen</th><th>Last Seen</th><th>Suggested Rule</th></tr>
+          </thead>
+          <tbody id="ep-patterns"></tbody>
+        </table>
       </div>
     </div>
   </main>

@@ -1,6 +1,6 @@
-# MCP Filesystem Server
+# MCP Filesystem Server Ultra-Fast
 
-**v3.14.2** · Go · MCP 2025-11-25 · 56 tools
+**v4.1.1** · Go · MCP 2025-11-25 · 16 tools
 
 A high-performance [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go. Designed for use with Claude Desktop and Claude Code, with first-class support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -8,17 +8,20 @@ A high-performance [Model Context Protocol](https://modelcontextprotocol.io) fil
 
 ## Features
 
-- **56 MCP tools** covering read, write, edit, search, copy, move, delete, streaming, and backup operations
+- **16 MCP tools** (consolidated from 59 in v3.x) — all functionality preserved, zero tool bloat
+- **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
 - **Intelligent editing** with automatic backup, risk assessment, and rollback on failure
 - **3-tier cache** (BigCache + go-cache) with file watcher invalidation for O(1) reads
 - **Streaming and chunked I/O** for files up to 50 MB without blocking
-- **WSL ↔ Windows path translation** — accepts `/mnt/c/...`, `C:\...`, and `/tmp/...` (UNC) transparently
+- **WSL ↔ Windows path translation** — accepts `/mnt/c/...`, `C:\...`, and `/tmp/...` transparently
 - **Compact mode** — minimal token responses (~90% reduction) for high-volume Claude Desktop sessions
 - **Risk assessment** — edits above configurable thresholds (30 / 50 / 90% change) require explicit confirmation
 - **Hook system** — pre/post hooks for write, edit, delete, create, move, and copy events
 - **Plan mode** — dry-run analysis with diff preview and risk report before applying changes
-- **Pipeline system** — chain search → edit → verify in a single MCP call (5–22× fewer round-trips)
+- **Pipeline system** — 12 actions with conditions, templates, DAG-based parallel execution (5–22× fewer round-trips)
 - **Atomic batch operations** — grouped file operations with rollback on failure
+- **Audit logging** — JSON Lines operation log + metrics snapshots for observability
+- **Dashboard** — separate HTTP binary for real-time metrics, operation log, and backup recovery
 - **Access control** — restrict the server to specific directory trees via `--allowed-paths`
 
 ---
@@ -26,7 +29,11 @@ A high-performance [Model Context Protocol](https://modelcontextprotocol.io) fil
 ## Build
 
 ```bash
-go build -ldflags="-s -w" -trimpath -o filesystem-ultra.exe .
+# Build (Windows) — v4 binary
+go build -ldflags="-s -w" -trimpath -o filesystem-ultra-v4.exe .
+
+# Or use the build script
+build-windows.bat
 ```
 
 Requires Go 1.25+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
@@ -37,6 +44,9 @@ go test ./tests/... ./core/...
 
 # With race detector
 go test -race ./...
+
+# Security fuzzing
+go test -fuzz=Fuzz ./tests/security
 ```
 
 ---
@@ -49,12 +59,13 @@ Add to your `claude_desktop_config.json`:
 {
   "mcpServers": {
     "filesystem": {
-      "command": "C:\\MCPs\\clone\\mcp-filesystem-go-ultra\\filesystem-ultra.exe",
+      "command": "C:\\path\\to\\filesystem-ultra-v4.exe",
       "args": [
         "--compact-mode",
         "--cache-size", "200MB",
         "--parallel-ops", "8",
         "--log-level", "error",
+        "--log-dir", "C:\\logs\\mcp-filesystem",
         "C:\\your\\project\\"
       ]
     }
@@ -62,7 +73,7 @@ Add to your `claude_desktop_config.json`:
 }
 ```
 
-The positional arguments after the flags are the allowed base paths. Omitting `--allowed-paths` (and positional paths) disables access control entirely.
+The positional arguments after the flags are the allowed base paths. Omitting paths disables access control entirely.
 
 ### Key flags
 
@@ -78,123 +89,106 @@ The positional arguments after the flags are the allowed base paths. Omitting `-
 | `--risk-threshold-high` | 50 | % change that requires `force: true` |
 | `--hooks-enabled` | off | Enable pre/post operation hooks |
 | `--hooks-config` | — | Path to hooks configuration JSON |
+| `--log-dir` | — | Directory for audit logs and metrics (enables logging) |
+| `--log-level` | info | Log level: debug, info, warn, error |
 | `--debug` | off | Verbose debug logging |
 
 ---
 
-## Available Tools
+## Available Tools (16)
 
-### File I/O
-
-| Tool | Description |
-|------|-------------|
-| `read_file` | Read file contents with cache |
-| `write_file` | Atomic write with backup |
-| `read_file_range` | Read a line range (avoids loading large files) |
-| `streaming_write_file` | Chunked write for large files |
-| `chunked_read_file` | Chunked read for large files |
-| `get_file_info` | Size, permissions, timestamps |
-
-### Editing
+### Core (5)
 
 | Tool | Description |
 |------|-------------|
-| `edit_file` | Find-and-replace with backup and risk assessment |
-| `multi_edit` | Multiple find-and-replace operations in one call |
-| `smart_edit_file` | Edit files larger than 1 MB |
-| `replace_nth_occurrence` | Replace only the Nth occurrence of a pattern |
-| `intelligent_edit` | Auto-selects edit strategy by file size |
-| `recovery_edit` | Edit with automatic error recovery (fuzzy match, line normalization) |
-
-### Search
-
-| Tool | Description |
-|------|-------------|
-| `smart_search` | File name and content search with filters |
-| `advanced_text_search` | Full-text search with context lines, case sensitivity, whole-word |
-| `search_and_replace` | Regex or literal replacement across a directory tree |
-| `count_occurrences` | Count pattern occurrences with optional line numbers |
-
-### Directory Operations
-
-| Tool | Description |
-|------|-------------|
+| `read_file` | Read full file, line range (`start_line`/`end_line`), head/tail (`max_lines`+`mode`), or base64 (`encoding:"base64"`) |
+| `write_file` | Create or overwrite file. Supports text (`content`) and binary (`encoding:"base64"`) |
+| `edit_file` | Find-and-replace with backup and risk assessment. Modes: exact match (default), `search_replace` (all occurrences), `regex` (capture groups), `occurrence:N` (Nth match) |
 | `list_directory` | Directory listing with cache |
-| `create_directory` | Create directory tree (`mkdir -p`) |
-| `rename_file` | Rename or move within the same volume |
-| `move_file` | Move file or directory across paths |
+| `search_files` | Search by pattern with optional `file_types`, `include_content`, `include_context`, `case_sensitive`, `count_only` |
+
+### Edit+ (1)
+
+| Tool | Description |
+|------|-------------|
+| `multi_edit` | Multiple find-and-replace operations on the same file in one call via `edits_json` |
+
+### File Operations (4)
+
+| Tool | Description |
+|------|-------------|
+| `move_file` | Move or rename file/directory |
 | `copy_file` | Recursive copy preserving permissions |
-| `delete_file` | Permanent delete (file or directory) |
-| `soft_delete_file` | Move to trash folder instead of deleting |
+| `delete_file` | Soft-delete (default) or permanent (`permanent: true`) |
+| `create_directory` | Create directory tree (`mkdir -p`) |
 
-### Backup & Recovery
-
-| Tool | Description |
-|------|-------------|
-| `list_backups` | List backups with filters (path, operation, age) |
-| `restore_backup` | Restore a file from backup (with preview) |
-| `compare_with_backup` | Diff current file against a backup |
-| `cleanup_backups` | Remove old backups (supports dry-run) |
-| `get_backup_info` | Metadata for a specific backup |
-
-### Analysis & Safety
+### Batch & Pipeline (1)
 
 | Tool | Description |
 |------|-------------|
-| `analyze_write` | Dry-run write — previews result without writing |
-| `analyze_edit` | Dry-run edit — shows diff and risk level |
-| `analyze_delete` | Dry-run delete — reports impact |
-| `get_edit_telemetry` | Token and operation statistics |
-| `get_optimization_suggestion` | Recommends optimal tool for a given file |
-| `analyze_file` | Detailed file analysis with strategy recommendation |
+| `batch_operations` | Atomic batch ops (`request_json`), multi-step pipelines (`pipeline_json`), or batch rename (`rename_json`) — with rollback on failure |
 
-### Batch & Pipeline
+### Backup (1)
 
 | Tool | Description |
 |------|-------------|
-| `batch_operations` | Atomic execution of multiple operations with rollback |
-| `execute_pipeline` | Chain steps (search → edit → verify) in one call |
+| `backup` | Manage backups via `action`: list, info, compare, cleanup, restore |
 
-### Artifacts
-
-| Tool | Description |
-|------|-------------|
-| `capture_last_artifact` | Store content in memory |
-| `write_last_artifact` | Write stored artifact to disk (zero token retransmission) |
-| `artifact_info` | Size and line count of stored artifact |
-
-### WSL / Windows
+### Analysis (1)
 
 | Tool | Description |
 |------|-------------|
-| `convert_path` | Explicit WSL ↔ Windows path conversion |
-| `detect_path_format` | Identify path format (WSL, Windows, UNC, Linux) |
-| `sync_to_windows` | Copy a WSL file to the Windows filesystem |
-| `sync_to_wsl` | Copy a Windows file into WSL |
-| `configure_autosync` | Configure automatic WSL ↔ Windows sync rules |
+| `analyze_operation` | Dry-run preview via `operation`: file, edit, delete, write, optimize, compare |
 
-### Performance & Diagnostics
+### WSL (1)
 
 | Tool | Description |
 |------|-------------|
-| `performance_stats` | Cache hit rate, operation counts, latency |
-| `get_help` | Usage guide and tool selection recommendations |
+| `wsl` | WSL ↔ Windows sync and status. Params: `wsl_path`/`windows_path` + `direction`, or `action:"status"` |
 
-### Large File Processing
+### Utility (1)
 
 | Tool | Description |
 |------|-------------|
-| `process_large_file` | Line-by-line processing for files that don't fit in memory |
-| `regex_transform` | Advanced regex transformations with capture groups |
-| `intelligent_read` | Auto-selects read strategy by file size |
-| `intelligent_write` | Auto-selects write strategy by file size |
+| `server_info` | Server diagnostics via `action`: stats, help, artifact |
+
+### Info (1)
+
+| Tool | Description |
+|------|-------------|
+| `get_file_info` | Size, permissions, timestamps, type |
+
+---
+
+## Dashboard
+
+Separate binary for real-time observability — reads audit logs and serves a web UI.
+
+```bash
+# Build
+go build -ldflags="-s -w" -trimpath -o dashboard.exe ./cmd/dashboard/
+
+# Run
+dashboard.exe --log-dir=C:\logs\mcp-filesystem --backup-dir=C:\backups --port=9100
+```
+
+- No coupling with MCP server (file-based communication only)
+- Embedded web assets via `go:embed` (single binary, no dependencies)
+- Real-time updates via SSE (Server-Sent Events)
+- Pages: Dashboard (metrics), Operations (audit log), Backups (enterprise recovery), Statistics, Proxy/Tokens, Edit Analysis
+
+### Audit Logging
+
+When `--log-dir` is set on the MCP server, it writes:
+- `operations.jsonl` — JSON Lines audit log (one entry per tool call, auto-rotates at 10MB)
+- `metrics.json` — Performance metrics snapshot (updated every 30 seconds)
 
 ---
 
 ## Architecture
 
 ```
-main.go                     Entry point — flag parsing, tool registration, server startup
+main.go                     Entry point — flag parsing, 16 MCP tool registrations, server startup
 core/
   engine.go                 UltraFastEngine — central struct, cache, worker pool, metrics
   edit_operations.go        EditFile, MultiEdit — backup, risk assessment, hooks
@@ -207,16 +201,35 @@ core/
   hooks.go                  Pre/post hook system (12 event types)
   large_file_processor.go   Line-by-line and chunk-based processing
   regex_transformer.go      Regex transformations with capture groups
-  pipeline.go               Multi-step pipeline execution
+  pipeline.go               Multi-step pipeline execution (sequential + parallel)
+  pipeline_types.go         Pipeline types, validation
+  pipeline_conditions.go    9 condition types for conditional steps
+  pipeline_templates.go     {{step_id.field}} template resolution
+  pipeline_scheduler.go     DAG builder, topological sort, destructive step splitting
   batch_operations.go       Atomic batch operations with rollback
-  plan_mode.go              Dry-run analysis
+  batch_rename.go           Batch file renaming
+  audit_logger.go           JSON Lines operation log + MetricsSnapshot writer
+  claude_optimizer.go       Claude Desktop auto-optimization (small/large file strategy)
+  plan_mode.go              Dry-run analysis (analyze_write, analyze_edit, analyze_delete)
   path_converter.go         WSL ↔ Windows path conversion
   path_detector.go          Path format detection and WSL distro lookup
   wsl_sync.go               WSL/Windows file synchronization
+  autosync_config.go        Auto-sync configuration system
+  watcher.go                File watcher for cache invalidation
+  mmap.go                   Memory-mapped file I/O (Windows fallback)
   config.go                 Thresholds and constants
-  errors.go                 PathError, ValidationError, EditError, etc.
+  errors.go                 PathError, ValidationError, EditError, PipelineStepError, etc.
 cache/
   intelligent.go            BigCache (files) + go-cache (dirs + metadata)
+cmd/
+  dashboard/
+    main.go                 HTTP dashboard for logs/metrics/backups
+    static/                 Embedded web UI (go:embed)
+tests/
+  mcp_functions_test.go     Core MCP function tests
+  bug5_test.go–bug9_test.go Regression tests
+  edit_safety_test.go       Edit safety validation tests
+  security/                 Security & fuzzing tests
 ```
 
 ### File size thresholds
@@ -238,6 +251,7 @@ cache/
 - Backup IDs are sanitized to `[a-zA-Z0-9_-]` to prevent path traversal
 - Temp files and backup metadata written with `0600` permissions
 - `copyDirectory()` skips symlinks
+- No `unsafe` package usage in production code
 
 ---
 
@@ -261,7 +275,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-Current release: **v3.14.2** — fixes `batch_operations` edit operations discarding file content instead of performing find-and-replace.
+Current release: **v4.1.1** — fixes count_only directories, WSL paths, batch engine, and pipeline errors.
 
 ---
 

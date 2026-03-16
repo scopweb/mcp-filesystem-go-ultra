@@ -36,6 +36,11 @@ func DefaultRiskThresholds() RiskThresholds {
 
 // CalculateChangeImpact analiza el impacto de una operación de edición
 func CalculateChangeImpact(content, oldText, newText string, thresholds RiskThresholds) *ChangeImpact {
+	// Normalize line endings so CRLF files match LF search text (Bug #23)
+	content = normalizeLineEndings(content)
+	oldText = normalizeLineEndings(oldText)
+	newText = normalizeLineEndings(newText)
+
 	impact := &ChangeImpact{
 		TotalLines:  len(strings.Split(content, "\n")),
 		Occurrences: strings.Count(content, oldText),

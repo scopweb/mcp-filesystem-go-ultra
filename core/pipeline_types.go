@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -21,7 +22,8 @@ type PipelineRequest struct {
 	validated    bool           // Internal: validation cache
 }
 
-// PipelineStep represents a single operation in the pipeline
+// PipelineStep represents a single operation in the pipeline.
+// Accepts both "action" and "type" field names (Claude Desktop sometimes uses "type").
 type PipelineStep struct {
 	ID           string                 `json:"id"`                      // Unique identifier (alphanumeric + - _)
 	Action       string                 `json:"action"`                  // Action type: search, edit, etc.
@@ -29,6 +31,34 @@ type PipelineStep struct {
 	InputFromAll []string               `json:"input_from_all,omitempty"` // IDs of multiple steps (for aggregate/merge)
 	Params       map[string]interface{} `json:"params"`                  // Action-specific parameters
 	Condition    *StepCondition         `json:"condition,omitempty"`     // Optional condition for conditional execution
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling to accept "type" as alias for "action"
+// and auto-generate missing step IDs. Claude Desktop often sends "type" instead of "action"
+// and omits the "id" field.
+func (ps *PipelineStep) UnmarshalJSON(data []byte) error {
+	// Use a type alias to avoid infinite recursion
+	type pipelineStepAlias PipelineStep
+	var raw pipelineStepAlias
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*ps = PipelineStep(raw)
+
+	// Accept "type" as alias for "action" (Bug #22: Claude Desktop convention)
+	if ps.Action == "" {
+		var rawMap map[string]json.RawMessage
+		if err := json.Unmarshal(data, &rawMap); err == nil {
+			if typeVal, ok := rawMap["type"]; ok {
+				var t string
+				if json.Unmarshal(typeVal, &t) == nil {
+					ps.Action = t
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // StepResult represents the result of a single pipeline step
@@ -160,6 +190,14 @@ func (pr *PipelineRequest) Validate() error {
 		return &ValidationError{
 			Field:   "name",
 			Message: "pipeline name is required",
+		}
+	}
+
+	// Normalize steps: auto-generate missing IDs (Bug #22)
+	// Claude Desktop often omits step IDs. Generate "step-0", "step-1", etc.
+	for i := range pr.Steps {
+		if strings.TrimSpace(pr.Steps[i].ID) == "" {
+			pr.Steps[i].ID = fmt.Sprintf("step-%d", i)
 		}
 	}
 

@@ -148,8 +148,9 @@ func TestBug17_GenuineFailureStillReported(t *testing.T) {
 	}
 }
 
-// TestBug17_RiskAssessmentCriticalBlocks verifies CRITICAL risk blocks MultiEdit.
-func TestBug17_RiskAssessmentCriticalBlocks(t *testing.T) {
+// TestBug17_RiskAssessmentCriticalProceeds verifies CRITICAL risk in MultiEdit
+// auto-proceeds with backup and risk warning (Bug #22: multi_edit never blocks).
+func TestBug17_RiskAssessmentCriticalProceeds(t *testing.T) {
 	engine, tempDir := setupBug16Engine(t)
 
 	// Tiny file where edit rewrites nearly everything → CRITICAL
@@ -161,12 +162,20 @@ func TestBug17_RiskAssessmentCriticalBlocks(t *testing.T) {
 		{OldText: "AB", NewText: "CD"},
 	}
 
-	_, err := engine.MultiEdit(context.Background(), testFile, edits, false)
-	if err == nil {
-		t.Fatal("CRITICAL risk MultiEdit should be blocked without force")
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false)
+	if err != nil {
+		t.Fatalf("CRITICAL risk MultiEdit should proceed (Bug #22), got error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "OPERATION BLOCKED") {
-		t.Errorf("Error should contain 'OPERATION BLOCKED', got: %v", err)
+	if result.SuccessfulEdits != 1 {
+		t.Errorf("SuccessfulEdits: got %d, want 1", result.SuccessfulEdits)
+	}
+	// Should have a risk warning attached
+	if result.RiskWarning == "" {
+		t.Error("Expected risk warning for CRITICAL edit, got empty")
+	}
+	// Backup should be created
+	if result.BackupID == "" {
+		t.Error("Expected backup for CRITICAL edit, got empty")
 	}
 }
 

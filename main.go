@@ -85,7 +85,8 @@ func main() {
 		backupMaxCount = flag.Int("backup-max-count", 100, "Max number of backups to keep")
 
 		// Logging
-		logDir = flag.String("log-dir", "", "Directory for audit logs and metrics snapshots (enables operation logging)")
+		logDir          = flag.String("log-dir", "", "Directory for audit logs and metrics snapshots (enables operation logging)")
+		normalizerRules = flag.String("normalizer-rules", "", "Path to external normalizer rules JSON file (extends built-in rules)")
 
 		// Risk thresholds
 		riskThresholdMedium   = flag.Float64("risk-threshold-medium", 20.0, "Percentage change threshold for medium risk")
@@ -194,7 +195,8 @@ func main() {
 		BackupMaxCount: *backupMaxCount,
 
 		// Logging
-		LogDir: *logDir,
+		LogDir:              *logDir,
+		NormalizerRulesPath: *normalizerRules,
 
 		// Risk thresholds
 		RiskThresholdMedium:   *riskThresholdMedium,
@@ -234,6 +236,92 @@ func main() {
 	}
 }
 
+// auditWrap wraps a tool handler with request normalization and audit logging.
+// Normalization: applies data-driven rules (param aliases, type coercions, nested fixes).
+// Audit: creates an AuditEntry, injects it into context, logs timing/status/path on completion.
+func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		start := time.Now()
+
+		// Create audit entry and inject into context for sub-op annotation
+		entry := &core.AuditEntry{Timestamp: start, Tool: tool}
+		ctx = context.WithValue(ctx, core.AuditEntryKey{}, entry)
+
+		// Run normalizer on arguments
+		if normalizer := engine.GetNormalizer(); normalizer != nil {
+			if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+				result := normalizer.Normalize(tool, args)
+				if result.WasModified {
+					request.Params.Arguments = result.Args
+					entry.Normalizations = result.Applied
+				}
+			}
+		}
+
+		// Call actual handler
+		res, err := handler(ctx, request)
+
+		// Complete audit entry
+		entry.DurationMs = time.Since(start).Milliseconds()
+		if err != nil {
+			entry.Status = "error"
+			entry.Error = err.Error()
+		} else if res != nil && res.IsError {
+			entry.Status = "error"
+			// Extract error text from result content
+			if len(res.Content) > 0 {
+				if tc, ok := res.Content[0].(mcp.TextContent); ok {
+					entry.Error = tc.Text
+				}
+			}
+		} else {
+			entry.Status = "ok"
+		}
+
+		// Extract path and summarize args for logging
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if p, ok := args["path"].(string); ok {
+				entry.Path = p
+			}
+			entry.Args = summarizeArgs(args)
+			// Extract bytes_out from result
+			if res != nil && len(res.Content) > 0 {
+				if tc, ok := res.Content[0].(mcp.TextContent); ok {
+					entry.BytesOut = int64(len(tc.Text))
+				}
+			}
+		}
+
+		// Log the audit entry
+		engine.Audit(*entry)
+
+		return res, err
+	}
+}
+
+// summarizeArgs creates a compact map of key arguments for audit logging
+func summarizeArgs(args map[string]interface{}) map[string]string {
+	summary := make(map[string]string)
+	for k, v := range args {
+		switch k {
+		case "content", "edits_json", "pipeline_json", "request_json", "rename_json":
+			// Skip large payloads, just note their presence
+			if s, ok := v.(string); ok {
+				summary[k] = fmt.Sprintf("(%d chars)", len(s))
+			} else {
+				summary[k] = "(present)"
+			}
+		default:
+			s := fmt.Sprintf("%v", v)
+			if len(s) > 100 {
+				s = s[:100] + "..."
+			}
+			summary[k] = s
+		}
+	}
+	return summary
+}
+
 // registerTools registers all 16 consolidated filesystem tools
 func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	// Create modular processor for regex transforms (used by edit_file regex mode)
@@ -254,7 +342,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithNumber("end_line", mcp.Description("Ending line number (inclusive) for range read")),
 		mcp.WithString("encoding", mcp.Description("Set to \"base64\" to read file as base64-encoded binary")),
 	)
-	s.AddTool(readFileTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(readFileTool, auditWrap(engine, "read_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -318,7 +406,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		}
 
 		return mcp.NewToolResultText(content), nil
-	})
+	}))
 
 	// ============================================================================
 	// 2. write_file — Write file (consolidated: mcp_write + write_file + create_file + write_base64 + streaming_write + intelligent_write)
@@ -333,7 +421,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithString("content_base64", mcp.Description("Base64-encoded binary content to write")),
 		mcp.WithString("encoding", mcp.Description("Set to \"base64\" when content is base64-encoded")),
 	)
-	s.AddTool(writeFileTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(writeFileTool, auditWrap(engine, "write_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -399,7 +487,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultText(fmt.Sprintf("OK: %s written", formatSize(int64(len(content))))), nil
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), path)), nil
-	})
+	}))
 
 	// ============================================================================
 	// 3. edit_file — Edit file (consolidated: mcp_edit + edit_file + search_and_replace + replace_nth_occurrence + regex_transform_file + smart_edit + intelligent_edit + recovery_edit)
@@ -411,7 +499,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithDescription("Edit file with multiple modes. Default mode: smart text replacement with auto-backup and risk validation. "+
 			"mode:\"search_replace\" for recursive search & replace. mode:\"regex\" for advanced regex transformations with capture groups. "+
 			"Use occurrence:N to replace specific match (1=first, -1=last). Accepts old_text/new_text or old_str/new_str. "+
-			"Only blocks CRITICAL risk (>=90% change). Auto-converts WSL/Windows paths."),
+			"Never blocks — auto-creates backup and proceeds with risk warning. Auto-converts WSL/Windows paths."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file (WSL or Windows format)")),
 		mcp.WithString("old_text", mcp.Description("Text to be replaced (default mode)")),
 		mcp.WithString("new_text", mcp.Description("New text to replace with (default mode)")),
@@ -430,7 +518,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithBoolean("dry_run", mcp.Description("Validate without applying changes (default: false, for regex mode)")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false, for occurrence mode)")),
 	)
-	s.AddTool(editFileTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(editFileTool, auditWrap(engine, "edit_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -454,22 +542,12 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			if occ, ok := args["occurrence"].(float64); ok {
 				occurrence = int(occ)
 			}
-			// Accept both old_text/new_text and old_str/new_str
+			// old_str/new_str → old_text/new_text aliasing handled by normalizer
 			if ot, ok := args["old_text"].(string); ok {
 				oldText = ot
 			}
 			if nt, ok := args["new_text"].(string); ok {
 				newText = nt
-			}
-			if oldText == "" {
-				if os, ok := args["old_str"].(string); ok {
-					oldText = os
-				}
-			}
-			if newText == "" {
-				if ns, ok := args["new_str"].(string); ok {
-					newText = ns
-				}
 			}
 		}
 
@@ -631,7 +709,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			msg += result.RiskWarning
 		}
 		return mcp.NewToolResultText(msg), nil
-	})
+	}))
 
 	// ============================================================================
 	// 4. list_directory — List directory (consolidated: mcp_list + list_directory)
@@ -643,7 +721,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to directory (WSL or Windows format)")),
 	)
-	s.AddTool(listDirTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(listDirTool, auditWrap(engine, "list_directory", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -654,7 +732,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
 		return mcp.NewToolResultText(listing), nil
-	})
+	}))
 
 	// ============================================================================
 	// 5. search_files — Search files (consolidated: mcp_search + smart_search + advanced_text_search + count_occurrences)
@@ -677,7 +755,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithBoolean("count_only", mcp.Description("Count pattern occurrences without full search (default: false)")),
 		mcp.WithString("return_lines", mcp.Description("Return line numbers of count matches (true/false, for count_only mode)")),
 	)
-	s.AddTool(searchFilesTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(searchFilesTool, auditWrap(engine, "search_files", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -771,7 +849,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultText(resp.Content[0].Text), nil
 		}
 		return mcp.NewToolResultText("No matches"), nil
-	})
+	}))
 
 	// ============================================================================
 	// 6. analyze_operation — Analyze operations (Plan Mode / dry-run)
@@ -789,7 +867,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithString("old_text", mcp.Description("Text to be replaced (for edit analysis)")),
 		mcp.WithString("new_text", mcp.Description("Replacement text (for edit analysis)")),
 	)
-	s.AddTool(analyzeOpTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(analyzeOpTool, auditWrap(engine, "analyze_operation", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		operation, err := request.RequireString("operation")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid operation: %v", err)), nil
@@ -860,7 +938,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		default:
 			return mcp.NewToolResultError(fmt.Sprintf("Unknown operation: %s. Valid: file, optimize, write, edit, delete", operation)), nil
 		}
-	})
+	}))
 
 	// ============================================================================
 	// 7. create_directory — Create directory
@@ -872,7 +950,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithDescription("Create a new directory (and parent directories if needed)"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the directory to create")),
 	)
-	s.AddTool(createDirTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(createDirTool, auditWrap(engine, "create_directory", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -887,7 +965,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultText(fmt.Sprintf("OK: %s created", path)), nil
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Successfully created directory: %s", path)), nil
-	})
+	}))
 
 	// ============================================================================
 	// 8. delete_file — Delete file (soft-delete by default, permanent with permanent:true)
@@ -900,7 +978,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file or directory to delete")),
 		mcp.WithBoolean("permanent", mcp.Description("Permanently delete instead of soft-delete (default: false)")),
 	)
-	s.AddTool(deleteFileTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(deleteFileTool, auditWrap(engine, "delete_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -933,7 +1011,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultText(fmt.Sprintf("OK: %s soft-deleted", path)), nil
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Successfully moved '%s' to filesdelete folder", path)), nil
-	})
+	}))
 
 	// ============================================================================
 	// 9. move_file — Move/rename file (also replaces rename_file)
@@ -946,7 +1024,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithString("source_path", mcp.Required(), mcp.Description("Current path of the file/directory")),
 		mcp.WithString("dest_path", mcp.Required(), mcp.Description("New path for the file/directory")),
 	)
-	s.AddTool(moveFileTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(moveFileTool, auditWrap(engine, "move_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		sourcePath, err := request.RequireString("source_path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid source_path: %v", err)), nil
@@ -966,7 +1044,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultText(fmt.Sprintf("OK: moved to %s", destPath)), nil
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Successfully moved '%s' to '%s'", sourcePath, destPath)), nil
-	})
+	}))
 
 	// ============================================================================
 	// 10. copy_file — Copy file
@@ -979,7 +1057,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithString("source_path", mcp.Required(), mcp.Description("Path of the file/directory to copy")),
 		mcp.WithString("dest_path", mcp.Required(), mcp.Description("Destination path for the copy")),
 	)
-	s.AddTool(copyFileTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(copyFileTool, auditWrap(engine, "copy_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		sourcePath, err := request.RequireString("source_path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid source_path: %v", err)), nil
@@ -999,7 +1077,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultText(fmt.Sprintf("OK: copied to %s", destPath)), nil
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Successfully copied '%s' to '%s'", sourcePath, destPath)), nil
-	})
+	}))
 
 	// ============================================================================
 	// 11. get_file_info — Get file information
@@ -1011,7 +1089,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file or directory")),
 	)
-	s.AddTool(fileInfoTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(fileInfoTool, auditWrap(engine, "get_file_info", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -1022,7 +1100,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
 		return mcp.NewToolResultText(info), nil
-	})
+	}))
 
 	// ============================================================================
 	// 12. multi_edit — Multi-edit (unchanged)
@@ -1031,26 +1109,43 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("Apply multiple edits to a single file atomically. MUCH faster than calling edit_file multiple times. Only blocks CRITICAL risk (>=90% change)."),
+		mcp.WithDescription("Apply multiple edits to a single file atomically. MUCH faster than calling edit_file multiple times. Never blocks — auto-creates backup and proceeds with risk warning."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
-		mcp.WithString("edits_json", mcp.Required(), mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]")),
+		mcp.WithString("edits_json", mcp.Required(), mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]. Also accepts old_str/new_str as aliases.")),
 		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 	)
-	s.AddTool(multiEditTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(multiEditTool, auditWrap(engine, "multi_edit", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
 		}
 
-		editsJSON, err := request.RequireString("edits_json")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Invalid edits_json: %v", err)), nil
-		}
-
-		// Parse edits from JSON
+		// Accept edits_json as string (normal) or as raw JSON array (Claude Desktop sometimes sends this)
 		var edits []core.MultiEditOperation
-		if err := json.Unmarshal([]byte(editsJSON), &edits); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Invalid edits JSON: %v", err)), nil
+		args, _ := request.Params.Arguments.(map[string]interface{})
+
+		editsJSON, strErr := request.RequireString("edits_json")
+		if strErr == nil {
+			// Normal case: edits_json is a JSON string
+			if err := json.Unmarshal([]byte(editsJSON), &edits); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Invalid edits JSON: %v", err)), nil
+			}
+		} else if args != nil {
+			// Defense-in-depth: normalizer should convert raw arrays to JSON string,
+			// but keep fallback for edge cases
+			if rawEdits, ok := args["edits_json"]; ok {
+				rawBytes, err := json.Marshal(rawEdits)
+				if err != nil {
+					return mcp.NewToolResultError(fmt.Sprintf("Invalid edits_json: %v", err)), nil
+				}
+				if err := json.Unmarshal(rawBytes, &edits); err != nil {
+					return mcp.NewToolResultError(fmt.Sprintf("Invalid edits JSON: %v", err)), nil
+				}
+			} else {
+				return mcp.NewToolResultError("edits_json is required"), nil
+			}
+		} else {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid edits_json: %v", strErr)), nil
 		}
 
 		if len(edits) == 0 {
@@ -1059,7 +1154,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 		// Extract force parameter
 		force := false
-		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+		if args != nil {
 			if f, ok := args["force"].(bool); ok {
 				force = f
 			}
@@ -1138,7 +1233,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		}
 
 		return mcp.NewToolResultText(sb.String()), nil
-	})
+	}))
 
 	// ============================================================================
 	// 13. batch_operations — Batch operations (enhanced: + pipeline_json + rename_json)
@@ -1155,7 +1250,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithString("pipeline_json", mcp.Description("JSON-encoded pipeline definition with name, steps, and optional flags (dry_run, force, stop_on_error, create_backup, verbose, parallel)")),
 		mcp.WithString("rename_json", mcp.Description("JSON with batch rename parameters. Fields: path, mode, find, replace, prefix, suffix, pattern, extension, start_number, padding, recursive, file_pattern, preview, case_sensitive")),
 	)
-	s.AddTool(batchOpsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(batchOpsTool, auditWrap(engine, "batch_operations", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		pipelineJSON := ""
 		renameJSON := ""
 		requestJSON := ""
@@ -1245,7 +1340,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		}
 
 		return mcp.NewToolResultText(resultText), nil
-	})
+	}))
 
 	// ============================================================================
 	// 14. backup — Backup and recovery (enhanced: + restore action)
@@ -1267,7 +1362,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithBoolean("dry_run", mcp.Description("For cleanup/restore: preview without executing (default: true for cleanup, false for restore)")),
 		mcp.WithBoolean("preview", mcp.Description("For restore: show diff without restoring (default: false)")),
 	)
-	s.AddTool(backupTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(backupTool, auditWrap(engine, "backup", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if engine.GetBackupManager() == nil {
 			return mcp.NewToolResultError("Backup system not available"), nil
 		}
@@ -1470,7 +1565,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		default:
 			return mcp.NewToolResultError(fmt.Sprintf("Unknown action: %s. Valid: list, info, compare, cleanup, restore", action)), nil
 		}
-	})
+	}))
 
 	// ============================================================================
 	// 15. wsl — WSL/Windows integration (consolidated: wsl_sync + wsl_status + configure_autosync + autosync_status)
@@ -1497,7 +1592,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithBoolean("sync_on_edit", mcp.Description("Auto-sync on edit operations (default: true)")),
 		mcp.WithBoolean("silent", mcp.Description("Silent mode for auto-sync (default: false)")),
 	)
-	s.AddTool(wslTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(wslTool, auditWrap(engine, "wsl", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		action := "sync"
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if a, ok := args["action"].(string); ok && a != "" {
@@ -1788,7 +1883,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 			return mcp.NewToolResultError("For sync: provide wsl_path, windows_path, or direction. Use action:\"status\" for integration status."), nil
 		}
-	})
+	}))
 
 	// ============================================================================
 	// 16. server_info — Server info (consolidated: stats + artifact + get_help)
@@ -1808,7 +1903,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithString("content", mcp.Description("Artifact content to capture")),
 		mcp.WithString("path", mcp.Description("Path for writing artifact")),
 	)
-	s.AddTool(serverInfoTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(serverInfoTool, auditWrap(engine, "server_info", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		action := "help"
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if a, ok := args["action"].(string); ok && a != "" {
@@ -1895,7 +1990,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		default:
 			return mcp.NewToolResultError(fmt.Sprintf("Unknown action: %s. Valid: help, stats, artifact", action)), nil
 		}
-	})
+	}))
 
 	log.Printf("Registered 16 tools for v4.0.0")
 

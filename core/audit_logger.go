@@ -50,7 +50,8 @@ type AuditEntry struct {
 	SubOp        string            `json:"sub_op,omitempty"`
 	LinesChanged int              `json:"lines_changed,omitempty"`
 	Matches      int              `json:"matches,omitempty"`
-	CacheHit     *bool             `json:"cache_hit,omitempty"`
+	CacheHit       *bool                  `json:"cache_hit,omitempty"`
+	Normalizations []NormalizationApplied `json:"norms,omitempty"`
 }
 
 // MetricsSnapshot is the periodic metrics dump written to metrics.json
