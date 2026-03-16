@@ -653,30 +653,60 @@ async function fetchNormalizer() {
     const byRule = s.by_rule || {};
     $('#n-rules').textContent = Object.keys(byRule).length;
 
-    // By tool table
-    const byTool = Object.entries(s.by_tool || {}).sort((a, b) => b[1] - a[1]);
-    $('#n-by-tool').innerHTML = byTool.map(([name, count]) => `<tr>
-      <td><span class="badge ${toolBadgeClass(name)}">${name}</span></td>
-      <td>${count.toLocaleString()}</td>
-    </tr>`).join('') || '<tr><td colspan="2" class="empty">No normalizations yet</td></tr>';
+    // By tool table — values are {processed, normalized} objects
+    const byTool = Object.entries(s.by_tool || {}).sort((a, b) => {
+      const av = typeof a[1] === 'object' ? (a[1].processed || 0) : a[1];
+      const bv = typeof b[1] === 'object' ? (b[1].processed || 0) : b[1];
+      return bv - av;
+    });
+    $('#n-by-tool').innerHTML = byTool.map(([name, v]) => {
+      const processed = typeof v === 'object' ? (v.processed || 0) : v;
+      const normalized = typeof v === 'object' ? (v.normalized || 0) : 0;
+      return `<tr>
+        <td><span class="badge ${toolBadgeClass(name)}">${name}</span></td>
+        <td>${processed.toLocaleString()} / <span style="color:var(--green)">${normalized.toLocaleString()} norm</span></td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="2" class="empty">No normalizations yet</td></tr>';
 
-    // By rule table
-    const rules = Object.entries(byRule).sort((a, b) => b[1] - a[1]);
-    $('#n-by-rule').innerHTML = rules.map(([id, count]) => `<tr>
-      <td><code>${id}</code></td>
-      <td>${count.toLocaleString()}</td>
-    </tr>`).join('') || '<tr><td colspan="2" class="empty">No rules triggered yet</td></tr>';
+    // By rule table — values are {rule_id, type, hits, tools} objects
+    const rules = Object.entries(byRule).sort((a, b) => {
+      const av = typeof a[1] === 'object' ? (a[1].hits || 0) : a[1];
+      const bv = typeof b[1] === 'object' ? (b[1].hits || 0) : b[1];
+      return bv - av;
+    });
+    $('#n-by-rule').innerHTML = rules.map(([id, v]) => {
+      const hits = typeof v === 'object' ? (v.hits || 0) : v;
+      return `<tr>
+        <td><code>${id}</code></td>
+        <td>${hits.toLocaleString()}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="2" class="empty">No rules triggered yet</td></tr>';
 
-    // Recent normalizations
-    const recent = s.recent || [];
-    $('#n-recent').innerHTML = recent.map(r => `<tr>
-      <td>${r.ts ? formatTime(r.ts) : '—'}</td>
-      <td><span class="badge ${toolBadgeClass(r.tool || '')}">${r.tool || '—'}</span></td>
-      <td><code>${r.rule_id || '—'}</code></td>
-      <td>${r.param || '—'}</td>
-      <td><code>${r.from || '—'}</code></td>
-      <td><code>${r.to || '—'}</code></td>
-    </tr>`).join('') || '<tr><td colspan="6" class="empty">No recent normalizations</td></tr>';
+    // Recent normalizations — each entry has {ts, tool, applied: [{rule_id, type, param, from, to}]}
+    const recent = s.recent_normalizations || s.recent || [];
+    const rows = [];
+    for (const r of recent) {
+      const applied = r.applied || [];
+      if (applied.length === 0) {
+        rows.push(`<tr>
+          <td>${r.ts ? formatTime(r.ts) : '—'}</td>
+          <td><span class="badge ${toolBadgeClass(r.tool || '')}">${r.tool || '—'}</span></td>
+          <td>—</td><td>—</td><td>—</td><td>—</td>
+        </tr>`);
+      } else {
+        for (const a of applied) {
+          rows.push(`<tr>
+            <td>${r.ts ? formatTime(r.ts) : '—'}</td>
+            <td><span class="badge ${toolBadgeClass(r.tool || '')}">${r.tool || '—'}</span></td>
+            <td><code>${a.rule_id || '—'}</code></td>
+            <td>${a.param || '—'}</td>
+            <td><code>${a.from || '—'}</code></td>
+            <td><code>${a.to || '—'}</code></td>
+          </tr>`);
+        }
+      }
+    }
+    $('#n-recent').innerHTML = rows.join('') || '<tr><td colspan="6" class="empty">No recent normalizations</td></tr>';
   } catch (e) {
     // silent
   }
