@@ -1114,6 +1114,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 
 	// If no edits succeeded and none were already_present, return error
 	if result.SuccessfulEdits == 0 && result.SkippedEdits == 0 {
+		result.BackupID = backupID
 		return result, fmt.Errorf("no edits were successful: %v", result.Errors)
 	}
 
@@ -1124,6 +1125,21 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 			result.RiskWarning = aggregateImpact.FormatRiskNotice(backupID, path)
 		}
 		return result, nil
+	}
+
+	// Bug #27: Atomic multi_edit — if ANY edit failed, do NOT write partial changes.
+	// Writing partial edits causes file truncation when the AI retries.
+	// The backup is already created, so the original file is safe.
+	if result.FailedEdits > 0 {
+		result.BackupID = backupID
+		failedDetails := make([]string, 0, result.FailedEdits)
+		for _, detail := range result.EditDetails {
+			if detail.Status == EditStatusFailed {
+				failedDetails = append(failedDetails, fmt.Sprintf("edit %d: %s", detail.Index+1, detail.Error))
+			}
+		}
+		return result, fmt.Errorf("atomic rollback: %d of %d edits failed — file NOT modified. Failed: %s. Fix the failing edits and retry, or use individual edit_file calls",
+			result.FailedEdits, result.TotalEdits, strings.Join(failedDetails, "; "))
 	}
 
 	// Apply hook modifications if any

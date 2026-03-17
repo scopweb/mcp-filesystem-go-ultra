@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra-Fast
 
-**v4.1.2** · Go · MCP 2025-11-25 · 16 tools
+**v4.1.3** · Go · MCP 2025-11-25 · 16 tools
 
 A high-performance [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go. Designed for use with Claude Desktop and Claude Code, with first-class support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -275,7 +275,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-Current release: **v4.1.2** — version alignment, SECURITY.md, audit fixes.
+Current release: **v4.1.3** — atomic multi_edit rollback, prevents file truncation.
 
 ---
 

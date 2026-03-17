@@ -212,7 +212,7 @@ func main() {
 	// Create MCP server using mark3labs SDK
 	s := server.NewMCPServer(
 		"filesystem-ultra",
-		"4.1.2",
+		"4.1.3",
 		server.WithToolCapabilities(true), // listChanged=true enables tools/list_changed notifications
 	)
 
@@ -1211,6 +1211,25 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		// Execute multi-edit
 		result, err := engine.MultiEdit(ctx, path, edits, force)
 		if err != nil {
+			// Bug #27: If result is non-nil, this is an atomic rollback — include backup_id and details
+			if result != nil && result.BackupID != "" {
+				errMsg := fmt.Sprintf("Multi-edit ROLLED BACK (file unchanged): %v\n", err)
+				errMsg += fmt.Sprintf("Applied: %d, Failed: %d, Skipped: %d of %d total\n",
+					result.SuccessfulEdits, result.FailedEdits, result.SkippedEdits, result.TotalEdits)
+				for _, detail := range result.EditDetails {
+					switch detail.Status {
+					case core.EditStatusApplied:
+						errMsg += fmt.Sprintf("  edit %d: would apply (rolled back)\n", detail.Index+1)
+					case core.EditStatusFailed:
+						errMsg += fmt.Sprintf("  edit %d: FAILED — %s\n", detail.Index+1, detail.Error)
+					case core.EditStatusAlreadyPresent:
+						errMsg += fmt.Sprintf("  edit %d: already present\n", detail.Index+1)
+					}
+				}
+				errMsg += fmt.Sprintf("Backup: %s (original file is safe)\n", result.BackupID)
+				errMsg += "Fix the failing old_text and retry. Use read_file to get exact text."
+				return mcp.NewToolResultError(errMsg), nil
+			}
 			return mcp.NewToolResultError(fmt.Sprintf("Multi-edit error: %v", err)), nil
 		}
 

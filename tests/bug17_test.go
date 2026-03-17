@@ -107,7 +107,8 @@ func TestBug17_AllEditsApplied(t *testing.T) {
 	}
 }
 
-// TestBug17_GenuineFailureStillReported verifies a truly missing oldText is "failed".
+// TestBug17_GenuineFailureStillReported verifies a truly missing oldText triggers atomic rollback.
+// Bug #27: multi_edit is now atomic — if any edit fails, the file is NOT modified.
 func TestBug17_GenuineFailureStillReported(t *testing.T) {
 	engine, tempDir := setupBug16Engine(t)
 
@@ -122,12 +123,21 @@ func TestBug17_GenuineFailureStillReported(t *testing.T) {
 	}
 
 	result, err := engine.MultiEdit(context.Background(), testFile, edits, false)
-	if err != nil {
-		t.Fatalf("MultiEdit should still succeed (partial): %v", err)
+
+	// Bug #27: multi_edit is now atomic — should return error when any edit fails
+	if err == nil {
+		t.Fatal("MultiEdit should return atomic rollback error when any edit fails")
+	}
+	if !strings.Contains(err.Error(), "atomic rollback") {
+		t.Errorf("Error should mention 'atomic rollback', got: %v", err)
 	}
 
+	// Result should still be returned with details
+	if result == nil {
+		t.Fatal("Result should be non-nil with edit details")
+	}
 	if result.SuccessfulEdits != 1 {
-		t.Errorf("SuccessfulEdits: got %d, want 1", result.SuccessfulEdits)
+		t.Errorf("SuccessfulEdits: got %d, want 1 (rolled back)", result.SuccessfulEdits)
 	}
 	if result.FailedEdits != 1 {
 		t.Errorf("FailedEdits: got %d, want 1", result.FailedEdits)
@@ -145,6 +155,12 @@ func TestBug17_GenuineFailureStillReported(t *testing.T) {
 	}
 	if result.EditDetails[1].Error == "" {
 		t.Error("Edit 1 should have an error message")
+	}
+
+	// Bug #27: File must NOT be modified (atomic rollback)
+	actualContent, _ := os.ReadFile(testFile)
+	if string(actualContent) != content {
+		t.Error("File was modified despite atomic rollback — Bug #27 regression!")
 	}
 }
 
@@ -207,6 +223,7 @@ func TestBug17_RiskAssessmentCriticalForceProceeds(t *testing.T) {
 }
 
 // TestBug17_EditDetailsPopulated verifies per-edit details are always populated.
+// Bug #27: multi_edit is now atomic — any failure causes rollback.
 func TestBug17_EditDetailsPopulated(t *testing.T) {
 	engine, tempDir := setupBug16Engine(t)
 
@@ -222,8 +239,13 @@ func TestBug17_EditDetailsPopulated(t *testing.T) {
 	}
 
 	result, err := engine.MultiEdit(context.Background(), testFile, edits, false)
-	if err != nil {
-		t.Fatalf("Should succeed with partial edits: %v", err)
+
+	// Bug #27: atomic rollback — any failed edit means file is NOT modified
+	if err == nil {
+		t.Fatal("Expected atomic rollback error due to empty old_text edit")
+	}
+	if result == nil {
+		t.Fatal("Result should be non-nil with edit details")
 	}
 
 	if len(result.EditDetails) != 3 {
@@ -231,18 +253,22 @@ func TestBug17_EditDetailsPopulated(t *testing.T) {
 	}
 
 	if result.EditDetails[0].Status != core.EditStatusApplied {
-		t.Errorf("Edit 0: got %s, want applied", result.EditDetails[0].Status)
+		t.Errorf("Edit 0: got %s, want applied (rolled back)", result.EditDetails[0].Status)
 	}
 	if result.EditDetails[1].Status != core.EditStatusFailed {
 		t.Errorf("Edit 1: got %s, want failed", result.EditDetails[1].Status)
 	}
-	if result.EditDetails[2].Status != core.EditStatusApplied {
-		t.Errorf("Edit 2: got %s, want applied", result.EditDetails[2].Status)
-	}
+	// Edit 2 may be applied or not depending on execution order, but file is unchanged
 
 	// Verify snippets are populated
 	if result.EditDetails[0].OldTextSnippet == "" {
 		t.Error("Edit 0 OldTextSnippet should be populated")
+	}
+
+	// File must NOT be modified (atomic rollback)
+	actualContent, _ := os.ReadFile(testFile)
+	if string(actualContent) != content {
+		t.Error("File was modified despite atomic rollback — Bug #27 regression!")
 	}
 }
 
