@@ -13,7 +13,7 @@ CRITICAL RULES:
 4. **BEFORE searching: Ask user if they know the location (saves 90% tokens)**
 5. Every edit returns a backup_id. Quick undo: `backup(action:"undo_last")`
 
-For the full tool reference, see `System_prompt.md` in the project root.
+For the full tool reference, see [System_prompt.md](../System_prompt.md) in the docs folder.
 
 ---
 

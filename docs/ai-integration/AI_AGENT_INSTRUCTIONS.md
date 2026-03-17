@@ -1,7 +1,7 @@
 # MCP Filesystem Ultra — Instructions for AI Agents (v4.1.2)
 
 > This document is designed to be included in AI agent system prompts or context.
-> For the complete tool reference, see [System_prompt.md](../../System_prompt.md) or the main [README](../../README.md).
+> For the complete tool reference, see [System_prompt.md](../System_prompt.md) or the main [README](../../README.md).
 
 ---
 

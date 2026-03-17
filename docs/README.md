@@ -26,5 +26,6 @@
 
 ## Top-Level Docs
 
+- [System_prompt.md](System_prompt.md) - Tool reference cheat sheet for AI system prompts
 - [SAFE_EDITING_PROTOCOL.md](SAFE_EDITING_PROTOCOL.md) - Safe editing protocol and guidelines
 - [SECURITY_TESTING_SUMMARY.md](SECURITY_TESTING_SUMMARY.md) - Security testing results summary
