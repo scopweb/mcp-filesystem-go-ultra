@@ -319,10 +319,11 @@ func TestBug16_FormatRiskNotice(t *testing.T) {
 		t.Fatal("FormatRiskNotice should return non-empty string for MEDIUM risk")
 	}
 
-	if !strings.Contains(notice, "test-backup-123") {
-		t.Error("Notice should contain backup ID")
+	// Notice should contain risk level and percentage (UNDO is now in main response, not in notice)
+	if !strings.Contains(notice, "RISK") {
+		t.Error("Notice should contain RISK level")
 	}
-	if !strings.Contains(notice, "UNDO: backup(action:") {
-		t.Error("Notice should contain UNDO backup command")
+	if !strings.Contains(notice, "changed") {
+		t.Error("Notice should contain change percentage")
 	}
 }

@@ -1,5 +1,25 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.1.3] - 2026-03-17
+
+### Bug Fix: #27 — multi_edit atomic rollback (prevents file truncation)
+
+`multi_edit` with 2+ edits could truncate files when the second edit's `old_text` didn't match after the first edit was applied. The file was written with only partial changes, causing code blocks to disappear (e.g., 565 lines → 178 lines).
+
+**Root cause:** `multi_edit` applied edits sequentially and wrote the file even when some edits failed. Common triggers:
+- Quote escaping mismatches (`\"` vs `"`, single vs double quotes in HTML/JS)
+- Content shift after prior edit changed surrounding text
+
+**Fix:** `multi_edit` is now atomic — if ANY edit fails, the file is NOT modified and the error response includes:
+- Which edits would have applied (rolled back)
+- Which edits failed and why
+- The backup_id (original file is always safe)
+- Actionable instruction: "Fix the failing old_text and retry"
+
+**Files changed:**
+- `core/edit_operations.go` — atomic rollback when `FailedEdits > 0` (no partial writes)
+- `main.go` — detailed error response with per-edit status and backup_id
+
 ## [4.1.2] - 2026-03-17
 
 ### Bug Fix: #24 — v3 tool names in error messages + undo/recovery system for AI self-healing
