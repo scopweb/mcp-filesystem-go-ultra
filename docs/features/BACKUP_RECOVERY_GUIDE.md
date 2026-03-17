@@ -1,580 +1,246 @@
-# Guía de Backup y Recuperación
+# Backup & Recovery Guide
 
-**Versión:** 3.8.0  
-**Fecha:** 3 de Diciembre de 2025
-
----
-
-## 📦 Introducción
-
-El sistema de backup de MCP Filesystem Ultra protege tu código contra pérdida accidental. Cada operación destructiva (edición, eliminación) crea automáticamente un backup persistente que puedes recuperar fácilmente.
-
-### 🎯 Beneficios Clave
-
-- ✅ **Backups automáticos** - No necesitas hacer nada, se crean solos
-- ✅ **Validación inteligente** - Te avisa antes de cambios riesgosos
-- ✅ **Recuperación rápida** - Un comando para restaurar código perdido
-- ✅ **Auditoría completa** - Historial de todos los cambios
+**Version:** 4.1.2
+**Updated:** 2026-03-17
 
 ---
 
-## 🔒 Backups Automáticos
+## Overview
 
-### ¿Cuándo se crean backups?
+MCP Filesystem Ultra automatically creates backups before every destructive operation (edit, delete, batch). You can recover any file at any time using the `backup` tool.
 
-Los backups se crean **automáticamente** antes de:
+### Key Benefits
 
-1. **Ediciones de archivos** (`edit_file`, `intelligent_edit`, `recovery_edit`)
-2. **Eliminaciones** (`delete_file`, `soft_delete_file`)
-3. **Operaciones batch** (`batch_operations` con `create_backup: true`)
+- **Automatic backups** — created before every `edit_file` and `multi_edit` call
+- **Risk validation** — warns before large or risky changes
+- **Quick undo** — `backup(action:"undo_last")` restores the most recent backup
+- **Full audit trail** — every backup has metadata (timestamp, operation, files)
 
-### Ubicación de Backups
+---
 
-Por defecto, los backups se guardan en:
+## Automatic Backups
+
+### When are backups created?
+
+Backups are created automatically before:
+
+1. **File edits** — `edit_file`, `multi_edit`
+2. **File deletions** — `delete_file`
+3. **Batch operations** — `batch_operations` with `create_backup: true`
+
+### Backup location
+
+By default, backups are stored in the system temp directory:
 ```
-C:\Users\DAVID\AppData\Local\Temp\mcp-batch-backups\
+%TEMP%\mcp-batch-backups\
 ```
 
-Cada backup tiene su propio directorio con ID único:
+Each backup has its own directory:
 ```
-20241203-153045-abc123\
-├── metadata.json       # Información del backup
-└── files\             # Archivos respaldados
-    └── tu_archivo.go
+<backup-id>\
+  metadata.json       # Backup metadata
+  files\              # Backed-up files
+    your_file.go
 ```
 
-### Configuración
+### Configuration
 
-Puedes personalizar el comportamiento en `claude_desktop_config.json`:
+Customize backup behavior in `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "filesystem-ultra": {
+      "command": "C:\\path\\to\\filesystem-ultra-v4.exe",
       "args": [
-        "--backup-dir=C:\\MisBackups",
+        "--backup-dir=C:\\backups\\mcp",
         "--backup-max-age=14",
-        "--backup-max-count=200"
-      ],
-      "env": {
-        "ALLOWED_PATHS": "C:\\__REPOS;C:\\MisBackups"
-      }
+        "--backup-max-count=200",
+        "C:\\your\\project",
+        "C:\\backups\\mcp"
+      ]
     }
   }
 }
 ```
 
-**⚠️ IMPORTANTE:** El directorio de backups **DEBE** estar en `ALLOWED_PATHS`.
+**Important:** The backup directory MUST be in the allowed paths (positional args).
 
 ---
 
-## ⚠️ Validación de Riesgo
+## Risk Validation
 
-### ¿Qué es la validación de riesgo?
+Before editing a file, the system analyzes the impact:
 
-Antes de editar un archivo, el sistema analiza el **impacto** del cambio:
-- % del archivo que cambiará
-- Número de ocurrencias a reemplazar
-- Factores de riesgo específicos
+| Level | Conditions | Behavior |
+|-------|-----------|----------|
+| **LOW** | <30% change, <50 occurrences | Proceeds normally |
+| **MEDIUM** | 30-50% change, 50-100 occurrences | Shows warning |
+| **HIGH** | 50-90% change, >100 occurrences | Proceeds with warning + VERIFY instruction |
+| **CRITICAL** | >90% change | Requires `force: true` |
 
-### Niveles de Riesgo
+### Recommended workflow for risky edits
 
-| Nivel | Condiciones | Comportamiento |
-|-------|------------|---------------|
-| **LOW** | <30% cambio, <50 ocurrencias | Procede normalmente |
-| **MEDIUM** | 30-50% cambio, 50-100 ocurrencias | Muestra advertencia |
-| **HIGH** | 50-90% cambio, >100 ocurrencias | Requiere `force: true` |
-| **CRITICAL** | >90% cambio | Requiere doble confirmación |
-
-### Ejemplo de Advertencia
-
-Cuando intentas un cambio riesgoso:
-
-```javascript
-edit_file({
-  path: "main.go",
-  old_text: "func",
-  new_text: "function"
-})
-```
-
-Respuesta:
-```
-⚠️  RISK LEVEL: HIGH
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Impact Analysis:
-  • 65.3% of file will change
-  • 200 occurrence(s) to replace
-  • ~15234 characters affected
-
-Risk Factors:
-  ⚠️ Large portion of file affected (65.3%)
-  ⚠️ Very high occurrence count (200 replacements)
-
-Recommended Actions:
-  1. Use 'analyze_edit' to preview changes
-  2. Add 'force: true' to proceed
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
-### Workflow Recomendado
-
-Para cambios riesgosos:
-
-1. **Preview primero** con `analyze_edit`:
-   ```javascript
-   analyze_edit({
-     path: "main.go",
-     old_text: "func",
-     new_text: "function"
-   })
+1. **Preview first** with `analyze_operation`:
+   ```
+   analyze_operation(path: "main.go", operation: "edit")
    ```
 
-2. **Revisa los cambios** que se mostrarán
+2. **Review the impact analysis**
 
-3. **Confirma con force** si todo se ve bien:
-   ```javascript
-   edit_file({
-     path: "main.go",
-     old_text: "func",
-     new_text: "function",
-     force: true
-   })
+3. **Proceed with force** if safe:
+   ```
+   edit_file(path: "main.go", old_text: "func", new_text: "function", force: true)
    ```
 
 ---
 
-## 🔍 Gestión de Backups
+## Backup Management
 
-### 1. Listar Backups Disponibles
+### Quick undo (most recent edit)
 
-```javascript
-list_backups({
-  limit: 20,                    // Máximo a mostrar
-  filter_operation: "edit",     // edit, delete, batch, all
-  filter_path: "main.go",       // Filtrar por archivo
-  newer_than_hours: 24          // Solo últimas 24 horas
-})
+```
+backup(action: "undo_last")
 ```
 
-**Respuesta:**
+Preview before undoing:
 ```
-📦 Available Backups (3)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🔖 20241203-153045-abc123
-   Time: 2024-12-03 15:30:45 (2 hours ago)
-   Operation: edit_file
-   Files: 1 (12.1KB)
-   Context: Edit: 12 occurrences, 35.2% change
-
-🔖 20241203-140230-def456
-   Time: 2024-12-03 14:02:30 (3 hours ago)
-   Operation: batch_operations
-   Files: 47 (2.3MB)
-   Context: Batch rename: 47 files
-
-💡 Use restore_backup(backup_id) to restore files
+backup(action: "undo_last", preview: true)
 ```
 
-### 2. Obtener Información Detallada
+### List available backups
 
-```javascript
-get_backup_info({
-  backup_id: "20241203-153045-abc123"
-})
+```
+backup(action: "list")
+backup(action: "list", filter_path: "main.go")
+backup(action: "list", filter_operation: "edit", limit: 10)
 ```
 
-**Respuesta:**
+### Get backup details
+
 ```
-📦 Backup Details: 20241203-153045-abc123
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-⏰ Timestamp: 2024-12-03 15:30:45 (2 hours ago)
-🔧 Operation: edit_file
-📝 Context: Edit: 12 occurrences, 35.2% change
-📊 Total Size: 12.1KB
-📁 Files: 1
-
-Files in backup:
-   • C:\__REPOS\project\main.go (12.1KB)
-
-🔗 Backup Location: C:\Users\DAVID\AppData\Local\Temp\mcp-batch-backups\20241203-153045-abc123
+backup(action: "info", backup_id: "20260317-153045-abc123")
 ```
 
-### 3. Comparar con Estado Actual
+### Compare before restoring
 
-Antes de restaurar, ve qué cambió:
-
-```javascript
-compare_with_backup({
-  backup_id: "20241203-153045-abc123",
-  file_path: "C:\\__REPOS\\project\\main.go"
-})
+```
+backup(action: "compare", backup_id: "20260317-153045-abc123", file_path: "main.go")
 ```
 
-**Respuesta:**
+### Restore a specific backup
+
 ```
-=== Comparison for C:\__REPOS\project\main.go ===
-Backup lines: 245
-Current lines: 268
-Difference: +23 lines
+backup(action: "restore", backup_id: "20260317-153045-abc123")
+backup(action: "restore", backup_id: "20260317-153045-abc123", file_path: "main.go")
+```
 
-First differences:
-Line 12:
-  - BACKUP:  func oldName() {
-  + CURRENT: func newName() {
+A safety backup of the current state is created before restoring.
 
-Line 45:
-  - BACKUP:  // TODO: implement
-  + CURRENT: // DONE: implemented
+### Cleanup old backups
+
+Preview what would be deleted:
+```
+backup(action: "cleanup", older_than_days: 7, dry_run: true)
+```
+
+Execute cleanup:
+```
+backup(action: "cleanup", older_than_days: 7)
 ```
 
 ---
 
-## 🔄 Recuperación de Archivos
+## Common Use Cases
 
-### Modo Preview (Recomendado)
+### Case 1: Safe Mass Edit
 
-Primero, usa el modo preview para ver qué se restaurará:
+```
+# 1. Count occurrences first
+search_files(path: "main.go", pattern: "oldFunc", count_only: true)
 
-```javascript
-restore_backup({
-  backup_id: "20241203-153045-abc123",
-  file_path: "C:\\__REPOS\\project\\main.go",
-  preview: true
-})
+# 2. Preview impact
+analyze_operation(path: "main.go", operation: "edit")
+
+# 3. Edit (auto-creates backup)
+edit_file(path: "main.go", mode: "search_replace", pattern: "oldFunc", replacement: "newFunc")
+
+# 4. If something went wrong
+backup(action: "undo_last")
 ```
 
-**Respuesta:**
+### Case 2: Emergency Recovery
+
 ```
-📊 Preview Mode - Changes to be restored:
+# 1. Find backups for the broken file
+backup(action: "list", filter_path: "important.go")
 
-=== Comparison for C:\__REPOS\project\main.go ===
-[muestra el diff]
-```
+# 2. Compare to see the diff
+backup(action: "compare", backup_id: "...", file_path: "important.go")
 
-### Restauración Real
-
-Si el preview se ve bien, procede con la restauración:
-
-```javascript
-restore_backup({
-  backup_id: "20241203-153045-abc123",
-  file_path: "C:\\__REPOS\\project\\main.go"
-})
+# 3. Restore
+backup(action: "restore", backup_id: "...", file_path: "important.go")
 ```
 
-**Respuesta:**
+### Case 3: Batch Operations with Safety
+
 ```
-✅ Restore completed successfully
-
-📁 Restored 1 file(s):
-   • C:\__REPOS\project\main.go
-
-💡 A backup of the current state was created before restoring
-```
-
-**Nota:** Se crea un backup del estado actual antes de restaurar, así tienes doble protección.
-
-### Restaurar Todos los Archivos
-
-Omite `file_path` para restaurar todo:
-
-```javascript
-restore_backup({
-  backup_id: "20241203-140230-def456"  // Backup con 47 archivos
-})
-```
-
----
-
-## 🧹 Limpieza de Backups
-
-### ¿Por qué limpiar?
-
-Los backups ocupan espacio en disco. Limpia regularmente los antiguos.
-
-### Dry Run (Recomendado)
-
-Primero, ve qué se eliminaría:
-
-```javascript
-cleanup_backups({
-  older_than_days: 7,
-  dry_run: true
-})
-```
-
-**Respuesta:**
-```
-🔍 Dry Run Mode - Preview of cleanup operation
-
-Would delete: 45 backup(s)
-Would free: 120.5MB
-
-💡 Run with dry_run: false to actually delete backups
-```
-
-### Ejecutar Limpieza
-
-Si estás de acuerdo, ejecuta la limpieza:
-
-```javascript
-cleanup_backups({
-  older_than_days: 7,
-  dry_run: false
-})
-```
-
-**Respuesta:**
-```
-✅ Cleanup completed
-
-Deleted: 45 backup(s)
-Freed: 120.5MB
-```
-
-### Limpieza Automática
-
-El sistema limpia automáticamente cuando:
-- Se excede `backup_max_count` (default: 100)
-- Los backups más antiguos se eliminan primero
-
----
-
-## 📋 Casos de Uso Comunes
-
-### Caso 1: Edición Masiva Segura
-
-**Situación:** Necesitas cambiar "func" por "function" en todo el archivo.
-
-```javascript
-// 1. Analiza el impacto
-analyze_edit({
-  path: "main.go",
-  old_text: "func",
-  new_text: "function"
-})
-
-// 2. Si es seguro, procede
-edit_file({
-  path: "main.go",
-  old_text: "func",
-  new_text: "function",
-  force: true  // Si es riesgoso
-})
-
-// 3. Si algo salió mal, restaura
-restore_backup({
-  backup_id: "20241203-153045-abc123",
-  file_path: "main.go"
-})
-```
-
-### Caso 2: Recuperación de Emergencia
-
-**Situación:** Sobrescribiste un archivo importante por error.
-
-```javascript
-// 1. Lista backups recientes
-list_backups({
-  newer_than_hours: 2,
-  filter_path: "importante.go"
-})
-
-// 2. Encuentra el backup correcto
-get_backup_info({
-  backup_id: "20241203-140230-def456"
-})
-
-// 3. Compara para estar seguro
-compare_with_backup({
-  backup_id: "20241203-140230-def456",
-  file_path: "importante.go"
-})
-
-// 4. Restaura
-restore_backup({
-  backup_id: "20241203-140230-def456",
-  file_path: "importante.go"
-})
-```
-
-### Caso 3: Batch Operations Seguras
-
-**Situación:** Necesitas renombrar 50 archivos.
-
-```javascript
-// 1. Batch con backup automático
-batch_operations({
-  operations: [
-    {type: "edit", path: "file1.go", old_text: "old", new_text: "new"},
-    // ... 49 más
+batch_operations(request_json: '{
+  "operations": [
+    {"type": "edit", "path": "f1.go", "old_text": "old", "new_text": "new"},
+    {"type": "edit", "path": "f2.go", "old_text": "old", "new_text": "new"}
   ],
-  atomic: true,
-  create_backup: true,
-  force: true  // Si el análisis lo requiere
-})
-
-// 2. Si algo falla, el rollback es automático
-// O puedes restaurar manualmente si es necesario
+  "atomic": true,
+  "create_backup": true
+}')
 ```
 
-### Caso 4: Auditoría de Cambios
-
-**Situación:** Quieres ver qué cambios se hicieron hoy.
-
-```javascript
-// Lista todos los backups de hoy
-list_backups({
-  newer_than_hours: 24,
-  limit: 100
-})
-
-// Revisa cada uno
-get_backup_info({
-  backup_id: "20241203-XXXXXX-XXXXXX"
-})
-
-// Compara con el estado actual
-compare_with_backup({
-  backup_id: "20241203-XXXXXX-XXXXXX",
-  file_path: "archivo.go"
-})
-```
+If any operation fails, all changes are automatically rolled back.
 
 ---
 
-## ⚙️ Configuración Avanzada
+## Advanced Configuration
 
-### Thresholds de Riesgo Personalizados
-
-Ajusta la sensibilidad de la validación de riesgo:
+### Custom risk thresholds
 
 ```json
 {
   "args": [
     "--risk-threshold-medium=40.0",
-    "--risk-threshold-high=60.0",
-    "--risk-occurrences-medium=75",
-    "--risk-occurrences-high=150"
+    "--risk-threshold-high=60.0"
   ]
 }
 ```
 
-**Defaults:**
-- MEDIUM: 30% cambio o 50 ocurrencias
-- HIGH: 50% cambio o 100 ocurrencias
-
-### Retención de Backups
-
-Controla cuántos backups mantener:
+### Backup retention
 
 ```json
 {
   "args": [
-    "--backup-max-age=14",      // Días
-    "--backup-max-count=200"    // Cantidad
+    "--backup-max-age=14",
+    "--backup-max-count=200"
   ]
 }
 ```
 
-**Defaults:**
-- Max age: 7 días
-- Max count: 100 backups
+Defaults: max age 72h, max count 50.
 
 ---
 
-## 🔐 Seguridad y Confiabilidad
+## FAQ
 
-### Integridad de Datos
+**Are backups created automatically?**
+Yes, before every `edit_file` and `multi_edit` call.
 
-- ✅ **Hash SHA256** de cada archivo
-- ✅ Verificación de integridad al restaurar
-- ✅ Metadata JSON para auditoría
+**Can I access backups manually?**
+Yes, they are regular files in the backup directory.
 
-### Manejo de Errores
+**What if I run out of disk space?**
+Use `backup(action:"cleanup", older_than_days: 3)` to free space.
 
-- ✅ Rollback si falla la creación del backup
-- ✅ Backup del estado actual antes de restaurar
-- ✅ Mensajes de error descriptivos
-
-### Performance
-
-- **Overhead mínimo:** ~5-10ms por archivo pequeño
-- **Cache inteligente:** Metadata en memoria (refresh cada 5 min)
-- **Sin bloqueos:** Operaciones no bloquean el sistema
+**Can I disable backups?**
+No, but you can minimize retention with `--backup-max-age=1 --backup-max-count=5`.
 
 ---
 
-## 💡 Tips y Mejores Prácticas
-
-### 1. Usa Preview Siempre
-
-Antes de restaurar, usa el modo preview:
-```javascript
-restore_backup({backup_id: "...", file_path: "...", preview: true})
-```
-
-### 2. Limpia Regularmente
-
-Establece una rutina semanal:
-```javascript
-cleanup_backups({older_than_days: 7, dry_run: false})
-```
-
-### 3. Valida Cambios Grandes
-
-Para ediciones masivas, siempre usa `analyze_edit` primero.
-
-### 4. Documenta Contexto
-
-Los backups incluyen contexto automático, pero puedes agregar más información en batch operations.
-
-### 5. Mantén el Directorio de Backups Accesible
-
-Asegúrate de que esté en `ALLOWED_PATHS` para acceso completo.
-
----
-
-## ❓ FAQ
-
-### ¿Los backups se eliminan automáticamente?
-
-No después de éxito, pero sí cuando:
-- Excedes `backup_max_count`
-- Corres `cleanup_backups`
-
-### ¿Puedo acceder a los backups manualmente?
-
-Sí, están en el filesystem normal. Puedes copiarlos, moverlos, etc.
-
-### ¿Qué pasa si edito un archivo sin backup?
-
-El sistema **siempre** crea un backup antes de editar. Es automático.
-
-### ¿Puedo deshabilitar los backups?
-
-No directamente, pero puedes usar `--backup-max-age=0` para eliminarlos inmediatamente.
-
-### ¿Los backups incluyen contenido binario?
-
-Sí, se respalda cualquier tipo de archivo.
-
-### ¿Qué pasa si no tengo espacio en disco?
-
-El sistema avisará, pero es mejor limpiar regularmente con `cleanup_backups`.
-
----
-
-## 📚 Recursos Adicionales
-
-- **Documentación Técnica:** `docs/BUG10_RESOLUTION.md`
-- **Configuración Claude Desktop:** `guides/CLAUDE_DESKTOP_SETUP.md`
-- **Changelog:** `CHANGELOG.md` (v3.8.0)
-
----
-
-**Versión de la guía:** 1.0  
-**Última actualización:** 3 de Diciembre de 2025
+*Version: 4.1.2 | Updated: 2026-03-17*

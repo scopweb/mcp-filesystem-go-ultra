@@ -1,378 +1,212 @@
-# 🎯 Guía de Configuración Optimizada para Claude Desktop
+# Claude Desktop Setup Guide
 
-## 📋 Configuración Recomendada (Máxima Reducción de Tokens)
+**Version:** 4.1.2
 
-### Ubicación del archivo de configuración:
+## Configuration File Location
+
 **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 
-### Configuración Ultra-Optimizada:
+## Recommended Configuration
 
 ```json
 {
   "mcpServers": {
     "filesystem-ultra": {
-      "command": "C:\\MCPs\\clone\\mcp-filesystem-go-ultra\\mcp-filesystem-ultra.exe",
+      "command": "C:\\path\\to\\filesystem-ultra-v4.exe",
       "args": [
         "--compact-mode",
-        "--max-response-size", "5MB",
-        "--max-search-results", "50",
-        "--max-list-items", "100",
-        "--log-level", "error",
         "--cache-size", "200MB",
         "--parallel-ops", "8",
-        "C:\\MCPs\\clone\\",
-        "C:\\temp\\",
-        "C:\\tu\\proyecto\\"
-      ],
-      "env": {
-        "NODE_ENV": "production"
-      }
-    }
-  }
-}
-```
-
----
-
-## 🔍 Explicación de Parámetros
-
-### Optimización de Tokens (NUEVO):
-
-| Parámetro | Valor | Descripción | Ahorro de Tokens |
-|-----------|-------|-------------|------------------|
-| `--compact-mode` | - | Habilita respuestas minimalistas | **65-75%** |
-| `--max-response-size` | `5MB` | Limita tamaño de respuestas | **Previene respuestas masivas** |
-| `--max-search-results` | `50` | Limita resultados de búsqueda | **85-95%** en búsquedas |
-| `--max-list-items` | `100` | Limita items en listados | **70-80%** en listados |
-
-### Rendimiento:
-
-| Parámetro | Valor | Descripción |
-|-----------|-------|-------------|
-| `--cache-size` | `200MB` | Caché en memoria (aumentado para mejor rendimiento) |
-| `--parallel-ops` | `8` | Operaciones paralelas (balance perfecto) |
-| `--log-level` | `error` | Solo errores (reduce overhead) |
-
-### Seguridad:
-
-Los últimos 3 argumentos son **rutas permitidas** (sin `--allowed-paths`):
-- `C:\\MCPs\\clone\\` - Ruta del proyecto MCP
-- `C:\\temp\\` - Carpeta temporal
-- `C:\\tu\\proyecto\\` - Tu proyecto actual
-
----
-
-## 📊 Comparación de Configuraciones
-
-### Configuración A: Ultra-Optimizada (Recomendada)
-```json
-{
-  "args": [
-    "--compact-mode",              // ⭐ CLAVE: Reduce tokens 65-75%
-    "--max-response-size", "5MB",
-    "--max-search-results", "50",
-    "--max-list-items", "100",
-    "--log-level", "error",
-    "--cache-size", "200MB",
-    "--parallel-ops", "8"
-  ]
-}
-```
-**Resultado:** 
-- ✅ Mínimo uso de tokens
-- ✅ Máxima velocidad
-- ✅ Respuestas compactas
-- ❌ Menos detalle visual
-
----
-
-### Configuración B: Balanceada
-```json
-{
-  "args": [
-    "--compact-mode",              // Con modo compacto
-    "--max-response-size", "10MB", // Límites más generosos
-    "--max-search-results", "200",
-    "--max-list-items", "300",
-    "--log-level", "info",         // Más información
-    "--cache-size", "200MB",
-    "--parallel-ops", "8"
-  ]
-}
-```
-**Resultado:**
-- ✅ Buen ahorro de tokens (50-60%)
-- ✅ Más resultados en búsquedas
-- ✅ Balance entre detalle y eficiencia
-
----
-
-### Configuración C: Verbose (Modo Original)
-```json
-{
-  "args": [
-    // SIN --compact-mode           // ⚠️ Modo verbose
-    "--max-response-size", "20MB",
-    "--max-search-results", "1000",
-    "--max-list-items", "500",
-    "--log-level", "info",
-    "--cache-size", "200MB",
-    "--parallel-ops", "8"
-  ]
-}
-```
-**Resultado:**
-- ✅ Máximo detalle visual (emojis, formateo)
-- ✅ Respuestas completas
-- ❌ Alto uso de tokens (modo original)
-- ❌ Respuestas más largas
-
----
-
-## 🎯 Escenarios de Uso
-
-### 📝 Desarrollo Activo (Muchas Operaciones)
-**Usa: Configuración A (Ultra-Optimizada)**
-
-Cuando haces muchas operaciones de archivo, ediciones, búsquedas:
-- 100+ operaciones por sesión
-- Búsquedas frecuentes
-- Listados de directorios grandes
-- Prioridad: **Minimizar tokens**
-
----
-
-### 🔍 Debugging / Análisis Profundo
-**Usa: Configuración C (Verbose)**
-
-Cuando necesitas ver todos los detalles:
-- Debugging de problemas
-- Análisis detallado de archivos
-- Ver estadísticas completas
-- Prioridad: **Máxima información**
-
----
-
-### ⚖️ Uso General
-**Usa: Configuración B (Balanceada)**
-
-Para trabajo diario normal:
-- Mezcla de operaciones
-- Balance entre tokens y detalle
-- Prioridad: **Equilibrio**
-
----
-
-## 💡 Ejemplos de Ahorro Real
-
-### Ejemplo 1: Listado de Directorio Grande
-
-**Comando Claude:** "Lista el contenido de C:\project\src"
-
-**Sin compact-mode:**
-```
-Directory listing for: C:\project\src
-
-[DIR]  components (file://C:\project\src\components) - 0 bytes
-[FILE] index.js (file://C:\project\src\index.js) - 1024 bytes
-[FILE] app.js (file://C:\project\src\app.js) - 2048 bytes
-[FILE] config.json (file://C:\project\src\config.json) - 512 bytes
-[DIR]  utils (file://C:\project\src\utils) - 0 bytes
-
-Directory: C:\project\src
-```
-**~350 tokens**
-
-**Con compact-mode:**
-```
-C:\project\src: components/, index.js(1KB), app.js(2KB), config.json, utils/
-```
-**~50 tokens = 85% de reducción** ✅
-
----
-
-### Ejemplo 2: Búsqueda en Proyecto
-
-**Comando Claude:** "Busca 'TODO' en todo el proyecto"
-
-**Sin compact-mode:**
-```
-🔍 Found 127 matches for pattern 'TODO':
-
-📁 C:\project\src\file1.js:42
-   // TODO: implement feature
-   Context:
-   │ function doWork() {
-   │   // TODO: implement feature
-   │   return null;
-   │ }
-
-📁 C:\project\src\file2.js:15
-   // TODO: review this
-...
-[125 más]
-```
-**~8,000+ tokens**
-
-**Con compact-mode:**
-```
-127 matches (first 20): file1.js:42, file2.js:15, file3.js:88, ... (107 more)
-```
-**~150 tokens = 98% de reducción** ✅
-
----
-
-### Ejemplo 3: Sesión Completa (100 operaciones)
-
-| Operación | Sin Compact | Con Compact | Ahorro |
-|-----------|-------------|-------------|--------|
-| 20× write | 3,000 | 300 | **90%** |
-| 30× edit | 6,000 | 600 | **90%** |
-| 20× list | 16,000 | 2,000 | **87%** |
-| 10× search | 50,000 | 2,000 | **96%** |
-| 20× otros | 6,000 | 1,000 | **83%** |
-| **TOTAL** | **81,000** | **5,900** | **92.7%** 🎉 |
-
----
-
-## 🔧 Comandos de Prueba
-
-Después de configurar, prueba estos comandos en Claude:
-
-### 1. Verificar Configuración
-```
-Claude: "Lista performance_stats"
-```
-**Esperado (compact-mode):**
-```
-ops/s:2016.0 hit:98.9% mem:40.3MB ops:2547
-```
-
----
-
-### 2. Probar Listado
-```
-Claude: "Lista el contenido de [tu carpeta]"
-```
-**Esperado (compact-mode):**
-```
-[ruta]: archivo1.txt, archivo2(5KB), carpeta/, ...
-```
-
----
-
-### 3. Probar Escritura
-```
-Claude: "Escribe 'test' en C:\temp\test.txt"
-```
-**Esperado (compact-mode):**
-```
-OK: 4B written
-```
-
----
-
-## ⚠️ Solución de Problemas
-
-### Problema: Claude sigue mostrando respuestas largas
-**Solución:** Verifica que `--compact-mode` esté en los args sin errores de sintaxis JSON.
-
-### Problema: No encuentra el ejecutable
-**Solución:** Verifica la ruta completa en `command`. Usa barras invertidas dobles `\\` en Windows.
-
-### Problema: Acceso denegado a archivos
-**Solución:** Agrega las rutas necesarias como argumentos individuales al final de `args`.
-
-### Problema: Respuestas muy cortas, perdí información
-**Solución:** Quita `--compact-mode` para volver al modo verbose con todos los detalles.
-
----
-
-## 📚 Recursos Adicionales
-
-- **TOKEN_OPTIMIZATION_SUMMARY.md** - Resumen técnico completo
-- **README.md** - Documentación general del proyecto
-- **benchmarks.md** - Benchmarks de rendimiento
-
----
-
-## 🎯 Recomendación Final
-
-Para **Claude Desktop** con uso intensivo:
-
-```json
-✅ USAR: --compact-mode
-✅ USAR: --max-search-results 50
-✅ USAR: --max-list-items 100
-✅ USAR: --log-level error
-```
-
-**Resultado: Ahorro de 65-75% en tokens** sin perder funcionalidad esencial.
-
----
-
-## 🔄 Configuración del Sistema de Backup (Nuevo en v3.8.0)
-
-### Configuración Básica
-
-Para habilitar el sistema de backup automático, agrega el directorio de backups a las rutas permitidas:
-
-```json
-{
-  "mcpServers": {
-    "filesystem-ultra": {
-      "command": "C:\\MCPs\\clone\\mcp-filesystem-go-ultra\\mcp-filesystem-ultra.exe",
-      "args": [
-        "--compact-mode",
-        "--max-response-size", "5MB",
-        "--backup-dir", "C:\\MisBackups",
-        "C:\\MCPs\\clone\\",
-        "C:\\temp\\",
-        "C:\\MisBackups"  // ⚠️ IMPORTANTE: Incluir directorio de backups
+        "--log-level", "error",
+        "--log-dir", "C:\\logs\\mcp-filesystem",
+        "C:\\your\\project\\",
+        "C:\\other\\allowed\\path\\"
       ]
     }
   }
 }
 ```
 
-### Parámetros de Backup Disponibles
+The positional arguments at the end are **allowed paths**. Only these directories (and their children) will be accessible. Omitting paths disables access control entirely.
 
-| Parámetro | Valor Default | Descripción |
-|-----------|---------------|-------------|
-| `--backup-dir` | `%TEMP%\mcp-batch-backups` | Directorio donde se guardan los backups |
-| `--backup-max-age` | `7` | Días de retención de backups |
-| `--backup-max-count` | `100` | Número máximo de backups a mantener |
-| `--risk-threshold-medium` | `30.0` | % de cambio para riesgo MEDIUM |
-| `--risk-threshold-high` | `50.0` | % de cambio para riesgo HIGH |
-| `--risk-occurrences-medium` | `50` | Ocurrencias para riesgo MEDIUM |
-| `--risk-occurrences-high` | `100` | Ocurrencias para riesgo HIGH |
+---
 
-### Configuración Avanzada con Backups
+## Key Parameters
+
+### Token Optimization
+
+| Parameter | Description | Token Savings |
+|-----------|-------------|---------------|
+| `--compact-mode` | Minimal responses | **65-75%** |
+
+### Performance
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--cache-size` | 100MB | In-memory file cache |
+| `--parallel-ops` | 2x CPU (max 16) | Concurrent operations |
+| `--log-level` | info | Log verbosity: debug, info, warn, error |
+
+### Backup & Safety
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--backup-dir` | system temp | Where backups are stored |
+| `--backup-max-age` | 72h | Retention period |
+| `--backup-max-count` | 50 | Max backups per file |
+| `--risk-threshold-medium` | 30 | % change that triggers warning |
+| `--risk-threshold-high` | 50 | % change that requires `force: true` |
+
+### Hooks
+
+| Parameter | Description |
+|-----------|-------------|
+| `--hooks-enabled` | Enable pre/post operation hooks |
+| `--hooks-config` | Path to hooks configuration JSON |
+
+### Audit Logging
+
+| Parameter | Description |
+|-----------|-------------|
+| `--log-dir` | Directory for audit logs + metrics (enables operation logging) |
+
+---
+
+## Configuration Profiles
+
+### A: Ultra-Optimized (Recommended for high-volume sessions)
+```json
+{
+  "args": [
+    "--compact-mode",
+    "--cache-size", "200MB",
+    "--parallel-ops", "8",
+    "--log-level", "error"
+  ]
+}
+```
+- Minimal token usage
+- Maximum speed
+- Compact responses
+
+### B: Balanced (General use)
+```json
+{
+  "args": [
+    "--compact-mode",
+    "--cache-size", "200MB",
+    "--parallel-ops", "8",
+    "--log-level", "info"
+  ]
+}
+```
+- Good token savings (50-60%)
+- More diagnostic information
+
+### C: Verbose (Debugging)
+```json
+{
+  "args": [
+    "--cache-size", "200MB",
+    "--parallel-ops", "8",
+    "--log-level", "debug"
+  ]
+}
+```
+- Full detail in responses
+- Higher token usage
+
+---
+
+## Token Savings Examples
+
+### Directory Listing
+
+**Without compact-mode (~350 tokens):**
+```
+Directory listing for: C:\project\src
+[DIR]  components (0 bytes)
+[FILE] index.js (1024 bytes)
+[FILE] app.js (2048 bytes)
+```
+
+**With compact-mode (~50 tokens):**
+```
+C:\project\src: components/, index.js(1KB), app.js(2KB)
+```
+
+### Search Results
+
+**Without compact-mode (~8,000 tokens):**
+```
+Found 127 matches for pattern 'TODO':
+C:\project\src\file1.js:42
+   // TODO: implement feature
+   Context: ...
+```
+
+**With compact-mode (~150 tokens):**
+```
+127 matches (first 20): file1.js:42, file2.js:15, ... (107 more)
+```
+
+### Session Total (100 operations)
+
+| Mode | Tokens | Savings |
+|------|--------|---------|
+| Verbose | ~81,000 | — |
+| Compact | ~5,900 | **92.7%** |
+
+---
+
+## Backup Configuration
+
+To enable the backup system with a custom directory:
 
 ```json
 {
   "args": [
     "--compact-mode",
-    "--backup-dir", "C:\\Backups\\MCP",
+    "--backup-dir", "C:\\backups\\mcp",
     "--backup-max-age", "14",
     "--backup-max-count", "200",
-    "--risk-threshold-medium", "40.0",
-    "--risk-threshold-high", "60.0",
-    "C:\\MCPs\\clone\\",
-    "C:\\Backups\\MCP"
+    "C:\\your\\project",
+    "C:\\backups\\mcp"
   ]
 }
 ```
 
-**Beneficios:**
-- ✅ Protección automática contra pérdida de código
-- ✅ Validación de riesgo antes de cambios masivos
-- ✅ Recuperación rápida con `restore_backup`
-- ✅ Auditoría completa de cambios
-
-📚 **Más información:** Ver [BACKUP_RECOVERY_GUIDE.md](BACKUP_RECOVERY_GUIDE.md)
+**Important:** Include the backup directory in the allowed paths.
 
 ---
 
-**Última actualización:** Diciembre 3, 2025  
-**Versión:** 3.8.0 - Backup & Risk Protection Release
+## Dashboard Setup
+
+Build and run the dashboard binary for real-time observability:
+
+```bash
+go build -ldflags="-s -w" -trimpath -o dashboard.exe ./cmd/dashboard/
+dashboard.exe --log-dir=C:\logs\mcp-filesystem --backup-dir=C:\backups\mcp --port=9100
+```
+
+Requires `--log-dir` to be set on the MCP server.
+
+---
+
+## Troubleshooting
+
+### Claude shows long responses
+Verify `--compact-mode` is in the args without JSON syntax errors.
+
+### Cannot find the executable
+Verify the full path in `command`. Use double backslashes `\\` on Windows.
+
+### Access denied to files
+Add the required paths as positional arguments at the end of `args`.
+
+### Responses too short, missing information
+Remove `--compact-mode` to return to verbose mode.
+
+---
+
+*Version: 4.1.2 | Updated: 2026-03-17*

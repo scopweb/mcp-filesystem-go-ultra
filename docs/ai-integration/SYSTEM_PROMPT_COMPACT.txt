@@ -1,30 +1,29 @@
-# MCP Filesystem Ultra v3.7.0
+# MCP Filesystem Ultra v4.1.2
 
-## 🚀 FIRST ACTION (Do this immediately)
-Call get_help("overview") to learn all 50 available tools.
+## 16 Tools Available
+Reading:   read_file (full, range via start_line/end_line, head/tail, base64)
+Writing:   write_file (text or base64)
+Editing:   edit_file (exact, search_replace, regex, occurrence:N), multi_edit
+Search:    search_files (pattern, count_only, file_types, include_content)
+Files:     copy_file, move_file, delete_file, create_directory, list_directory, get_file_info
+Batch:     batch_operations (atomic ops, pipelines, batch rename)
+Backup:    backup (list, info, compare, cleanup, restore, undo_last)
+Analysis:  analyze_operation (dry-run preview)
+Utility:   server_info (stats, help, artifact), wsl (sync, status)
 
-## ⚡ CRITICAL RULES
-1. Use mcp_read, mcp_write, mcp_edit - NOT native file tools
-2. These auto-convert paths: /mnt/c/ ↔ C:\
-3. For files >1000 lines: smart_search → read_file_range → edit_file
-4. When errors occur: call get_help("errors")
+## Critical Rules
+1. Use MCP tools, NOT native file tools — they auto-convert WSL/Windows paths
+2. For files >1000 lines: search_files -> read_file(start_line, end_line) -> edit_file
+3. BEFORE searching: ask user if they know the location (saves 90% tokens)
+4. Use multi_edit for multiple changes in one file
+5. Every edit returns UNDO instructions — use backup(action:"undo_last") if needed
 
-## 📚 HELP TOPICS (call anytime)
-get_help("overview")  - Quick start
-get_help("workflow")  - Efficient 4-step process
-get_help("tools")     - All 50 tools listed
-get_help("edit")      - How to edit files properly
-get_help("errors")    - Fix common problems
-get_help("examples")  - Code examples
-get_help("tips")      - Pro efficiency tips
-
-## 🎯 QUICK TOOL REFERENCE
-Reading: mcp_read, read_file_range (for large files)
-Writing: mcp_write, multi_edit (for multiple changes)
-Editing: mcp_edit, replace_nth_occurrence
-Search: mcp_search, count_occurrences
-Files: copy_file, move_file, delete_file
-Dirs: mcp_list, create_directory
-
-## ⚠️ IF SOMETHING FAILS
-Call get_help("errors") immediately for diagnosis and solutions.
+## Quick Tool Reference
+- Read specific lines:  read_file(path, start_line:10, end_line:20)
+- Count occurrences:    search_files(path, pattern, count_only:true)
+- Replace exact text:   edit_file(path, old_text, new_text)
+- Replace all matches:  edit_file(path, mode:"search_replace", pattern, replacement)
+- Replace Nth match:    edit_file(path, old_text, new_text, occurrence:1)
+- Multiple edits:       multi_edit(path, edits_json:'[{"old_text":"a","new_text":"b"}]')
+- Undo last edit:       backup(action:"undo_last")
+- Find backups:         backup(action:"list", filter_path:"filename")

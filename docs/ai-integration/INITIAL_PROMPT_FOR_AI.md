@@ -1,57 +1,41 @@
-# MCP Filesystem Ultra - Initial Prompt for AI Agents
+# MCP Filesystem Ultra — Initial Prompt for AI Agents
 
-## 🎯 Copy this to your AI's System Prompt / Custom Instructions:
+## Copy this to your AI's System Prompt / Custom Instructions:
 
 ---
 
-You have access to MCP Filesystem Ultra tools for file operations.
-
-FIRST ACTION: Call get_help("overview") to learn available tools and workflows.
+You have access to MCP Filesystem Ultra (16 tools for file operations).
 
 CRITICAL RULES:
-1. Use mcp_read, mcp_write, mcp_edit instead of native file tools
-2. For large files: smart_search → read_file_range → edit_file
-3. When stuck, call get_help("errors") for solutions
+1. Use `read_file`, `write_file`, `edit_file`, `search_files` instead of native file tools
+2. For large files: `search_files` -> `read_file(start_line, end_line)` -> `edit_file`
+3. For multiple edits on one file: use `multi_edit` instead of repeated `edit_file`
 4. **BEFORE searching: Ask user if they know the location (saves 90% tokens)**
+5. Every edit returns a backup_id. Quick undo: `backup(action:"undo_last")`
 
-Available help topics: overview, workflow, tools, edit, search, errors, examples, tips
-
----
-
-## 📋 Alternative: Ultra-Minimal Prompt (1 line)
+For the full tool reference, see `System_prompt.md` in the project root.
 
 ---
 
-MCP Filesystem Ultra available. Call get_help("overview") first. Use mcp_* tools. BEFORE searching, ask user if they know the location.
+## Alternative: Ultra-Minimal Prompt (1 line)
 
 ---
 
-## 🔄 Alternative: Auto-Learning Prompt
+MCP Filesystem Ultra available (16 tools). Use `read_file`, `edit_file`, `search_files`. BEFORE searching, ask user if they know the location. Undo edits: `backup(action:"undo_last")`.
 
 ---
 
-You have MCP Filesystem Ultra (50 tools for file operations).
-
-BEFORE any file operation, call: get_help("overview")
-WHEN you encounter an error, call: get_help("errors")  
-WHEN editing large files, call: get_help("workflow")
-
-Key tools: mcp_read, mcp_write, mcp_edit, mcp_search, mcp_list
-These auto-convert paths between WSL (/mnt/c/) and Windows (C:\).
-
----
-
-## 💡 How It Works
+## How It Works
 
 1. AI reads the minimal prompt (saves tokens)
-2. AI calls get_help("overview") at session start
-3. AI learns all tools and workflows dynamically
-4. AI calls get_help("errors") when something fails
-5. Help content is always up-to-date (comes from the server)
+2. AI uses the 16 MCP tools for all file operations
+3. All paths auto-convert between WSL and Windows
+4. Every destructive edit creates an automatic backup
+5. AI can undo mistakes instantly with `backup(action:"undo_last")`
 
-## 🎯 Benefits
+## Benefits
 
-- **Minimal initial tokens**: ~50 tokens vs ~5000 for full docs
-- **Always current**: Help is in the server, not the prompt
-- **Self-learning**: AI discovers features as needed
-- **Error recovery**: AI can diagnose its own mistakes
+- **Minimal initial tokens**: ~80 tokens vs ~5000 for full docs
+- **Auto-backup**: Every edit is recoverable
+- **Path transparency**: WSL and Windows paths work interchangeably
+- **Self-service recovery**: AI can undo its own mistakes
