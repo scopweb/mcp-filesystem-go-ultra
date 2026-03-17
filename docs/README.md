@@ -4,6 +4,7 @@
 
 - [CLAUDE_DESKTOP_SETUP.md](setup/CLAUDE_DESKTOP_SETUP.md) - Claude Desktop configuration guide
 - [WINDOWS_PATH_FIX.md](setup/WINDOWS_PATH_FIX.md) - Windows path resolution fixes
+- [DASHBOARD_PROXY_SETUP.md](setup/DASHBOARD_PROXY_SETUP.md) - Dashboard and proxy token tracking setup
 
 ## Features
 
