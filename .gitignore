@@ -107,8 +107,5 @@ borrar/
 *.ico
 filesystem-ultra.exe___
 
-# Proxy (separate project)
-cmd/proxy/
-
 # docs-website (separate git repo)
 docs-website/

@@ -177,6 +177,27 @@ dashboard.exe --log-dir=C:\logs\mcp-filesystem --backup-dir=C:\backups --port=91
 - Real-time updates via SSE (Server-Sent Events)
 - Pages: Dashboard (metrics), Operations (audit log), Backups (enterprise recovery), Statistics, Proxy/Tokens, Edit Analysis
 
+### MCP Proxy
+
+Transparent stdio proxy that logs every tool call with timing and token estimates. Sits between Claude Desktop and the MCP server.
+
+```bash
+# Build
+go build -ldflags="-s -w" -trimpath -o mcp-proxy.exe ./cmd/proxy/
+
+# Claude Desktop config — wrap the MCP server with the proxy
+# "command": "mcp-proxy.exe",
+# "args": ["--model", "sonnet-4", "--log-dir", "C:\\logs\\mcp-proxy", "--", "filesystem-ultra-v4.exe", ...]
+```
+
+Point the dashboard at the proxy logs to see the **Proxy / Tokens** page:
+
+```bash
+dashboard.exe --log-dir=C:\logs\mcp-filesystem --proxy-log-dir=C:\logs\mcp-proxy --port=9100
+```
+
+See [docs/setup/DASHBOARD_PROXY_SETUP.md](docs/setup/DASHBOARD_PROXY_SETUP.md) for full setup guide.
+
 ### Audit Logging
 
 When `--log-dir` is set on the MCP server, it writes:
@@ -222,6 +243,8 @@ core/
 cache/
   intelligent.go            BigCache (files) + go-cache (dirs + metadata)
 cmd/
+  proxy/
+    main.go                 Stdio proxy — logs tool calls, timing, token estimates
   dashboard/
     main.go                 HTTP dashboard for logs/metrics/backups
     static/                 Embedded web UI (go:embed)
