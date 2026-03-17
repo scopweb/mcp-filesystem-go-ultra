@@ -1413,7 +1413,7 @@ func (e *UltraFastEngine) GetEditTelemetrySummary() map[string]interface{} {
 		"average_bytes_per_edit": fmt.Sprintf("%.0f", e.metrics.AverageBytesPerEdit),
 		"last_operation":         e.metrics.LastEditOperation,
 		"recommendation": map[string]string{
-			"if_high_rewrites": "Consider using smart_search + read_file_range + edit_file for surgical edits",
+			"if_high_rewrites": "Consider using search_files + read_file + edit_file for surgical edits",
 			"if_low_targeted":  "Good! Edits are efficient",
 			"next_step":        "Monitor these metrics to optimize Claude's tool usage",
 		},

@@ -370,7 +370,7 @@ func (e *UltraFastEngine) streamingEditLargeFile(ctx context.Context, path, oldT
 
 	// Attach risk warning for any risky operation (Bug #22: always warn, never block)
 	if impact.IsRisky {
-		result.RiskWarning = impact.FormatRiskNotice(backupID)
+		result.RiskWarning = impact.FormatRiskNotice(backupID, path)
 	}
 
 	return result, nil

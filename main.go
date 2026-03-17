@@ -212,7 +212,7 @@ func main() {
 	// Create MCP server using mark3labs SDK
 	s := server.NewMCPServer(
 		"filesystem-ultra",
-		"4.0.0",
+		"4.1.2",
 		server.WithToolCapabilities(true), // listChanged=true enables tools/list_changed notifications
 	)
 
@@ -386,6 +386,14 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		}
 
 		// Range read mode: read specific line range
+		// If start_line is set but end_line is not, read from start_line to end of file
+		if startLine > 0 && endLine == 0 {
+			endLine = 999999 // ReadFileRange will clamp to actual file length
+		}
+		// If end_line is set but start_line is not, read from line 1
+		if endLine > 0 && startLine == 0 {
+			startLine = 1
+		}
 		if startLine > 0 && endLine > 0 {
 			content, err := engine.ReadFileRange(ctx, path, startLine, endLine)
 			if err != nil {
@@ -499,7 +507,8 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithDescription("Edit file with multiple modes. Default mode: smart text replacement with auto-backup and risk validation. "+
 			"mode:\"search_replace\" for recursive search & replace. mode:\"regex\" for advanced regex transformations with capture groups. "+
 			"Use occurrence:N to replace specific match (1=first, -1=last). Accepts old_text/new_text or old_str/new_str. "+
-			"Never blocks — auto-creates backup and proceeds with risk warning. Auto-converts WSL/Windows paths."),
+			"Never blocks — auto-creates backup and proceeds with risk warning. Auto-converts WSL/Windows paths. "+
+			"UNDO: Every edit returns a backup_id. To undo: backup(action:\"restore\", backup_id:\"...\"). Quick undo: backup(action:\"undo_last\")."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file (WSL or Windows format)")),
 		mcp.WithString("old_text", mcp.Description("Text to be replaced (default mode)")),
 		mcp.WithString("new_text", mcp.Description("New text to replace with (default mode)")),
@@ -693,7 +702,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		if engine.IsCompactMode() {
 			msg := fmt.Sprintf("OK: %d changes", result.ReplacementCount)
 			if result.BackupID != "" {
-				msg += fmt.Sprintf(" [backup:%s]", result.BackupID)
+				msg += fmt.Sprintf(" [backup:%s | UNDO: backup(action:\"restore\", backup_id:\"%s\")]", result.BackupID, result.BackupID)
 			}
 			if result.RiskWarning != "" {
 				msg += result.RiskWarning
@@ -703,7 +712,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		msg := fmt.Sprintf("Successfully edited %s\nChanges: %d replacement(s)\nMatch confidence: %s\nLines affected: %d",
 			path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)
 		if result.BackupID != "" {
-			msg += fmt.Sprintf("\nBackup ID: %s", result.BackupID)
+			msg += fmt.Sprintf("\nBackup ID: %s\nUNDO: backup(action:\"restore\", backup_id:\"%s\")", result.BackupID, result.BackupID)
 		}
 		if result.RiskWarning != "" {
 			msg += result.RiskWarning
@@ -1109,7 +1118,8 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("Apply multiple edits to a single file atomically. MUCH faster than calling edit_file multiple times. Never blocks — auto-creates backup and proceeds with risk warning."),
+		mcp.WithDescription("Apply multiple edits to a single file atomically. MUCH faster than calling edit_file multiple times. Never blocks — auto-creates backup and proceeds with risk warning. "+
+			"UNDO: Every edit returns a backup_id. To undo: backup(action:\"restore\", backup_id:\"...\"). Quick undo: backup(action:\"undo_last\")."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
 		mcp.WithString("edits_json", mcp.Required(), mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]. Also accepts old_str/new_str as aliases.")),
 		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
@@ -1126,8 +1136,46 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 		editsJSON, strErr := request.RequireString("edits_json")
 		if strErr == nil {
-			// Normal case: edits_json is a JSON string
-			if err := json.Unmarshal([]byte(editsJSON), &edits); err != nil {
+			// Bug #26: Claude Desktop sends literal newlines inside JSON string values.
+			// json.Unmarshal rejects raw \n in strings — fix by escaping them.
+			// We only escape newlines that are NOT already escaped (not preceded by \).
+			sanitized := editsJSON
+			{
+				var buf strings.Builder
+				inString := false
+				escaped := false
+				for i := 0; i < len(sanitized); i++ {
+					ch := sanitized[i]
+					if escaped {
+						buf.WriteByte(ch)
+						escaped = false
+						continue
+					}
+					if ch == '\\' && inString {
+						buf.WriteByte(ch)
+						escaped = true
+						continue
+					}
+					if ch == '"' {
+						inString = !inString
+					}
+					if ch == '\n' && inString {
+						buf.WriteString("\\n")
+						continue
+					}
+					if ch == '\r' && inString {
+						buf.WriteString("\\r")
+						continue
+					}
+					if ch == '\t' && inString {
+						buf.WriteString("\\t")
+						continue
+					}
+					buf.WriteByte(ch)
+				}
+				sanitized = buf.String()
+			}
+			if err := json.Unmarshal([]byte(sanitized), &edits); err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Invalid edits JSON: %v", err)), nil
 			}
 		} else if args != nil {
@@ -1183,7 +1231,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 				msg = fmt.Sprintf("OK: %d edits, %d lines", applied, result.LinesAffected)
 			}
 			if result.BackupID != "" {
-				msg += fmt.Sprintf(" [backup:%s]", result.BackupID)
+				msg += fmt.Sprintf(" [backup:%s | UNDO: backup(action:\"restore\", backup_id:\"%s\")]", result.BackupID, result.BackupID)
 			}
 			if result.RiskWarning != "" {
 				msg += result.RiskWarning
@@ -1204,7 +1252,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		sb.WriteString(fmt.Sprintf("Lines affected: %d\n", result.LinesAffected))
 		sb.WriteString(fmt.Sprintf("Confidence: %s\n", result.MatchConfidence))
 		if result.BackupID != "" {
-			sb.WriteString(fmt.Sprintf("Backup ID: %s\n", result.BackupID))
+			sb.WriteString(fmt.Sprintf("Backup ID: %s\nUNDO: backup(action:\"restore\", backup_id:\"%s\")\n", result.BackupID, result.BackupID))
 		}
 
 		if len(result.EditDetails) > 0 {
@@ -1349,9 +1397,10 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("Manage file backups. Actions: list (default), info, compare, cleanup, restore. "+
-			"Backups are created automatically before destructive operations."),
-		mcp.WithString("action", mcp.Description("Action: list (default), info, compare, cleanup, restore")),
+		mcp.WithDescription("Manage file backups. Actions: list (default), info, compare, cleanup, restore, undo_last. "+
+			"Backups are created automatically before every edit_file/multi_edit. "+
+			"DISASTER RECOVERY: If edits go wrong, use undo_last to restore the most recent backup, or list+restore for older ones."),
+		mcp.WithString("action", mcp.Description("Action: list (default), info, compare, cleanup, restore, undo_last")),
 		mcp.WithString("backup_id", mcp.Description("Backup ID (required for info, compare, restore)")),
 		mcp.WithString("file_path", mcp.Description("File path for compare or selective restore")),
 		mcp.WithNumber("limit", mcp.Description("Max backups to return for list (default: 20)")),
@@ -1562,8 +1611,58 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 			return mcp.NewToolResultText(output.String()), nil
 
+		case "undo_last":
+			// Find the most recent backup
+			backups, err := engine.GetBackupManager().ListBackups(1, "all", "", 0)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Failed to list backups: %v", err)), nil
+			}
+			if len(backups) == 0 {
+				return mcp.NewToolResultError("No backups found. Nothing to undo."), nil
+			}
+
+			lastBackup := backups[0]
+
+			// Check for preview mode
+			preview := false
+			if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+				if p, ok := args["preview"].(bool); ok {
+					preview = p
+				}
+			}
+
+			if preview {
+				var output strings.Builder
+				output.WriteString(fmt.Sprintf("Preview — Last backup: %s\n", lastBackup.BackupID))
+				output.WriteString(fmt.Sprintf("Time: %s (%s)\n", lastBackup.Timestamp.Format("2006-01-02 15:04:05"), core.FormatAge(lastBackup.Timestamp)))
+				output.WriteString(fmt.Sprintf("Operation: %s\n", lastBackup.Operation))
+				output.WriteString(fmt.Sprintf("Files: %d\n\n", len(lastBackup.Files)))
+				for _, file := range lastBackup.Files {
+					output.WriteString(fmt.Sprintf("   - %s\n", file.OriginalPath))
+				}
+				output.WriteString("\nRun backup(action:\"undo_last\") without preview to restore these files\n")
+				return mcp.NewToolResultText(output.String()), nil
+			}
+
+			// Restore the last backup
+			restoredFiles, err := engine.GetBackupManager().RestoreBackup(lastBackup.BackupID, "", true)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Failed to restore: %v", err)), nil
+			}
+
+			var output strings.Builder
+			output.WriteString(fmt.Sprintf("UNDO completed — restored backup %s\n\n", lastBackup.BackupID))
+			output.WriteString(fmt.Sprintf("Operation undone: %s\n", lastBackup.Operation))
+			output.WriteString(fmt.Sprintf("Time of original edit: %s (%s)\n\n", lastBackup.Timestamp.Format("2006-01-02 15:04:05"), core.FormatAge(lastBackup.Timestamp)))
+			output.WriteString(fmt.Sprintf("Restored %d file(s):\n", len(restoredFiles)))
+			for _, file := range restoredFiles {
+				output.WriteString(fmt.Sprintf("   - %s\n", file))
+			}
+			output.WriteString("\nA backup of the current state was created before restoring\n")
+			return mcp.NewToolResultText(output.String()), nil
+
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("Unknown action: %s. Valid: list, info, compare, cleanup, restore", action)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Unknown action: %s. Valid: list, info, compare, cleanup, restore, undo_last", action)), nil
 		}
 	}))
 
@@ -1920,7 +2019,23 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			data, _ := json.MarshalIndent(summary, "", "  ")
 			telemetry := fmt.Sprintf("\n\nEdit Telemetry:\n%s", string(data))
 
-			return mcp.NewToolResultText(stats + telemetry), nil
+			// Include backup system info
+			backupInfo := ""
+			if bm := engine.GetBackupManager(); bm != nil {
+				backups, _ := bm.ListBackups(1, "all", "", 0)
+				maxCount, maxAge := bm.GetBackupLimits()
+				backupInfo = fmt.Sprintf("\n\nBackup System:\n  Directory: %s\n  Max count: %d\n  Max age: %d days",
+					bm.GetBackupDir(), maxCount, maxAge)
+				if len(backups) > 0 {
+					backupInfo += fmt.Sprintf("\n  Latest: %s (%s, %s)",
+						backups[0].BackupID, backups[0].Operation, core.FormatAge(backups[0].Timestamp))
+				}
+				allBackups, _ := bm.ListBackups(9999, "all", "", 0)
+				backupInfo += fmt.Sprintf("\n  Total backups: %d", len(allBackups))
+				backupInfo += fmt.Sprintf("\n  UNDO last edit: backup(action:\"undo_last\")")
+			}
+
+			return mcp.NewToolResultText(stats + telemetry + backupInfo), nil
 
 		case "artifact":
 			subAction := "info"
@@ -2026,6 +2141,7 @@ Call server_info(topic) with:
 - "errors"   - Common errors and fixes
 - "examples" - Code examples
 - "tips"     - Pro tips for efficiency
+- "recovery" - Disaster recovery from bad edits
 - "all"      - Everything (long output)
 `)
 
@@ -2410,6 +2526,49 @@ server_info(action:"stats") -> See cache hit rate, ops/sec
 edit_file(mode:"regex", patterns_json='[{"pattern":"(\\w+)Error","replacement":"${1}Exception"}]')
 `)
 
+	case "recovery":
+		sb.WriteString(`# DISASTER RECOVERY
+
+## Quick Undo (last edit)
+backup(action:"undo_last")
+-> Restores the most recent backup automatically
+-> Use preview:true first to see what will be restored
+
+## Undo Specific Edit
+Every edit_file/multi_edit response includes:
+  UNDO: backup(action:"restore", backup_id:"...")
+Copy that command to restore.
+
+## Find Backups for a File
+backup(action:"list", filter_path:"filename.cs")
+-> Shows all backups containing that file
+-> Then: backup(action:"restore", backup_id:"...")
+
+## Compare Before Restoring
+backup(action:"compare", backup_id:"...", file_path:"path/to/file")
+-> Shows diff between backup and current file
+
+## Check System Status
+server_info(action:"stats")
+-> Shows backup directory, count, and latest backup
+
+## Before Repairing Damage
+1. backup(action:"list", filter_path:"broken-file") -> find clean backup
+2. copy_file(source, "/tmp/manual-backup") -> extra safety copy
+3. get_file_info(path) -> note file size as reference
+4. search_files(path, pattern, count_only:true) -> count key elements
+5. THEN start fixing
+
+## Known Issues
+- read_file with only start_line (no end_line) now reads to end of file (fixed in v4.1.2)
+- If file seems truncated, verify with mode:"tail" before editing
+- If >15% of file changes in one edit, STOP and verify
+
+## Golden Rule
+If edits make things WORSE, STOP editing and RESTORE from backup.
+Repeated edits on a broken file make recovery harder.
+`)
+
 	case "all":
 		// Return all topics
 		sb.WriteString(getHelpContent("overview", compactMode))
@@ -2423,6 +2582,8 @@ edit_file(mode:"regex", patterns_json='[{"pattern":"(\\w+)Error","replacement":"
 		sb.WriteString(getHelpContent("errors", compactMode))
 		sb.WriteString("\n---\n\n")
 		sb.WriteString(getHelpContent("tips", compactMode))
+		sb.WriteString("\n---\n\n")
+		sb.WriteString(getHelpContent("recovery", compactMode))
 
 	default:
 		sb.WriteString(fmt.Sprintf(`# Unknown topic: "%s"

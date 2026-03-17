@@ -457,7 +457,7 @@ func (m *BatchOperationManager) executeEdit(op FileOperation, result *OperationR
 		editResult, editErr := m.engine.performIntelligentEdit(original, op.OldText, op.NewText)
 		if editErr != nil || editResult.ReplacementCount == 0 {
 			return fmt.Errorf("old_text not found in file: %s. "+
-				"ALWAYS read the file with read_file_range BEFORE editing. "+
+				"ALWAYS read the file with read_file BEFORE editing. "+
 				"Copy the exact text from the read result as old_text", op.Path)
 		}
 		err = os.WriteFile(op.Path, []byte(editResult.ModifiedContent), 0644)
@@ -471,7 +471,7 @@ func (m *BatchOperationManager) executeEdit(op FileOperation, result *OperationR
 	newContent := strings.Replace(original, op.OldText, op.NewText, 1)
 	if newContent == original {
 		return fmt.Errorf("old_text not found in file: %s. "+
-			"ALWAYS read the file with read_file_range BEFORE editing. "+
+			"ALWAYS read the file with read_file BEFORE editing. "+
 			"Copy the exact text from the read result as old_text", op.Path)
 	}
 
