@@ -284,29 +284,27 @@ func (ci *ChangeImpact) ShouldBlockOperation(force bool) bool {
 	return ci.RiskLevel == "critical"
 }
 
-// FormatRiskNotice generates a non-blocking warning appended to success responses.
+// FormatRiskNotice generates a non-blocking, actionable warning appended to success responses.
 // Used for MEDIUM and HIGH risk operations that auto-proceed with backup (Bug #16).
-func (ci *ChangeImpact) FormatRiskNotice(backupID string) string {
+// For HIGH risk, includes a VERIFY instruction to prompt the AI to check the result.
+func (ci *ChangeImpact) FormatRiskNotice(backupID string, filePath ...string) string {
 	if !ci.IsRisky || ci.RiskLevel == "low" {
 		return ""
 	}
 
 	var notice strings.Builder
 
-	if ci.RiskLevel == "high" {
-		notice.WriteString(fmt.Sprintf("\n⚠️  RISK WARNING [%s]\n", strings.ToUpper(ci.RiskLevel)))
-	} else {
-		notice.WriteString(fmt.Sprintf("\n⚠️  Risk notice [%s]\n", ci.RiskLevel))
+	notice.WriteString(fmt.Sprintf("\n⚠️ %s RISK (%.0f%% changed)", strings.ToUpper(ci.RiskLevel), ci.ChangePercentage))
+
+	// For HIGH/CRITICAL risk: add actionable VERIFY instruction
+	if ci.RiskLevel == "high" || ci.RiskLevel == "critical" {
+		if len(filePath) > 0 && filePath[0] != "" {
+			notice.WriteString(fmt.Sprintf("\n⚠️ VERIFY: read_file(\"%s\", mode:\"tail\") to confirm file is complete", filePath[0]))
+		} else {
+			notice.WriteString("\n⚠️ VERIFY: read_file with mode:\"tail\" to confirm file is complete")
+		}
 	}
-	notice.WriteString(fmt.Sprintf("  %.1f%% of file changed (%d occurrence(s), ~%d chars)\n",
-		ci.ChangePercentage, ci.Occurrences, ci.CharactersChanged))
-	if backupID != "" {
-		notice.WriteString(fmt.Sprintf("  Auto-backup: %s\n", backupID))
-		notice.WriteString("  Restore with: restore_backup(backup_id)\n")
-	}
-	for _, factor := range ci.RiskFactors {
-		notice.WriteString(fmt.Sprintf("  %s\n", factor))
-	}
+	notice.WriteString("\n")
 
 	return notice.String()
 }
@@ -317,9 +315,9 @@ func (ci *ChangeImpact) GetRecommendation() string {
 	case "critical":
 		return "CRITICAL risk detected. Operation blocked. Use analyze_edit first, then add force: true to confirm."
 	case "high":
-		return "HIGH risk - auto-backup created. Review changes and use restore_backup if needed."
+		return "HIGH risk - auto-backup created. Use backup(action:\"undo_last\") to revert if needed."
 	case "medium":
-		return "MEDIUM risk - auto-backup created. Use restore_backup if needed."
+		return "MEDIUM risk - auto-backup created. Use backup(action:\"undo_last\") to revert if needed."
 	default:
 		return "Low risk operation."
 	}

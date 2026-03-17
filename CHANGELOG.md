@@ -1,5 +1,100 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.1.2] - 2026-03-17
+
+### Bug Fix: #24 — v3 tool names in error messages + undo/recovery system for AI self-healing
+
+When edit_file or multi_edit failed, error messages referenced deprecated v3 tool names (`read_file_range`, `smart_search`) that no longer exist in v4, causing Claude Desktop to call non-existent tools and enter error loops.
+
+Additionally, when an AI model (e.g. Haiku) made bad edits across multiple files, there was no easy way for the AI itself to discover and restore from filesystem-ultra's own backups — requiring manual human intervention.
+
+#### Fix 1: Update error messages from v3 to v4 tool names
+
+- **Fixed**: `core/edit_operations.go` — 3 error messages: `read_file_range` → `read_file`, `smart_search` → `search_files`
+- **Fixed**: `core/engine.go` — 1 recommendation message: `smart_search + read_file_range` → `search_files + read_file`
+- **Fixed**: `core/batch_operations.go` — 2 error messages: `read_file_range` → `read_file`
+
+#### Fix 2: UNDO instructions in every edit response
+
+Every `edit_file` and `multi_edit` response now includes the exact command to undo the change:
+
+- **Compact mode**: `OK: 1 changes [backup:abc123 | UNDO: backup(action:"restore", backup_id:"abc123")]`
+- **Verbose mode**: `Backup ID: abc123\nUNDO: backup(action:"restore", backup_id:"abc123")`
+
+This ensures the AI always has the information needed to restore, even after model switches or context loss.
+
+#### Fix 3: `undo_last` action for backup tool
+
+New `backup(action:"undo_last")` — restores the most recent backup without requiring a backup_id:
+
+- Finds the most recent backup automatically
+- Supports `preview: true` to show what would be restored before doing it
+- Creates a safety backup of the current state before restoring
+- Zero new dependencies — reuses existing `ListBackups(1)` + `RestoreBackup()`
+
+#### Fix 4: Recovery instructions in tool descriptions
+
+- **Updated**: `edit_file` description now includes: `UNDO: Every edit returns a backup_id. To undo: backup(action:"restore", backup_id:"..."). Quick undo: backup(action:"undo_last").`
+- **Updated**: `multi_edit` description — same undo instructions
+- **Updated**: `backup` tool description — lists `undo_last` as valid action, adds `DISASTER RECOVERY` guidance
+
+#### Files changed
+
+| File | Changes |
+|------|---------|
+| `main.go` | edit_file/multi_edit responses with UNDO, undo_last case, updated descriptions |
+| `core/edit_operations.go` | 3× `read_file_range` → `read_file`, `smart_search` → `search_files` |
+| `core/engine.go` | 1× recommendation message updated to v4 tool names |
+| `core/batch_operations.go` | 2× `read_file_range` → `read_file` |
+
+#### Fix 5: `read_file` with `start_line` but no `end_line` ignored start_line (Bug #25)
+
+When the AI called `read_file(path, start_line=880)` without `end_line`, the `start_line` parameter was silently ignored and the entire file was returned from line 1. This caused the AI to believe files were truncated or "wrapping around".
+
+- **Fixed**: `main.go` — `start_line` without `end_line` now reads from `start_line` to end of file
+- **Fixed**: `main.go` — `end_line` without `start_line` now reads from line 1 to `end_line`
+
+#### Fix 6: Backup system info visible in `server_info(action:"stats")`
+
+The AI had no way to discover where backups were stored or how many existed.
+
+- **Added**: `core/backup_manager.go` — `GetBackupDir()` and `GetBackupLimits()` getters
+- **Added**: `main.go` — `server_info(action:"stats")` now shows backup directory, limits, total count, latest backup, and undo command
+
+#### Fix 7: `server_info(topic:"recovery")` — Disaster recovery guide
+
+New help topic with step-by-step instructions for AI self-recovery from bad edits.
+
+- **Added**: `main.go` — "recovery" topic covering: undo_last, find backups by filename, compare before restore, pre-repair checklist, golden rule (stop editing if making things worse)
+
+#### Files changed (complete)
+
+| File | Changes |
+|------|---------|
+| `main.go` | UNDO in responses, undo_last, start_line fix, stats backup info, recovery help topic, multi_edit JSON sanitizer |
+| `core/edit_operations.go` | 3× error messages v3→v4 |
+| `core/engine.go` | 1× recommendation v3→v4 |
+| `core/batch_operations.go` | 2× error messages v3→v4 |
+| `core/backup_manager.go` | GetBackupDir(), GetBackupLimits() getters |
+| `core/impact_analyzer.go` | FormatRiskNotice: compact actionable format, VERIFY instruction for HIGH risk, removed v3 `restore_backup` |
+| `tests/bug16_test.go` | Updated assertion for new risk notice format |
+
+#### Fix 8: Risk warnings — compact, actionable, no redundancy
+
+Risk warnings were verbose and passive (informational but not actionable for the AI).
+
+- **Changed**: `FormatRiskNotice` now returns compact format: `⚠️ HIGH RISK (80% changed)` — one line
+- **Added**: For HIGH/CRITICAL risk: `⚠️ VERIFY: read_file("path", mode:"tail")` — actionable instruction
+- **Removed**: Redundant UNDO in risk warning (already present in main response line)
+- **Removed**: Verbose risk factors list, char count, occurrence count (passive info)
+- **Fixed**: `restore_backup(backup_id)` → removed (v3 tool name that doesn't exist)
+
+#### Fix 9: `multi_edit` — invalid JSON with literal newlines (Bug #26)
+
+Claude Desktop sends `edits_json` with literal newlines inside string values (e.g., multi-line `old_text`). Go's `json.Unmarshal` rejects raw `\n`/`\r`/`\t` inside JSON strings.
+
+- **Added**: `main.go` — JSON string sanitizer that escapes literal control characters (`\n` → `\\n`, `\r` → `\\r`, `\t` → `\\t`) only inside quoted strings, preserving already-escaped sequences and structural whitespace outside strings
+
 ## [4.1.1] - 2026-03-12
 
 ### Bug Fix: #19 — write_base64, wsl_sync y copy_file fallan desde contenedor Linux (claude.ai web)
@@ -506,7 +601,7 @@ Multi-step file transformation pipeline that reduces token consumption by **4x**
 ### Performance & Toolchain Update
 
 #### Go Toolchain
-- **Go version**: `1.24.0` → `1.25.7`
+- **Go version**: `1.24.0` → `1.26.0`
 - Compiled with latest Go stable release
 
 #### Dependency Updates
@@ -1220,10 +1315,10 @@ Complete backup and recovery system to prevent code loss from destructive operat
   "mcpServers": {
     "filesystem-ultra": {
       "args": [
-        "--backup-dir=C:\\Users\\DAVID\\AppData\\Local\\Temp\\mcp-batch-backups"
+        "--backup-dir=C:\\backups\\mcp-batch-backups"
       ],
       "env": {
-        "ALLOWED_PATHS": "C:\\__REPOS;C:\\Users\\DAVID\\AppData\\Local\\Temp\\mcp-batch-backups"
+        "ALLOWED_PATHS": "C:\\your\\project;C:\\backups\\mcp-batch-backups"
       }
     }
   }

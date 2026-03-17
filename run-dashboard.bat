@@ -3,7 +3,7 @@ title MCP Filesystem Ultra - Dashboard
 
 set LOG_DIR=C:\temp\mcp-ultra-logs
 set PROXY_LOG_DIR=C:\temp\mcp-proxy-logs
-set BACKUP_DIR=%TEMP%\mcp-batch-backups
+set BACKUP_DIR=C:\backups\filesystem-ultra
 set PORT=9100
 
 echo Starting Dashboard on http://localhost:%PORT%

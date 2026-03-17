@@ -487,6 +487,16 @@ func (bm *BackupManager) CleanupOldBackups(olderThanDays int, dryRun bool) (int,
 }
 
 // GetBackupPath retorna la ruta completa de un backup
+// GetBackupDir returns the backup directory path
+func (bm *BackupManager) GetBackupDir() string {
+	return bm.backupDir
+}
+
+// GetBackupLimits returns the max count and max age in days
+func (bm *BackupManager) GetBackupLimits() (maxCount int, maxAgeDays int) {
+	return bm.maxBackups, bm.maxAgeDays
+}
+
 func (bm *BackupManager) GetBackupPath(backupID string) string {
 	// Sanitize backup ID - return empty string on invalid ID
 	if err := sanitizeBackupID(backupID); err != nil {

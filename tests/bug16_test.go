@@ -322,7 +322,7 @@ func TestBug16_FormatRiskNotice(t *testing.T) {
 	if !strings.Contains(notice, "test-backup-123") {
 		t.Error("Notice should contain backup ID")
 	}
-	if !strings.Contains(notice, "restore_backup") {
-		t.Error("Notice should mention restore_backup")
+	if !strings.Contains(notice, "UNDO: backup(action:") {
+		t.Error("Notice should contain UNDO backup command")
 	}
 }

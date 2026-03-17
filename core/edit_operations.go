@@ -79,7 +79,7 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 	// This prevents overwriting recent modifications
 	contextValid, contextWarning := e.validateEditContext(string(content), oldText)
 	if !contextValid {
-		return nil, fmt.Errorf("context validation failed: %s - file may have been modified. Please re-read the file with smart_search + read_file_range", contextWarning)
+		return nil, fmt.Errorf("context validation failed: %s - file may have been modified. Please re-read the file with search_files + read_file", contextWarning)
 	}
 
 	// Calculate change impact for risk assessment
@@ -181,7 +181,7 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 
 	// Attach risk warning for any risky operation (Bug #22: always warn, never block)
 	if impact.IsRisky {
-		result.RiskWarning = impact.FormatRiskNotice(backupID)
+		result.RiskWarning = impact.FormatRiskNotice(backupID, path)
 	}
 
 	return result, nil
@@ -1121,7 +1121,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	if result.SuccessfulEdits == 0 {
 		result.BackupID = backupID
 		if aggregateImpact.IsRisky && !aggregateImpact.ShouldBlockOperation(false) {
-			result.RiskWarning = aggregateImpact.FormatRiskNotice(backupID)
+			result.RiskWarning = aggregateImpact.FormatRiskNotice(backupID, path)
 		}
 		return result, nil
 	}
@@ -1172,7 +1172,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	// Store backup ID and attach risk warning (Bug #22: always warn, never block)
 	result.BackupID = backupID
 	if aggregateImpact.IsRisky {
-		result.RiskWarning = aggregateImpact.FormatRiskNotice(backupID)
+		result.RiskWarning = aggregateImpact.FormatRiskNotice(backupID, path)
 	}
 
 	return result, nil
@@ -1476,7 +1476,7 @@ func (e *UltraFastEngine) validateEditContext(currentContent, oldText string) (b
 				lineCount := strings.Count(normalizedOldText, "\n") + 1
 				return false, fmt.Sprintf(
 					"old_text not found in file (%d line(s)). "+
-						"ALWAYS read the file with read_file_range BEFORE editing. "+
+						"ALWAYS read the file with read_file BEFORE editing. "+
 						"Copy the exact text from the read result as old_text",
 					lineCount,
 				)
@@ -1528,7 +1528,7 @@ func (e *UltraFastEngine) validateEditContext(currentContent, oldText string) (b
 	}
 
 	if !found {
-		return false, "old_text not found. ALWAYS read the file with read_file_range BEFORE editing. Copy the exact text from the read result as old_text"
+		return false, "old_text not found. ALWAYS read the file with read_file BEFORE editing. Copy the exact text from the read result as old_text"
 	}
 
 	// Check context: verify that surrounding lines are stable

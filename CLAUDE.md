@@ -38,7 +38,7 @@ CORE (5):      read_file, write_file, edit_file, list_directory, search_files
 EDIT+ (1):     multi_edit
 FILES (4):     move_file, copy_file, delete_file, create_directory
 BATCH (1):     batch_operations  (includes pipelines + batch rename)
-BACKUP (1):    backup            (includes restore via action:"restore")
+BACKUP (1):    backup            (includes restore via action:"restore", undo_last)
 ANALYSIS (1):  analyze_operation (operations: file, optimize, write, edit, delete)
 WSL (1):       wsl               (includes sync + status via action param)
 UTIL (1):      server_info       (includes help, stats, artifact via action param)
@@ -112,7 +112,7 @@ cmd/
 | `github.com/panjf2000/ants/v2 v2.11.5` | Goroutine worker pool |
 | `github.com/fsnotify/fsnotify v1.9.0` | File system event watching |
 
-Go version: 1.25.7
+Go version: 1.26.0
 
 ## Core Patterns
 
@@ -413,8 +413,9 @@ When `--log-dir` is set, each completed step emits a separate audit entry with `
 
 | Need | Tool | Parameters |
 |------|------|------------|
-| Backup management | `backup` | `action` (list/info/compare/cleanup/restore), `backup_id` |
+| Backup management | `backup` | `action` (list/info/compare/cleanup/restore/undo_last), `backup_id` |
 | Restore backup | `backup` | `action: "restore"`, `backup_id`, `file_path` (optional) |
+| Undo last edit | `backup` | `action: "undo_last"`, `preview: true` (optional) |
 | Analyze before doing | `analyze_operation` | `path`, `operation` (file/edit/delete/write/optimize) |
 | Performance stats | `server_info` | `action: "stats"` |
 | Help | `server_info` | `action: "help"`, `topic` (optional) |
@@ -488,3 +489,12 @@ For replacing large code blocks (>10 lines):
 - If `edit_file` says "old_text not found": re-read the file and try again with exact text
 - If `batch_operations` fails: check the error for which operation failed and why
 - If a tool returns no response (timeout): retry once, the file system may have been briefly locked
+
+### 10. Disaster Recovery — UNDO and backup restore
+- Every `edit_file` and `multi_edit` response includes: `UNDO: backup(action:"restore", backup_id:"...")`
+- Quick undo (no backup_id needed): `backup(action:"undo_last")`
+- Preview before undo: `backup(action:"undo_last", preview:true)`
+- Find backups for a specific file: `backup(action:"list", filter_path:"filename")`
+- If edits make things WORSE, **STOP editing and RESTORE** from backup — repeated edits on a broken file make recovery harder
+- For HIGH risk edits, verify the result: `read_file(path, mode:"tail")` to confirm file is complete
+- Full recovery guide: `server_info(action:"help", topic:"recovery")`

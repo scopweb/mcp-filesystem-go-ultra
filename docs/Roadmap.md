@@ -10,7 +10,7 @@
 
 ### Achievements
 
-- **Security Audit and Hardening** - Go toolchain updated to go1.25.7 (8 CVEs resolved)
+- **Security Audit and Hardening** - Go toolchain updated to go1.26.0 (8 CVEs resolved)
 - **5 CRITICAL security fixes** - Symlink traversal bypass, access control in EditFile, StreamingWriteFile, ChunkedReadFile, SmartEditFile
 - **3 HIGH security fixes** - MultiEdit access control, deadlock in ListBackups, path traversal via backup IDs
 - **5 MEDIUM security fixes** - Temp files with crypto/rand, secure backup IDs, permissions preserved, symlinks in copyDirectory, metadata 0600
@@ -119,7 +119,7 @@ The following features are fully implemented and tested:
 - Build fix in tests/security/
 
 ### v3.13.2 (2026-02): "Performance & Extensions"
-- Go toolchain updated to go1.25.7
+- Go toolchain updated to go1.26.0
 - Optimized isTextFile() function
 - Added 70+ file extensions support
 - Tests for large_file_processor and regex_transformer

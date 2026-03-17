@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra-Fast
 
-**v4.1.1** · Go · MCP 2025-11-25 · 16 tools
+**v4.1.2** · Go · MCP 2025-11-25 · 16 tools
 
 A high-performance [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go. Designed for use with Claude Desktop and Claude Code, with first-class support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -36,7 +36,7 @@ go build -ldflags="-s -w" -trimpath -o filesystem-ultra-v4.exe .
 build-windows.bat
 ```
 
-Requires Go 1.25+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
+Requires Go 1.26+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
 
 ```bash
 # Run tests
@@ -259,7 +259,7 @@ tests/
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `github.com/mark3labs/mcp-go` | v0.43.2 | MCP server SDK |
+| `github.com/mark3labs/mcp-go` | v0.44.1 | MCP server SDK |
 | `github.com/allegro/bigcache/v3` | v3.1.0 | File content cache |
 | `github.com/patrickmn/go-cache` | v2.1.0 | Directory and metadata cache |
 | `github.com/panjf2000/ants/v2` | v2.11.5 | Goroutine pool |
@@ -275,7 +275,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-Current release: **v4.1.1** — fixes count_only directories, WSL paths, batch engine, and pipeline errors.
+Current release: **v4.1.2** — version alignment, SECURITY.md, audit fixes.
 
 ---
 
