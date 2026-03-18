@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-MCP Filesystem Server Ultra-Fast (v4.0.0) - A high-performance MCP (Model Context Protocol) filesystem server written in Go, optimized for Claude Desktop and Claude Code. Provides **16 MCP tools** (consolidated from 59 in v3.x) for file operations, search, editing, backups, streaming, and WSL/Windows integration. All tools include MCP spec-compliant annotations (readOnlyHint, destructiveHint, idempotentHint).
+MCP Filesystem Server Ultra-Fast (v4.1.3) - A high-performance MCP (Model Context Protocol) filesystem server written in Go, optimized for Claude Desktop and Claude Code. Provides **16 MCP tools** (consolidated from 59 in v3.x) for file operations, search, editing, backups, streaming, and WSL/Windows integration. All tools include MCP spec-compliant annotations (readOnlyHint, destructiveHint, idempotentHint).
 
 ## Build & Test
 
@@ -31,7 +31,7 @@ go test ./tests/ -run TestName -v
 go build -ldflags="-s -w" -trimpath -o dashboard.exe ./cmd/dashboard/
 ```
 
-## Tool Inventory (v4.0.0 — 16 tools)
+## Tool Inventory (v4.1.3 — 16 tools)
 
 ```
 CORE (5):      read_file, write_file, edit_file, list_directory, search_files
@@ -352,7 +352,7 @@ When `--log-dir` is set, each completed step emits a separate audit entry with `
 
 ---
 
-## filesystem-ultra Tool Reference (v4.0.0 — 16 tools)
+## filesystem-ultra Tool Reference (v4.1.3 — 16 tools)
 
 ### Reading Files
 

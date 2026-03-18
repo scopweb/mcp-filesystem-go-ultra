@@ -4,7 +4,7 @@ Copy this section into your project's CLAUDE.md or system prompt to help Claude 
 
 ---
 
-## filesystem-ultra Tool Reference (v4.0.0 — 16 tools)
+## filesystem-ultra Tool Reference (v4.1.3 — 16 tools)
 
 ### Reading Files
 
