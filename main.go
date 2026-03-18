@@ -97,7 +97,7 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("MCP Filesystem Server Ultra-Fast v4.0.0\n")
+		fmt.Printf("MCP Filesystem Server Ultra-Fast v4.1.3\n")
 		fmt.Printf("Protocol: MCP 2025-11-25\n")
 		fmt.Printf("Build: %s\n", time.Now().Format("2006-01-02"))
 		fmt.Printf("Go: %s\n", runtime.Version())
@@ -154,7 +154,7 @@ func main() {
 	// Setup logging
 	setupLogging(config)
 
-	log.Printf("Starting MCP Filesystem Server Ultra-Fast v4.0.0")
+	log.Printf("Starting MCP Filesystem Server Ultra-Fast v4.1.3")
 	log.Printf("Config: Cache=%s, Parallel=%d, Binary=%s, VSCode=%v, Compact=%v",
 		formatSize(config.CacheSize), config.ParallelOps,
 		formatSize(config.BinaryThreshold), config.VSCodeAPIEnabled, config.CompactMode)
@@ -2126,7 +2126,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		}
 	}))
 
-	log.Printf("Registered 16 tools for v4.0.0")
+	log.Printf("Registered 16 tools for v4.1.3")
 
 	return nil
 }
@@ -2137,7 +2137,7 @@ func getHelpContent(topic string, compactMode bool) string {
 
 	switch topic {
 	case "overview":
-		sb.WriteString(`# MCP Filesystem Ultra v4.0.0 - Quick Start
+		sb.WriteString(`# MCP Filesystem Ultra v4.1.3 - Quick Start
 
 ## CRITICAL RULE
 Always use MCP tools (read_file, write_file, edit_file) instead of native file tools.
