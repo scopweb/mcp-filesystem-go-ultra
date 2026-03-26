@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra-Fast
 
-**v4.1.3** · Go · MCP 2025-11-25 · 16 tools
+**v4.1.3** · Go · MCP 2025-11-25 · 17 tools
 
 A high-performance [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go. Designed for use with Claude Desktop and Claude Code, with first-class support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -95,7 +95,35 @@ The positional arguments after the flags are the allowed base paths. Omitting pa
 
 ---
 
-## Available Tools (16)
+## Tool Discovery
+
+Claude Desktop uses **lazy tool loading** — it only discovers ~5 tools per query via semantic search, missing most of the 17 available tools.
+
+Three layers solve this:
+
+| Layer | How it works | Client support |
+|-------|-------------|----------------|
+| **`/filesystem-ultra-tools` skill** | Claude Code skill that calls `help` on conversation start | Claude Code |
+| **`help` tool** | Keyword-rich description; returns full 17-tool catalog | Any MCP client |
+| **`server.WithInstructions()`** | Sends catalog during MCP initialize handshake | Spec-compliant clients |
+
+### Using the skill
+
+The skill ships in `.claude/skills/filesystem-ultra-tools/`. In Claude Code or Claude Desktop, invoke:
+
+```
+/filesystem-ultra-tools
+```
+
+This calls the `help` tool and loads the full catalog. You can also add this to your project instructions:
+
+```
+At the start of every conversation, do tool_search for "filesystem help" and then call filesystem-ultra:help()
+```
+
+---
+
+## Available Tools (17)
 
 ### Core (5)
 
