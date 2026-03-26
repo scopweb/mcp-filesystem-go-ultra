@@ -85,7 +85,8 @@ hooks.local.json
 # Claude Code agent artifacts
 .agent/
 .agents/
-.claude/skills/
+.claude/skills/*
+!.claude/skills/filesystem-ultra-tools/
 .claude/worktrees/
 .mcp.json
 

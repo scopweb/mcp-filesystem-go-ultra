@@ -1,5 +1,18 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased]
+
+### Added
+- **`help` tool** — standalone tool that returns the full 17-tool catalog with usage rules and best practices. Keyword-rich description ensures Claude Desktop's semantic search picks it up for any filesystem query.
+- **`server.WithInstructions()`** — sends tool catalog during MCP initialize handshake (spec 2025-11-25 compliant).
+- **`/filesystem-ultra-tools` skill** — Claude Code skill (`.claude/skills/filesystem-ultra-tools/`) that calls `help` at conversation start and persists tool knowledge via `memory_user_edits`. Solves Claude Desktop's lazy tool loading problem.
+- **Tool title annotations** — all 17 tools have `WithTitleAnnotation()` for better client UI display (Read File, Edit File, Multi Edit, Backup & Restore, etc.).
+- **Cross-reference descriptions** — every tool description mentions related tools so Claude Desktop learns about tools it hasn't loaded yet.
+- **`server.WithLogging()`** — MCP logging capability enabled.
+
+### Changed
+- Tool descriptions shortened and unified with "Other tools: ..." cross-references for Claude Desktop discoverability.
+
 ## [4.1.3] - 2026-03-17
 
 ### Bug Fix: #27 — multi_edit atomic rollback (prevents file truncation)
