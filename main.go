@@ -92,12 +92,19 @@ const serverInstructions = `You have access to MCP Filesystem Ultra with 16 tool
 ## System
 - **server_info**: Help topics, stats, artifact management.
 
+## Recommended workflow
+1. **Locate** → search_files(include_content:true, context_lines:3) to find exact blocks
+2. **Read range** → read_file(start_line/end_line) for precise context
+3. **Edit** → edit_file (NOT write_file) for modifications
+4. **Verify** → analyze_operation or read_file after large edits
+
 ## Key rules
 1. To modify existing files: use edit_file, NOT write_file
 2. For multiple edits in one file: use multi_edit, NOT multiple edit_file calls
 3. Surgical edits save 98% tokens: search_files -> read_file(range) -> edit_file
 4. For bulk renames/deletes: use batch_operations, not individual calls
-5. Check backup before destructive ops: backup(action:"list")`
+5. Check backup before destructive ops: backup(action:"list")
+6. After large edits (>10 lines): verify with read_file or analyze_operation`
 
 func main() {
 	config := DefaultConfiguration()
@@ -386,7 +393,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithNumber("end_line", mcp.Description("Ending line number (inclusive) for range read")),
 		mcp.WithString("encoding", mcp.Description("Set to \"base64\" to read file as base64-encoded binary")),
 	)
-	s.AddTool(readFileTool, auditWrap(engine, "read_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	readFileHandler := auditWrap(engine, "read_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -458,7 +465,8 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		}
 
 		return mcp.NewToolResultText(content), nil
-	}))
+	})
+	s.AddTool(readFileTool, readFileHandler)
 
 	// ============================================================================
 	// 2. write_file — Write file (consolidated: mcp_write + write_file + create_file + write_base64 + streaming_write + intelligent_write)
@@ -762,6 +770,9 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		if result.RiskWarning != "" {
 			msg += result.RiskWarning
 		}
+		if result.LinesAffected > 10 {
+			msg += "\nTIP: Use read_file to verify large edits, or analyze_operation for dry-run preview"
+		}
 		return mcp.NewToolResultText(msg), nil
 	}))
 
@@ -776,7 +787,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to directory (WSL or Windows format)")),
 	)
-	s.AddTool(listDirTool, auditWrap(engine, "list_directory", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	listDirHandler := auditWrap(engine, "list_directory", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -787,7 +798,8 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
 		return mcp.NewToolResultText(listing), nil
-	}))
+	})
+	s.AddTool(listDirTool, listDirHandler)
 
 	// ============================================================================
 	// 5. search_files — Search files (consolidated: mcp_search + smart_search + advanced_text_search + count_occurrences)
@@ -810,7 +822,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithBoolean("count_only", mcp.Description("Count pattern occurrences without full search (default: false)")),
 		mcp.WithString("return_lines", mcp.Description("Return line numbers of count matches (true/false, for count_only mode)")),
 	)
-	s.AddTool(searchFilesTool, auditWrap(engine, "search_files", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	searchFilesHandler := auditWrap(engine, "search_files", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -904,7 +916,8 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultText(resp.Content[0].Text), nil
 		}
 		return mcp.NewToolResultText("No matches"), nil
-	}))
+	})
+	s.AddTool(searchFilesTool, searchFilesHandler)
 
 	// ============================================================================
 	// 6. analyze_operation — Analyze operations (Plan Mode / dry-run)
@@ -2175,6 +2188,43 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultError(fmt.Sprintf("Unknown action: %s. Valid: help, stats, artifact", action)), nil
 		}
 	}))
+
+	// ============================================================================
+	// Official MCP server compatibility aliases
+	// For clients trained on modelcontextprotocol/servers filesystem
+	// ============================================================================
+
+	s.AddTool(mcp.NewTool("read_text_file",
+		mcp.WithTitleAnnotation("Read File (alias)"),
+		mcp.WithDescription("Alias for read_file — compatibility with the official MCP filesystem server."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file")),
+		mcp.WithNumber("start_line", mcp.Description("Starting line number (1-indexed)")),
+		mcp.WithNumber("end_line", mcp.Description("Ending line number (inclusive)")),
+	), readFileHandler)
+
+	s.AddTool(mcp.NewTool("search",
+		mcp.WithTitleAnnotation("Search (alias)"),
+		mcp.WithDescription("Alias for search_files — compatibility with mcp-filesystem-server (light edition)."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Base directory")),
+		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal pattern")),
+		mcp.WithBoolean("include_content", mcp.Description("Include file content search")),
+		mcp.WithString("file_types", mcp.Description("Comma-separated extensions")),
+	), searchFilesHandler)
+
+	s.AddTool(mcp.NewTool("directory_tree",
+		mcp.WithTitleAnnotation("Directory Tree (alias)"),
+		mcp.WithDescription("Alias for list_directory — compatibility with the official MCP filesystem server."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to directory")),
+	), listDirHandler)
 
 	// ============================================================================
 	// 17. help — Standalone help for Claude Desktop tool discovery
