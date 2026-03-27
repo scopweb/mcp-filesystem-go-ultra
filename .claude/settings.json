@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git fetch:*)"
+      "Bash(git fetch:*)",
+      "Read(//c/MCPs/clone/mcp-filesystem-go-ultra/.claude/skills/mcp-spec-reviewer/**)",
+      "Read(//c/MCPs/SKILLS/mcp-spec-reviewer/**)"
     ]
   }
 }

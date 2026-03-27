@@ -49,20 +49,24 @@ Si `head` o `customCss` ya existen, actualízalos en vez de duplicarlos.
 
 ### 3. Enlace de vuelta a scopweb.com
 
-Añade un enlace al principio del array `sidebar` para que los usuarios puedan volver a scopweb.com desde cualquier subdominio de documentación:
+Añade un enlace a scopweb.com en la zona de **social icons** del header de Starlight, para que los usuarios puedan volver al sitio principal desde cualquier subdominio de documentación:
 
 ```js
-sidebar: [
-  { label: '← scopweb.com', link: 'https://scopweb.com' },
-  {
-    label: 'Getting Started',
-    items: [/* ... */],
-  },
-  // ... resto del sidebar
-]
+starlight({
+  // ... resto de la config
+  social: [
+    {
+      icon: 'external',
+      label: 'scopweb.com',
+      href: 'https://scopweb.com',
+    },
+  ],
+})
 ```
 
-Esto debe ser **siempre el primer elemento** del sidebar. El texto `← scopweb.com` usa la flecha Unicode `\u2190` como indicador visual de "volver".
+Si `social` ya existe, **añade** la entrada de scopweb.com al array existente (no la dupliques ni reemplaces los demás enlaces sociales como GitHub, Discord, etc.).
+
+El icono `external` muestra un enlace genérico externo. El enlace aparecerá en la barra superior junto a los demás iconos sociales del sitio.
 
 ### 4. Escribir el CSS del tema
 
