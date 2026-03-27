@@ -126,8 +126,10 @@ func TestCompareFiles_AccessDenied(t *testing.T) {
 	engine, _ := setupCompareEngine(t)
 	ctx := context.Background()
 
-	// Paths outside allowed directory
-	_, err := engine.CompareFiles(ctx, "/etc/passwd", "/etc/shadow")
+	// Paths outside allowed directory — use Windows-native paths to avoid WSL resolution
+	outsideA := filepath.Join(os.TempDir(), "nonexistent_compare_a.txt")
+	outsideB := filepath.Join(os.TempDir(), "nonexistent_compare_b.txt")
+	_, err := engine.CompareFiles(ctx, outsideA, outsideB)
 	if err == nil {
 		t.Fatal("Expected access denied error, got nil")
 	}
