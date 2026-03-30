@@ -580,7 +580,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithBoolean("dry_run", mcp.Description("Validate without applying changes (default: false, for regex mode)")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false, for occurrence mode)")),
 	)
-	s.AddTool(editFileTool, auditWrap(engine, "edit_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	editFileHandler := auditWrap(engine, "edit_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -774,7 +774,8 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			msg += "\nTIP: Use read_file to verify large edits, or analyze_operation for dry-run preview"
 		}
 		return mcp.NewToolResultText(msg), nil
-	}))
+	})
+	s.AddTool(editFileTool, editFileHandler)
 
 	// ============================================================================
 	// 4. list_directory — List directory (consolidated: mcp_list + list_directory)
@@ -2196,18 +2197,31 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	s.AddTool(mcp.NewTool("read_text_file",
 		mcp.WithTitleAnnotation("Read File (alias)"),
-		mcp.WithDescription("Alias for read_file — compatibility with the official MCP filesystem server."),
+		mcp.WithDescription("Read file contents (alias for read_file). To MODIFY this file use edit_file or the edit alias. Other tools: search_files, multi_edit, write_file, batch_operations."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file")),
 		mcp.WithNumber("start_line", mcp.Description("Starting line number (1-indexed)")),
 		mcp.WithNumber("end_line", mcp.Description("Ending line number (inclusive)")),
-	), readFileHandler)
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		result, err := readFileHandler(ctx, request)
+		if err != nil || result == nil || result.IsError {
+			return result, err
+		}
+		// Append tool discovery hint to help AI find edit_file
+		if len(result.Content) > 0 {
+			if textContent, ok := result.Content[0].(mcp.TextContent); ok {
+				textContent.Text += "\n\n---\nTo modify this file: edit(path, old_text, new_text) or edit_file(path, old_text, new_text)"
+				result.Content[0] = textContent
+			}
+		}
+		return result, nil
+	})
 
 	s.AddTool(mcp.NewTool("search",
 		mcp.WithTitleAnnotation("Search (alias)"),
-		mcp.WithDescription("Alias for search_files — compatibility with mcp-filesystem-server (light edition)."),
+		mcp.WithDescription("Search files by name or content with regex support (alias for search_files). To edit found files use edit_file or the edit alias. Other tools: read_file, multi_edit, batch_operations."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -2216,6 +2230,22 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithBoolean("include_content", mcp.Description("Include file content search")),
 		mcp.WithString("file_types", mcp.Description("Comma-separated extensions")),
 	), searchFilesHandler)
+
+	s.AddTool(mcp.NewTool("edit",
+		mcp.WithTitleAnnotation("Edit File (alias)"),
+		mcp.WithDescription("Edit and modify existing files — search-and-replace text in files with auto-backup. Supports exact match, regex, and occurrence-based replacement. Use this instead of write_file to change existing files."),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file")),
+		mcp.WithString("old_text", mcp.Description("Text to be replaced")),
+		mcp.WithString("new_text", mcp.Description("New text to replace with")),
+		mcp.WithString("old_str", mcp.Description("Alias for old_text")),
+		mcp.WithString("new_str", mcp.Description("Alias for new_text")),
+		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\"")),
+		mcp.WithNumber("occurrence", mcp.Description("Which occurrence to replace")),
+		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk")),
+	), editFileHandler)
 
 	s.AddTool(mcp.NewTool("directory_tree",
 		mcp.WithTitleAnnotation("Directory Tree (alias)"),
@@ -2231,7 +2261,10 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	// ============================================================================
 	helpTool := mcp.NewTool("help",
 		mcp.WithTitleAnnotation("Server Help"),
-		mcp.WithDescription("IMPORTANT: Call this tool FIRST in every conversation. Returns the complete catalog of 16 filesystem tools (read, write, edit, multi_edit, list, search, copy, move, delete, compare, batch, backup, analyze, wsl, plan, info) with usage rules, best practices and parameter details. Without calling help first you will miss most available tools."),
+		mcp.WithDescription("IMPORTANT: Call this tool FIRST in every conversation to discover ALL 16 tools. "+
+			"Covers: edit_file (modify/change/replace text), write_file (create), read_file, multi_edit, search_files, "+
+			"list_directory, copy_file, move_file, delete_file, create_directory, get_file_info, batch_operations, "+
+			"backup (restore/undo), analyze_operation, wsl, server_info. Without calling help you will miss most tools."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),

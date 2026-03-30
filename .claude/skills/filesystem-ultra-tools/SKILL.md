@@ -13,7 +13,7 @@ Check if `memory_user_edits` is available. If it is:
 2. If **NOT present**, add it:
 
 ```
-memory_user_edits add "FILESYSTEM-ULTRA MCP: You have 16 tools + 3 official aliases + help. At the START of every conversation, do tool_search for 'filesystem help' and then call filesystem-ultra:help() to load the full tool catalog. Key rules: use edit_file to modify existing files (NOT write_file), use multi_edit for multiple edits in one file, use search_files before reading large files, use batch_operations for bulk ops. Official MCP aliases: read_text_file→read_file, search→search_files, directory_tree→list_directory."
+memory_user_edits add "FILESYSTEM-ULTRA MCP: You have 16 tools + 3 official aliases + help. At the START of every conversation, call filesystem-ultra:help() directly to load the full tool catalog. Key rules: use edit_file to modify existing files (NOT write_file), use multi_edit for multiple edits in one file, use search_files before reading large files, use batch_operations for bulk ops. Official MCP aliases: read_text_file→read_file, search→search_files, directory_tree→list_directory."
 ```
 
 3. If already present, skip — no duplicates needed
@@ -22,12 +22,7 @@ This ensures **every future conversation** in this project automatically knows a
 
 ## STEP 2: Load tools now
 
-1. Search for the help tool:
-```
-tool_search("filesystem help")
-```
-
-2. Then call it immediately:
+Call directly — no tool_search needed:
 ```
 filesystem-ultra:help()
 ```
@@ -36,7 +31,7 @@ No arguments needed. This loads the full catalog of **16 tools + 3 aliases + hel
 
 ## Why
 
-MCP clients like Claude Desktop use **lazy tool loading** — they only discover 4-5 tools per semantic search. A single `tool_search("filesystem help")` + `help()` call loads all 17 tools at once instead of discovering them piecemeal.
+MCP clients like Claude Desktop use **lazy tool loading** — they only discover 4-5 tools per semantic search. `filesystem-ultra:help()` is always discoverable and loads all tools at once. Skipping `tool_search` saves ~200 tokens per conversation.
 
 ## After calling help
 
@@ -60,4 +55,5 @@ Use the right tool for each task:
 
 - `read_text_file` → `read_file`
 - `search` → `search_files`
+- `edit` → `edit_file`
 - `directory_tree` → `list_directory`
