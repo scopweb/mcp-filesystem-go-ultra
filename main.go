@@ -482,7 +482,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithString("content_base64", mcp.Description("Base64-encoded binary content to write")),
 		mcp.WithString("encoding", mcp.Description("Set to \"base64\" when content is base64-encoded")),
 	)
-	s.AddTool(writeFileTool, auditWrap(engine, "write_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	writeFileHandler := auditWrap(engine, "write_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -548,7 +548,8 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultText(fmt.Sprintf("OK: %s written", formatSize(int64(len(content))))), nil
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), path)), nil
-	}))
+	})
+	s.AddTool(writeFileTool, writeFileHandler)
 
 	// ============================================================================
 	// 3. edit_file — Edit file (consolidated: mcp_edit + edit_file + search_and_replace + replace_nth_occurrence + regex_transform_file + smart_edit + intelligent_edit + recovery_edit)
@@ -2204,20 +2205,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file")),
 		mcp.WithNumber("start_line", mcp.Description("Starting line number (1-indexed)")),
 		mcp.WithNumber("end_line", mcp.Description("Ending line number (inclusive)")),
-	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		result, err := readFileHandler(ctx, request)
-		if err != nil || result == nil || result.IsError {
-			return result, err
-		}
-		// Append tool discovery hint to help AI find edit_file
-		if len(result.Content) > 0 {
-			if textContent, ok := result.Content[0].(mcp.TextContent); ok {
-				textContent.Text += "\n\n---\nTo modify this file: edit(path, old_text, new_text) or edit_file(path, old_text, new_text)"
-				result.Content[0] = textContent
-			}
-		}
-		return result, nil
-	})
+	), readFileHandler)
 
 	s.AddTool(mcp.NewTool("search",
 		mcp.WithTitleAnnotation("Search (alias)"),
@@ -2247,6 +2235,30 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk")),
 	), editFileHandler)
 
+	s.AddTool(mcp.NewTool("write",
+		mcp.WithTitleAnnotation("Write File (alias)"),
+		mcp.WithDescription("Write content to a file — create new files or overwrite existing ones. Supports text and base64 binary. For modifying existing files prefer edit_file or the edit alias instead."),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path where to write")),
+		mcp.WithString("content", mcp.Description("Text content to write")),
+		mcp.WithString("content_base64", mcp.Description("Base64-encoded binary content")),
+		mcp.WithString("encoding", mcp.Description("Set to \"base64\" for base64 content")),
+	), writeFileHandler)
+
+	s.AddTool(mcp.NewTool("create_file",
+		mcp.WithTitleAnnotation("Create File (alias)"),
+		mcp.WithDescription("Create a new file with content (alias for write_file). For modifying existing files use edit_file or the edit alias instead."),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path for the new file")),
+		mcp.WithString("content", mcp.Description("Text content to write")),
+		mcp.WithString("content_base64", mcp.Description("Base64-encoded binary content")),
+		mcp.WithString("encoding", mcp.Description("Set to \"base64\" for base64 content")),
+	), writeFileHandler)
+
 	s.AddTool(mcp.NewTool("directory_tree",
 		mcp.WithTitleAnnotation("Directory Tree (alias)"),
 		mcp.WithDescription("Alias for list_directory — compatibility with the official MCP filesystem server."),
@@ -2273,7 +2285,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		return mcp.NewToolResultText(serverInstructions), nil
 	})
 
-	log.Printf("Registered 17 tools for v4.1.3")
+	log.Printf("Registered 23 tools for v4.1.3")
 
 	return nil
 }

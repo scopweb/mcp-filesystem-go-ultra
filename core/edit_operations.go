@@ -1490,10 +1490,20 @@ func (e *UltraFastEngine) validateEditContext(currentContent, oldText string) (b
 				// Match found with literal escape conversion — let performIntelligentEdit handle it
 			} else {
 				lineCount := strings.Count(normalizedOldText, "\n") + 1
+				contentLines := strings.Split(normalizedContent, "\n")
+				if len(contentLines) <= 20 {
+					// Small file: include actual content so AI can retry without re-reading
+					return false, fmt.Sprintf(
+						"old_text not found in file (%d line(s)). "+
+							"The file has %d lines. Actual content:\n---\n%s\n---\n"+
+							"Copy the EXACT text from above as old_text — do NOT retype from memory",
+						lineCount, len(contentLines), normalizedContent,
+					)
+				}
 				return false, fmt.Sprintf(
 					"old_text not found in file (%d line(s)). "+
 						"ALWAYS read the file with read_file BEFORE editing. "+
-						"Copy the exact text from the read result as old_text",
+						"Copy the exact text from the read result as old_text — file may have been modified",
 					lineCount,
 				)
 			}
