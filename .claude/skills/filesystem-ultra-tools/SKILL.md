@@ -1,6 +1,6 @@
 ---
 name: filesystem-ultra-tools
-description: Load and discover all 16 tools + 3 aliases + help from the filesystem-ultra MCP server. Call this at the start of any conversation. Essential because MCP clients like Claude Desktop only discover 4-5 tools per semantic search — this loads the full catalog in one call.
+description: Load and discover all 16 tools + 6 aliases + help from the filesystem-ultra MCP server. Call this at the start of any conversation. Essential because MCP clients like Claude Desktop only discover 4-5 tools per semantic search — this loads the full catalog in one call.
 ---
 
 # Filesystem Ultra - Tool Discovery
@@ -13,7 +13,7 @@ Check if `memory_user_edits` is available. If it is:
 2. If **NOT present**, add it:
 
 ```
-memory_user_edits add "FILESYSTEM-ULTRA MCP: You have 16 tools + 3 official aliases + help. At the START of every conversation, call filesystem-ultra:help() directly to load the full tool catalog. Key rules: use edit_file to modify existing files (NOT write_file), use multi_edit for multiple edits in one file, use search_files before reading large files, use batch_operations for bulk ops. Official MCP aliases: read_text_file→read_file, search→search_files, directory_tree→list_directory."
+memory_user_edits add "FILESYSTEM-ULTRA MCP: 16 tools + 6 aliases. Call filesystem-ultra:help() at conversation start. Rules: edit_file for modifications (NOT write_file), ALWAYS read_file before edit_file (copy exact text as old_text), RE-READ after each edit before next edit on same file, multi_edit for multiple edits on same file, search_files before reading. Aliases: read_text_file, search, edit, write, create_file, directory_tree."
 ```
 
 3. If already present, skip — no duplicates needed
@@ -27,7 +27,7 @@ Call directly — no tool_search needed:
 filesystem-ultra:help()
 ```
 
-No arguments needed. This loads the full catalog of **16 tools + 3 aliases + help** in one call.
+No arguments needed. This loads the full catalog of **16 tools + 6 aliases + help** in one call.
 
 ## Why
 
@@ -45,15 +45,34 @@ Use the right tool for each task:
 - **Dry-run analysis** → `analyze_operation`
 - **WSL sync** → `wsl`
 
+## Critical rules for edit_file
+
+1. **ALWAYS read before editing** — `old_text` must be copied exactly from `read_file` output, never typed from memory
+2. **Re-read after each edit** — After every `edit_file` call, the file content changes. You MUST `read_file` again before the next `edit_file` on the same file. Stale `old_text` from a previous read will fail with "context validation failed"
+3. **Use `multi_edit` for multiple edits** — If you need 2+ edits on the same file, prefer `multi_edit` with `edits_json` (array of `{old_text, new_text}`) instead of sequential `edit_file` calls. This avoids the re-read problem entirely
+4. **Whitespace matters** — `old_text` is a literal match. Tabs vs spaces, trailing whitespace, and indentation must match exactly
+5. **If edit fails, don't retry blindly** — Re-read the file first, then retry with the exact text from the fresh read
+
+## Common errors and fixes
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `context validation failed: old_text not found` | File was modified since last read, or `old_text` doesn't match exactly | Re-read with `read_file`, copy exact text |
+| `no match found` | Text doesn't exist (typo, wrong whitespace) | Use `search_files` to verify, then `read_file` |
+| `multiple matches found` | Same text appears multiple times | Add more surrounding context to `old_text`, or use `occurrence:N` |
+
 ## Recommended workflow
 1. **Locate** → `search_files` with `include_content:true`, `context_lines:3`
 2. **Read range** → `read_file` with `start_line/end_line`
 3. **Edit** → `edit_file` (NOT `write_file`)
-4. **Verify** → `analyze_operation` or `read_file` after large edits
+4. **Re-read if editing again** → `read_file` before each subsequent `edit_file` on the same file
+5. **Verify** → `analyze_operation` or `read_file` after large edits
 
 ## Official MCP compatibility aliases
 
 - `read_text_file` → `read_file`
 - `search` → `search_files`
 - `edit` → `edit_file`
+- `write` → `write_file`
+- `create_file` → `write_file`
 - `directory_tree` → `list_directory`
