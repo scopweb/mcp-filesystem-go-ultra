@@ -76,11 +76,12 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 	}
 
 	// Validate context: Check if surrounding content suggests file has changed
-	// This prevents overwriting recent modifications
-	contextValid, contextWarning := e.validateEditContext(string(content), oldText)
-	if !contextValid {
-		return nil, fmt.Errorf("context validation failed: %s - file may have been modified. Please re-read the file with search_files + read_file", contextWarning)
-	}
+	// This prevents overwriting recent modifications.
+	// Bug #28: validateEditContext is a soft gate — if it can't confirm the match,
+	// we still proceed to performIntelligentEdit which has 8 fallback strategies
+	// (indentation normalization, flexible regex, etc.) that handle edge cases
+	// like HTML content, mixed whitespace, and invisible Unicode characters.
+	_, contextWarning := e.validateEditContext(string(content), oldText)
 
 	// Calculate change impact for risk assessment
 	impact := CalculateChangeImpact(string(content), oldText, newText, e.riskThresholds)
@@ -131,6 +132,9 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 	// Perform intelligent edit
 	result, err := e.performIntelligentEdit(string(content), oldText, newText)
 	if err != nil {
+		if contextWarning != "" {
+			return nil, fmt.Errorf("edit failed: %w (context hint: %s)", err, contextWarning)
+		}
 		return nil, fmt.Errorf("edit failed: %w", err)
 	}
 
