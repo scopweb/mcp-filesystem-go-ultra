@@ -63,7 +63,7 @@ func TestBug22_MultiEditOldStrAlias(t *testing.T) {
 		t.Fatal("NewText is empty — new_str alias not recognized")
 	}
 
-	result, err := engine.MultiEdit(ctx, filePath, edits, false)
+	result, err := engine.MultiEdit(ctx, filePath, edits, false, false)
 	if err != nil {
 		t.Fatalf("MultiEdit failed with old_str alias: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestBug22_MultiEditMixedAliases(t *testing.T) {
 		t.Fatalf("Mixed alias parsing failed: edit[0].OldText=%q, edit[1].OldText=%q", edits[0].OldText, edits[1].OldText)
 	}
 
-	result, err := engine.MultiEdit(ctx, filePath, edits, false)
+	result, err := engine.MultiEdit(ctx, filePath, edits, false, false)
 	if err != nil {
 		t.Fatalf("MultiEdit with mixed aliases failed: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestBug22_MultiEditLiteralEscapesContextValidation(t *testing.T) {
 		{OldText: "line1\\nline2", NewText: "lineA\\nlineB"},
 	}
 
-	result, err := engine.MultiEdit(ctx, filePath, edits, false)
+	result, err := engine.MultiEdit(ctx, filePath, edits, false, false)
 	if err != nil {
 		t.Fatalf("MultiEdit failed with literal escapes: %v", err)
 	}
@@ -177,7 +177,7 @@ func main() {
 		t.Fatalf("Failed to parse standard edits: %v", err)
 	}
 
-	result, err := engine.MultiEdit(ctx, filePath, edits, false)
+	result, err := engine.MultiEdit(ctx, filePath, edits, false, false)
 	if err != nil {
 		t.Fatalf("MultiEdit with standard old_text failed: %v", err)
 	}

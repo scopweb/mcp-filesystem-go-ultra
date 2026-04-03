@@ -31,7 +31,7 @@ func TestBug17_OverlappingEditsNotMisreported(t *testing.T) {
 		},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false)
 	if err != nil {
 		t.Fatalf("MultiEdit should succeed, got error: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestBug17_AllEditsApplied(t *testing.T) {
 		{OldText: "line3_target", NewText: "modified3"},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false)
 	if err != nil {
 		t.Fatalf("MultiEdit should succeed: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestBug17_GenuineFailureStillReported(t *testing.T) {
 		{OldText: "NONEXISTENT_TEXT", NewText: "should_fail"},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false)
 
 	// Bug #27: multi_edit is now atomic — should return error when any edit fails
 	if err == nil {
@@ -178,7 +178,7 @@ func TestBug17_RiskAssessmentCriticalProceeds(t *testing.T) {
 		{OldText: "AB", NewText: "CD"},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false)
 	if err != nil {
 		t.Fatalf("CRITICAL risk MultiEdit should proceed (Bug #22), got error: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestBug17_RiskAssessmentCriticalForceProceeds(t *testing.T) {
 		{OldText: "AB", NewText: "CD"},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, true)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, true, false)
 	if err != nil {
 		t.Fatalf("CRITICAL risk with force=true should succeed: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestBug17_EditDetailsPopulated(t *testing.T) {
 		{OldText: "ccc", NewText: "zzz"},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false)
 
 	// Bug #27: atomic rollback — any failed edit means file is NOT modified
 	if err == nil {
@@ -285,7 +285,7 @@ func TestBug17_BackwardCompatibility(t *testing.T) {
 		{OldText: "hello", NewText: "goodbye"},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false)
 	if err != nil {
 		t.Fatalf("Should succeed: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestBug17_AllAlreadyPresent(t *testing.T) {
 		{OldText: "original3", NewText: "modified3"},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false)
 	if err != nil {
 		t.Fatalf("All-already-present should succeed: %v", err)
 	}
@@ -370,7 +370,7 @@ func TestBug17_MixedOverlapAndIndependent(t *testing.T) {
 		{OldText: "DDD", NewText: "ZZZ"},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false)
 	if err != nil {
 		t.Fatalf("Should succeed: %v", err)
 	}

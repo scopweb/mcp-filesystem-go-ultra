@@ -682,7 +682,7 @@ func (e *UltraFastEngine) isTextFile(path string) bool {
 }
 
 // CountOccurrences counts occurrences of a pattern in a file and optionally returns line numbers
-func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern string, returnLines bool) (string, error) {
+func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern string, returnLines bool, caseSensitive bool, wholeWord bool) (string, error) {
 	if err := e.acquireOperation(ctx, "count"); err != nil {
 		return "", err
 	}
@@ -707,11 +707,28 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 	}
 
 	// Try to compile as regex first, fallback to literal if fails (uses engine cache)
+	// Bug #32: apply case_sensitive and whole_word flags to the regex pattern,
+	// matching the same logic used in performAdvancedTextSearch.
+	searchPattern := pattern
+	if !caseSensitive {
+		searchPattern = "(?i)" + searchPattern
+	}
+	if wholeWord {
+		searchPattern = `\b` + searchPattern + `\b`
+	}
+
 	var regexPattern *regexp.Regexp
-	regexPattern, err = e.CompileRegex(pattern)
+	regexPattern, err = e.CompileRegex(searchPattern)
 	if err != nil {
-		// Use literal pattern
-		regexPattern, _ = e.CompileRegex(regexp.QuoteMeta(pattern))
+		// Use literal pattern with flags
+		litPattern := regexp.QuoteMeta(pattern)
+		if !caseSensitive {
+			litPattern = "(?i)" + litPattern
+		}
+		if wholeWord {
+			litPattern = `\b` + litPattern + `\b`
+		}
+		regexPattern, _ = e.CompileRegex(litPattern)
 	}
 
 	// Directory mode: count across all text files in directory

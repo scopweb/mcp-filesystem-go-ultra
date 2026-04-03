@@ -304,7 +304,7 @@ func (e *UltraFastEngine) SmartEditFile(ctx context.Context, path, oldText, newT
 	}
 
 	// Use regular edit for smaller files (EditFile acquires its own semaphore)
-	return e.EditFile(ctx, path, oldText, newText, force)
+	return e.EditFile(ctx, path, oldText, newText, force, false)
 }
 
 // streamingEditLargeFile handles editing of very large files

@@ -61,7 +61,7 @@ func TestBug28_EditFileWithHTMLContent(t *testing.T) {
 				t.Fatalf("Failed to write test file: %v", err)
 			}
 
-			result, err := engine.EditFile(context.Background(), testFile, tt.oldText, tt.newText, false)
+			result, err := engine.EditFile(context.Background(), testFile, tt.oldText, tt.newText, false, false)
 			if err != nil {
 				t.Fatalf("EditFile failed with HTML content: %v", err)
 			}
@@ -104,7 +104,7 @@ func TestBug28_ValidateContextNoLongerBlocks(t *testing.T) {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
-	result, err := engine.EditFile(context.Background(), testFile, oldText, newText, false)
+	result, err := engine.EditFile(context.Background(), testFile, oldText, newText, false, false)
 	if err != nil {
 		t.Fatalf("EditFile should succeed via fallback strategies, got error: %v", err)
 	}
