@@ -60,51 +60,21 @@ func DefaultConfiguration() *Configuration {
 
 // serverInstructions is sent to the client during the MCP initialize handshake
 // and returned by the help tool. Ensures the AI knows ALL available tools.
-const serverInstructions = `You have access to MCP Filesystem Ultra with 16 tools. Use the RIGHT tool for each task:
+const serverInstructions = `MCP Filesystem Ultra — 16 tools + 6 aliases.
 
-## Editing files (IMPORTANT)
-- **edit_file**: Smart text replacement with auto-backup. Modes: default (replace), search_replace, regex. ALWAYS prefer this over write_file for existing files.
-- **multi_edit**: Multiple edits to one file atomically. MUCH faster than calling edit_file multiple times.
-- **write_file**: Create new files or full overwrite only. Supports base64 for binary.
+RULES:
+1. edit_file to modify files (NOT write_file)
+2. multi_edit for multiple edits in one file
+3. search_files → read_file(range) → edit_file = 98% token savings
+4. batch_operations for bulk ops
+5. backup(action:"undo_last") to undo
 
-## Reading files
-- **read_file**: Read file contents. Use start_line/end_line for ranges. Supports base64, head/tail modes.
+TOOLS: read_file, write_file, edit_file, multi_edit, list_directory, search_files, analyze_operation, create_directory, delete_file, move_file, copy_file, get_file_info, batch_operations, backup, wsl, server_info
+ALIASES: read_text_file→read_file, search→search_files, edit→edit_file, write→write_file, create_file→write_file, directory_tree→list_directory
 
-## File operations
-- **copy_file**: Copy files or directories.
-- **move_file**: Move or rename files and directories.
-- **delete_file**: Soft-delete (trash) by default. Use permanent:true for hard delete.
-- **create_directory**: Create directories with parents.
+SUPER-TOOL: Use fs(action, ...) when individual tools are not visible. All 16 actions available via single tool.
 
-## Directory & search
-- **list_directory**: Cached directory listing.
-- **search_files**: Search by name or content. Supports regex, count_only mode.
-
-## Analysis & planning
-- **get_file_info**: File/directory metadata.
-- **analyze_operation**: Dry-run analysis before executing operations.
-
-## Bulk & advanced
-- **batch_operations**: Batch ops, pipelines, and batch rename in one call.
-- **backup**: List, info, compare, cleanup, restore, undo_last.
-- **wsl**: WSL/Windows file sync and path conversion.
-
-## System
-- **server_info**: Help topics, stats, artifact management.
-
-## Recommended workflow
-1. **Locate** → search_files(include_content:true, context_lines:3) to find exact blocks
-2. **Read range** → read_file(start_line/end_line) for precise context
-3. **Edit** → edit_file (NOT write_file) for modifications
-4. **Verify** → analyze_operation or read_file after large edits
-
-## Key rules
-1. To modify existing files: use edit_file, NOT write_file
-2. For multiple edits in one file: use multi_edit, NOT multiple edit_file calls
-3. Surgical edits save 98% tokens: search_files -> read_file(range) -> edit_file
-4. For bulk renames/deletes: use batch_operations, not individual calls
-5. Check backup before destructive ops: backup(action:"list")
-6. After large edits (>10 lines): verify with read_file or analyze_operation`
+WORKFLOW: search_files(pattern) → read_file(start_line/end_line) → edit_file(old_text, new_text) → verify`
 
 func main() {
 	config := DefaultConfiguration()
@@ -145,7 +115,7 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("MCP Filesystem Server Ultra-Fast v4.1.3\n")
+		fmt.Printf("MCP Filesystem Server Ultra-Fast v4.2.0\n")
 		fmt.Printf("Protocol: MCP 2025-11-25\n")
 		fmt.Printf("Build: %s\n", time.Now().Format("2006-01-02"))
 		fmt.Printf("Go: %s\n", runtime.Version())
@@ -202,7 +172,7 @@ func main() {
 	// Setup logging
 	setupLogging(config)
 
-	log.Printf("Starting MCP Filesystem Server Ultra-Fast v4.1.3")
+	log.Printf("Starting MCP Filesystem Server Ultra-Fast v4.2.0")
 	log.Printf("Config: Cache=%s, Parallel=%d, Binary=%s, VSCode=%v, Compact=%v",
 		formatSize(config.CacheSize), config.ParallelOps,
 		formatSize(config.BinaryThreshold), config.VSCodeAPIEnabled, config.CompactMode)
@@ -260,7 +230,7 @@ func main() {
 	// Create MCP server using mark3labs SDK
 	s := server.NewMCPServer(
 		"filesystem-ultra",
-		"4.1.3",
+		"4.2.0",
 		server.WithToolCapabilities(true), // listChanged=true enables tools/list_changed notifications
 		server.WithLogging(),
 		server.WithInstructions(serverInstructions),
@@ -377,12 +347,24 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	// Create modular processor for regex transforms (used by edit_file regex mode)
 	regexTransform := core.NewRegexTransformer(engine)
 
+	// Dispatch map: filled as tools are registered, used by the "fs" super-tool
+	toolHandlers := make(map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error))
+
+	// addToolWithDispatch registers a tool on the server AND adds its handler to the dispatch map
+	addToolWithDispatch := func(tool mcp.Tool, handler func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) {
+		s.AddTool(tool, handler)
+		toolHandlers[tool.Name] = handler
+	}
+	_ = addToolWithDispatch // used below
+
 	// ============================================================================
 	// 1. read_file — Read file (consolidated: mcp_read + read_file + read_file_range + read_base64 + chunked_read + intelligent_read)
 	// ============================================================================
 	readFileTool := mcp.NewTool("read_file",
 		mcp.WithTitleAnnotation("Read File"),
-		mcp.WithDescription("Read file contents. Supports line ranges (start_line/end_line), base64 encoding for binary files (encoding:\"base64\"), and mode control (head/tail). To MODIFY files use edit_file (not write_file). Other tools: search_files, multi_edit, batch_operations, backup, analyze_operation."),
+		mcp.WithDescription("Read file contents. Consolidates: direct read, chunked read, intelligent read, range read, base64 read. "+
+			"Auto-selects strategy by file size. Params: start_line/end_line for ranges, encoding:\"base64\" for binaries, "+
+			"mode:head/tail for partial reads, max_lines to limit output. Use edit_file to modify."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -466,14 +448,16 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 		return mcp.NewToolResultText(content), nil
 	})
-	s.AddTool(readFileTool, readFileHandler)
+	addToolWithDispatch(readFileTool, readFileHandler)
 
 	// ============================================================================
 	// 2. write_file — Write file (consolidated: mcp_write + write_file + create_file + write_base64 + streaming_write + intelligent_write)
 	// ============================================================================
 	writeFileTool := mcp.NewTool("write_file",
 		mcp.WithTitleAnnotation("Write File"),
-		mcp.WithDescription("Create NEW files or full overwrite. For modifying existing files use edit_file instead. Supports base64 binary (encoding:\"base64\"). Other tools: edit_file, multi_edit, copy_file, move_file, batch_operations, backup."),
+		mcp.WithDescription("Create new files or full overwrite. Consolidates: direct write, streaming write, intelligent write, base64 write. "+
+			"Auto-selects direct vs streaming based on file size. Params: content for text, encoding:\"base64\" + content_base64 for binaries. "+
+			"For modifying existing files ALWAYS use edit_file instead."),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -549,7 +533,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), path)), nil
 	})
-	s.AddTool(writeFileTool, writeFileHandler)
+	addToolWithDispatch(writeFileTool, writeFileHandler)
 
 	// ============================================================================
 	// 3. edit_file — Edit file (consolidated: mcp_edit + edit_file + search_and_replace + replace_nth_occurrence + regex_transform_file + smart_edit + intelligent_edit + recovery_edit)
@@ -559,10 +543,11 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("Modify existing files. Modes: default (smart replace), search_replace, regex. Auto-backup with undo. "+
-			"ALWAYS prefer this over write_file for existing files. "+
-			"UNDO: backup(action:\"restore\", backup_id:\"...\") or backup(action:\"undo_last\"). "+
-			"Other tools: multi_edit (multiple edits atomically), read_file, search_files, batch_operations, backup, analyze_operation."),
+		mcp.WithDescription("Modify existing files with auto-backup and undo. Consolidates: edit, smart edit, intelligent edit, "+
+			"search-and-replace, regex transform, nth-occurrence replace, recovery edit. "+
+			"Modes: replace (default: old_text→new_text), search_replace (pattern→replacement across dirs), "+
+			"regex (patterns_json with capture groups). Use occurrence:1/-1 for first/last match, "+
+			"whole_word:true for word boundaries. ALWAYS prefer over write_file. UNDO: backup(action:\"undo_last\")."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file (WSL or Windows format)")),
 		mcp.WithString("old_text", mcp.Description("Text to be replaced (default mode)")),
 		mcp.WithString("new_text", mcp.Description("New text to replace with (default mode)")),
@@ -776,14 +761,14 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		}
 		return mcp.NewToolResultText(msg), nil
 	})
-	s.AddTool(editFileTool, editFileHandler)
+	addToolWithDispatch(editFileTool, editFileHandler)
 
 	// ============================================================================
 	// 4. list_directory — List directory (consolidated: mcp_list + list_directory)
 	// ============================================================================
 	listDirTool := mcp.NewTool("list_directory",
 		mcp.WithTitleAnnotation("List Directory"),
-		mcp.WithDescription("List directory contents (cached). Other tools: search_files (find by name/content), read_file, edit_file, create_directory, analyze_operation, batch_operations."),
+		mcp.WithDescription("List directory contents with file sizes and types. Cached for performance. Shows files, subdirectories, and sizes."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -801,7 +786,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		}
 		return mcp.NewToolResultText(listing), nil
 	})
-	s.AddTool(listDirTool, listDirHandler)
+	addToolWithDispatch(listDirTool, listDirHandler)
 
 	// ============================================================================
 	// 5. search_files — Search files (consolidated: mcp_search + smart_search + advanced_text_search + count_occurrences)
@@ -811,8 +796,11 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDescription("Search files by name/content. Supports regex, count_only, include_content. "+
-			"Other tools: edit_file (modify files), read_file (line ranges), multi_edit, batch_operations, analyze_operation, backup."),
+		mcp.WithDescription("Search files by name or content. Consolidates: smart search, advanced text search, count occurrences. "+
+			"Auto-routes: basic (path+pattern) → fast filename search; include_content:true → content search; "+
+			"with case_sensitive/whole_word/include_context → advanced text search. "+
+			"Use count_only:true + return_lines:\"true\" to get line numbers without content. "+
+			"Filter by file_types:\".go,.ts\" to narrow scope."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Base directory or file (WSL or Windows format)")),
 		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal pattern")),
 		mcp.WithBoolean("include_content", mcp.Description("Include file content search (default: false)")),
@@ -919,7 +907,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		}
 		return mcp.NewToolResultText("No matches"), nil
 	})
-	s.AddTool(searchFilesTool, searchFilesHandler)
+	addToolWithDispatch(searchFilesTool, searchFilesHandler)
 
 	// ============================================================================
 	// 6. analyze_operation — Analyze operations (Plan Mode / dry-run)
@@ -929,15 +917,16 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDescription("Dry-run analysis before executing. Operations: file, optimize, write, edit, delete. "+
-			"Other tools: edit_file, multi_edit, search_files, batch_operations, backup, read_file."),
+		mcp.WithDescription("Dry-run analysis and planning before executing operations. Consolidates: file analysis, optimization suggestions, "+
+			"write/edit/delete previews. Operations: file (strategy recommendation), optimize (Claude Desktop tips), "+
+			"write (preview write impact), edit (preview edit changes), delete (preview deletion safety)."),
 		mcp.WithString("operation", mcp.Required(), mcp.Description("Operation to analyze: file, optimize, write, edit, delete")),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file")),
 		mcp.WithString("content", mcp.Description("Content for write analysis")),
 		mcp.WithString("old_text", mcp.Description("Text to be replaced (for edit analysis)")),
 		mcp.WithString("new_text", mcp.Description("Replacement text (for edit analysis)")),
 	)
-	s.AddTool(analyzeOpTool, auditWrap(engine, "analyze_operation", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addToolWithDispatch(analyzeOpTool, auditWrap(engine, "analyze_operation", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		operation, err := request.RequireString("operation")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid operation: %v", err)), nil
@@ -1018,10 +1007,10 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDescription("Create directories (recursive). Other tools: list_directory, write_file (create files), delete_file, batch_operations, search_files."),
+		mcp.WithDescription("Create directories recursively (like mkdir -p). Creates all intermediate directories. Idempotent — safe to call on existing dirs."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the directory to create")),
 	)
-	s.AddTool(createDirTool, auditWrap(engine, "create_directory", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addToolWithDispatch(createDirTool, auditWrap(engine, "create_directory", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -1046,11 +1035,12 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("Delete files or directories. Default: soft-delete (trash). Use permanent:true for hard delete. Other tools: copy_file, move_file, edit_file, batch_operations (bulk delete), backup."),
+		mcp.WithDescription("Delete files or directories. Default: soft-delete (moves to trash folder for recovery). "+
+			"Use permanent:true for hard delete. Consolidates: soft_delete and permanent delete into one safe tool."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file or directory to delete")),
 		mcp.WithBoolean("permanent", mcp.Description("Permanently delete instead of soft-delete (default: false)")),
 	)
-	s.AddTool(deleteFileTool, auditWrap(engine, "delete_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addToolWithDispatch(deleteFileTool, auditWrap(engine, "delete_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -1093,11 +1083,12 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("Move or rename files and directories. Other tools: copy_file, delete_file, edit_file (modify content), batch_operations (bulk rename)."),
+		mcp.WithDescription("Move or rename files and directories. Also replaces the old rename_file tool. "+
+			"Works across WSL/Windows paths with auto-conversion."),
 		mcp.WithString("source_path", mcp.Required(), mcp.Description("Current path of the file/directory")),
 		mcp.WithString("dest_path", mcp.Required(), mcp.Description("New path for the file/directory")),
 	)
-	s.AddTool(moveFileTool, auditWrap(engine, "move_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addToolWithDispatch(moveFileTool, auditWrap(engine, "move_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		sourcePath, err := request.RequireString("source_path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid source_path: %v", err)), nil
@@ -1127,11 +1118,11 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDescription("Copy files and directories. Other tools: move_file (rename), delete_file, edit_file (modify content), batch_operations (bulk copy), backup."),
+		mcp.WithDescription("Copy files and directories. Supports recursive directory copy with WSL/Windows path auto-conversion."),
 		mcp.WithString("source_path", mcp.Required(), mcp.Description("Path of the file/directory to copy")),
 		mcp.WithString("dest_path", mcp.Required(), mcp.Description("Destination path for the copy")),
 	)
-	s.AddTool(copyFileTool, auditWrap(engine, "copy_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addToolWithDispatch(copyFileTool, auditWrap(engine, "copy_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		sourcePath, err := request.RequireString("source_path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid source_path: %v", err)), nil
@@ -1158,13 +1149,13 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	// ============================================================================
 	fileInfoTool := mcp.NewTool("get_file_info",
 		mcp.WithTitleAnnotation("File Info"),
-		mcp.WithDescription("File/directory metadata (size, permissions, dates). Other tools: read_file, edit_file, search_files, list_directory, analyze_operation."),
+		mcp.WithDescription("File/directory metadata: size, permissions, timestamps, type. Quick way to check if a path exists and its properties."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file or directory")),
 	)
-	s.AddTool(fileInfoTool, auditWrap(engine, "get_file_info", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addToolWithDispatch(fileInfoTool, auditWrap(engine, "get_file_info", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -1185,13 +1176,14 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("Multiple edits to one file atomically. MUCH faster than calling edit_file multiple times. Auto-backup with undo. "+
-			"Other tools: edit_file (single edit), read_file, search_files, batch_operations, backup, analyze_operation."),
+		mcp.WithDescription("Apply multiple edits to one file in a single atomic operation. MUCH faster than repeated edit_file calls. "+
+			"Creates one backup for all edits with undo support. "+
+			"Pass edits_json: [{\"old_text\":\"x\",\"new_text\":\"y\"}, ...]. Supports old_str/new_str aliases."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
 		mcp.WithString("edits_json", mcp.Required(), mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]. Also accepts old_str/new_str as aliases.")),
 		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 	)
-	s.AddTool(multiEditTool, auditWrap(engine, "multi_edit", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addToolWithDispatch(multiEditTool, auditWrap(engine, "multi_edit", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -1377,13 +1369,15 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("Bulk file operations, pipelines, and batch rename in one call. Use request_json, pipeline_json, or rename_json. "+
-			"Other tools: edit_file (single edit), multi_edit (multiple edits one file), search_files, backup, analyze_operation, copy_file, move_file, delete_file."),
+		mcp.WithDescription("Bulk file operations, multi-step pipelines, and batch rename. Consolidates: batch ops, pipeline executor, batch rename. "+
+			"Three modes via JSON params: request_json (bulk ops: copy/move/delete with atomic + backup options), "+
+			"pipeline_json (multi-step workflows with conditions, parallel execution, dry_run), "+
+			"rename_json (batch rename: find/replace, prefix/suffix, regex pattern, sequential numbering, preview mode)."),
 		mcp.WithString("request_json", mcp.Description("JSON with operations array and options. Fields: operations (array), atomic (bool), create_backup (bool), validate_only (bool)")),
 		mcp.WithString("pipeline_json", mcp.Description("JSON-encoded pipeline definition with name, steps, and optional flags (dry_run, force, stop_on_error, create_backup, verbose, parallel)")),
 		mcp.WithString("rename_json", mcp.Description("JSON with batch rename parameters. Fields: path, mode, find, replace, prefix, suffix, pattern, extension, start_number, padding, recursive, file_pattern, preview, case_sensitive")),
 	)
-	s.AddTool(batchOpsTool, auditWrap(engine, "batch_operations", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addToolWithDispatch(batchOpsTool, auditWrap(engine, "batch_operations", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		pipelineJSON := ""
 		renameJSON := ""
 		requestJSON := ""
@@ -1483,8 +1477,9 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("Manage backups. Actions: list, info, compare, cleanup, restore, undo_last. Auto-created before every edit. "+
-			"Other tools: edit_file (auto-backup), multi_edit, batch_operations, search_files, read_file, analyze_operation."),
+		mcp.WithDescription("Manage backups and recovery. Consolidates: list_backups, backup_info, compare_with_backup, cleanup_backups, restore_backup. "+
+			"Auto-created before every edit/delete. Actions: list (default, with filters), info (detail by backup_id), "+
+			"compare (diff backup vs current), cleanup (remove old backups), restore (recover files), undo_last (quick undo)."),
 		mcp.WithString("action", mcp.Description("Action: list (default), info, compare, cleanup, restore, undo_last")),
 		mcp.WithString("backup_id", mcp.Description("Backup ID (required for info, compare, restore)")),
 		mcp.WithString("file_path", mcp.Description("File path for compare or selective restore")),
@@ -1496,7 +1491,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithBoolean("dry_run", mcp.Description("For cleanup/restore: preview without executing (default: true for cleanup, false for restore)")),
 		mcp.WithBoolean("preview", mcp.Description("For restore: show diff without restoring (default: false)")),
 	)
-	s.AddTool(backupTool, auditWrap(engine, "backup", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addToolWithDispatch(backupTool, auditWrap(engine, "backup", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if engine.GetBackupManager() == nil {
 			return mcp.NewToolResultError("Backup system not available"), nil
 		}
@@ -1759,8 +1754,11 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDescription("WSL/Windows file sync and path conversion. Actions: sync, status, autosync_config, autosync_status. "+
-			"Other tools: read_file, edit_file, copy_file, search_files, batch_operations."),
+		mcp.WithDescription("WSL/Windows file sync and path conversion. Consolidates: wsl_to_windows_copy, windows_to_wsl_copy, "+
+			"sync_claude_workspace, wsl_windows_status, configure_autosync, autosync_status. "+
+			"Actions: sync (auto-detects direction from paths, supports filter_pattern and dry_run), "+
+			"status (WSL integration health + path mapping), autosync_config (enable/disable auto-sync on write/edit), "+
+			"autosync_status (current auto-sync settings)."),
 		mcp.WithString("action", mcp.Description("Action: sync (default), status, autosync_config, autosync_status")),
 		// sync params
 		mcp.WithString("wsl_path", mcp.Description("Source WSL path for sync")),
@@ -1775,7 +1773,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithBoolean("sync_on_edit", mcp.Description("Auto-sync on edit operations (default: true)")),
 		mcp.WithBoolean("silent", mcp.Description("Silent mode for auto-sync (default: false)")),
 	)
-	s.AddTool(wslTool, auditWrap(engine, "wsl", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addToolWithDispatch(wslTool, auditWrap(engine, "wsl", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		action := "sync"
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if a, ok := args["action"].(string); ok && a != "" {
@@ -2076,8 +2074,11 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDescription("Server help, stats, and artifacts. action:help (usage topics), action:stats (performance), action:artifact (code capture). "+
-			"Other tools: edit_file, multi_edit, search_files, batch_operations, backup, read_file, analyze_operation."),
+		mcp.WithDescription("Server help, performance stats, and code artifact capture. Consolidates: get_help, performance_stats, "+
+			"edit_telemetry, capture_artifact, write_artifact, artifact_info. "+
+			"Actions: help (usage topics — workflow, tools, read, write, edit, search, batch, errors, examples, tips), "+
+			"stats (performance metrics + edit telemetry + backup status), "+
+			"artifact (sub_action: capture/write/info for storing and retrieving code snippets)."),
 		mcp.WithString("action", mcp.Description("Action: help (default), stats, artifact")),
 		// help params
 		mcp.WithString("topic", mcp.Description("Help topic: overview, workflow, tools, read, write, edit, search, batch, errors, examples, tips, all")),
@@ -2086,7 +2087,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		mcp.WithString("content", mcp.Description("Artifact content to capture")),
 		mcp.WithString("path", mcp.Description("Path for writing artifact")),
 	)
-	s.AddTool(serverInfoTool, auditWrap(engine, "server_info", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addToolWithDispatch(serverInfoTool, auditWrap(engine, "server_info", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		action := "help"
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if a, ok := args["action"].(string); ok && a != "" {
@@ -2198,46 +2199,62 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	s.AddTool(mcp.NewTool("read_text_file",
 		mcp.WithTitleAnnotation("Read File (alias)"),
-		mcp.WithDescription("Read file contents (alias for read_file). To MODIFY this file use edit_file or the edit alias. Other tools: search_files, multi_edit, write_file, batch_operations."),
+		mcp.WithDescription("[Alias → read_file] Read file contents with line ranges, base64, head/tail modes."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file")),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file (WSL or Windows format)")),
+		mcp.WithNumber("max_lines", mcp.Description("Max lines (optional, 0=all)")),
+		mcp.WithString("mode", mcp.Description("Mode: all, head, tail")),
 		mcp.WithNumber("start_line", mcp.Description("Starting line number (1-indexed)")),
 		mcp.WithNumber("end_line", mcp.Description("Ending line number (inclusive)")),
+		mcp.WithString("encoding", mcp.Description("Set to \"base64\" to read file as base64-encoded binary")),
 	), readFileHandler)
 
 	s.AddTool(mcp.NewTool("search",
 		mcp.WithTitleAnnotation("Search (alias)"),
-		mcp.WithDescription("Search files by name or content with regex support (alias for search_files). To edit found files use edit_file or the edit alias. Other tools: read_file, multi_edit, batch_operations."),
+		mcp.WithDescription("[Alias → search_files] Search files by name or content. Supports regex, count_only, context lines, case sensitivity."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithString("path", mcp.Required(), mcp.Description("Base directory")),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Base directory or file (WSL or Windows format)")),
 		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal pattern")),
-		mcp.WithBoolean("include_content", mcp.Description("Include file content search")),
-		mcp.WithString("file_types", mcp.Description("Comma-separated extensions")),
+		mcp.WithBoolean("include_content", mcp.Description("Include file content search (default: false)")),
+		mcp.WithString("file_types", mcp.Description("Comma-separated file extensions (e.g., '.go,.txt')")),
+		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive search (default: false)")),
+		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false)")),
+		mcp.WithBoolean("include_context", mcp.Description("Include context lines (default: false)")),
+		mcp.WithNumber("context_lines", mcp.Description("Number of context lines (default: 3)")),
+		mcp.WithBoolean("count_only", mcp.Description("Count pattern occurrences without full search (default: false)")),
+		mcp.WithString("return_lines", mcp.Description("Return line numbers of count matches (true/false, for count_only mode)")),
 	), searchFilesHandler)
 
 	s.AddTool(mcp.NewTool("edit",
 		mcp.WithTitleAnnotation("Edit File (alias)"),
-		mcp.WithDescription("Edit and modify existing files — search-and-replace text in files with auto-backup. Supports exact match, regex, and occurrence-based replacement. Use this instead of write_file to change existing files."),
+		mcp.WithDescription("[Alias → edit_file] Modify existing files with auto-backup. Modes: replace, search_replace, regex. Prefer over write_file."),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file")),
-		mcp.WithString("old_text", mcp.Description("Text to be replaced")),
-		mcp.WithString("new_text", mcp.Description("New text to replace with")),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file (WSL or Windows format)")),
+		mcp.WithString("old_text", mcp.Description("Text to be replaced (default mode)")),
+		mcp.WithString("new_text", mcp.Description("New text to replace with (default mode)")),
 		mcp.WithString("old_str", mcp.Description("Alias for old_text")),
 		mcp.WithString("new_str", mcp.Description("Alias for new_text")),
+		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\"")),
-		mcp.WithNumber("occurrence", mcp.Description("Which occurrence to replace")),
-		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk")),
+		mcp.WithNumber("occurrence", mcp.Description("Which occurrence to replace: 1=first, 2=second, -1=last, -2=second-to-last (default: all)")),
+		mcp.WithString("pattern", mcp.Description("Regex or literal pattern (for search_replace and regex modes)")),
+		mcp.WithString("replacement", mcp.Description("Replacement text (for search_replace mode)")),
+		mcp.WithString("patterns_json", mcp.Description("JSON array of patterns for regex mode: [{\"pattern\": \"regex\", \"replacement\": \"$1...\", \"limit\": -1}]")),
+		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive matching (default: true, for regex mode)")),
+		mcp.WithBoolean("create_backup", mcp.Description("Create backup before transformation (default: true, for regex mode)")),
+		mcp.WithBoolean("dry_run", mcp.Description("Validate without applying changes (default: false, for regex mode)")),
+		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false, for occurrence mode)")),
 	), editFileHandler)
 
 	s.AddTool(mcp.NewTool("write",
 		mcp.WithTitleAnnotation("Write File (alias)"),
-		mcp.WithDescription("Write content to a file — create new files or overwrite existing ones. Supports text and base64 binary. For modifying existing files prefer edit_file or the edit alias instead."),
+		mcp.WithDescription("[Alias → write_file] Create new files or overwrite. Supports text and base64. Use edit_file to modify existing files."),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -2249,7 +2266,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	s.AddTool(mcp.NewTool("create_file",
 		mcp.WithTitleAnnotation("Create File (alias)"),
-		mcp.WithDescription("Create a new file with content (alias for write_file). For modifying existing files use edit_file or the edit alias instead."),
+		mcp.WithDescription("[Alias → write_file] Create a new file with content. Use edit_file to modify existing files."),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -2261,7 +2278,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 	s.AddTool(mcp.NewTool("directory_tree",
 		mcp.WithTitleAnnotation("Directory Tree (alias)"),
-		mcp.WithDescription("Alias for list_directory — compatibility with the official MCP filesystem server."),
+		mcp.WithDescription("[Alias → list_directory] List directory contents."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -2269,14 +2286,150 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	), listDirHandler)
 
 	// ============================================================================
+	// SUPER-TOOL: fs — Single entry point dispatching to ALL 16 operations
+	// Resolves lazy-loading: clients loading only 4-5 tools get full access via fs
+	// ============================================================================
+	fsTool := mcp.NewTool("fs",
+		mcp.WithTitleAnnotation("Filesystem Super-Tool"),
+		mcp.WithDescription("[Super-tool] Single entry point for ALL filesystem operations: "+
+			"read, write, edit, multi-edit, search, list directory, move, copy, delete, "+
+			"rename files, create directory, batch operations, backup/undo/restore, "+
+			"analyze, WSL sync, server info. Use when individual tools are not available. "+
+			"Set action param to select operation: read_file, write_file, edit_file, "+
+			"multi_edit, list_directory, search_files, analyze_operation, create_directory, "+
+			"delete_file, move_file, copy_file, get_file_info, batch_operations, backup, "+
+			"wsl, server_info. Pass all operation params alongside action. "+
+			"Example: fs(action:\"edit_file\", path:\"f.go\", old_text:\"x\", new_text:\"y\")"),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(false),
+		// Routing
+		mcp.WithString("action", mcp.Required(), mcp.Description(
+			"Operation to perform: read_file, write_file, edit_file, multi_edit, "+
+				"list_directory, search_files, analyze_operation, create_directory, "+
+				"delete_file, move_file, copy_file, get_file_info, batch_operations, "+
+				"backup, wsl, server_info")),
+		// Universal
+		mcp.WithString("path", mcp.Description("File or directory path")),
+		// read_file
+		mcp.WithNumber("start_line", mcp.Description("Start line (1-indexed)")),
+		mcp.WithNumber("end_line", mcp.Description("End line (inclusive)")),
+		mcp.WithNumber("max_lines", mcp.Description("Max lines (0=all)")),
+		mcp.WithString("mode", mcp.Description("Read: all/head/tail — Edit: replace/search_replace/regex")),
+		mcp.WithString("encoding", mcp.Description("\"base64\" for binary read/write")),
+		// write_file
+		mcp.WithString("content", mcp.Description("Text content")),
+		mcp.WithString("content_base64", mcp.Description("Base64 binary content")),
+		// edit_file
+		mcp.WithString("old_text", mcp.Description("Text to replace")),
+		mcp.WithString("new_text", mcp.Description("Replacement text")),
+		mcp.WithString("old_str", mcp.Description("Alias for old_text")),
+		mcp.WithString("new_str", mcp.Description("Alias for new_text")),
+		mcp.WithNumber("occurrence", mcp.Description("Occurrence: 1=first, -1=last")),
+		mcp.WithBoolean("force", mcp.Description("Force past CRITICAL risk")),
+		mcp.WithBoolean("whole_word", mcp.Description("Whole word matching")),
+		// search_files
+		mcp.WithString("pattern", mcp.Description("Search/regex pattern")),
+		mcp.WithString("replacement", mcp.Description("Replacement (search_replace)")),
+		mcp.WithString("patterns_json", mcp.Description("Regex patterns JSON array")),
+		mcp.WithBoolean("include_content", mcp.Description("Search file contents")),
+		mcp.WithString("file_types", mcp.Description("Extension filter (.go,.txt)")),
+		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive")),
+		mcp.WithBoolean("include_context", mcp.Description("Include context lines")),
+		mcp.WithNumber("context_lines", mcp.Description("Context line count")),
+		mcp.WithBoolean("count_only", mcp.Description("Count matches only")),
+		mcp.WithString("return_lines", mcp.Description("Return line numbers")),
+		mcp.WithBoolean("create_backup", mcp.Description("Create backup")),
+		mcp.WithBoolean("dry_run", mcp.Description("Preview without applying")),
+		// multi_edit
+		mcp.WithString("edits_json", mcp.Description("Edits array JSON")),
+		// move/copy
+		mcp.WithString("source_path", mcp.Description("Source for move/copy")),
+		mcp.WithString("dest_path", mcp.Description("Destination for move/copy")),
+		// delete
+		mcp.WithBoolean("permanent", mcp.Description("Hard delete (default: soft)")),
+		// analyze
+		mcp.WithString("operation", mcp.Description("Analyze op: file/optimize/write/edit/delete")),
+		// batch
+		mcp.WithString("request_json", mcp.Description("Batch operations JSON")),
+		mcp.WithString("pipeline_json", mcp.Description("Pipeline JSON")),
+		mcp.WithString("rename_json", mcp.Description("Batch rename JSON")),
+		// backup — uses "action" field internally, so we remap from backup_action
+		mcp.WithString("backup_action", mcp.Description("Backup: list/info/compare/cleanup/restore/undo_last")),
+		mcp.WithString("backup_id", mcp.Description("Backup ID")),
+		mcp.WithString("file_path", mcp.Description("File path for backup compare/restore")),
+		mcp.WithNumber("limit", mcp.Description("Max backup results")),
+		mcp.WithString("filter_operation", mcp.Description("Filter by op type")),
+		mcp.WithString("filter_path", mcp.Description("Filter by path")),
+		mcp.WithNumber("newer_than_hours", mcp.Description("Backups newer than N hours")),
+		mcp.WithNumber("older_than_days", mcp.Description("Cleanup: older than N days")),
+		mcp.WithBoolean("preview", mcp.Description("Preview restore")),
+		// wsl — uses "action" field internally, remap from wsl_action
+		mcp.WithString("wsl_action", mcp.Description("WSL: sync/status/autosync_config/autosync_status")),
+		mcp.WithString("wsl_path", mcp.Description("WSL path")),
+		mcp.WithString("windows_path", mcp.Description("Windows path")),
+		mcp.WithString("direction", mcp.Description("Sync direction")),
+		mcp.WithBoolean("create_dirs", mcp.Description("Create dirs on sync")),
+		mcp.WithString("filter_pattern", mcp.Description("WSL sync filter")),
+		mcp.WithBoolean("enabled", mcp.Description("Enable auto-sync")),
+		mcp.WithBoolean("sync_on_write", mcp.Description("Auto-sync on write")),
+		mcp.WithBoolean("sync_on_edit", mcp.Description("Auto-sync on edit")),
+		mcp.WithBoolean("silent", mcp.Description("Silent auto-sync")),
+		// server_info — uses "action" field internally, remap from server_action
+		mcp.WithString("server_action", mcp.Description("Info: help/stats/artifact")),
+		mcp.WithString("topic", mcp.Description("Help topic")),
+		mcp.WithString("sub_action", mcp.Description("Artifact: capture/write/info")),
+	)
+
+	s.AddTool(fsTool, auditWrap(engine, "fs", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		actionStr, err := request.RequireString("action")
+		if err != nil {
+			return mcp.NewToolResultError(
+				"action is required. Valid: read_file, write_file, edit_file, multi_edit, " +
+					"list_directory, search_files, analyze_operation, create_directory, " +
+					"delete_file, move_file, copy_file, get_file_info, batch_operations, " +
+					"backup, wsl, server_info"), nil
+		}
+
+		// For backup, wsl, server_info: remap sub-action params to "action" key
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			switch actionStr {
+			case "backup":
+				if ba, ok := args["backup_action"].(string); ok && ba != "" {
+					args["action"] = ba
+					request.Params.Arguments = args
+				}
+			case "wsl":
+				if wa, ok := args["wsl_action"].(string); ok && wa != "" {
+					args["action"] = wa
+					request.Params.Arguments = args
+				}
+			case "server_info":
+				if sa, ok := args["server_action"].(string); ok && sa != "" {
+					args["action"] = sa
+					request.Params.Arguments = args
+				}
+			}
+		}
+
+		handler, ok := toolHandlers[actionStr]
+		if !ok {
+			return mcp.NewToolResultError(fmt.Sprintf(
+				"Unknown action: %s. Valid: read_file, write_file, edit_file, multi_edit, "+
+					"list_directory, search_files, analyze_operation, create_directory, "+
+					"delete_file, move_file, copy_file, get_file_info, batch_operations, "+
+					"backup, wsl, server_info", actionStr)), nil
+		}
+
+		return handler(ctx, request)
+	}))
+
+	// ============================================================================
 	// 17. help — Standalone help for Claude Desktop tool discovery
 	// ============================================================================
 	helpTool := mcp.NewTool("help",
 		mcp.WithTitleAnnotation("Server Help"),
-		mcp.WithDescription("IMPORTANT: Call this tool FIRST in every conversation to discover ALL 16 tools. "+
-			"Covers: edit_file (modify/change/replace text), write_file (create), read_file, multi_edit, search_files, "+
-			"list_directory, copy_file, move_file, delete_file, create_directory, get_file_info, batch_operations, "+
-			"backup (restore/undo), analyze_operation, wsl, server_info. Without calling help you will miss most tools."),
+		mcp.WithDescription("Discover all 16 filesystem tools. Call FIRST to ensure full tool visibility. Returns: read/write/edit files, search, copy, move, delete, batch ops, backup/undo, WSL sync."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -2285,7 +2438,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		return mcp.NewToolResultText(serverInstructions), nil
 	})
 
-	log.Printf("Registered 23 tools for v4.1.3")
+	log.Printf("Registered 24 tools (16 core + 6 aliases + help + fs super-tool) for v4.2.0")
 
 	return nil
 }
@@ -2296,7 +2449,7 @@ func getHelpContent(topic string, compactMode bool) string {
 
 	switch topic {
 	case "overview":
-		sb.WriteString(`# MCP Filesystem Ultra v4.1.3 - Quick Start
+		sb.WriteString(`# MCP Filesystem Ultra v4.2.0 - Quick Start
 
 ## CRITICAL RULE
 Always use MCP tools (read_file, write_file, edit_file) instead of native file tools.
@@ -2358,37 +2511,118 @@ server_info(action:"stats")
 	case "tools":
 		sb.WriteString(`# COMPLETE TOOL LIST (16 Tools)
 
+Use this topic when the client hides full tool schemas. Each entry lists the most important parameters only.
+
 ## Core (5)
-read_file      - Read file (supports line ranges, base64, head/tail)
-write_file     - Atomic write (supports text and base64 binary)
-edit_file      - Smart edit with modes: replace, search_replace, regex
-list_directory - Cached directory listing
-search_files   - Search files/content (supports count_only mode)
+
+read_file
+- Purpose: Read a full file, line range, head/tail, or base64 content
+- Key params: path, start_line, end_line, max_lines, mode, encoding
+- Examples: read_file(path), read_file(path, start_line=10, end_line=30)
+
+write_file
+- Purpose: Create or overwrite a file atomically
+- Key params: path, content, content_base64, encoding
+- Examples: write_file(path, content="text")
+
+edit_file
+- Purpose: Modify existing files with backup and risk checks
+- Key params: path, old_text, new_text, mode, pattern, replacement, occurrence, force
+- Modes: replace (default), search_replace, regex
+- Examples: edit_file(path, old_text, new_text), edit_file(path, mode:"search_replace", pattern, replacement)
+
+list_directory
+- Purpose: List directory contents
+- Key params: path
+- Examples: list_directory(path)
+
+search_files
+- Purpose: Search by filename or file content
+- Key params: path, pattern, file_types, include_content, include_context, case_sensitive, count_only
+- Examples: search_files(path, pattern), search_files(path, pattern, include_content=true)
 
 ## Edit+ (1)
-multi_edit     - Multiple edits to one file atomically
+
+multi_edit
+- Purpose: Apply multiple exact replacements to the same file atomically
+- Key params: path, edits_json
+- Examples: multi_edit(path, edits_json='[{"old_text":"A","new_text":"B"}]')
 
 ## Files (4)
-move_file        - Move or rename file/directory
-copy_file        - Copy file/directory
-delete_file      - Delete (soft by default, permanent:true for hard)
-create_directory - Create directory with parents
+
+move_file
+- Purpose: Move or rename a file or directory
+- Key params: source_path, dest_path
+- Examples: move_file(source_path, dest_path)
+
+copy_file
+- Purpose: Copy a file or directory
+- Key params: source_path, dest_path
+- Examples: copy_file(source_path, dest_path)
+
+delete_file
+- Purpose: Soft-delete by default, or hard-delete permanently
+- Key params: path, permanent
+- Examples: delete_file(path), delete_file(path, permanent=true)
+
+create_directory
+- Purpose: Create a directory tree like mkdir -p
+- Key params: path
+- Examples: create_directory(path)
 
 ## Analysis (2)
-get_file_info     - File/directory information
-analyze_operation - Dry-run analysis (file, optimize, write, edit, delete)
+
+get_file_info
+- Purpose: Return metadata for a file or directory
+- Key params: path
+- Examples: get_file_info(path)
+
+analyze_operation
+- Purpose: Preview risk and impact before acting
+- Key params: path, operation
+- Valid operations: file, optimize, write, edit, delete
+- Examples: analyze_operation(path, operation:"edit")
 
 ## Batch (1)
-batch_operations  - Batch ops, pipelines, and batch rename
+
+batch_operations
+- Purpose: Run atomic multi-file ops, pipelines, or batch rename
+- Key params: request_json, pipeline_json, rename_json
+- Examples: batch_operations(request_json='{"operations":[...]}')
 
 ## Backup (1)
-backup           - List, info, compare, cleanup, restore backups
+
+backup
+- Purpose: List, inspect, compare, restore, clean up, or undo backups
+- Key params: action, backup_id, file_path, preview, filter_path
+- Valid actions: list, info, compare, cleanup, restore, undo_last
+- Examples: backup(action:"list"), backup(action:"undo_last")
 
 ## WSL (1)
-wsl              - WSL/Windows sync, status, autosync config
+
+wsl
+- Purpose: WSL/Windows sync, status, and autosync operations
+- Key params: action, wsl_path, windows_path, direction, auto_create_dirs
+- Valid actions: status, sync
+- Examples: wsl(action:"status"), wsl(wsl_path, windows_path, direction)
 
 ## Info (1)
-server_info      - Help, stats, artifact management
+
+server_info
+- Purpose: Help topics, performance stats, and artifact management
+- Key params: action, topic, sub_action, content, path
+- Valid actions: help, stats, artifact
+- Examples: server_info(action:"stats"), server_info(action:"help", topic:"edit")
+
+## Aliases (6 + help)
+
+read_text_file -> read_file
+search -> search_files
+edit -> edit_file
+write -> write_file
+create_file -> write_file
+directory_tree -> list_directory
+help -> standalone discovery tool, not an alias
 `)
 
 	case "read":
