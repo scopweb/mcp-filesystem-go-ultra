@@ -52,7 +52,7 @@ func main() {
 		},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false)
 
 	// Should return an error (atomic rollback)
 	if err == nil {
@@ -122,7 +122,7 @@ func goodbye() {
 		},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false)
 	if err != nil {
 		t.Fatalf("Expected success, got error: %v", err)
 	}
@@ -187,7 +187,7 @@ function gestionData() {
 		},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false)
 
 	// Should fail atomically
 	if err == nil {

@@ -228,6 +228,13 @@ func (e *UltraFastEngine) collectFilesForRename(path string, isDir bool, recursi
 			return nil // Continue on error
 		}
 
+		// Bug #32: Skip the root directory entry itself.
+		// filepath.Walk visits the root first; filepath.Dir(root) != root,
+		// so the non-recursive check below would incorrectly SkipDir the entire tree.
+		if currentPath == path {
+			return nil
+		}
+
 		// Skip if not recursive and not in base directory
 		if !recursive && filepath.Dir(currentPath) != path {
 			if info.IsDir() {

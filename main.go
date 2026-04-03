@@ -578,6 +578,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		oldText := ""
 		newText := ""
 		force := false
+		dryRun := false
 		occurrence := 0
 
 		if args != nil {
@@ -586,6 +587,9 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			}
 			if f, ok := args["force"].(bool); ok {
 				force = f
+			}
+			if dr, ok := args["dry_run"].(bool); ok {
+				dryRun = dr
 			}
 			if occ, ok := args["occurrence"].(float64); ok {
 				occurrence = int(occ)
@@ -733,9 +737,27 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		}
 
 		// Default: standard EditFile
-		result, err := engine.EditFile(ctx, path, oldText, newText, force)
+		result, err := engine.EditFile(ctx, path, oldText, newText, force, dryRun)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+		}
+
+		// Bug #32: dry_run response format
+		if dryRun {
+			if engine.IsCompactMode() {
+				msg := fmt.Sprintf("DRY RUN: %d changes would be made", result.ReplacementCount)
+				if result.RiskWarning != "" {
+					msg += result.RiskWarning
+				}
+				msg += "\nNo changes were written to disk"
+				return mcp.NewToolResultText(msg), nil
+			}
+			msg := fmt.Sprintf("DRY RUN — No changes made\nFile: %s\nWould change: %d replacement(s)\nMatch confidence: %s\nLines affected: %d",
+				path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)
+			if result.RiskWarning != "" {
+				msg += result.RiskWarning
+			}
+			return mcp.NewToolResultText(msg), nil
 		}
 
 		if engine.IsCompactMode() {
@@ -828,7 +850,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 		// Extract optional parameters
 		countOnly := false
 		includeContent := false
-		caseSensitive := false
+		caseSensitive := true // Bug #32: default is case-sensitive (true), user must explicitly set false
 		wholeWord := false
 		includeContext := false
 		contextLines := 3
@@ -869,15 +891,17 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 
 		// Count-only mode: dispatch to CountOccurrences
 		if countOnly {
-			result, err := engine.CountOccurrences(ctx, path, pattern, returnLines)
+			result, err := engine.CountOccurrences(ctx, path, pattern, returnLines, caseSensitive, wholeWord)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
 			return mcp.NewToolResultText(result), nil
 		}
 
-		// Advanced search mode (with context, case sensitivity, whole word)
-		if caseSensitive || wholeWord || includeContext {
+		// Advanced search mode (with content search, case sensitivity, whole word, context)
+		// Bug #32: route ALL content searches through AdvancedTextSearch which properly
+		// handles case_sensitive:false. SmartSearch (the default path) ignores this flag.
+		if includeContent || wholeWord || includeContext {
 			engineReq := localmcp.CallToolRequest{Arguments: map[string]interface{}{
 				"path": path, "pattern": pattern,
 				"case_sensitive": caseSensitive, "whole_word": wholeWord,
@@ -1259,16 +1283,20 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 			return mcp.NewToolResultError("edits array cannot be empty"), nil
 		}
 
-		// Extract force parameter
+		// Extract force and dry_run parameters
 		force := false
+		dryRun := false
 		if args != nil {
 			if f, ok := args["force"].(bool); ok {
 				force = f
 			}
+			if dr, ok := args["dry_run"].(bool); ok {
+				dryRun = dr
+			}
 		}
 
 		// Execute multi-edit
-		result, err := engine.MultiEdit(ctx, path, edits, force)
+		result, err := engine.MultiEdit(ctx, path, edits, force, dryRun)
 		if err != nil {
 			// Bug #27: If result is non-nil, this is an atomic rollback — include backup_id and details
 			if result != nil && result.BackupID != "" {
@@ -1290,6 +1318,25 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 				return mcp.NewToolResultError(errMsg), nil
 			}
 			return mcp.NewToolResultError(fmt.Sprintf("Multi-edit error: %v", err)), nil
+		}
+
+		// Bug #32: dry_run response format for multi_edit
+		if dryRun {
+			if engine.IsCompactMode() {
+				msg := fmt.Sprintf("DRY RUN: %d edits would be applied, %d lines affected",
+					result.SuccessfulEdits, result.LinesAffected)
+				if result.RiskWarning != "" {
+					msg += result.RiskWarning
+				}
+				msg += "\nNo changes were written to disk"
+				return mcp.NewToolResultText(msg), nil
+			}
+			msg := fmt.Sprintf("DRY RUN — No changes made\nFile: %s\nWould apply: %d edits\nLines affected: %d",
+				path, result.SuccessfulEdits, result.LinesAffected)
+			if result.RiskWarning != "" {
+				msg += result.RiskWarning
+			}
+			return mcp.NewToolResultText(msg), nil
 		}
 
 		// Format result (Bug #17: added SkippedEdits and EditDetails)

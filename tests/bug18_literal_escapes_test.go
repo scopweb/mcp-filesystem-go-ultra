@@ -53,7 +53,7 @@ func TestBug18_LiteralNewlineEscapes(t *testing.T) {
 	oldTextWithLiteralEscapes := `    private async Task HandleKeyDown(KeyboardEventArgs e) {\n        if (e.Key == "Enter") await Search();\n    }\n\n    private async Task Search()`
 	newText := "    private async Task HandleKeyDown(KeyboardEventArgs e) {\n        if (e.Key == \"Enter\") await Search();\n    }\n\n    private async Task SearchOrders()"
 
-	result, err := engine.EditFile(ctx, testFile, oldTextWithLiteralEscapes, newText, false)
+	result, err := engine.EditFile(ctx, testFile, oldTextWithLiteralEscapes, newText, false, false)
 	if err != nil {
 		t.Fatalf("EditFile failed with literal \\n escapes: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestBug18_LiteralTabEscapes(t *testing.T) {
 	oldTextLiteral := `\tfunction hello() {\n\t\treturn 'world';\n\t}`
 	newText := "\tfunction hello() {\n\t\treturn 'universe';\n\t}"
 
-	result, err := engine.EditFile(ctx, testFile, oldTextLiteral, newText, false)
+	result, err := engine.EditFile(ctx, testFile, oldTextLiteral, newText, false, false)
 	if err != nil {
 		t.Fatalf("EditFile failed with literal \\t escapes: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestBug18_RealNewlinesStillWork(t *testing.T) {
 
 	// Normal edit with real newlines (should still work as before)
 	// force=true because this small file triggers CRITICAL risk (>90% change)
-	result, err := engine.EditFile(ctx, testFile, "line1\nline2", "lineA\nlineB", true)
+	result, err := engine.EditFile(ctx, testFile, "line1\nline2", "lineA\nlineB", true, false)
 	if err != nil {
 		t.Fatalf("EditFile failed with real newlines: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestBug18_CodeWithBackslashN(t *testing.T) {
 
 	// Edit with real newlines — the literal \n inside Printf should be preserved
 	// force=true because this small file triggers CRITICAL risk (>90% change)
-	result, err := engine.EditFile(ctx, testFile, "fmt.Printf(\"hello\\nworld\")", "fmt.Printf(\"hello\\nuniverse\")", true)
+	result, err := engine.EditFile(ctx, testFile, "fmt.Printf(\"hello\\nworld\")", "fmt.Printf(\"hello\\nuniverse\")", true, false)
 	if err != nil {
 		t.Fatalf("EditFile failed: %v", err)
 	}

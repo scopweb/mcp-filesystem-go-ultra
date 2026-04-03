@@ -72,6 +72,24 @@ Add to your `claude_desktop_config.json`:
   }
 }
 ```
+Linux 
+```json
+{
+  "mcpServers": {
+    "filesystem-ultra": {
+      "command": "/home/armi/Documentos/MCPs/clone/mcp-filesystem-go-ultra/filesystem-ultra",
+      "args": [
+        "--compact-mode",
+        "--cache-size", "200MB",
+        "--parallel-ops", "8",
+        "--log-level", "error",
+        "--log-dir", "/home/armi/.local/share/mcp-filesystem/logs",
+        "/home/armi/Documentos/MCPs/clone/"
+      ]
+    }
+  }
+}
+```
 
 The positional arguments after the flags are the allowed base paths. Omitting paths disables access control entirely.
 

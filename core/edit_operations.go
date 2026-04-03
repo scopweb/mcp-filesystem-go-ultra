@@ -41,7 +41,7 @@ type SearchMatch struct {
 //
 // Context Validation: Validates surrounding context (3-5 lines) to prevent
 // editing stale content that may have been modified since the file was read.
-func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText string, force bool) (*EditResult, error) {
+func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText string, force bool, dryRun bool) (*EditResult, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
@@ -88,8 +88,9 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 
 	// Create persistent backup BEFORE blocking decision (Bug #16)
 	// Ensures backup exists even for blocked CRITICAL operations
+	// Skip backup creation in dry_run mode (Bug #32: dry_run must not modify anything)
 	var backupID string
-	if e.backupManager != nil {
+	if e.backupManager != nil && !dryRun {
 		backupID, err = e.backupManager.CreateBackupWithContext(path, "edit_file",
 			fmt.Sprintf("Edit: %d occurrences, %.1f%% change, risk=%s",
 				impact.Occurrences, impact.ChangePercentage, impact.RiskLevel))
@@ -102,31 +103,35 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 	// Blocking wastes tokens (Claude Desktop must resend the full old_text with force:true).
 	// Risk warning is appended to the result instead.
 
-	// Log telemetry about this edit operation
-	// This helps identify patterns of full-file rewrites vs targeted edits
-	e.LogEditTelemetry(int64(len(oldText)), int64(len(newText)), path)
-
-	// Execute pre-edit hooks
-	workingDir, _ := os.Getwd()
-	hookCtx := &HookContext{
-		Event:      HookPreEdit,
-		ToolName:   "edit_file",
-		FilePath:   path,
-		Operation:  "edit",
-		OldContent: string(content),
-		Timestamp:  time.Now(),
-		WorkingDir: workingDir,
-		Metadata: map[string]interface{}{
-			"old_text":       oldText,
-			"new_text":       newText,
-			"risk_level":     impact.RiskLevel,
-			"change_percent": impact.ChangePercentage,
-		},
+	// Log telemetry about this edit operation (skip in dry_run)
+	if !dryRun {
+		e.LogEditTelemetry(int64(len(oldText)), int64(len(newText)), path)
 	}
 
-	hookResult, err := e.hookManager.ExecuteHooks(ctx, HookPreEdit, hookCtx)
-	if err != nil {
-		return nil, fmt.Errorf("pre-edit hook denied operation: %w", err)
+	// Execute pre-edit hooks (skip in dry_run — Bug #32)
+	var hookResult *HookResult
+	var hookCtx *HookContext
+	if !dryRun {
+		workingDir, _ := os.Getwd()
+		hookCtx = &HookContext{
+			Event:      HookPreEdit,
+			ToolName:   "edit_file",
+			FilePath:   path,
+			Operation:  "edit",
+			OldContent: string(content),
+			Timestamp:  time.Now(),
+			WorkingDir: workingDir,
+			Metadata: map[string]interface{}{
+				"old_text":       oldText,
+				"new_text":       newText,
+				"risk_level":     impact.RiskLevel,
+				"change_percent": impact.ChangePercentage,
+			},
+		}
+		hookResult, err = e.hookManager.ExecuteHooks(ctx, HookPreEdit, hookCtx)
+		if err != nil {
+			return nil, fmt.Errorf("pre-edit hook denied operation: %w", err)
+		}
 	}
 
 	// Perform intelligent edit
@@ -138,9 +143,17 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 		return nil, fmt.Errorf("edit failed: %w", err)
 	}
 
+	// Bug #32: dry_run returns result without writing to disk
+	if dryRun {
+		if impact.IsRisky {
+			result.RiskWarning = impact.FormatRiskNotice("", path)
+		}
+		return result, nil
+	}
+
 	// Apply hook modifications if any
 	finalContent := result.ModifiedContent
-	if hookResult.ModifiedContent != "" {
+	if hookResult != nil && hookResult.ModifiedContent != "" {
 		finalContent = hookResult.ModifiedContent
 	}
 
@@ -932,7 +945,7 @@ type MultiEditResult struct {
 // 4. Only one backup is created
 // ULTRA-FAST: Designed for Claude Desktop batch editing
 // Bug #17: Added risk assessment, context validation, hooks, per-edit detail, and "already_present" detection
-func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []MultiEditOperation, force bool) (*MultiEditResult, error) {
+func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []MultiEditOperation, force bool, dryRun bool) (*MultiEditResult, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
@@ -1002,8 +1015,9 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	aggregateImpact := calculateMultiEditImpact(originalContent, simContent, e.riskThresholds)
 
 	// Create persistent backup BEFORE blocking decision (Bug #16)
+	// Skip backup creation in dry_run mode (Bug #32)
 	var backupID string
-	if e.backupManager != nil {
+	if e.backupManager != nil && !dryRun {
 		backupID, err = e.backupManager.CreateBackupWithContext(path, "multi_edit",
 			fmt.Sprintf("MultiEdit: %d edits, risk=%s", len(edits), aggregateImpact.RiskLevel))
 		if err != nil {
@@ -1016,24 +1030,29 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	// Risk warning is appended to the result instead.
 
 	// Execute pre-edit hooks (Bug #17 — parity with EditFile)
-	workingDir, _ := os.Getwd()
-	hookCtx := &HookContext{
-		Event:      HookPreEdit,
-		ToolName:   "multi_edit",
-		FilePath:   path,
-		Operation:  "multi_edit",
-		OldContent: originalContent,
-		Timestamp:  time.Now(),
-		WorkingDir: workingDir,
-		Metadata: map[string]interface{}{
-			"edit_count":     len(edits),
-			"risk_level":     aggregateImpact.RiskLevel,
-			"change_percent": aggregateImpact.ChangePercentage,
-		},
-	}
-	hookResult, err := e.hookManager.ExecuteHooks(ctx, HookPreEdit, hookCtx)
-	if err != nil {
-		return nil, fmt.Errorf("pre-edit hook denied operation: %w", err)
+	// Skip hooks in dry_run mode (Bug #32)
+	var hookResult *HookResult
+	var hookCtx *HookContext
+	if !dryRun {
+		workingDir, _ := os.Getwd()
+		hookCtx = &HookContext{
+			Event:      HookPreEdit,
+			ToolName:   "multi_edit",
+			FilePath:   path,
+			Operation:  "multi_edit",
+			OldContent: originalContent,
+			Timestamp:  time.Now(),
+			WorkingDir: workingDir,
+			Metadata: map[string]interface{}{
+				"edit_count":     len(edits),
+				"risk_level":     aggregateImpact.RiskLevel,
+				"change_percent": aggregateImpact.ChangePercentage,
+			},
+		}
+		hookResult, err = e.hookManager.ExecuteHooks(ctx, HookPreEdit, hookCtx)
+		if err != nil {
+			return nil, fmt.Errorf("pre-edit hook denied operation: %w", err)
+		}
 	}
 
 	// Apply all edits in order with per-edit detail tracking (Bug #17)
@@ -1146,9 +1165,17 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 			result.FailedEdits, result.TotalEdits, strings.Join(failedDetails, "; "))
 	}
 
+	// Bug #32: dry_run returns result without writing to disk
+	if dryRun {
+		if aggregateImpact.IsRisky {
+			result.RiskWarning = aggregateImpact.FormatRiskNotice("", path)
+		}
+		return result, nil
+	}
+
 	// Apply hook modifications if any
 	finalContent := currentContent
-	if hookResult.ModifiedContent != "" {
+	if hookResult != nil && hookResult.ModifiedContent != "" {
 		finalContent = hookResult.ModifiedContent
 	}
 

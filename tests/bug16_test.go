@@ -133,7 +133,7 @@ func TestBug16_MediumRiskAutoProceeds(t *testing.T) {
 	}
 
 	// Edit with force=false — should NOT block (Bug #16 fix)
-	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 100), strings.Repeat("D", 100), false)
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 100), strings.Repeat("D", 100), false, false)
 	if err != nil {
 		t.Fatalf("MEDIUM risk edit should NOT block, got error: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestBug16_HighRiskAutoProceeds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 200), strings.Repeat("D", 200), false)
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 200), strings.Repeat("D", 200), false, false)
 	if err != nil {
 		t.Fatalf("HIGH risk edit should NOT block, got error: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestBug16_CriticalRiskProceeds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), false)
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), false, false)
 	if err != nil {
 		t.Fatalf("CRITICAL risk edit should proceed (Bug #22), got error: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestBug16_CriticalRiskForceProceeds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), true)
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), true, false)
 	if err != nil {
 		t.Fatalf("CRITICAL risk edit with force=true should succeed, got error: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestBug16_LowRiskNoWarning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(context.Background(), testFile, "HELLO", "WORLD", false)
+	result, err := engine.EditFile(context.Background(), testFile, "HELLO", "WORLD", false, false)
 	if err != nil {
 		t.Fatalf("LOW risk edit should succeed, got error: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestBug16_BackupCreatedForCritical(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), false)
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), false, false)
 	if err != nil {
 		t.Fatalf("CRITICAL edit should proceed (Bug #22): %v", err)
 	}
@@ -288,7 +288,7 @@ func TestBug16_MultiEditWithForce(t *testing.T) {
 		{OldText: "line3", NewText: "modified3"},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false)
 	if err != nil {
 		t.Fatalf("MultiEdit should succeed, got error: %v", err)
 	}
