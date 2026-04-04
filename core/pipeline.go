@@ -399,7 +399,7 @@ func (pe *PipelineExecutor) executeReadRanges(ctx context.Context, step Pipeline
 
 		// Check access
 		if len(pe.engine.config.AllowedPaths) > 0 {
-			if !pe.engine.isPathAllowed(normalizedPath) {
+			if !pe.engine.IsPathAllowed(normalizedPath) {
 				return &PathError{Op: "read_ranges", Path: normalizedPath, Err: fmt.Errorf("access denied")}
 			}
 		}
@@ -1011,7 +1011,7 @@ func (pe *PipelineExecutor) performSmartSearchInternal(ctx context.Context, path
 
 	// Check access
 	if len(pe.engine.config.AllowedPaths) > 0 {
-		if !pe.engine.isPathAllowed(normalizedPath) {
+		if !pe.engine.IsPathAllowed(normalizedPath) {
 			return nil, &PathError{Op: "search", Path: normalizedPath, Err: fmt.Errorf("access denied")}
 		}
 	}

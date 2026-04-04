@@ -480,10 +480,10 @@ func (e *UltraFastEngine) CompareFiles(ctx context.Context, pathA, pathB string)
 
 	// Access control
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(pathA) {
+		if !e.IsPathAllowed(pathA) {
 			return nil, &PathError{Op: "compare", Path: pathA, Err: fmt.Errorf("access denied")}
 		}
-		if !e.isPathAllowed(pathB) {
+		if !e.IsPathAllowed(pathB) {
 			return nil, &PathError{Op: "compare", Path: pathB, Err: fmt.Errorf("access denied")}
 		}
 	}

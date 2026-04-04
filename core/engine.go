@@ -534,7 +534,7 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 
 	// Check if path is allowed
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return "", &PathError{Op: "read", Path: path, Err: fmt.Errorf("access denied")}
 		}
 	}
@@ -603,7 +603,7 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 
 	// Check if path is allowed
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return &PathError{Op: "write", Path: path, Err: fmt.Errorf("access denied")}
 		}
 	}
@@ -700,7 +700,7 @@ func (e *UltraFastEngine) WriteFileBytes(ctx context.Context, path string, data 
 
 	// Check if path is allowed
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return &PathError{Op: "write_bytes", Path: path, Err: fmt.Errorf("access denied")}
 		}
 	}
@@ -769,7 +769,7 @@ func (e *UltraFastEngine) ReadFileBytes(ctx context.Context, path string) ([]byt
 
 	// Check if path is allowed
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return nil, &PathError{Op: "read_bytes", Path: path, Err: fmt.Errorf("access denied")}
 		}
 	}
@@ -837,7 +837,7 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 
 	// Check if path is allowed
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return "", fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
 		}
 	}
@@ -973,9 +973,10 @@ Search Operations: %d`,
 		e.metrics.SearchOperations)
 }
 
-// isPathAllowed checks if the given path is within one of the allowed base paths.
+// IsPathAllowed checks if the given path is within one of the allowed base paths.
 // It resolves symlinks to prevent sandbox escape via symlink following.
-func (e *UltraFastEngine) isPathAllowed(path string) bool {
+// Exported so that BatchOperationManager and other subsystems can enforce access control.
+func (e *UltraFastEngine) IsPathAllowed(path string) bool {
 	// WSL paths (\\wsl.localhost\..., \\wsl$\...) are always allowed —
 	// they are local virtual machines, not external network shares
 	lowerPath := strings.ToLower(filepath.Clean(path))
@@ -1052,6 +1053,39 @@ func (e *UltraFastEngine) isPathAllowed(path string) bool {
 
 	if e.config.DebugMode {
 		slog.Debug("Access denied", "path", path)
+	}
+	return false
+}
+
+// IsAllowedPathRoot returns true if the given path resolves to one of the
+// configured --allowed-paths roots. Destructive operations (delete, move)
+// must reject these paths to prevent wiping out an entire allowed tree.
+func (e *UltraFastEngine) IsAllowedPathRoot(path string) bool {
+	if len(e.resolvedAllowedPaths) == 0 {
+		return false
+	}
+
+	targetAbs, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(targetAbs); err == nil {
+		targetAbs = resolved
+	}
+
+	norm := func(p string) string {
+		p = filepath.Clean(p)
+		if os.PathSeparator == '\\' {
+			return strings.ToLower(p)
+		}
+		return p
+	}
+	targetAbs = norm(targetAbs)
+
+	for _, baseAbs := range e.resolvedAllowedPaths {
+		if targetAbs == baseAbs {
+			return true
+		}
 	}
 	return false
 }
@@ -1202,7 +1236,7 @@ func (e *UltraFastEngine) ListDirectoryTree(ctx context.Context, path string, ma
 	defer e.releaseOperation("tree", start)
 
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return "", fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
 		}
 	}

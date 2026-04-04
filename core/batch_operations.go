@@ -190,6 +190,26 @@ func (m *BatchOperationManager) validateOperations(operations []FileOperation) [
 	errors := make([]string, 0)
 
 	for i, op := range operations {
+		// Security: enforce allowed-paths on every path in the operation.
+		// Without this check, batch operations bypass --allowed-paths access control.
+		if m.engine != nil && len(m.engine.config.AllowedPaths) > 0 {
+			for _, p := range m.collectPaths(op) {
+				if p != "" && !m.engine.IsPathAllowed(p) {
+					errors = append(errors, fmt.Sprintf("Op %d: access denied — path '%s' is not in allowed paths", i, p))
+				}
+			}
+			// Prevent destructive operations on allowed-path roots
+			if op.Type == "delete" || op.Type == "move" {
+				target := op.Path
+				if op.Type == "move" {
+					target = op.Source
+				}
+				if target != "" && m.engine.IsAllowedPathRoot(target) {
+					errors = append(errors, fmt.Sprintf("Op %d: access denied — cannot %s allowed-path root '%s'", i, op.Type, target))
+				}
+			}
+		}
+
 		switch op.Type {
 		case "write":
 			if op.Path == "" {
@@ -538,6 +558,16 @@ func (m *BatchOperationManager) executeDelete(op FileOperation, result *Operatio
 
 func (m *BatchOperationManager) executeCreateDir(op FileOperation, result *OperationResult) error {
 	return os.MkdirAll(op.Path, 0755)
+}
+
+// collectPaths returns all filesystem paths referenced by a single operation.
+func (m *BatchOperationManager) collectPaths(op FileOperation) []string {
+	switch op.Type {
+	case "move", "copy":
+		return []string{op.Source, op.Destination}
+	default:
+		return []string{op.Path}
+	}
 }
 
 // cleanOldBackups limpia backups antiguos manteniendo solo los últimos N

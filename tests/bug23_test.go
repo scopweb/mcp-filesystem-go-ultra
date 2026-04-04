@@ -107,7 +107,7 @@ func TestBug23_MultiEdit_CRLFMatchesLF(t *testing.T) {
 		{OldText: "gamma\n", NewText: "GAMMA\n"},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), filePath, edits, true)
+	result, err := engine.MultiEdit(context.Background(), filePath, edits, true, false)
 	if err != nil {
 		t.Fatalf("MultiEdit failed: %v", err)
 	}

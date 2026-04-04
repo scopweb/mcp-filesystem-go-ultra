@@ -157,6 +157,7 @@ func builtinRules() []NormalizationRule {
 		{ID: "include_content-bool-coerce", Tools: []string{"search_files"}, Type: RuleTypeCoerce, From: "include_content", CoerceTo: "bool"},
 		{ID: "include_context-bool-coerce", Tools: []string{"search_files"}, Type: RuleTypeCoerce, From: "include_context", CoerceTo: "bool"},
 		{ID: "recursive-bool-coerce", Tools: []string{"list_directory", "search_files"}, Type: RuleTypeCoerce, From: "recursive", CoerceTo: "bool"},
+		{ID: "return_lines-bool-coerce", Tools: []string{"search_files"}, Type: RuleTypeCoerce, From: "return_lines", CoerceTo: "bool"},
 	}
 }
 

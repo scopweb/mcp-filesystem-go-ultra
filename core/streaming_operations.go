@@ -62,7 +62,7 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 
 	// Check if path is allowed (access control) - must check before any write path
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return &PathError{Op: "streaming_write", Path: path, Err: fmt.Errorf("access denied")}
 		}
 	}
@@ -207,7 +207,7 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 
 	// Check if path is allowed (access control) - must check before any read path
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return "", &PathError{Op: "chunked_read", Path: path, Err: fmt.Errorf("access denied")}
 		}
 	}
@@ -285,7 +285,7 @@ func (e *UltraFastEngine) SmartEditFile(ctx context.Context, path, oldText, newT
 
 	// Check if path is allowed (access control)
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return nil, &PathError{Op: "smart_edit", Path: path, Err: fmt.Errorf("access denied")}
 		}
 	}

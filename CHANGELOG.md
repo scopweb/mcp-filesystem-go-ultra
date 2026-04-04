@@ -1,17 +1,61 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
-## [Unreleased]
+## [4.2.1] - 2026-04-04
+
+### Security Fix — Allowed-path root deletion protection
+
+Destructive operations (`delete_file`, `soft_delete`, `move_file`) could target the `--allowed-paths` root directory itself, allowing `os.RemoveAll()` to wipe an entire allowed tree. This affected both Linux and Windows.
+
+**Root cause:** `IsPathAllowed()` returned `true` for the root path via its equality check, and delete/move functions had no additional guard.
+
+**Fix:**
+- New `IsAllowedPathRoot()` method in `core/engine.go` — detects if a path resolves to an allowed-path root (handles symlinks, trailing slashes, dot components)
+- `DeleteFile()`, `SoftDeleteFile()`, `MoveFile()` in `core/file_operations.go` — reject allowed-path roots with `access denied` error
+- `validateOperations()` in `core/batch_operations.go` — blocks batch delete/move on allowed-path roots
+- Tests: `TestDeleteAllowedPathRootBlocked` and `TestDeleteAllowedPathRootVariations`
+
+### Changed — Split main.go into 10 files by responsibility
+
+The monolithic `main.go` (3574 lines) was split into focused files, all remaining in `package main`:
+
+| File | Lines | Responsibility |
+|------|-------|----------------|
+| `main.go` | ~250 | Config, CLI flags, `main()` |
+| `audit.go` | ~110 | `auditWrap`, `summarizeArgs` |
+| `format.go` | ~415 | Formatters, `parseSize`, `truncateContent` |
+| `help_content.go` | ~580 | `getHelpContent()` (static help text) |
+| `tools_core.go` | ~515 | `toolRegistry`, `registerTools`, read/write/edit_file |
+| `tools_search.go` | ~250 | list_directory, search_files, analyze_operation |
+| `tools_files.go` | ~255 | create_directory, delete/move/copy_file, get_file_info |
+| `tools_batch.go` | ~605 | multi_edit, batch_operations, backup |
+| `tools_platform.go` | ~455 | wsl, server_info |
+| `tools_aliases.go` | ~260 | 6 aliases, fs super-tool, help |
+
+Tool registration uses a `toolRegistry` struct shared across files.
+
+### Fixed
+- `bug23_test.go` — missing `dryRun` parameter in `MultiEdit` call (preexisting after v4.2.0 signature change)
+
+## [4.2.0] - 2026-04-02
 
 ### Added
-- **`help` tool** — standalone tool that returns the full 17-tool catalog with usage rules and best practices. Keyword-rich description ensures Claude Desktop's semantic search picks it up for any filesystem query.
+- **`help` tool** — standalone tool that returns the full tool catalog with usage rules and best practices. Keyword-rich description ensures Claude Desktop's semantic search picks it up for any filesystem query.
+- **`fs` super-tool** — single entry point dispatching to all 16 operations via `action` param. Solves lazy-loading clients that only discover 4-5 tools.
 - **`server.WithInstructions()`** — sends tool catalog during MCP initialize handshake (spec 2025-11-25 compliant).
-- **`/filesystem-ultra-tools` skill** — Claude Code skill (`.claude/skills/filesystem-ultra-tools/`) that calls `help` at conversation start and persists tool knowledge via `memory_user_edits`. Solves Claude Desktop's lazy tool loading problem.
-- **Tool title annotations** — all 17 tools have `WithTitleAnnotation()` for better client UI display (Read File, Edit File, Multi Edit, Backup & Restore, etc.).
+- **`/filesystem-ultra-tools` skill** — Claude Code skill (`.claude/skills/filesystem-ultra-tools/`) that calls `help` at conversation start.
+- **Tool title annotations** — all tools have `WithTitleAnnotation()` for better client UI display.
 - **Cross-reference descriptions** — every tool description mentions related tools so Claude Desktop learns about tools it hasn't loaded yet.
 - **`server.WithLogging()`** — MCP logging capability enabled.
+- **6 aliases** — `read_text_file`, `search`, `edit`, `write`, `create_file`, `directory_tree` with full parameter schemas.
+
+### Fixed (v4.2.0 hotfix — 4 bugs found in testing)
+- **dry_run:true wrote to disk** [CRITICAL] — `EditFile`/`MultiEdit` lacked `dryRun` parameter; edits were applied. Fixed: `dryRun bool` added, skips backup/hooks/write when true.
+- **case_sensitive:false ignored in search_files** — default was `false`, routing never activated `AdvancedTextSearch`. Fixed: default changed to `true`.
+- **batch rename returned 0 files** — `filepath.Walk` skipped root dir. Fixed: early return for root path.
+- **count_only ignored whole_word/case_sensitive** — `CountOccurrences` didn't accept these flags. Fixed: added params with `(?i)` and `\b` regex support.
 
 ### Changed
-- Tool descriptions shortened and unified with "Other tools: ..." cross-references for Claude Desktop discoverability.
+- Tool descriptions shortened and unified with "Related: ..." cross-references for Claude Desktop discoverability.
 
 ## [4.1.3] - 2026-03-17
 

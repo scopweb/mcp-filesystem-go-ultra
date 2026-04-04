@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra-Fast
 
-**v4.1.3** · Go · MCP 2025-11-25 · 17 tools
+**v4.2.1** · Go · MCP 2025-11-25 · 16 tools + 6 aliases + fs super-tool
 
 A high-performance [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go. Designed for use with Claude Desktop and Claude Code, with first-class support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -72,19 +72,19 @@ Add to your `claude_desktop_config.json`:
   }
 }
 ```
-Linux 
+Linux:
 ```json
 {
   "mcpServers": {
     "filesystem-ultra": {
-      "command": "/home/armi/Documentos/MCPs/clone/mcp-filesystem-go-ultra/filesystem-ultra",
+      "command": "/path/to/filesystem-ultra",
       "args": [
         "--compact-mode",
         "--cache-size", "200MB",
         "--parallel-ops", "8",
         "--log-level", "error",
-        "--log-dir", "/home/armi/.local/share/mcp-filesystem/logs",
-        "/home/armi/Documentos/MCPs/clone/"
+        "--log-dir", "/home/user/.local/share/mcp-filesystem/logs",
+        "/home/user/projects/"
       ]
     }
   }
@@ -115,14 +115,15 @@ The positional arguments after the flags are the allowed base paths. Omitting pa
 
 ## Tool Discovery
 
-Claude Desktop uses **lazy tool loading** — it only discovers ~5 tools per query via semantic search, missing most of the 17 available tools.
+Claude Desktop uses **lazy tool loading** — it only discovers ~5 tools per query via semantic search, missing most of the 16 available tools.
 
 Three layers solve this:
 
 | Layer | How it works | Client support |
 |-------|-------------|----------------|
 | **`/filesystem-ultra-tools` skill** | Claude Code skill that calls `help` on conversation start | Claude Code |
-| **`help` tool** | Keyword-rich description; returns full 17-tool catalog | Any MCP client |
+| **`help` tool** | Keyword-rich description; returns full 16-tool catalog | Any MCP client |
+| **`fs` super-tool** | Single entry point dispatching to all 16 operations via `action` param | Any MCP client |
 | **`server.WithInstructions()`** | Sends catalog during MCP initialize handshake | Spec-compliant clients |
 
 ### Using the skill
@@ -141,7 +142,7 @@ At the start of every conversation, do tool_search for "filesystem help" and the
 
 ---
 
-## Available Tools (17)
+## Available Tools (16 + 6 aliases + fs + help)
 
 ### Core (5)
 
@@ -255,7 +256,16 @@ When `--log-dir` is set on the MCP server, it writes:
 ## Architecture
 
 ```
-main.go                     Entry point — flag parsing, 16 MCP tool registrations, server startup
+main.go                     Entry point — config, CLI flags, server startup (~250 lines)
+audit.go                    auditWrap — request normalization + audit logging
+format.go                   Response formatters, parseSize, truncateContent, formatSize
+help_content.go             getHelpContent() — static help text for all topics
+tools_core.go               toolRegistry, registerTools, read_file/write_file/edit_file
+tools_search.go             list_directory, search_files, analyze_operation
+tools_files.go              create_directory, delete_file, move_file, copy_file, get_file_info
+tools_batch.go              multi_edit, batch_operations, backup
+tools_platform.go           wsl, server_info
+tools_aliases.go            6 aliases, fs super-tool, help tool
 core/
   engine.go                 UltraFastEngine — central struct, cache, worker pool, metrics
   edit_operations.go        EditFile, MultiEdit — backup, risk assessment, hooks
@@ -315,7 +325,9 @@ tests/
 
 ## Security
 
-- `isPathAllowed()` resolves symlinks via `filepath.EvalSymlinks()` before containment check — prevents symlink escape from allowed paths
+- `IsPathAllowed()` resolves symlinks via `filepath.EvalSymlinks()` before containment check — prevents symlink escape from allowed paths
+- **Allowed-path root protection** (v4.2.1) — `delete_file`, `soft_delete`, and `move_file` reject the `--allowed-paths` root itself, preventing `os.RemoveAll()` from wiping an entire tree
+- Strict parameter validation — unknown params rejected, types enforced (`core/param_validator.go`)
 - Temp files and backup IDs use `crypto/rand` (not timestamps)
 - Backup IDs are sanitized to `[a-zA-Z0-9_-]` to prevent path traversal
 - Temp files and backup metadata written with `0600` permissions
@@ -344,7 +356,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-Current release: **v4.1.3** — atomic multi_edit rollback, prevents file truncation.
+Current release: **v4.2.1** — allowed-path root protection, main.go split, dry_run fix.
 
 ---
 
