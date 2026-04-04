@@ -85,10 +85,15 @@ hooks.local.json
 # Claude Code agent artifacts
 .agent/
 .agents/
+.claude/settings.json
+.claude/settings.local.json
 .claude/skills/*
 !.claude/skills/filesystem-ultra-tools/
 .claude/worktrees/
 .mcp.json
+
+# Junk drawer (unused/legacy files)
+morralla/
 
 # Temporary project docs (not for repo)
 BUILD_SUCCESS.md
