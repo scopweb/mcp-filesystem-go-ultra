@@ -87,6 +87,7 @@ core/
   mmap.go                  # Memory-mapped file I/O (Windows fallback)
   config.go                # Performance thresholds and constants
   errors.go                # Custom error types (PathError, ValidationError, EditError, etc.)
+  param_validator.go       # Strict schema validation: unknown param rejection, type checking
 cache/
   intelligent.go           # 3-tier cache: BigCache (files) + go-cache (dirs) + go-cache (metadata)
 mcp/
@@ -119,12 +120,12 @@ Go version: 1.26.0
 ### Access Control
 ```go
 if len(e.config.AllowedPaths) > 0 {
-    if !e.isPathAllowed(path) {
+    if !e.IsPathAllowed(path) {
         return nil, &PathError{Op: "operation", Path: path, Err: fmt.Errorf("access denied")}
     }
 }
 ```
-`isPathAllowed()` resolves symlinks via `filepath.EvalSymlinks()` before checking containment. Empty AllowedPaths = no restrictions.
+`IsPathAllowed()` (exported) resolves symlinks via `filepath.EvalSymlinks()` before checking containment. Empty AllowedPaths = no restrictions. Batch operations also enforce this check via `validateOperations()`.
 
 ### Error Handling
 Custom error types in `core/errors.go`: `PathError`, `ValidationError`, `CacheError`, `EditError`, `ContextError`. Always wrap with `fmt.Errorf("context: %w", err)`.
@@ -345,7 +346,9 @@ When `--log-dir` is set, each completed step emits a separate audit entry with `
 
 - All temp files use `crypto/rand` for names (not predictable timestamps)
 - Backup IDs sanitized: only alphanumeric, `-`, `_` allowed
-- `isPathAllowed()` resolves symlinks before containment check
+- `IsPathAllowed()` resolves symlinks before containment check (exported for subsystem use)
+- Batch operations enforce `--allowed-paths` via `IsPathAllowed()` in `validateOperations()`
+- Strict parameter validation: unknown params rejected, types enforced (see `core/param_validator.go`)
 - `copyDirectory()` skips symlinks
 - Temp files and backup metadata use 0600 permissions
 - No `unsafe` package usage in production code
@@ -359,6 +362,7 @@ When `--log-dir` is set, each completed step emits a separate audit entry with `
 | Need | Tool | Parameters |
 |------|------|------------|
 | Read full file | `read_file` | `path` |
+| Read multiple files | `read_file` | `paths` (JSON array: `'["a.go","b.go"]'`) |
 | Read specific lines | `read_file` | `path`, `start_line`, `end_line` |
 | Read first/last N lines | `read_file` | `path`, `max_lines`, `mode` ("head" or "tail") |
 | Read binary as base64 | `read_file` | `path`, `encoding: "base64"` |
@@ -395,9 +399,11 @@ When `--log-dir` is set, each completed step emits a separate audit entry with `
 |------|------|------------|
 | List directory | `list_directory` | `path` |
 | File info | `get_file_info` | `path` |
+| File info (batch) | `get_file_info` | `paths` (JSON array: `'["a.go","dir/"]'`) |
 | Copy | `copy_file` | `source_path`, `dest_path` |
 | Move/rename | `move_file` | `source_path`, `dest_path` |
 | Delete (soft) | `delete_file` | `path` |
+| Delete multiple | `delete_file` | `paths` (JSON array: `'["a.txt","b.txt"]'`) |
 | Delete (permanent) | `delete_file` | `path`, `permanent: true` |
 | Create directory | `create_directory` | `path` |
 

@@ -59,7 +59,7 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 
 	// Check if path is allowed (access control)
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return nil, &PathError{Op: "edit", Path: path, Err: fmt.Errorf("access denied")}
 		}
 	}
@@ -295,7 +295,7 @@ func (e *UltraFastEngine) validatePath(path string) (string, error) {
 
 	// Enforce allowed paths if configured
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(abs) { // uses engine.go helper
+		if !e.IsPathAllowed(abs) { // uses engine.go helper
 			return "", fmt.Errorf("access denied: path '%s' not in allowed paths", abs)
 		}
 	}
@@ -951,7 +951,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 
 	// Check if path is allowed (access control)
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return nil, &PathError{Op: "multi_edit", Path: path, Err: fmt.Errorf("access denied")}
 		}
 	}

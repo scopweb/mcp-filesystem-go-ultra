@@ -1,24 +1,11 @@
 ---
 name: filesystem-ultra-tools
-description: Load and discover all 16 tools + 6 aliases + fs super-tool from the filesystem-ultra MCP server v4.2.0. Call this at the start of any conversation. Essential because MCP clients like Claude Desktop only discover 4-5 tools per semantic search — this loads the full catalog in one call.
+description: Load and discover all 16 tools + 6 aliases + fs super-tool from the filesystem-ultra MCP server v4.2.1. Call this at the start of any conversation. Essential because MCP clients like Claude Desktop only discover 4-5 tools per semantic search — this loads the full catalog in one call.
 ---
 
-# Filesystem Ultra v4.2.0 — Tool Discovery
+# Filesystem Ultra v4.2.1 — Tool Discovery
 
-## STEP 1: Persist in project memory (one-time)
-
-Check if `memory_user_edits` is available. If it is:
-
-1. Run `memory_user_edits view` to check if a filesystem-ultra entry already exists
-2. If **NOT present**, add it:
-
-```
-memory_user_edits add "FILESYSTEM-ULTRA MCP v4.2.0: 16 tools + 6 aliases + fs super-tool. SIEMPRE llamar filesystem-ultra:help() al inicio de conversación para descubrir el catálogo completo. Reglas: edit (alias edit_file) para modificar (NO write), multi_edit para múltiples edits, search (alias search_files) antes de leer. Aliases completos: read_text_file→read_file, search→search_files, edit→edit_file, write→write_file, create_file→write_file, directory_tree→list_directory. Super-tool fs(action, ...) disponible para clientes con lazy loading. Path de pruebas: /home/armi/Documentos/MCPs/clone/prueba"
-```
-
-3. If already present, **replace** it with the updated version above
-
-## STEP 2: Load tools now
+## Load tools
 
 Call directly — no tool_search needed:
 ```
@@ -40,7 +27,7 @@ Use the right tool for each task:
 - **Search then edit** → `search` → `read_text_file(start_line/end_line)` → `edit` (saves 98% tokens)
 - **Bulk operations** → `batch_operations` (batch, pipeline, rename)
 - **Undo edits** → `backup(action:"undo_last")` or `backup(action:"restore", backup_id:"...")`
-- **Dry-run analysis** → `analyze_operation`
+- **Dry-run preview** → `analyze_operation` or `edit_file(dry_run:true)` / `multi_edit(dry_run:true)`
 - **WSL sync** → `wsl`
 - **All ops via single tool** → `fs(action:"...", ...)` — for clients with limited tool loading
 
@@ -75,3 +62,9 @@ fs(action:"backup", backup_action:"undo_last")
 Valid actions: read_file, write_file, edit_file, multi_edit, list_directory, search_files, analyze_operation, create_directory, delete_file, move_file, copy_file, get_file_info, batch_operations, backup, wsl, server_info
 
 For backup/wsl/server_info, use `backup_action`, `wsl_action`, `server_action` params to avoid collision with the top-level `action` param.
+
+## Security notes (v4.2.1)
+
+- `--allowed-paths` roots are protected: `delete_file`, `soft_delete`, and `move_file` reject the root directory itself
+- All delete operations default to soft-delete (trash); use `permanent:true` for hard delete
+- `dry_run:true` on `edit_file` and `multi_edit` now correctly previews without writing to disk

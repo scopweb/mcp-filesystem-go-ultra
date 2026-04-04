@@ -26,10 +26,10 @@ func (e *UltraFastEngine) RenameFile(ctx context.Context, oldPath, newPath strin
 
 	// Check if both paths are allowed
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(oldPath) {
+		if !e.IsPathAllowed(oldPath) {
 			return fmt.Errorf("access denied: source path '%s' is not in allowed paths", oldPath)
 		}
-		if !e.isPathAllowed(newPath) {
+		if !e.IsPathAllowed(newPath) {
 			return fmt.Errorf("access denied: destination path '%s' is not in allowed paths", newPath)
 		}
 	}
@@ -80,8 +80,12 @@ func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) error
 
 	// Check if path is allowed
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
+		}
+		// Prevent soft-deletion of allowed-path roots (would move entire tree to trash)
+		if e.IsAllowedPathRoot(path) {
+			return fmt.Errorf("access denied: cannot delete allowed-path root '%s'", path)
 		}
 	}
 
@@ -194,7 +198,7 @@ func (e *UltraFastEngine) CreateDirectory(ctx context.Context, path string) erro
 
 	// Check if path is allowed
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
 		}
 	}
@@ -232,8 +236,12 @@ func (e *UltraFastEngine) DeleteFile(ctx context.Context, path string) error {
 
 	// Check if path is allowed
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
+		}
+		// Prevent deletion of allowed-path roots (would wipe entire tree via os.RemoveAll)
+		if e.IsAllowedPathRoot(path) {
+			return fmt.Errorf("access denied: cannot delete allowed-path root '%s'", path)
 		}
 	}
 
@@ -280,11 +288,15 @@ func (e *UltraFastEngine) MoveFile(ctx context.Context, sourcePath, destPath str
 
 	// Check if both paths are allowed
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(sourcePath) {
+		if !e.IsPathAllowed(sourcePath) {
 			return fmt.Errorf("access denied: source path '%s' is not in allowed paths", sourcePath)
 		}
-		if !e.isPathAllowed(destPath) {
+		if !e.IsPathAllowed(destPath) {
 			return fmt.Errorf("access denied: destination path '%s' is not in allowed paths", destPath)
+		}
+		// Prevent moving an allowed-path root (would remove the entire tree from its location)
+		if e.IsAllowedPathRoot(sourcePath) {
+			return fmt.Errorf("access denied: cannot move allowed-path root '%s'", sourcePath)
 		}
 	}
 
@@ -342,10 +354,10 @@ func (e *UltraFastEngine) CopyFile(ctx context.Context, sourcePath, destPath str
 
 	// Check if both paths are allowed
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(sourcePath) {
+		if !e.IsPathAllowed(sourcePath) {
 			return fmt.Errorf("access denied: source path '%s' is not in allowed paths", sourcePath)
 		}
-		if !e.isPathAllowed(destPath) {
+		if !e.IsPathAllowed(destPath) {
 			return fmt.Errorf("access denied: destination path '%s' is not in allowed paths", destPath)
 		}
 	}
@@ -483,7 +495,7 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 
 	// Validate path
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return "", fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
 		}
 	}
@@ -583,7 +595,7 @@ func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string,
 
 	// Check if path is allowed
 	if len(e.config.AllowedPaths) > 0 {
-		if !e.isPathAllowed(path) {
+		if !e.IsPathAllowed(path) {
 			return "", fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
 		}
 	}
