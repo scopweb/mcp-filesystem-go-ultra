@@ -490,7 +490,7 @@ func registerCoreTools(reg *toolRegistry) {
 		}
 
 		if engine.IsCompactMode() {
-			msg := fmt.Sprintf("OK: %d changes", result.ReplacementCount)
+			msg := fmt.Sprintf("OK: %d changes (+%d -%d) | %d lines", result.ReplacementCount, result.LinesAdded, result.LinesRemoved, result.TotalLines)
 			if result.BackupID != "" {
 				msg += fmt.Sprintf(" [backup:%s | UNDO: backup(action:\"restore\", backup_id:\"%s\")]", result.BackupID, result.BackupID)
 			}
@@ -499,8 +499,8 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			return mcp.NewToolResultText(msg), nil
 		}
-		msg := fmt.Sprintf("Successfully edited %s\nChanges: %d replacement(s)\nMatch confidence: %s\nLines affected: %d",
-			path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)
+		msg := fmt.Sprintf("Successfully edited %s\nChanges: %d replacement(s) (+%d -%d)\nMatch confidence: %s\nFile total lines: %d",
+			path, result.ReplacementCount, result.LinesAdded, result.LinesRemoved, result.MatchConfidence, result.TotalLines)
 		if result.BackupID != "" {
 			msg += fmt.Sprintf("\nBackup ID: %s\nUNDO: backup(action:\"restore\", backup_id:\"%s\")", result.BackupID, result.BackupID)
 		}
