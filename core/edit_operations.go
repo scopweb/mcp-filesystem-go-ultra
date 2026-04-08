@@ -20,6 +20,9 @@ type EditResult struct {
 	ReplacementCount int
 	MatchConfidence  string
 	LinesAffected    int
+	LinesAdded       int    // Lines added (+N in diff format)
+	LinesRemoved     int    // Lines removed (-M in diff format)
+	TotalLines       int    // Total lines in file after edit
 	BackupID         string // ID of backup created before edit
 	RiskWarning      string // Non-blocking risk warning for MEDIUM/HIGH (empty if LOW/none)
 }
@@ -191,6 +194,23 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 	// Auto-sync to Windows if enabled (async, non-blocking)
 	if e.autoSyncManager != nil {
 		_ = e.autoSyncManager.AfterEdit(path)
+	}
+
+	// Calculate diff stats: +added -removed lines (standard diff format)
+	originalLines := strings.Count(string(content), "\n") + 1
+	result.TotalLines = strings.Count(finalContent, "\n") + 1
+	oldTextLines := strings.Count(oldText, "\n") + 1
+	newTextLines := strings.Count(newText, "\n") + 1
+	result.LinesRemoved = oldTextLines * result.ReplacementCount
+	result.LinesAdded = newTextLines * result.ReplacementCount
+	// Sanity check: net change must match total line difference
+	if net := result.LinesAdded - result.LinesRemoved; net != result.TotalLines-originalLines {
+		// Fallback: derive from actual line counts (handles edge cases like whitespace normalization)
+		if result.TotalLines >= originalLines {
+			result.LinesAdded = result.TotalLines - originalLines + result.LinesRemoved
+		} else {
+			result.LinesRemoved = originalLines - result.TotalLines + result.LinesAdded
+		}
 	}
 
 	// Store backup ID in result
@@ -930,6 +950,9 @@ type MultiEditResult struct {
 	FailedEdits     int          `json:"failed_edits"`
 	SkippedEdits    int          `json:"skipped_edits"`
 	LinesAffected   int          `json:"lines_affected"`
+	LinesAdded      int          `json:"lines_added"`   // Lines added (+N in diff format)
+	LinesRemoved    int          `json:"lines_removed"`  // Lines removed (-M in diff format)
+	TotalLines      int          `json:"total_lines"`    // Total lines in file after edits
 	MatchConfidence string       `json:"match_confidence"`
 	Errors          []string     `json:"errors,omitempty"`
 	BackupID        string       `json:"backup_id,omitempty"`
@@ -1064,6 +1087,8 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 
 	currentContent := originalContent
 	totalLinesAffected := 0
+	totalLinesAdded := 0
+	totalLinesRemoved := 0
 
 	for i, edit := range edits {
 		detail := EditDetail{
@@ -1126,6 +1151,11 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		currentContent = editResult.ModifiedContent
 		result.SuccessfulEdits++
 		totalLinesAffected += editResult.LinesAffected
+		// Accumulate diff stats per edit
+		oldLines := strings.Count(edit.OldText, "\n") + 1
+		newLines := strings.Count(edit.NewText, "\n") + 1
+		totalLinesRemoved += oldLines * editResult.ReplacementCount
+		totalLinesAdded += newLines * editResult.ReplacementCount
 
 		if editResult.MatchConfidence == "low" && result.MatchConfidence == "high" {
 			result.MatchConfidence = "medium"
@@ -1134,6 +1164,9 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	}
 
 	result.LinesAffected = totalLinesAffected
+	result.LinesAdded = totalLinesAdded
+	result.LinesRemoved = totalLinesRemoved
+	result.TotalLines = strings.Count(currentContent, "\n") + 1
 
 	// If no edits succeeded and none were already_present, return error
 	if result.SuccessfulEdits == 0 && result.SkippedEdits == 0 {

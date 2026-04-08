@@ -168,12 +168,12 @@ func registerBatchTools(reg *toolRegistry) {
 			total := result.TotalEdits
 
 			if failed > 0 {
-				msg = fmt.Sprintf("OK: %d/%d edits, %d lines", applied+skipped, total, result.LinesAffected)
+				msg = fmt.Sprintf("OK: %d/%d edits (+%d -%d) | %d lines", applied+skipped, total, result.LinesAdded, result.LinesRemoved, result.TotalLines)
 			} else if skipped > 0 {
-				msg = fmt.Sprintf("OK: %d edits (%d applied, %d already present), %d lines",
-					total, applied, skipped, result.LinesAffected)
+				msg = fmt.Sprintf("OK: %d edits (%d applied, %d already present) (+%d -%d) | %d lines",
+					total, applied, skipped, result.LinesAdded, result.LinesRemoved, result.TotalLines)
 			} else {
-				msg = fmt.Sprintf("OK: %d edits, %d lines", applied, result.LinesAffected)
+				msg = fmt.Sprintf("OK: %d edits (+%d -%d) | %d lines", applied, result.LinesAdded, result.LinesRemoved, result.TotalLines)
 			}
 			if result.BackupID != "" {
 				msg += fmt.Sprintf(" [backup:%s | UNDO: backup(action:\"restore\", backup_id:\"%s\")]", result.BackupID, result.BackupID)
@@ -194,7 +194,8 @@ func registerBatchTools(reg *toolRegistry) {
 		if result.FailedEdits > 0 {
 			sb.WriteString(fmt.Sprintf("Failed: %d\n", result.FailedEdits))
 		}
-		sb.WriteString(fmt.Sprintf("Lines affected: %d\n", result.LinesAffected))
+		sb.WriteString(fmt.Sprintf("Changes: +%d -%d (lines added/removed)\n", result.LinesAdded, result.LinesRemoved))
+		sb.WriteString(fmt.Sprintf("File total lines: %d\n", result.TotalLines))
 		sb.WriteString(fmt.Sprintf("Confidence: %s\n", result.MatchConfidence))
 		if result.BackupID != "" {
 			sb.WriteString(fmt.Sprintf("Backup ID: %s\nUNDO: backup(action:\"restore\", backup_id:\"%s\")\n", result.BackupID, result.BackupID))
