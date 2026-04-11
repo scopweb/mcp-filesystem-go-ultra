@@ -1,6 +1,326 @@
 {
+  "_comment": "MCP Filesystem Ultra — Full hook configuration example (16 events). Copy to hooks.json and start server with --hooks-enabled --hooks-config=hooks.json",
   "hooks": {
     "pre-write": [
+      {
+        "pattern": "*.go",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gofmt -w",
+            "timeout": 10,
+            "failOnError": false,
+            "description": "Format Go files before writing",
+            "enabled": true
+          }
+        ]
+      },
+      {
+        "pattern": "*.js",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "prettier --write",
+            "timeout": 10,
+            "failOnError": false,
+            "description": "Format JavaScript files with prettier",
+            "enabled": false
+          }
+        ]
+      },
+      {
+        "pattern": "*.py",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "black",
+            "timeout": 10,
+            "failOnError": false,
+            "description": "Format Python files with black",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "post-write": [
+      {
+        "pattern": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo File written successfully",
+            "timeout": 5,
+            "failOnError": false,
+            "description": "Log file write",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "pre-edit": [
+      {
+        "pattern": "*.go",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "go vet",
+            "timeout": 30,
+            "failOnError": false,
+            "description": "Validate Go syntax before editing",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "post-edit": [
+      {
+        "pattern": "*.go",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "go build",
+            "timeout": 60,
+            "failOnError": false,
+            "description": "Verify Go files compile after edit",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "pre-delete": [
+      {
+        "_comment": "SECURITY: Block deletion of sensitive files. Set failOnError:true to enforce. Adjust the script path to your environment.",
+        "pattern": "*.env",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo BLOCKED: .env files are protected from deletion",
+            "timeout": 5,
+            "failOnError": true,
+            "description": "Block deletion of .env files",
+            "enabled": false
+          }
+        ]
+      },
+      {
+        "pattern": "*.pem",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo BLOCKED: PEM certificates are protected from deletion",
+            "timeout": 5,
+            "failOnError": true,
+            "description": "Block deletion of PEM certificate files",
+            "enabled": false
+          }
+        ]
+      },
+      {
+        "pattern": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo Pre-delete audit",
+            "timeout": 5,
+            "failOnError": false,
+            "description": "Audit log: record deletion intent",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "post-delete": [
+      {
+        "_comment": "Cleanup companion files or update audit logs after deletion.",
+        "pattern": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo Post-delete audit",
+            "timeout": 5,
+            "failOnError": false,
+            "description": "Audit log: record deletion completion",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "pre-move": [
+      {
+        "_comment": "SECURITY: Validate move destination before performing. Use scripts to enforce directory policies.",
+        "pattern": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo Pre-move validation",
+            "timeout": 5,
+            "failOnError": false,
+            "description": "Validate move operation (source/dest available in hook context)",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "post-move": [
+      {
+        "_comment": "Update import references or notify after a file is moved.",
+        "pattern": "*.go",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo Post-move: update import references",
+            "timeout": 30,
+            "failOnError": false,
+            "description": "Notify about moved Go file — update imports manually",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "pre-copy": [
+      {
+        "_comment": "SECURITY: Prevent copying sensitive files to insecure locations.",
+        "pattern": "*.key",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo BLOCKED: private key files cannot be copied",
+            "timeout": 5,
+            "failOnError": true,
+            "description": "Block copying of private key files",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "post-copy": [
+      {
+        "_comment": "Normalize permissions on copied sensitive files.",
+        "pattern": "*.pem",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo Post-copy: normalize permissions for PEM file",
+            "timeout": 5,
+            "failOnError": false,
+            "description": "Reminder to set 0600 permissions on copied PEM files",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "pre-create": [
+      {
+        "_comment": "Validate directory naming conventions before creation.",
+        "pattern": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo Pre-create directory validation",
+            "timeout": 5,
+            "failOnError": false,
+            "description": "Validate directory name conventions",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "post-create": [
+      {
+        "_comment": "Scaffold new directories with template files.",
+        "pattern": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo Post-create: scaffold templates",
+            "timeout": 10,
+            "failOnError": false,
+            "description": "Copy template files to newly created directory",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "pre-read": [
+      {
+        "_comment": "SECURITY: Deny read access to credential files. Set failOnError:true to enforce.",
+        "pattern": "*.env",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo BLOCKED: reading .env files is restricted",
+            "timeout": 5,
+            "failOnError": true,
+            "description": "Block reading of .env credential files",
+            "enabled": false
+          }
+        ]
+      },
+      {
+        "pattern": "*.key",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo BLOCKED: reading private key files is restricted",
+            "timeout": 5,
+            "failOnError": true,
+            "description": "Block reading of private key files",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "post-read": [
+      {
+        "_comment": "Compliance audit: log which files were read and when.",
+        "pattern": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo Post-read audit log",
+            "timeout": 5,
+            "failOnError": false,
+            "description": "Compliance: record file read events",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "pre-search": [
+      {
+        "_comment": "SECURITY: Block credential harvesting patterns in search. The pattern field matches the tool name (search_files), not the search query.",
+        "pattern": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo Pre-search audit",
+            "timeout": 5,
+            "failOnError": false,
+            "description": "Audit log: record search intent (pattern available in hook context metadata)",
+            "enabled": false
+          }
+        ]
+      }
+    ],
+    "post-search": [
+      {
+        "_comment": "Detect and audit sensitive search patterns for exfiltration monitoring.",
+        "pattern": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo Post-search audit",
+            "timeout": 5,
+            "failOnError": false,
+            "description": "Compliance: record search queries and match counts",
+            "enabled": false
+          }
+        ]
+      }
+    ]
+  }
+}
+
       {
         "pattern": "*.go",
         "hooks": [

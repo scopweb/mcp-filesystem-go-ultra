@@ -164,7 +164,7 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 	if config.MaxListItems == 0 {
 		config.MaxListItems = MaxListItems // 10000
 	}
-	
+
 	engine := &UltraFastEngine{
 		config:    config,
 		cache:     config.Cache,
@@ -539,6 +539,20 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 		}
 	}
 
+	// Execute pre-read hook
+	workingDir, _ := os.Getwd()
+	hookCtx := &HookContext{
+		Event:      HookPreRead,
+		ToolName:   "read_file",
+		FilePath:   path,
+		Operation:  "read",
+		Timestamp:  time.Now(),
+		WorkingDir: workingDir,
+	}
+	if _, err := e.hookManager.ExecuteHooks(ctx, HookPreRead, hookCtx); err != nil {
+		return "", fmt.Errorf("pre-read hook denied operation: %w", err)
+	}
+
 	// Try cache first
 	if cached, hit := e.cache.GetFile(path); hit {
 		if e.config.DebugMode {
@@ -579,6 +593,11 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 	// Cache the content and track access
 	e.cache.SetFile(path, result.content)
 	e.cache.TrackAccess(path)
+
+	// Execute post-read hook (best-effort)
+	hookCtx.Event = HookPostRead
+	hookCtx.Metadata = map[string]interface{}{"bytes": len(result.content)}
+	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostRead, hookCtx)
 
 	return string(result.content), nil
 }

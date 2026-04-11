@@ -54,6 +54,25 @@ func (e *UltraFastEngine) SmartSearch(ctx context.Context, request mcp.CallToolR
 		}, nil
 	}
 
+	// Execute pre-search hook
+	workingDir, _ := os.Getwd()
+	hookCtx := &HookContext{
+		Event:      HookPreSearch,
+		ToolName:   "search_files",
+		FilePath:   validPath,
+		Operation:  "search",
+		Timestamp:  time.Now(),
+		WorkingDir: workingDir,
+		Metadata:   map[string]interface{}{"pattern": pattern},
+	}
+	if _, err := e.hookManager.ExecuteHooks(ctx, HookPreSearch, hookCtx); err != nil {
+		return &mcp.CallToolResponse{
+			Content: []mcp.TextContent{
+				{Text: fmt.Sprintf("❌ Error: pre-search hook denied: %v", err)},
+			},
+		}, nil
+	}
+
 	results, err := e.performSmartSearch(ctx, validPath, pattern, includeContent, fileTypes)
 	if err != nil {
 		return &mcp.CallToolResponse{
@@ -62,6 +81,10 @@ func (e *UltraFastEngine) SmartSearch(ctx context.Context, request mcp.CallToolR
 			},
 		}, nil
 	}
+
+	// Execute post-search hook (best-effort)
+	hookCtx.Event = HookPostSearch
+	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostSearch, hookCtx)
 
 	return &mcp.CallToolResponse{
 		Content: []mcp.TextContent{
@@ -102,6 +125,25 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 		return &mcp.CallToolResponse{
 			Content: []mcp.TextContent{
 				{Text: fmt.Sprintf("❌ Error: %v", err)},
+			},
+		}, nil
+	}
+
+	// Execute pre-search hook
+	workingDir2, _ := os.Getwd()
+	hookCtx2 := &HookContext{
+		Event:      HookPreSearch,
+		ToolName:   "search_files",
+		FilePath:   validPath,
+		Operation:  "advanced_search",
+		Timestamp:  time.Now(),
+		WorkingDir: workingDir2,
+		Metadata:   map[string]interface{}{"pattern": pattern, "case_sensitive": caseSensitive, "whole_word": wholeWord},
+	}
+	if _, err := e.hookManager.ExecuteHooks(ctx, HookPreSearch, hookCtx2); err != nil {
+		return &mcp.CallToolResponse{
+			Content: []mcp.TextContent{
+				{Text: fmt.Sprintf("❌ Error: pre-search hook denied: %v", err)},
 			},
 		}, nil
 	}
@@ -187,6 +229,11 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 		}
 	}
 
+	// Execute post-search hook (best-effort)
+	hookCtx2.Event = HookPostSearch
+	hookCtx2.Metadata["match_count"] = len(matches)
+	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostSearch, hookCtx2)
+
 	return &mcp.CallToolResponse{
 		Content: []mcp.TextContent{
 			{Text: result.String()},
@@ -194,7 +241,7 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 	}, nil
 }
 
-// performSmartSearch implements intelligent search with parallelization
+// performSmartSearch
 func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern string, includeContent bool, fileTypes []string) (string, error) {
 	// Check context before starting
 	if err := ctx.Err(); err != nil {
@@ -321,7 +368,7 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 						match := SearchMatch{
 							File:       currentFile,
 							LineNumber: lineNum,
-							Line:       line,  // ✅ NO TrimSpace - mantener línea original
+							Line:       line, // ✅ NO TrimSpace - mantener línea original
 							MatchStart: matchStart,
 							MatchEnd:   matchEnd,
 						}
@@ -516,7 +563,7 @@ func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSe
 						match := SearchMatch{
 							File:       currentFile,
 							LineNumber: lineNum,
-							Line:       line,  // ✅ NO TrimSpace - mantener línea original
+							Line:       line, // ✅ NO TrimSpace - mantener línea original
 							MatchStart: matchStart,
 							MatchEnd:   matchEnd,
 						}
@@ -534,7 +581,7 @@ func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSe
 						match := SearchMatch{
 							File:       currentFile,
 							LineNumber: lineNum + 1,
-							Line:       line,  // ✅ NO TrimSpace - mantener línea original
+							Line:       line, // ✅ NO TrimSpace - mantener línea original
 							MatchStart: matchStart,
 							MatchEnd:   matchEnd,
 						}
@@ -640,12 +687,12 @@ var textExtensionsMap = map[string]bool{
 	".makefile": true, ".cmake": true,
 	".graphql": true, ".gql": true, ".proto": true,
 	".tf": true, ".tfvars": true, // Terraform
-	".hcl": true,                 // HashiCorp
+	".hcl": true,                                            // HashiCorp
 	".lua": true, ".vim": true, ".el": true, ".emacs": true, // Scripting
 	".r": true, ".rmd": true, // R
 	".dart": true, ".ex": true, ".exs": true, // Dart, Elixir
 	".zig": true, ".nim": true, ".v": true, // Modern languages
-	".pl": true,   // Perl
+	".pl":   true, // Perl
 	".lock": true, // Lock files (package-lock.json, yarn.lock, etc.)
 }
 
