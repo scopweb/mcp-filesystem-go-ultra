@@ -89,6 +89,7 @@ hooks.local.json
 .claude/settings.local.json
 .claude/skills/*
 !.claude/skills/filesystem-ultra-tools/
+.claude/commands/
 .claude/worktrees/
 .mcp.json
 
