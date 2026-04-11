@@ -1,5 +1,21 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased] - 2026-04-11
+
+### Security
+- Updated Go toolchain to **go1.26.2** (fixes 4 stdlib CVEs):
+  - **GO-2026-4947** — Unexpected work during chain building in `crypto/x509`
+  - **GO-2026-4946** — Inefficient policy validation in `crypto/x509`
+  - **GO-2026-4870** — Unauthenticated TLS 1.3 KeyUpdate causes DoS in `crypto/tls`
+  - **GO-2026-4866** — Case-sensitive `excludedSubtrees` name constraints auth bypass in `crypto/x509`
+
+### Dependencies
+- `github.com/mark3labs/mcp-go` v0.46.0 → **v0.47.1**
+- `golang.org/x/sys` v0.42.0 → **v0.43.0**
+- `go` directive updated: 1.26.1 → **1.26.2**
+
+---
+
 ## [4.2.1] - 2026-04-04
 
 ### Security Fix — Allowed-path root deletion protection
