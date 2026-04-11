@@ -52,7 +52,7 @@ A comprehensive security testing framework for Go library vulnerability detectio
 
 ```batch
 REM Run everything
-cd c:\MCPs\clone\mcp-filesystem-go-ultra
+cd mcp-filesystem-go-ultra
 scripts\security\run_all_security_tests.bat
 
 REM With options
