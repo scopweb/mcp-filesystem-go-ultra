@@ -58,7 +58,7 @@ func (e *UltraFastEngine) RenameFile(ctx context.Context, oldPath, newPath strin
 	// Invalidate cache entries for both paths
 	e.cache.InvalidateFile(oldPath)
 	e.cache.InvalidateFile(newPath)
-	
+
 	// Also invalidate parent directories
 	e.cache.InvalidateDirectory(filepath.Dir(oldPath))
 	e.cache.InvalidateDirectory(filepath.Dir(newPath))
@@ -92,6 +92,20 @@ func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) error
 	// Check if source exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return fmt.Errorf("file does not exist: %s", path)
+	}
+
+	// Execute pre-delete hook
+	workingDir, _ := os.Getwd()
+	hookCtx := &HookContext{
+		Event:      HookPreDelete,
+		ToolName:   "delete_file",
+		FilePath:   path,
+		Operation:  "soft_delete",
+		Timestamp:  time.Now(),
+		WorkingDir: workingDir,
+	}
+	if _, err := e.hookManager.ExecuteHooks(ctx, HookPreDelete, hookCtx); err != nil {
+		return fmt.Errorf("pre-delete hook denied operation: %w", err)
 	}
 
 	// Determine the root directory (where to create filesdelete folder)
@@ -165,6 +179,11 @@ func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) error
 	e.cache.InvalidateFile(path)
 	e.cache.InvalidateDirectory(filepath.Dir(path))
 
+	// Execute post-delete hook (best-effort)
+	hookCtx.Event = HookPostDelete
+	hookCtx.Metadata = map[string]interface{}{"dest_path": destPath}
+	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostDelete, hookCtx)
+
 	return nil
 }
 
@@ -211,6 +230,20 @@ func (e *UltraFastEngine) CreateDirectory(ctx context.Context, path string) erro
 		return fmt.Errorf("a file with that name already exists: %s", path)
 	}
 
+	// Execute pre-create hook
+	workingDir, _ := os.Getwd()
+	hookCtx := &HookContext{
+		Event:      HookPreCreate,
+		ToolName:   "create_directory",
+		FilePath:   path,
+		Operation:  "create_directory",
+		Timestamp:  time.Now(),
+		WorkingDir: workingDir,
+	}
+	if _, err := e.hookManager.ExecuteHooks(ctx, HookPreCreate, hookCtx); err != nil {
+		return fmt.Errorf("pre-create hook denied operation: %w", err)
+	}
+
 	// Create directory with all parent directories
 	if err := os.MkdirAll(path, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
@@ -218,6 +251,10 @@ func (e *UltraFastEngine) CreateDirectory(ctx context.Context, path string) erro
 
 	// Invalidate parent directory cache
 	e.cache.InvalidateDirectory(filepath.Dir(path))
+
+	// Execute post-create hook (best-effort)
+	hookCtx.Event = HookPostCreate
+	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostCreate, hookCtx)
 
 	return nil
 }
@@ -254,6 +291,21 @@ func (e *UltraFastEngine) DeleteFile(ctx context.Context, path string) error {
 		return fmt.Errorf("failed to stat file: %w", err)
 	}
 
+	// Execute pre-delete hook
+	workingDir, _ := os.Getwd()
+	hookCtx := &HookContext{
+		Event:      HookPreDelete,
+		ToolName:   "delete_file",
+		FilePath:   path,
+		Operation:  "delete",
+		Timestamp:  time.Now(),
+		WorkingDir: workingDir,
+		Metadata:   map[string]interface{}{"permanent": true},
+	}
+	if _, err := e.hookManager.ExecuteHooks(ctx, HookPreDelete, hookCtx); err != nil {
+		return fmt.Errorf("pre-delete hook denied operation: %w", err)
+	}
+
 	// Delete file or directory recursively
 	if info.IsDir() {
 		err = os.RemoveAll(path)
@@ -269,6 +321,10 @@ func (e *UltraFastEngine) DeleteFile(ctx context.Context, path string) error {
 	e.cache.InvalidateFile(path)
 	e.cache.InvalidateDirectory(path)
 	e.cache.InvalidateDirectory(filepath.Dir(path))
+
+	// Execute post-delete hook (best-effort)
+	hookCtx.Event = HookPostDelete
+	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostDelete, hookCtx)
 
 	return nil
 }
@@ -323,6 +379,22 @@ func (e *UltraFastEngine) MoveFile(ctx context.Context, sourcePath, destPath str
 		}
 	}
 
+	// Execute pre-move hook
+	workingDir, _ := os.Getwd()
+	hookCtx := &HookContext{
+		Event:      HookPreMove,
+		ToolName:   "move_file",
+		FilePath:   sourcePath,
+		Operation:  "move",
+		SourcePath: sourcePath,
+		DestPath:   destPath,
+		Timestamp:  time.Now(),
+		WorkingDir: workingDir,
+	}
+	if _, err := e.hookManager.ExecuteHooks(ctx, HookPreMove, hookCtx); err != nil {
+		return fmt.Errorf("pre-move hook denied operation: %w", err)
+	}
+
 	// Perform the move
 	if err := os.Rename(sourcePath, destPath); err != nil {
 		return fmt.Errorf("failed to move: %w", err)
@@ -335,6 +407,10 @@ func (e *UltraFastEngine) MoveFile(ctx context.Context, sourcePath, destPath str
 	e.cache.InvalidateDirectory(destPath)
 	e.cache.InvalidateDirectory(filepath.Dir(sourcePath))
 	e.cache.InvalidateDirectory(filepath.Dir(destPath))
+
+	// Execute post-move hook (best-effort)
+	hookCtx.Event = HookPostMove
+	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostMove, hookCtx)
 
 	return nil
 }
@@ -376,11 +452,39 @@ func (e *UltraFastEngine) CopyFile(ctx context.Context, sourcePath, destPath str
 		return fmt.Errorf("destination already exists: %s", destPath)
 	}
 
-	// Copy based on type
-	if sourceInfo.IsDir() {
-		return e.copyDirectory(sourcePath, destPath)
+	// Execute pre-copy hook
+	workingDir, _ := os.Getwd()
+	hookCtx := &HookContext{
+		Event:      HookPreCopy,
+		ToolName:   "copy_file",
+		FilePath:   sourcePath,
+		Operation:  "copy",
+		SourcePath: sourcePath,
+		DestPath:   destPath,
+		Timestamp:  time.Now(),
+		WorkingDir: workingDir,
+		Metadata:   map[string]interface{}{"is_dir": sourceInfo.IsDir()},
 	}
-	return e.copyFile(sourcePath, destPath)
+	if _, err := e.hookManager.ExecuteHooks(ctx, HookPreCopy, hookCtx); err != nil {
+		return fmt.Errorf("pre-copy hook denied operation: %w", err)
+	}
+
+	// Copy based on type
+	var copyErr error
+	if sourceInfo.IsDir() {
+		copyErr = e.copyDirectory(sourcePath, destPath)
+	} else {
+		copyErr = e.copyFile(sourcePath, destPath)
+	}
+	if copyErr != nil {
+		return copyErr
+	}
+
+	// Execute post-copy hook (best-effort)
+	hookCtx.Event = HookPostCopy
+	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostCopy, hookCtx)
+
+	return nil
 }
 
 // copyFile copies a single file using io.Copy for memory efficiency

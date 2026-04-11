@@ -9,6 +9,16 @@
   - **GO-2026-4870** — Unauthenticated TLS 1.3 KeyUpdate causes DoS in `crypto/tls`
   - **GO-2026-4866** — Case-sensitive `excludedSubtrees` name constraints auth bypass in `crypto/x509`
 
+### Added — Hook system: 12 events now fully connected (was 4)
+- **4 new hook event constants** in `core/hooks.go`: `HookPreRead`, `HookPostRead`, `HookPreSearch`, `HookPostSearch`
+- **`pre-delete` / `post-delete`** hooks connected in `DeleteFile()` and `SoftDeleteFile()` — `pre-delete` with `failOnError:true` can block destructive deletes of sensitive files (`.env`, `.pem`, `.key`)
+- **`pre-create` / `post-create`** hooks connected in `CreateDirectory()` — enables naming convention enforcement and directory scaffolding  
+- **`pre-move` / `post-move`** hooks connected in `MoveFile()` — `HookContext` includes `SourcePath` + `DestPath` for destination validation
+- **`pre-copy` / `post-copy`** hooks connected in `CopyFile()` — blocks copying sensitive files to insecure locations
+- **`pre-read` / `post-read`** hooks connected in `ReadFileContent()` — `pre-read` with `failOnError:true` can deny access to credential files; `post-read` enables compliance audit logging
+- **`pre-search` / `post-search`** hooks connected in `SmartSearch()` and `AdvancedTextSearch()` — search pattern available in `HookContext.Metadata` for credential-harvesting detection
+- **`examples/hooks.example.json`** fully updated: all 16 hook events documented with security use cases, `_comment` fields explaining each pattern
+
 ### Dependencies
 - `github.com/mark3labs/mcp-go` v0.46.0 → **v0.47.1**
 - `golang.org/x/sys` v0.42.0 → **v0.43.0**

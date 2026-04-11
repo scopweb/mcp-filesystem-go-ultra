@@ -17,18 +17,22 @@ type HookEvent string
 
 const (
 	// File operation hooks
-	HookPreWrite    HookEvent = "pre-write"    // Before writing a file
-	HookPostWrite   HookEvent = "post-write"   // After writing a file
-	HookPreEdit     HookEvent = "pre-edit"     // Before editing a file
-	HookPostEdit    HookEvent = "post-edit"    // After editing a file
-	HookPreDelete   HookEvent = "pre-delete"   // Before deleting a file
-	HookPostDelete  HookEvent = "post-delete"  // After deleting a file
-	HookPreCreate   HookEvent = "pre-create"   // Before creating a directory
-	HookPostCreate  HookEvent = "post-create"  // After creating a directory
-	HookPreMove     HookEvent = "pre-move"     // Before moving a file
-	HookPostMove    HookEvent = "post-move"    // After moving a file
-	HookPreCopy     HookEvent = "pre-copy"     // Before copying a file
-	HookPostCopy    HookEvent = "post-copy"    // After copying a file
+	HookPreWrite   HookEvent = "pre-write"   // Before writing a file
+	HookPostWrite  HookEvent = "post-write"  // After writing a file
+	HookPreEdit    HookEvent = "pre-edit"    // Before editing a file
+	HookPostEdit   HookEvent = "post-edit"   // After editing a file
+	HookPreDelete  HookEvent = "pre-delete"  // Before deleting a file
+	HookPostDelete HookEvent = "post-delete" // After deleting a file
+	HookPreCreate  HookEvent = "pre-create"  // Before creating a directory
+	HookPostCreate HookEvent = "post-create" // After creating a directory
+	HookPreMove    HookEvent = "pre-move"    // Before moving a file
+	HookPostMove   HookEvent = "post-move"   // After moving a file
+	HookPreCopy    HookEvent = "pre-copy"    // Before copying a file
+	HookPostCopy   HookEvent = "post-copy"   // After copying a file
+	HookPreRead    HookEvent = "pre-read"    // Before reading a file
+	HookPostRead   HookEvent = "post-read"   // After reading a file
+	HookPreSearch  HookEvent = "pre-search"  // Before searching files
+	HookPostSearch HookEvent = "post-search" // After searching files
 )
 
 // HookDecision represents the decision made by a hook
@@ -50,13 +54,13 @@ const (
 
 // Hook represents a single hook configuration
 type Hook struct {
-	Type        HookType `json:"type"`               // Type of hook (command or script)
-	Command     string   `json:"command"`            // Command to execute
-	Script      string   `json:"script,omitempty"`   // Script path (if type is script)
-	Timeout     int      `json:"timeout,omitempty"`  // Timeout in seconds (default: 60)
-	FailOnError bool     `json:"failOnError"`        // If true, operation fails if hook fails
-	Description string   `json:"description"`        // Human-readable description
-	Enabled     bool     `json:"enabled"`            // Whether this hook is enabled
+	Type        HookType `json:"type"`              // Type of hook (command or script)
+	Command     string   `json:"command"`           // Command to execute
+	Script      string   `json:"script,omitempty"`  // Script path (if type is script)
+	Timeout     int      `json:"timeout,omitempty"` // Timeout in seconds (default: 60)
+	FailOnError bool     `json:"failOnError"`       // If true, operation fails if hook fails
+	Description string   `json:"description"`       // Human-readable description
+	Enabled     bool     `json:"enabled"`           // Whether this hook is enabled
 }
 
 // HookMatcher represents a matcher for specific tools/operations
@@ -72,18 +76,18 @@ type HookConfig struct {
 
 // HookContext contains information passed to hooks
 type HookContext struct {
-	Event         HookEvent              `json:"event"`          // The hook event
-	ToolName      string                 `json:"tool_name"`      // Name of the tool being executed
-	FilePath      string                 `json:"file_path"`      // Path of the file being operated on
-	Operation     string                 `json:"operation"`      // Operation being performed
-	Content       string                 `json:"content,omitempty"` // File content (for write/edit)
-	OldContent    string                 `json:"old_content,omitempty"` // Previous content (for edit)
-	NewContent    string                 `json:"new_content,omitempty"` // New content (for edit)
-	SourcePath    string                 `json:"source_path,omitempty"` // Source path (for move/copy)
-	DestPath      string                 `json:"dest_path,omitempty"` // Destination path (for move/copy)
-	Timestamp     time.Time              `json:"timestamp"`      // Timestamp of the operation
-	WorkingDir    string                 `json:"working_dir"`    // Current working directory
-	Metadata      map[string]interface{} `json:"metadata,omitempty"` // Additional metadata
+	Event      HookEvent              `json:"event"`                 // The hook event
+	ToolName   string                 `json:"tool_name"`             // Name of the tool being executed
+	FilePath   string                 `json:"file_path"`             // Path of the file being operated on
+	Operation  string                 `json:"operation"`             // Operation being performed
+	Content    string                 `json:"content,omitempty"`     // File content (for write/edit)
+	OldContent string                 `json:"old_content,omitempty"` // Previous content (for edit)
+	NewContent string                 `json:"new_content,omitempty"` // New content (for edit)
+	SourcePath string                 `json:"source_path,omitempty"` // Source path (for move/copy)
+	DestPath   string                 `json:"dest_path,omitempty"`   // Destination path (for move/copy)
+	Timestamp  time.Time              `json:"timestamp"`             // Timestamp of the operation
+	WorkingDir string                 `json:"working_dir"`           // Current working directory
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`    // Additional metadata
 }
 
 // HookResult represents the result of a hook execution
