@@ -114,4 +114,4 @@ borrar/
 filesystem-ultra.exe___
 
 # docs-website (separate git repo)
-docs-website/
+docs-website/.claude/commands/
