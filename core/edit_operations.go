@@ -60,11 +60,9 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 		return nil, fmt.Errorf("operation cancelled: %w", err)
 	}
 
-	// Check if path is allowed (access control)
-	if len(e.config.AllowedPaths) > 0 {
-		if !e.IsPathAllowed(path) {
-			return nil, &PathError{Op: "edit", Path: path, Err: fmt.Errorf("access denied")}
-		}
+	// Check if path is allowed (security + access control)
+	if !e.IsPathAllowed(path) {
+		return nil, &PathError{Op: "edit", Path: path, Err: fmt.Errorf("access denied")}
 	}
 
 	// Validate file
@@ -313,11 +311,9 @@ func (e *UltraFastEngine) validatePath(path string) (string, error) {
 		return "", fmt.Errorf("invalid path: %w", err)
 	}
 
-	// Enforce allowed paths if configured
-	if len(e.config.AllowedPaths) > 0 {
-		if !e.IsPathAllowed(abs) { // uses engine.go helper
-			return "", fmt.Errorf("access denied: path '%s' not in allowed paths", abs)
-		}
+	// Enforce allowed paths if configured (security + access control)
+	if !e.IsPathAllowed(abs) {
+		return "", fmt.Errorf("access denied: path '%s' not in allowed paths", abs)
 	}
 	return abs, nil
 }
@@ -951,8 +947,8 @@ type MultiEditResult struct {
 	SkippedEdits    int          `json:"skipped_edits"`
 	LinesAffected   int          `json:"lines_affected"`
 	LinesAdded      int          `json:"lines_added"`   // Lines added (+N in diff format)
-	LinesRemoved    int          `json:"lines_removed"`  // Lines removed (-M in diff format)
-	TotalLines      int          `json:"total_lines"`    // Total lines in file after edits
+	LinesRemoved    int          `json:"lines_removed"` // Lines removed (-M in diff format)
+	TotalLines      int          `json:"total_lines"`   // Total lines in file after edits
 	MatchConfidence string       `json:"match_confidence"`
 	Errors          []string     `json:"errors,omitempty"`
 	BackupID        string       `json:"backup_id,omitempty"`
@@ -972,11 +968,9 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
-	// Check if path is allowed (access control)
-	if len(e.config.AllowedPaths) > 0 {
-		if !e.IsPathAllowed(path) {
-			return nil, &PathError{Op: "multi_edit", Path: path, Err: fmt.Errorf("access denied")}
-		}
+	// Check if path is allowed (security + access control)
+	if !e.IsPathAllowed(path) {
+		return nil, &PathError{Op: "multi_edit", Path: path, Err: fmt.Errorf("access denied")}
 	}
 
 	// Validate file

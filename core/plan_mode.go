@@ -12,16 +12,16 @@ import (
 // ChangeAnalysis represents the analysis of a proposed change
 type ChangeAnalysis struct {
 	FilePath          string                 `json:"file_path"`
-	OperationType     string                 `json:"operation_type"`      // write, edit, delete, move, copy
+	OperationType     string                 `json:"operation_type"` // write, edit, delete, move, copy
 	LinesAdded        int                    `json:"lines_added"`
 	LinesRemoved      int                    `json:"lines_removed"`
 	LinesModified     int                    `json:"lines_modified"`
 	CharactersChanged int                    `json:"characters_changed"`
-	RiskLevel         string                 `json:"risk_level"`          // low, medium, high, critical
+	RiskLevel         string                 `json:"risk_level"` // low, medium, high, critical
 	RiskFactors       []string               `json:"risk_factors"`
 	Suggestions       []string               `json:"suggestions"`
-	Preview           string                 `json:"preview"`             // Diff preview
-	Impact            string                 `json:"impact"`              // Human-readable impact description
+	Preview           string                 `json:"preview"` // Diff preview
+	Impact            string                 `json:"impact"`  // Human-readable impact description
 	FileExists        bool                   `json:"file_exists"`
 	FileSize          int64                  `json:"file_size"`
 	WouldCreateBackup bool                   `json:"would_create_backup"`
@@ -31,16 +31,16 @@ type ChangeAnalysis struct {
 
 // BatchChangeAnalysis represents analysis of multiple changes
 type BatchChangeAnalysis struct {
-	TotalChanges      int                `json:"total_changes"`
-	TotalRisk         string             `json:"total_risk"`
-	Changes           []*ChangeAnalysis  `json:"changes"`
-	Summary           string             `json:"summary"`
-	Recommendations   []string           `json:"recommendations"`
-	TotalLinesAdded   int                `json:"total_lines_added"`
-	TotalLinesRemoved int                `json:"total_lines_removed"`
+	TotalChanges       int               `json:"total_changes"`
+	TotalRisk          string            `json:"total_risk"`
+	Changes            []*ChangeAnalysis `json:"changes"`
+	Summary            string            `json:"summary"`
+	Recommendations    []string          `json:"recommendations"`
+	TotalLinesAdded    int               `json:"total_lines_added"`
+	TotalLinesRemoved  int               `json:"total_lines_removed"`
 	TotalFilesAffected int               `json:"total_files_affected"`
-	EstimatedDuration string             `json:"estimated_duration"`
-	Timestamp         time.Time          `json:"timestamp"`
+	EstimatedDuration  string            `json:"estimated_duration"`
+	Timestamp          time.Time         `json:"timestamp"`
 }
 
 // AnalyzeWriteChange analyzes a proposed write operation without executing it
@@ -254,9 +254,9 @@ func (e *UltraFastEngine) AnalyzeDeleteChange(ctx context.Context, path string) 
 // AnalyzeBatchChanges analyzes multiple changes at once
 func (e *UltraFastEngine) AnalyzeBatchChanges(ctx context.Context, changes []map[string]interface{}) (*BatchChangeAnalysis, error) {
 	batch := &BatchChangeAnalysis{
-		Changes:       make([]*ChangeAnalysis, 0),
+		Changes:         make([]*ChangeAnalysis, 0),
 		Recommendations: []string{},
-		Timestamp:     time.Now(),
+		Timestamp:       time.Now(),
 	}
 
 	// Analyze each change
@@ -478,14 +478,12 @@ func (e *UltraFastEngine) CompareFiles(ctx context.Context, pathA, pathB string)
 	pathA = NormalizePath(pathA)
 	pathB = NormalizePath(pathB)
 
-	// Access control
-	if len(e.config.AllowedPaths) > 0 {
-		if !e.IsPathAllowed(pathA) {
-			return nil, &PathError{Op: "compare", Path: pathA, Err: fmt.Errorf("access denied")}
-		}
-		if !e.IsPathAllowed(pathB) {
-			return nil, &PathError{Op: "compare", Path: pathB, Err: fmt.Errorf("access denied")}
-		}
+	// Access control (security + access control)
+	if !e.IsPathAllowed(pathA) {
+		return nil, &PathError{Op: "compare", Path: pathA, Err: fmt.Errorf("access denied")}
+	}
+	if !e.IsPathAllowed(pathB) {
+		return nil, &PathError{Op: "compare", Path: pathB, Err: fmt.Errorf("access denied")}
 	}
 
 	// Read both files
@@ -528,12 +526,12 @@ func (e *UltraFastEngine) CompareFiles(ctx context.Context, pathA, pathB string)
 		FileExists:    true,
 		FileSize:      int64(len(contentA)),
 		Metadata: map[string]interface{}{
-			"path_a":        pathA,
-			"path_b":        pathB,
-			"size_a":        len(contentA),
-			"size_b":        len(contentB),
-			"lines_a":       len(linesA),
-			"lines_b":       len(linesB),
+			"path_a":          pathA,
+			"path_b":          pathB,
+			"size_a":          len(contentA),
+			"size_b":          len(contentB),
+			"lines_a":         len(linesA),
+			"lines_b":         len(linesB),
 			"lines_different": diffCount,
 		},
 	}
