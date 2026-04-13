@@ -84,34 +84,54 @@ func registerCoreTools(reg *toolRegistry) {
 	)
 	reg.readFileHandler = auditWrap(engine, "read_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Batch mode: read multiple files in one call
+		// Note: If BOTH path AND paths are provided, AND range params are set,
+		// we prioritize path+range over paths (batch) to avoid confusion.
+		var paths []string
+		var usePathRange bool
+
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if pathsJSON, ok := args["paths"].(string); ok && pathsJSON != "" {
-				var paths []string
 				if err := json.Unmarshal([]byte(pathsJSON), &paths); err != nil {
 					return mcp.NewToolResultError(fmt.Sprintf("Invalid paths JSON: %v", err)), nil
 				}
-				if len(paths) == 0 {
-					return mcp.NewToolResultError("paths array is empty"), nil
+			}
+
+			// Check if we should use path+range instead of paths (batch)
+			// If both path AND paths are provided, AND start_line/end_line are set,
+			// use path with range to avoid ambiguous behavior
+			if pathStr, ok := args["path"].(string); ok && pathStr != "" {
+				if sl, ok := args["start_line"].(float64); ok && sl > 0 {
+					if el, ok := args["end_line"].(float64); ok && el > 0 {
+						// Both path and paths provided with range — use path with range
+						usePathRange = true
+					}
 				}
-				var results strings.Builder
-				for i, p := range paths {
-					p = core.NormalizePath(p)
-					content, err := engine.ReadFileContent(ctx, p)
-					if i > 0 {
+			}
+		}
+
+		// If paths is set and we should NOT use path+range, process batch
+		if len(paths) > 0 && !usePathRange {
+			if len(paths) == 0 {
+				return mcp.NewToolResultError("paths array is empty"), nil
+			}
+			var results strings.Builder
+			for i, p := range paths {
+				p = core.NormalizePath(p)
+				content, err := engine.ReadFileContent(ctx, p)
+				if i > 0 {
+					results.WriteString("\n")
+				}
+				results.WriteString(fmt.Sprintf("=== %s ===\n", p))
+				if err != nil {
+					results.WriteString(fmt.Sprintf("ERROR: %v\n", err))
+				} else {
+					results.WriteString(content)
+					if !strings.HasSuffix(content, "\n") {
 						results.WriteString("\n")
 					}
-					results.WriteString(fmt.Sprintf("=== %s ===\n", p))
-					if err != nil {
-						results.WriteString(fmt.Sprintf("ERROR: %v\n", err))
-					} else {
-						results.WriteString(content)
-						if !strings.HasSuffix(content, "\n") {
-							results.WriteString("\n")
-						}
-					}
 				}
-				return mcp.NewToolResultText(results.String()), nil
 			}
+			return mcp.NewToolResultText(results.String()), nil
 		}
 
 		path, err := request.RequireString("path")

@@ -532,11 +532,9 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 	start := time.Now()
 	defer e.releaseOperation("read", start)
 
-	// Check if path is allowed
-	if len(e.config.AllowedPaths) > 0 {
-		if !e.IsPathAllowed(path) {
-			return "", &PathError{Op: "read", Path: path, Err: fmt.Errorf("access denied")}
-		}
+	// Check if path is allowed (security + access control)
+	if !e.IsPathAllowed(path) {
+		return "", &PathError{Op: "read", Path: path, Err: fmt.Errorf("access denied")}
 	}
 
 	// Execute pre-read hook
@@ -620,11 +618,9 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 	start := time.Now()
 	defer e.releaseOperation("write", start)
 
-	// Check if path is allowed
-	if len(e.config.AllowedPaths) > 0 {
-		if !e.IsPathAllowed(path) {
-			return &PathError{Op: "write", Path: path, Err: fmt.Errorf("access denied")}
-		}
+	// Check if path is allowed (security + access control)
+	if !e.IsPathAllowed(path) {
+		return &PathError{Op: "write", Path: path, Err: fmt.Errorf("access denied")}
 	}
 
 	// Check context before proceeding with write
@@ -717,11 +713,9 @@ func (e *UltraFastEngine) WriteFileBytes(ctx context.Context, path string, data 
 	start := time.Now()
 	defer e.releaseOperation("write", start)
 
-	// Check if path is allowed
-	if len(e.config.AllowedPaths) > 0 {
-		if !e.IsPathAllowed(path) {
-			return &PathError{Op: "write_bytes", Path: path, Err: fmt.Errorf("access denied")}
-		}
+	// Check if path is allowed (security + access control)
+	if !e.IsPathAllowed(path) {
+		return &PathError{Op: "write_bytes", Path: path, Err: fmt.Errorf("access denied")}
 	}
 
 	// Check context before proceeding with write
@@ -786,11 +780,9 @@ func (e *UltraFastEngine) ReadFileBytes(ctx context.Context, path string) ([]byt
 	start := time.Now()
 	defer e.releaseOperation("read", start)
 
-	// Check if path is allowed
-	if len(e.config.AllowedPaths) > 0 {
-		if !e.IsPathAllowed(path) {
-			return nil, &PathError{Op: "read_bytes", Path: path, Err: fmt.Errorf("access denied")}
-		}
+	// Check if path is allowed (security + access control)
+	if !e.IsPathAllowed(path) {
+		return nil, &PathError{Op: "read_bytes", Path: path, Err: fmt.Errorf("access denied")}
 	}
 
 	// Check file info
@@ -854,11 +846,9 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 	start := time.Now()
 	defer e.releaseOperation("list", start)
 
-	// Check if path is allowed
-	if len(e.config.AllowedPaths) > 0 {
-		if !e.IsPathAllowed(path) {
-			return "", fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
-		}
+	// Check if path is allowed (security + access control)
+	if !e.IsPathAllowed(path) {
+		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
 	}
 
 	// Stat the directory once; used both for existence check and mtime validation.
@@ -995,15 +985,25 @@ Search Operations: %d`,
 // IsPathAllowed checks if the given path is within one of the allowed base paths.
 // It resolves symlinks to prevent sandbox escape via symlink following.
 // Exported so that BatchOperationManager and other subsystems can enforce access control.
+//
+// Security checks (NTFS ADS, Unicode control chars, Windows reserved names) are ALWAYS
+// applied, even when --allowed-paths is not configured (open-access mode).
+// The WSL blanket bypass has been removed: WSL paths must be explicitly included in
+// --allowed-paths when access control is active.
 func (e *UltraFastEngine) IsPathAllowed(path string) bool {
-	// WSL paths (\\wsl.localhost\..., \\wsl$\...) are always allowed —
-	// they are local virtual machines, not external network shares
-	lowerPath := strings.ToLower(filepath.Clean(path))
-	if strings.HasPrefix(lowerPath, `\\wsl.localhost\`) || strings.HasPrefix(lowerPath, `\\wsl$\`) {
+	// 1. Security-first: reject dangerous path patterns regardless of AllowedPaths config.
+	if err := validatePathSecurity(path); err != nil {
+		slog.Debug("Path rejected by security check", "path", path, "reason", err.Error())
+		return false
+	}
+
+	// 2. When AllowedPaths is not configured, open-access mode — security checks above
+	//    still apply, but containment is not enforced.
+	if len(e.config.AllowedPaths) == 0 {
 		return true
 	}
 
-	// Re-resolve if AllowedPaths changed at runtime (e.g., tests append paths after init)
+	// 3. Re-resolve if AllowedPaths changed at runtime (e.g., tests append paths after init)
 	if len(e.resolvedAllowedPaths) != len(e.config.AllowedPaths) {
 		e.resolveAllowedPaths()
 	}
@@ -1254,10 +1254,8 @@ func (e *UltraFastEngine) ListDirectoryTree(ctx context.Context, path string, ma
 	start := time.Now()
 	defer e.releaseOperation("tree", start)
 
-	if len(e.config.AllowedPaths) > 0 {
-		if !e.IsPathAllowed(path) {
-			return "", fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
-		}
+	if !e.IsPathAllowed(path) {
+		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
 	}
 
 	type TreeNode struct {

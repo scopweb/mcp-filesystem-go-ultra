@@ -60,11 +60,9 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 		return fmt.Errorf("operation cancelled: %w", err)
 	}
 
-	// Check if path is allowed (access control) - must check before any write path
-	if len(e.config.AllowedPaths) > 0 {
-		if !e.IsPathAllowed(path) {
-			return &PathError{Op: "streaming_write", Path: path, Err: fmt.Errorf("access denied")}
-		}
+	// Check if path is allowed (security + access control)
+	if !e.IsPathAllowed(path) {
+		return &PathError{Op: "streaming_write", Path: path, Err: fmt.Errorf("access denied")}
 	}
 
 	// Quick path for small files - use MediumFileThreshold for cutoff

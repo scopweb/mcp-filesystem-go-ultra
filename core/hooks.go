@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -321,14 +322,18 @@ func (hm *HookManager) executeHook(ctx context.Context, hook *Hook, hookCtx *Hoo
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Prepare command
+	// Prepare command — cross-platform shell dispatch
 	var cmd *exec.Cmd
 	if hook.Type == HookTypeScript {
-		// Execute script file
+		// Execute script file directly
 		cmd = exec.CommandContext(execCtx, hook.Script)
 	} else {
-		// Execute shell command
-		cmd = exec.CommandContext(execCtx, "cmd", "/C", hook.Command)
+		// Execute shell command: use cmd.exe on Windows, sh on Linux/macOS
+		if runtime.GOOS == "windows" {
+			cmd = exec.CommandContext(execCtx, "cmd", "/C", hook.Command)
+		} else {
+			cmd = exec.CommandContext(execCtx, "sh", "-c", hook.Command)
+		}
 	}
 
 	// Set working directory

@@ -2,6 +2,32 @@
 
 ## [Unreleased] - 2026-04-11
 
+### Security — AI-era attack surface hardening (5 vectors mitigated)
+
+#### 1. Path Security Layer — new `core/path_security.go`
+Universal validation applied to **every path operation** regardless of `--allowed-paths` configuration.
+
+- **NTFS Alternate Data Streams (ADS)**: Paths containing `:` after the drive letter are rejected (e.g. `C:\file.txt:hidden_stream`). Prevents hidden covert channels invisible to `list_directory` and OS file managers. (Windows-only check via `runtime.GOOS`.)
+- **Unicode directional overrides and zero-width characters**: 18 dangerous code points blocked including `U+202E` (RIGHT-TO-LEFT OVERRIDE — RTLO extension spoofing), `U+200B` (ZERO WIDTH SPACE — hook pattern evasion), `U+202D/202E/202A/202B` (bidirectional embeddings), `U+FEFF` (BOM), `U+2028/2029` (line/paragraph separators). Entire Unicode `Cf` (Format) category also blocked.
+- **Windows reserved device names**: `CON`, `PRN`, `AUX`, `NUL`, `COM0-9`, `LPT0-9` rejected by base name (case-insensitive, extension-stripped). Prevents DoS via `os.ReadFile("CON")` freezing the process waiting for stdin. Check applied cross-platform for portability.
+
+#### 2. WSL Blanket Bypass Removed — `core/engine.go` `IsPathAllowed()`
+Previously, any path starting with `\\wsl.localhost\` or `\\wsl$\` **unconditionally bypassed** `--allowed-paths` access control:
+```
+# Before: this worked regardless of --allowed-paths
+read_file(path="\\wsl.localhost\Ubuntu\etc\passwd")   → ALLOWED (bypass)
+write_file(path="\\wsl.localhost\Ubuntu\etc\cron.d\x") → ALLOWED (bypass)
+```
+WSL paths now follow the same containment check as all other paths when `--allowed-paths` is configured. When no `--allowed-paths` is set (open-access mode), WSL paths continue to be accessible.
+
+#### 3. `IsPathAllowed()` refactored — security checks always run
+`validatePathSecurity()` is called first in `IsPathAllowed()` before any containment check. Security checks (ADS, Unicode, reserved names) fire even in open-access mode (no `--allowed-paths`). The outer `if len(AllowedPaths) > 0` guards have been removed from all 20 call sites — `IsPathAllowed()` now returns `true` when AllowedPaths is empty (after passing security checks), making the method always safe to call.
+
+#### 4. Hook system: cross-platform command execution — `core/hooks.go`
+Hook commands of type `command` previously used `cmd /C` unconditionally, causing hooks to silently fail on Linux and macOS. Fixed with OS detection:
+- Windows: `cmd /C <command>`
+- Linux/macOS: `sh -c <command>`
+
 ### Security
 - Updated Go toolchain to **go1.26.2** (fixes 4 stdlib CVEs):
   - **GO-2026-4947** — Unexpected work during chain building in `crypto/x509`
@@ -23,6 +49,15 @@
 - `github.com/mark3labs/mcp-go` v0.46.0 → **v0.47.1**
 - `golang.org/x/sys` v0.42.0 → **v0.43.0**
 - `go` directive updated: 1.26.1 → **1.26.2**
+
+### Fixed — `read_file\` with \`path\`+\`paths\`+range ignored range
+When calling \`read_file\` with both \`path\` and \`paths\` parameters AND \`start_line\`/\`end_line\` range parameters, the \`paths\` array was processed first, ignoring the range and returning full file content (or potentially truncating in edge cases).
+
+**Fix in \`tools_core.go\`**: Added logic to detect when both \`path\` and \`paths\` are provided with range parameters. In this case, \`path\`+range takes precedence over \`paths\`.
+
+**Reproducción**: \`read_file(path=\"f.cs\", paths='[\"f.cs\"]', start_line=40, end_line=50)\`
+
+**Issue**: [scopweb/mcp-filesystem-go-ultra#8](https://github.com/scopweb/mcp-filesystem-go-ultra/issues/8)
 
 ---
 
