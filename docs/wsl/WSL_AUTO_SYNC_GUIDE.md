@@ -414,14 +414,14 @@ done
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Status: ✅ ENABLED
 Environment: WSL
-Windows User: scopweb
+Windows User: <your-username>
 
 ⚙️  Configuration:
   Sync on Write: true
   Sync on Edit: true
   Sync on Delete: false
 
-📄 Config File: /home/scopweb/.config/mcp-filesystem-ultra/autosync.json
+📄 Config File: /home/<your-username>/.config/mcp-filesystem-ultra/autosync.json
 ```
 
 ### **Ver Logs de Sincronización**
