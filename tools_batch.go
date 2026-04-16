@@ -209,6 +209,8 @@ func registerBatchTools(reg *toolRegistry) {
 					sb.WriteString(fmt.Sprintf("  edit %d: applied (confidence: %s)\n", detail.Index+1, detail.MatchConfidence))
 				case core.EditStatusAlreadyPresent:
 					sb.WriteString(fmt.Sprintf("  edit %d: already present (subsumed by prior edit)\n", detail.Index+1))
+				case core.EditStatusAmbiguous:
+					sb.WriteString(fmt.Sprintf("  edit %d: AMBIGUOUS — old_text not in original but new_text present\n", detail.Index+1))
 				case core.EditStatusFailed:
 					sb.WriteString(fmt.Sprintf("  edit %d: FAILED - %s\n", detail.Index+1, detail.Error))
 				}

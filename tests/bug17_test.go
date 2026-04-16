@@ -320,8 +320,12 @@ func TestBug17_BackwardCompatibility(t *testing.T) {
 func TestBug17_AllAlreadyPresent(t *testing.T) {
 	engine, tempDir := setupBug16Engine(t)
 
-	// File already has the "after" state — oldText absent, newText present
-	content := "modified1\nline2\nmodified3\n"
+	// File has original content — both oldText values ARE in the original file.
+	// Edit 1: "original1" → "modified1"  (will apply)
+	// Edit 2: "modified1" → "final1"     (already present because edit 1 just changed it)
+	// This tests that prior edits in the same batch correctly mark subsequent
+	// edits with the same newText as "already present" (not ambiguous).
+	content := "original1\noriginal2\noriginal3\noriginal4\n"
 	testFile := filepath.Join(tempDir, "all_present.txt")
 	os.WriteFile(testFile, []byte(content), 0644)
 
@@ -332,20 +336,55 @@ func TestBug17_AllAlreadyPresent(t *testing.T) {
 
 	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false)
 	if err != nil {
-		t.Fatalf("All-already-present should succeed: %v", err)
+		t.Fatalf("MultiEdit should succeed: %v", err)
 	}
 
-	if result.SkippedEdits != 2 {
-		t.Errorf("SkippedEdits: got %d, want 2", result.SkippedEdits)
-	}
-	if result.SuccessfulEdits != 0 {
-		t.Errorf("SuccessfulEdits: got %d, want 0 (nothing was applied)", result.SuccessfulEdits)
+	if result.SuccessfulEdits != 2 {
+		t.Errorf("SuccessfulEdits: got %d, want 2", result.SuccessfulEdits)
 	}
 	if result.FailedEdits != 0 {
 		t.Errorf("FailedEdits: got %d, want 0", result.FailedEdits)
 	}
+	if result.SkippedEdits != 0 {
+		t.Errorf("SkippedEdits: got %d, want 0 (no edits are subsumed in this case)", result.SkippedEdits)
+	}
+}
 
-	// File should be unchanged (no write occurred)
+// TestBug17_AmbiguousOldTextNotInOriginal verifies that when old_text is not in
+// the original file but new_text IS present, the edit is marked as ambiguous (Bug #27 fix).
+// This is NOT the same as "already present" — old_text was never in the file.
+func TestBug17_AmbiguousOldTextNotInOriginal(t *testing.T) {
+	engine, tempDir := setupBug16Engine(t)
+
+	// File already has the "after" state — oldText absent, newText present.
+	// oldText "original1" was NEVER in the file, but newText "modified1" IS there.
+	// This must be flagged as ambiguous, not "already present".
+	content := "modified1\nline2\nmodified3\n"
+	testFile := filepath.Join(tempDir, "ambiguous.txt")
+	os.WriteFile(testFile, []byte(content), 0644)
+
+	edits := []core.MultiEditOperation{
+		{OldText: "original1", NewText: "modified1"},
+		{OldText: "original3", NewText: "modified3"},
+	}
+
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false)
+	if err == nil {
+		t.Fatal("MultiEdit should return error for ambiguous edits")
+	}
+
+	// Both edits are ambiguous: old_text never existed in original
+	if result.SkippedEdits != 0 {
+		t.Errorf("SkippedEdits: got %d, want 0 (ambiguous is not 'already present')", result.SkippedEdits)
+	}
+	if result.SuccessfulEdits != 0 {
+		t.Errorf("SuccessfulEdits: got %d, want 0", result.SuccessfulEdits)
+	}
+	if result.FailedEdits != 2 {
+		t.Errorf("FailedEdits: got %d, want 2 (both ambiguous)", result.FailedEdits)
+	}
+
+	// File should be unchanged
 	finalContent, _ := os.ReadFile(testFile)
 	if string(finalContent) != content {
 		t.Error("File should not have been modified")
