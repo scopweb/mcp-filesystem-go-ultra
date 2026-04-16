@@ -175,8 +175,11 @@ func registerBatchTools(reg *toolRegistry) {
 			} else {
 				msg = fmt.Sprintf("OK: %d edits (+%d -%d) | %d lines", applied, result.LinesAdded, result.LinesRemoved, result.TotalLines)
 			}
+			if result.StartLine > 0 {
+				msg += fmt.Sprintf(" | %s#L%d-%d", path, result.StartLine, result.EndLine)
+			}
 			if result.BackupID != "" {
-				msg += fmt.Sprintf(" [backup:%s | UNDO: backup(action:\"restore\", backup_id:\"%s\")]", result.BackupID, result.BackupID)
+				msg += fmt.Sprintf(" [with backup | UNDO: backup(action:\"restore\", backup_id:\"%s\")]", result.BackupID)
 			}
 			if result.RiskWarning != "" {
 				msg += result.RiskWarning

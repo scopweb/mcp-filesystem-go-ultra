@@ -61,6 +61,11 @@ func formatChangeAnalysis(analysis *core.ChangeAnalysis) string {
 		}
 	}
 
+	// Efficiency tip (token savings)
+	if analysis.EfficiencyTip != "" {
+		result.WriteString("\n" + analysis.EfficiencyTip + "\n")
+	}
+
 	// Additional info
 	result.WriteString("\nAdditional Info:\n")
 	result.WriteString(fmt.Sprintf("  - Backup would be created: %v\n", analysis.WouldCreateBackup))

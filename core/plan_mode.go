@@ -20,8 +20,9 @@ type ChangeAnalysis struct {
 	RiskLevel         string                 `json:"risk_level"` // low, medium, high, critical
 	RiskFactors       []string               `json:"risk_factors"`
 	Suggestions       []string               `json:"suggestions"`
-	Preview           string                 `json:"preview"` // Diff preview
-	Impact            string                 `json:"impact"`  // Human-readable impact description
+	EfficiencyTip     string                 `json:"efficiency_tip,omitempty"` // Token-saving tip when full-file rewrite detected
+	Preview           string                 `json:"preview"`                 // Diff preview
+	Impact            string                 `json:"impact"`                  // Human-readable impact description
 	FileExists        bool                   `json:"file_exists"`
 	FileSize          int64                  `json:"file_size"`
 	WouldCreateBackup bool                   `json:"would_create_backup"`
@@ -108,6 +109,16 @@ func (e *UltraFastEngine) AnalyzeWriteChange(ctx context.Context, path, content 
 	// Estimate time
 	analysis.EstimatedTime = e.estimateOperationTime(len(content))
 
+	// Token savings: detect full file rewrite (new content significantly different from existing)
+	if analysis.FileExists && analysis.FileSize > 1024 {
+		sizeDiff := float64(len(content)) / float64(analysis.FileSize)
+		// If new content is <50% or >200% of existing size, likely a rewrite
+		if sizeDiff < 0.5 || sizeDiff > 2.0 {
+			analysis.EfficiencyTip = "💡 TIP: This looks like a full file rewrite. For surgical changes, use edit_file instead to save tokens"
+			analysis.Suggestions = append(analysis.Suggestions, "Full file rewrite detected. Consider using edit_file with targeted old_text/new_text for token savings.")
+		}
+	}
+
 	return analysis, nil
 }
 
@@ -182,6 +193,13 @@ func (e *UltraFastEngine) AnalyzeEditChange(ctx context.Context, path, oldText, 
 	}
 	if occurrences == 0 {
 		analysis.Suggestions = append(analysis.Suggestions, "Use intelligent_edit or recovery_edit for better matching")
+	}
+
+	// Token savings: detect when oldText is suspiciously large (likely full-file rewrite)
+	// and suggest a more efficient surgical approach
+	if len(oldText) > 1000 && occurrences == 1 && analysis.FileSize > 5000 {
+		analysis.EfficiencyTip = "💡 TIP: Consider search_files(pattern) → read_file(start_line/end_line) → edit_file(old_text, new_text) instead of full file rewrite"
+		analysis.Suggestions = append(analysis.Suggestions, "Large oldText suggests full file rewrite. For surgical edits, use range read + targeted edit to save tokens.")
 	}
 
 	return analysis, nil

@@ -511,11 +511,17 @@ func registerCoreTools(reg *toolRegistry) {
 
 		if engine.IsCompactMode() {
 			msg := fmt.Sprintf("OK: %d changes (+%d -%d) | %d lines", result.ReplacementCount, result.LinesAdded, result.LinesRemoved, result.TotalLines)
+			if result.StartLine > 0 {
+				msg += fmt.Sprintf(" | %s#L%d-%d", path, result.StartLine, result.EndLine)
+			}
 			if result.BackupID != "" {
-				msg += fmt.Sprintf(" [backup:%s | UNDO: backup(action:\"restore\", backup_id:\"%s\")]", result.BackupID, result.BackupID)
+				msg += fmt.Sprintf(" [with backup | UNDO: backup(action:\"restore\", backup_id:\"%s\")]", result.BackupID)
 			}
 			if result.RiskWarning != "" {
 				msg += result.RiskWarning
+			}
+			if result.EfficiencyHint != "" {
+				msg += "\n" + result.EfficiencyHint
 			}
 			return mcp.NewToolResultText(msg), nil
 		}
@@ -527,7 +533,9 @@ func registerCoreTools(reg *toolRegistry) {
 		if result.RiskWarning != "" {
 			msg += result.RiskWarning
 		}
-		if result.LinesAffected > 10 {
+		if result.EfficiencyHint != "" {
+			msg += "\n" + result.EfficiencyHint
+		} else if result.LinesAffected > 10 {
 			msg += "\nTIP: Use read_file to verify large edits, or analyze_operation for dry-run preview"
 		}
 		return mcp.NewToolResultText(msg), nil

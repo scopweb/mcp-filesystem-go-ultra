@@ -23,8 +23,11 @@ type EditResult struct {
 	LinesAdded       int    // Lines added (+N in diff format)
 	LinesRemoved     int    // Lines removed (-M in diff format)
 	TotalLines       int    // Total lines in file after edit
+	StartLine        int    // 1-based line number where first edit was applied (for clickable links)
+	EndLine          int    // 1-based line number where last edit ends (for clickable links)
 	BackupID         string // ID of backup created before edit
 	RiskWarning      string // Non-blocking risk warning for MEDIUM/HIGH (empty if LOW/none)
+	EfficiencyHint   string // Token-saving hint when full-file rewrite detected (e.g., "Consider search_files + edit_file for surgical edits")
 }
 
 // SearchMatch represents a text search match
@@ -219,6 +222,12 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 		result.RiskWarning = impact.FormatRiskNotice(backupID, path)
 	}
 
+	// Attach efficiency hint for full-file rewrites (token savings)
+	// Detect when Claude sent a large old_text that likely represents a full-file rewrite
+	if len(oldText) > 1000 && result.ReplacementCount == 1 {
+		result.EfficiencyHint = "💡 TIP: For a single replacement, consider using search_files(pattern) → read_file(start_line/end_line) → edit_file(old_text, new_text) to save tokens"
+	}
+
 	return result, nil
 }
 
@@ -385,31 +394,44 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 		var sb strings.Builder
 		sb.Grow(newLen)
 
-		// Single-pass replacement (faster than ReplaceAll for known count)
-		last := 0
+		// Track start/end line for clickable link annotation
+		firstIdx := strings.Index(content, oldText)
+		startLine := strings.Count(content[:firstIdx], "\n") + 1
+		var endOffset int
 		linesAffected := 0
+		last := 0
+		firstMatch := true
 		for {
 			idx := strings.Index(content[last:], oldText)
 			if idx < 0 {
 				break
 			}
+			matchStart := last + idx
+			matchEnd := matchStart + len(oldText)
 			// Count newlines in affected region for line tracking
-			if strings.Contains(content[last:last+idx+len(oldText)], "\n") {
-				linesAffected += strings.Count(content[last:last+idx+len(oldText)], "\n")
+			if strings.Contains(content[matchStart:matchEnd], "\n") {
+				linesAffected += strings.Count(content[matchStart:matchEnd], "\n")
 			} else {
 				linesAffected++
 			}
-			sb.WriteString(content[last : last+idx])
+			if firstMatch {
+				endOffset = matchEnd
+				firstMatch = false
+			}
+			sb.WriteString(content[last:matchStart])
 			sb.WriteString(newText)
-			last = last + idx + len(oldText)
+			last = matchEnd
 		}
 		sb.WriteString(content[last:])
+		endLine := strings.Count(content[:endOffset], "\n") + 1
 
 		return &EditResult{
 			ModifiedContent:  sb.String(),
 			ReplacementCount: replacements,
 			MatchConfidence:  "high",
 			LinesAffected:    linesAffected,
+			StartLine:        startLine,
+			EndLine:          endLine,
 		}, nil
 	}
 
@@ -950,6 +972,8 @@ type MultiEditResult struct {
 	LinesAdded      int          `json:"lines_added"`   // Lines added (+N in diff format)
 	LinesRemoved    int          `json:"lines_removed"` // Lines removed (-M in diff format)
 	TotalLines      int          `json:"total_lines"`   // Total lines in file after edits
+	StartLine       int          `json:"start_line"`    // 1-based line of first edit (for clickable links)
+	EndLine         int          `json:"end_line"`      // 1-based end line of last edit (for clickable links)
 	MatchConfidence string       `json:"match_confidence"`
 	Errors          []string     `json:"errors,omitempty"`
 	BackupID        string       `json:"backup_id,omitempty"`
@@ -1084,6 +1108,8 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	totalLinesAffected := 0
 	totalLinesAdded := 0
 	totalLinesRemoved := 0
+	firstStartLine := 0
+	lastEndLine := 0
 
 	for i, edit := range edits {
 		detail := EditDetail{
@@ -1166,6 +1192,15 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		currentContent = editResult.ModifiedContent
 		result.SuccessfulEdits++
 		totalLinesAffected += editResult.LinesAffected
+		// Track line range for clickable link annotation
+		if editResult.StartLine > 0 {
+			if firstStartLine == 0 || editResult.StartLine < firstStartLine {
+				firstStartLine = editResult.StartLine
+			}
+			if editResult.EndLine > lastEndLine {
+				lastEndLine = editResult.EndLine
+			}
+		}
 		// Accumulate diff stats per edit
 		oldLines := strings.Count(edit.OldText, "\n") + 1
 		newLines := strings.Count(edit.NewText, "\n") + 1
@@ -1182,6 +1217,8 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	result.LinesAdded = totalLinesAdded
 	result.LinesRemoved = totalLinesRemoved
 	result.TotalLines = strings.Count(currentContent, "\n") + 1
+	result.StartLine = firstStartLine
+	result.EndLine = lastEndLine
 
 	// If no edits succeeded and none were already_present, return error
 	if result.SuccessfulEdits == 0 && result.SkippedEdits == 0 {
