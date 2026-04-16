@@ -114,5 +114,6 @@ borrar/
 *.ico
 filesystem-ultra.exe___
 
-# docs-website (separate git repo)
+# docs-website (separate git repo with its own .git)
+docs-website/
 docs-website/.claude/commands/
