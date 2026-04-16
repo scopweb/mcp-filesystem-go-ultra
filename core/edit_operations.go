@@ -926,6 +926,7 @@ type EditDetailStatus string
 const (
 	EditStatusApplied        EditDetailStatus = "applied"
 	EditStatusAlreadyPresent EditDetailStatus = "already_present"
+	EditStatusAmbiguous      EditDetailStatus = "ambiguous" // old_text not in original AND new_text present (Bug #27 fix)
 	EditStatusFailed         EditDetailStatus = "failed"
 )
 
@@ -1103,21 +1104,41 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		// Apply this edit
 		editResult, editErr := e.performIntelligentEdit(currentContent, edit.OldText, edit.NewText)
 		if editErr != nil || editResult.ReplacementCount == 0 {
-			// Check "already_present": newText in currentContent AND oldText absent (Bug #17)
+			// Check "already_present" / "ambiguous" (Bug #27 fix)
+			// Compare against originalContent to determine if old_text was actually in the file.
+			// old_text in original → new_text now present = "already present" (a prior edit in this batch did it)
+			// old_text NOT in original → this is ambiguous (old_text was never in the file, yet new_text is there)
 			normalizedCurrent := normalizeLineEndings(currentContent)
+			normalizedOriginal := normalizeLineEndings(originalContent)
 			normalizedNew := normalizeLineEndings(edit.NewText)
 			normalizedOld := normalizeLineEndings(edit.OldText)
 			// Also try with literal escapes converted (Bug #22)
 			convertedOld := normalizeLiteralEscapes(normalizedOld)
 			convertedNew := normalizeLiteralEscapes(normalizedNew)
 
+			oldInOriginal := strings.Contains(normalizedOriginal, normalizedOld) || strings.Contains(normalizedOriginal, convertedOld)
 			oldAbsent := !strings.Contains(normalizedCurrent, normalizedOld) && !strings.Contains(normalizedCurrent, convertedOld)
 			newPresent := edit.NewText != "" && (strings.Contains(normalizedCurrent, normalizedNew) || strings.Contains(normalizedCurrent, convertedNew))
 
 			if newPresent && oldAbsent {
-				detail.Status = EditStatusAlreadyPresent
-				detail.MatchConfidence = "high"
-				result.SkippedEdits++
+				if oldInOriginal {
+					// old_text WAS in original file → a prior edit in this batch already replaced it
+					detail.Status = EditStatusAlreadyPresent
+					detail.MatchConfidence = "high"
+					result.SkippedEdits++
+					result.EditDetails = append(result.EditDetails, detail)
+					continue
+				}
+				// old_text was NOT in original file → ambiguous: we cannot say "already present"
+				// This is a genuine problem: old_text never existed but new_text IS in the file
+				detail.Status = EditStatusAmbiguous
+				detail.MatchConfidence = "low"
+				detail.Error = "old_text not found in original file, yet new_text is present — ambiguous state"
+				result.FailedEdits++
+				result.Errors = append(result.Errors, fmt.Sprintf("edit %d: ambiguous — old_text not in original file but new_text is present", i+1))
+				if result.MatchConfidence == "high" {
+					result.MatchConfidence = "medium"
+				}
 				result.EditDetails = append(result.EditDetails, detail)
 				continue
 			}
