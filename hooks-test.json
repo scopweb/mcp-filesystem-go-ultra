@@ -1,0 +1,260 @@
+{
+  "_info": "hooks-test.json — Todos los hooks habilitados con echo para verificar que se disparan. Algunos con failOnError:true para probar bloqueo.",
+  "hooks": {
+    "pre-write": [
+      {
+        "pattern": "*.go",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [PRE-WRITE] Escribiendo archivo .go",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log pre-write en archivos Go",
+          "enabled": true
+        }]
+      },
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [PRE-WRITE] Escribiendo archivo",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log pre-write generico",
+          "enabled": true
+        }]
+      }
+    ],
+    "post-write": [
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [POST-WRITE] Archivo escrito correctamente",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log post-write",
+          "enabled": true
+        }]
+      }
+    ],
+    "pre-edit": [
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [PRE-EDIT] Iniciando edicion de archivo",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log pre-edit",
+          "enabled": true
+        }]
+      }
+    ],
+    "post-edit": [
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [POST-EDIT] Edicion completada",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log post-edit",
+          "enabled": true
+        }]
+      }
+    ],
+    "pre-delete": [
+      {
+        "_test_bloqueo": "Cambia failOnError a true para probar que bloquea el borrado",
+        "pattern": "*.env",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [PRE-DELETE] BLOQUEADO: intento de borrar .env && exit 1",
+          "timeout": 5,
+          "failOnError": true,
+          "description": "BLOQUEAR borrado de archivos .env",
+          "enabled": true
+        }]
+      },
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [PRE-DELETE] Iniciando borrado de archivo",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log pre-delete generico",
+          "enabled": true
+        }]
+      }
+    ],
+    "post-delete": [
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [POST-DELETE] Archivo borrado",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log post-delete",
+          "enabled": true
+        }]
+      }
+    ],
+    "pre-move": [
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [PRE-MOVE] Iniciando mover/renombrar archivo",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log pre-move",
+          "enabled": true
+        }]
+      }
+    ],
+    "post-move": [
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [POST-MOVE] Archivo movido correctamente",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log post-move",
+          "enabled": true
+        }]
+      }
+    ],
+    "pre-copy": [
+      {
+        "_test_bloqueo": "Cambia failOnError a true para probar que bloquea la copia de .key",
+        "pattern": "*.key",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [PRE-COPY] BLOQUEADO: intento de copiar .key && exit 1",
+          "timeout": 5,
+          "failOnError": true,
+          "description": "BLOQUEAR copia de archivos .key",
+          "enabled": true
+        }]
+      },
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [PRE-COPY] Iniciando copia de archivo",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log pre-copy generico",
+          "enabled": true
+        }]
+      }
+    ],
+    "post-copy": [
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [POST-COPY] Archivo copiado correctamente",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log post-copy",
+          "enabled": true
+        }]
+      }
+    ],
+    "pre-create": [
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [PRE-CREATE] Creando directorio",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log pre-create directorio",
+          "enabled": true
+        }]
+      }
+    ],
+    "post-create": [
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [POST-CREATE] Directorio creado",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log post-create directorio",
+          "enabled": true
+        }]
+      }
+    ],
+    "pre-read": [
+      {
+        "_test_bloqueo": "Cambia failOnError a true para probar que bloquea lectura de .env",
+        "pattern": "*.env",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [PRE-READ] BLOQUEADO: intento de leer .env && exit 1",
+          "timeout": 5,
+          "failOnError": true,
+          "description": "BLOQUEAR lectura de archivos .env",
+          "enabled": true
+        }]
+      },
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [PRE-READ] Leyendo archivo",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log pre-read generico",
+          "enabled": true
+        }]
+      }
+    ],
+    "post-read": [
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [POST-READ] Archivo leido",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log post-read (auditoria)",
+          "enabled": true
+        }]
+      }
+    ],
+    "pre-search": [
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [PRE-SEARCH] Iniciando busqueda",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log pre-search",
+          "enabled": true
+        }]
+      }
+    ],
+    "post-search": [
+      {
+        "pattern": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "cmd /c echo [POST-SEARCH] Busqueda completada",
+          "timeout": 5,
+          "failOnError": false,
+          "description": "Log post-search",
+          "enabled": true
+        }]
+      }
+    ]
+  }
+}
