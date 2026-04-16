@@ -1,6 +1,50 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
-## [Unreleased] - 2026-04-11
+## [Unreleased] - 2026-04-16
+
+### Performance — Token savings for Claude Desktop
+
+#### 1. Edit efficiency hints on full-file rewrite detection
+When `edit_file` detects a potential full-file rewrite (oldText > 1000 bytes, single replacement), the response now includes a TIP nudging toward the efficient workflow:
+
+```
+💡 TIP: For a single replacement, consider using search_files(pattern) → read_file(start_line/end_line) → edit_file(old_text, new_text) to save tokens
+```
+
+**Files changed:**
+- `core/edit_operations.go`: Added `EfficiencyHint` field to `EditResult` struct
+- `tools_core.go`: Added efficiency hint to compact and verbose edit responses
+
+#### 2. Improved serverInstructions with concrete workflow examples
+`serverInstructions` (sent during MCP handshake) expanded with:
+
+- **AVOID rule**: `write_file` for existing files wastes tokens
+- **TOKEN SAVINGS EXAMPLES**: Three concrete scenarios with exact tool call patterns
+  - Surgical function change: range read + targeted edit
+  - Cross-file rename: batch pipeline
+  - Large file handling: range read
+
+**File changed:** `main.go`
+
+#### 3. analyze_operation returns efficiency suggestions
+`analyze_operation` now detects and warns about inefficient operations:
+
+- **Edit analysis**: When oldText > 1000 bytes, single occurrence, and file > 5KB → suggests surgical edit workflow
+- **Write analysis**: When new content is <50% or >200% of existing file size → suggests edit_file instead of full rewrite
+
+**Files changed:**
+- `core/plan_mode.go`: Added `EfficiencyTip` field to `ChangeAnalysis` struct + logic in `AnalyzeEditChange()` and `AnalyzeWriteChange()`
+- `format.go`: Updated `formatChangeAnalysis()` to display efficiency tip
+
+### Dependencies
+- `github.com/mark3labs/mcp-go` v0.47.1 → **v0.48.0**
+- `github.com/stretchr/objx` v0.5.2 → **v0.5.3**
+- `golang.org/x/mod` v0.21.0 → **v0.35.0**
+- `golang.org/x/tools` v0.26.0 → **v0.44.0**
+
+---
+
+## [4.2.1] - 2026-04-04
 
 ### Security — AI-era attack surface hardening (5 vectors mitigated)
 

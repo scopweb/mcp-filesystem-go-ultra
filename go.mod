@@ -5,7 +5,7 @@ go 1.26.2
 require (
 	github.com/allegro/bigcache/v3 v3.1.0
 	github.com/fsnotify/fsnotify v1.9.0
-	github.com/mark3labs/mcp-go v0.47.1
+	github.com/mark3labs/mcp-go v0.48.0
 	github.com/panjf2000/ants/v2 v2.12.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 )
