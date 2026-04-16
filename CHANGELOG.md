@@ -2,6 +2,14 @@
 
 ## [Unreleased] - 2026-04-16
 
+### Security — Bug #29: Write inflation loop protection
+
+**Issue**: In long sessions, Claude may call `write_file` in a loop building content as `(content_read + new_block)`. Each call inflates the file, e.g., a 26KB file appended with 2KB 64 times → 122KB, breaking compilation with CS8802/CS8801.
+
+**Fix**: Added inflation guard in `IntelligentWrite()` — if new content exceeds 3× existing file size (>10KB), write is blocked with error explaining the pattern and suggesting `edit_file` instead.
+
+**Files changed**: `core/claude_optimizer.go`
+
 ### Performance — Token savings for Claude Desktop
 
 #### 1. Edit efficiency hints on full-file rewrite detection

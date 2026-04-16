@@ -61,10 +61,11 @@ func (o *ClaudeDesktopOptimizer) IntelligentWrite(ctx context.Context, path, con
 	if info, err := os.Stat(path); err == nil {
 		existingSize := info.Size()
 		newSize := int64(len(content))
-		// If existing file is >1KB and new content is <50% of existing size, warn
+
+		// Guard A: Truncation — new content <50% of existing file
+		// (LLM rewrote full file but only read partial content)
 		if existingSize > 1024 && newSize > 0 && newSize < existingSize/2 {
 			AppendSubOp(ctx, "truncation_blocked")
-			// Create backup before potentially destructive overwrite
 			if o.engine.backupManager != nil {
 				backupID, backupErr := o.engine.backupManager.CreateBackup(path, "truncation_protection")
 				if backupErr == nil {
@@ -76,6 +77,26 @@ func (o *ClaudeDesktopOptimizer) IntelligentWrite(ctx context.Context, path, con
 			}
 			return fmt.Errorf("WRITE BLOCKED — new content (%d bytes) is less than 50%% of existing file (%d bytes). "+
 				"This looks like accidental file truncation. Use mcp_edit for partial changes, or read the FULL file first",
+				newSize, existingSize)
+		}
+
+		// Bug #29: Detect inflation loop — new content >3x existing size.
+		// This catches LLMs that call write_file in a loop building content as
+		// (content_read + new_block), causing the file to balloon on each call.
+		// E.g., a 26KB file read 64 times with 2KB appended each time → 122KB.
+		if existingSize > 10*1024 && newSize > existingSize*3 {
+			AppendSubOp(ctx, "inflation_loop_blocked")
+			if o.engine.backupManager != nil {
+				backupID, backupErr := o.engine.backupManager.CreateBackup(path, "inflation_protection")
+				if backupErr == nil {
+					return fmt.Errorf("WRITE BLOCKED — new content (%d bytes) is more than 3x the existing file (%d bytes). "+
+						"This looks like an inflation loop (content = content_read + new_block repeated %d times). "+
+						"Use mcp_edit for surgical changes instead of mcp_write. Backup created: %s",
+						newSize, existingSize, newSize/existingSize, backupID)
+				}
+			}
+			return fmt.Errorf("WRITE BLOCKED — new content (%d bytes) is more than 3x the existing file (%d bytes). "+
+				"This looks like an inflation loop. Use mcp_edit for surgical changes instead of mcp_write",
 				newSize, existingSize)
 		}
 	}
