@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-MCP Filesystem Server Ultra-Fast (v4.1.3) - A high-performance MCP (Model Context Protocol) filesystem server written in Go, optimized for Claude Desktop and Claude Code. Provides **16 MCP tools** (consolidated from 59 in v3.x) for file operations, search, editing, backups, streaming, and WSL/Windows integration. All tools include MCP spec-compliant annotations (readOnlyHint, destructiveHint, idempotentHint).
+MCP Filesystem Server Ultra-Fast (v4.2.1) - A high-performance MCP (Model Context Protocol) filesystem server written in Go, optimized for Claude Desktop and Claude Code. Provides **16 MCP tools** (consolidated from 59 in v3.x) for file operations, search, editing, backups, streaming, and WSL/Windows integration. All tools include MCP spec-compliant annotations (readOnlyHint, destructiveHint, idempotentHint).
 
 ## Build & Test
 
@@ -31,37 +31,29 @@ go test ./tests/ -run TestName -v
 go build -ldflags="-s -w" -trimpath -o dashboard.exe ./cmd/dashboard/
 ```
 
-## Tool Inventory (v4.1.3 — 16 tools)
-
-```
-CORE (5):      read_file, write_file, edit_file, list_directory, search_files
-EDIT+ (1):     multi_edit
-FILES (4):     move_file, copy_file, delete_file, create_directory
-BATCH (1):     batch_operations  (includes pipelines + batch rename)
-BACKUP (1):    backup            (includes restore via action:"restore", undo_last)
-ANALYSIS (1):  analyze_operation (operations: file, optimize, write, edit, delete)
-WSL (1):       wsl               (includes sync + status via action param)
-UTIL (1):      server_info       (includes help, stats, artifact via action param)
-INFO (1):      get_file_info
-```
-
-### Key consolidations (v3 59 tools → v4 16 tools)
-- `read_file` replaces: `read_file`, `chunked_read_file`, `intelligent_read`, `read_file_range` (start_line/end_line), `read_base64` (encoding:"base64")
-- `write_file` replaces: `write_file`, `create_file`, `streaming_write_file`, `intelligent_write`, `write_base64` (encoding:"base64")
-- `edit_file` replaces: `edit_file`, `smart_edit_file`, `intelligent_edit`, `recovery_edit`, `search_and_replace` (mode:"search_replace"), `replace_nth_occurrence` (occurrence:N), `regex_transform_file` (mode:"regex")
-- `search_files` replaces: `smart_search`, `advanced_text_search`, `count_occurrences` (count_only:true)
+## Key Consolidations (v3 59 tools → v4 16 core tools)
+- `read_file` replaces: `read_file`, `chunked_read_file`, `intelligent_read`, `read_file_range`, `read_base64`
+- `write_file` replaces: `write_file`, `create_file`, `streaming_write_file`, `intelligent_write`, `write_base64`
+- `edit_file` replaces: `edit_file`, `smart_edit_file`, `intelligent_edit`, `recovery_edit`, `search_and_replace`, `replace_nth_occurrence`, `regex_transform_file`
+- `search_files` replaces: `smart_search`, `advanced_text_search`, `count_occurrences`
 - `move_file` also replaces: `rename_file`
-- `batch_operations` also replaces: `execute_pipeline` (pipeline_json), `batch_rename_files` (rename_json)
-- `backup` also replaces: `restore_backup` (action:"restore"), `list_backups`, `get_backup_info`, `compare_with_backup`, `cleanup_backups`
-- `wsl` replaces: `wsl_sync`, `wsl_status`, `wsl_to_windows_copy`, `windows_to_wsl_copy`, `configure_autosync`
-- `server_info` replaces: `stats`, `get_help`, `artifact`, `performance_stats`, `get_edit_telemetry`
-- `analyze_operation` replaces: `analyze_file`, `analyze_write`, `analyze_edit`, `analyze_delete`, `get_optimization_suggestion`
-- `delete_file` replaces: `soft_delete_file` (soft-delete is now default; use `permanent:true` for hard delete)
+- `batch_operations` also replaces: `execute_pipeline`, `batch_rename_files`
+- `backup` also replaces: `restore_backup`, `list_backups`, `get_backup_info`, `compare_with_backup`, `cleanup_backups`
+- `wsl` also replaces: `wsl_sync`, `wsl_status`, `wsl_to_windows_copy`, `windows_to_wsl_copy`, `configure_autosync`
+- `server_info` also replaces: `stats`, `get_help`, `artifact`, `performance_stats`, `get_edit_telemetry`
+- `analyze_operation` also replaces: `analyze_file`, `analyze_write`, `analyze_edit`, `analyze_delete`, `get_optimization_suggestion`
+- `delete_file` also replaces: `soft_delete_file` (soft-delete is now default; use `permanent:true` for hard delete)
 
 ## Architecture
 
 ```
-main.go                    # Entry point: CLI flags, 30 MCP tool registrations, server startup
+main.go                    # Entry point: CLI flags, server startup
+tools_core.go             # Core 3: read_file, write_file, edit_file
+tools_search.go            # search_files
+tools_files.go            # get_file_info, move_file, copy_file, delete_file, create_directory
+tools_batch.go            # batch_operations
+tools_platform.go         # wsl, server_info, analyze_operation
+tools_aliases.go          # 6 aliases + fs super-tool + help (discovery tool)
 core/
   engine.go                # UltraFastEngine - central struct with cache, worker pool, metrics
   edit_operations.go       # EditFile, MultiEdit with backup, risk assessment, hooks
@@ -101,6 +93,16 @@ cmd/
   dashboard/
     main.go              # Separate binary: HTTP dashboard for logs/metrics/backups
     static/              # Embedded web UI (go:embed) - HTML + vanilla JS + CSS
+
+## Tool Inventory (v4.1.3 — 24 tools total)
+
+```
+16 CORE:   read_file, write_file, edit_file, list_directory, search_files,
+           get_file_info, move_file, copy_file, delete_file, create_directory,
+           batch_operations, backup, analyze_operation, wsl, server_info, multi_edit
+6 ALIASES: read_text_file, search, edit, write, create_file, directory_tree
+1 HELP:    help         (discovery tool — call first to see all tools)
+1 SUPER:   fs           (dispatch to all 16 ops via action param)
 ```
 
 ## Key Dependencies
@@ -139,16 +141,8 @@ return mcp.NewToolResultText("result text"), nil
 return mcp.NewToolResultError("error message"), nil
 ```
 
-### Tool Registration (main.go)
-```go
-s.AddTool(mcp.NewTool("tool_name",
-    mcp.WithDescription("description"),
-    mcp.WithString("param", mcp.Description("desc"), mcp.Required()),
-), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-    // implementation
-})
-```
-Parameter extraction: `request.GetArguments()` returns `map[string]interface{}`, use `request.RequireString("param")` or type assertions.
+### Tool Registration (tools_core.go)
+Tools are registered in `registerTools()` (tools_core.go) via `toolRegistry.addTool()` which registers both the MCP tool AND adds its handler to the dispatch map for the `fs` super-tool.
 
 ### Concurrency
 - `engine.operationSem` channel-based semaphore limits parallel ops
@@ -197,7 +191,7 @@ When `--log-dir` is set, the MCP server writes:
 - `operations.jsonl` — JSON Lines audit log (one entry per tool call, auto-rotates at 10MB, keeps last 3)
 - `metrics.json` — Performance metrics snapshot (updated every 30 seconds)
 
-All 16 tools are wrapped with `auditWrap()` in main.go which records timing, status, path, bytes_in/out, file_size, args summary, risk level, lines_changed, and matches count. Zero overhead when `--log-dir` is not set (fast-path returns the handler unchanged).
+All 16 core tools are wrapped with `auditWrap()` in audit.go which records timing, status, path, bytes_in/out, file_size, args summary, risk level, lines_changed, and matches count. Zero overhead when `--log-dir` is not set (fast-path returns the handler unchanged).
 
 ### Dashboard Binary
 Separate binary in `cmd/dashboard/` — reads log files and serves a web UI:
@@ -504,3 +498,10 @@ For replacing large code blocks (>10 lines):
 - If edits make things WORSE, **STOP editing and RESTORE** from backup — repeated edits on a broken file make recovery harder
 - For HIGH risk edits, verify the result: `read_file(path, mode:"tail")` to confirm file is complete
 - Full recovery guide: `server_info(action:"help", topic:"recovery")`
+
+### 11. Use filesystem tools — never bash alternatives
+- **Search files** → `search_files` (never `grep`, `find`, `rg`)
+- **Read files** → `read_file` (never `cat`, `type`, `bat`)
+- **List directories** → `list_directory` (never `ls`, `dir`)
+
+Bash commands bypass the MCP cache, skip audit logging, and return untyped output.

@@ -55,7 +55,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	registerSuperTool(reg)
 	registerHelpTool(reg)
 
-	log.Printf("Registered 24 tools (16 core + 6 aliases + help + fs super-tool) for v4.2.0")
+	log.Printf("Registered 24 tools (16 core + 6 aliases + help + fs super-tool) for v4.2.1")
 	return nil
 }
 

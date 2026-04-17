@@ -11,7 +11,7 @@ func getHelpContent(topic string, compactMode bool) string {
 
 	switch topic {
 	case "overview":
-		sb.WriteString(`# MCP Filesystem Ultra v4.2.0 - Quick Start
+		sb.WriteString(`# MCP Filesystem Ultra v4.2.1 - Quick Start
 
 ## CRITICAL RULE
 Always use MCP tools (read_file, write_file, edit_file) instead of native file tools.
