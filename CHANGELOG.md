@@ -1,6 +1,6 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
-## [Unreleased] - 2026-04-16
+## [4.2.2] - 2026-04-17
 
 ### Security — Bug #29: Write inflation loop protection
 
@@ -1784,7 +1784,7 @@ Estimated speedup for multiple edits:
 
 ---
 
-## [Unreleased]
+## [4.2.2] - 2026-04-17
 
 ### 🐛 Bug Fix: WSLWindowsCopy now supports /mnt/c/ paths
 
