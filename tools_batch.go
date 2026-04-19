@@ -538,18 +538,22 @@ func registerBatchTools(reg *toolRegistry) {
 			}
 
 			// Actual restore
-			restoredFiles, err := engine.GetBackupManager().RestoreBackup(backupID, filePath, true)
+			restoredFiles, preRestoreID, err := engine.GetBackupManager().RestoreBackup(backupID, filePath, true)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to restore: %v", err)), nil
 			}
 
 			var output strings.Builder
 			output.WriteString("Restore completed successfully\n\n")
+			output.WriteString(fmt.Sprintf("Restored from backup: %s\n", backupID))
 			output.WriteString(fmt.Sprintf("Restored %d file(s):\n", len(restoredFiles)))
 			for _, file := range restoredFiles {
 				output.WriteString(fmt.Sprintf("   - %s\n", file))
 			}
-			output.WriteString("\nA backup of the current state was created before restoring\n")
+			if preRestoreID != "" {
+				output.WriteString(fmt.Sprintf("\nSafety backup (state before restore): %s\n", preRestoreID))
+				output.WriteString(fmt.Sprintf("UNDO this restore: backup(action:\"restore\", backup_id:\"%s\")\n", preRestoreID))
+			}
 
 			return mcp.NewToolResultText(output.String()), nil
 
@@ -587,7 +591,7 @@ func registerBatchTools(reg *toolRegistry) {
 			}
 
 			// Restore the last backup
-			restoredFiles, err := engine.GetBackupManager().RestoreBackup(lastBackup.BackupID, "", true)
+			restoredFiles, preRestoreID, err := engine.GetBackupManager().RestoreBackup(lastBackup.BackupID, "", true)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to restore: %v", err)), nil
 			}
@@ -599,6 +603,10 @@ func registerBatchTools(reg *toolRegistry) {
 			output.WriteString(fmt.Sprintf("Restored %d file(s):\n", len(restoredFiles)))
 			for _, file := range restoredFiles {
 				output.WriteString(fmt.Sprintf("   - %s\n", file))
+			}
+			if preRestoreID != "" {
+				output.WriteString(fmt.Sprintf("\nSafety backup (state before undo): %s\n", preRestoreID))
+				output.WriteString(fmt.Sprintf("REDO (re-apply): backup(action:\"restore\", backup_id:\"%s\")\n", preRestoreID))
 			}
 			output.WriteString("\nA backup of the current state was created before restoring\n")
 			return mcp.NewToolResultText(output.String()), nil

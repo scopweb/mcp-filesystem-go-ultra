@@ -14,6 +14,28 @@ import (
 // Used by auditWrap (main.go) and internal engine code to annotate sub-operations.
 type AuditEntryKey struct{}
 
+// SetFeedback annotates the current audit entry with a feedback signal.
+// Safe to call even when no audit entry is in context (no-op).
+func SetFeedback(ctx context.Context, signal *FeedbackSignal) {
+	if signal == nil || signal.Status == FeedbackOK {
+		return
+	}
+	if entry, ok := ctx.Value(AuditEntryKey{}).(*AuditEntry); ok {
+		entry.FeedbackPattern = string(signal.Pattern)
+		entry.FeedbackStatus = string(signal.Status)
+		if signal.Status == FeedbackWarn && entry.Status == "ok" {
+			entry.Status = "warn"
+		}
+	}
+}
+
+// SetDiffLines annotates the audit entry with the number of diff lines generated.
+func SetDiffLines(ctx context.Context, n int) {
+	if entry, ok := ctx.Value(AuditEntryKey{}).(*AuditEntry); ok {
+		entry.DiffLines = n
+	}
+}
+
 // SetSubOp annotates the current audit entry's sub-operation via context.
 // Safe to call even when no audit entry is in context (no-op).
 func SetSubOp(ctx context.Context, subOp string) {
@@ -41,17 +63,21 @@ type AuditEntry struct {
 	Path         string            `json:"path,omitempty"`
 	DurationMs   int64             `json:"duration_ms"`
 	BytesIn      int64             `json:"bytes_in,omitempty"`
-	BytesOut     int64             `json:"bytes_out,omitempty"`
-	Status       string            `json:"status"` // "ok" or "error"
+	BytesOut     int64             `json:"bytes_out,omitempty"`  // file bytes written/read — excludes diff text
+	Status       string            `json:"status"`               // "ok", "warn", or "error"
 	Error        string            `json:"error,omitempty"`
 	RiskLevel    string            `json:"risk,omitempty"`
 	FileSize     int64             `json:"file_size,omitempty"`
 	Args         map[string]string `json:"args,omitempty"`
 	SubOp        string            `json:"sub_op,omitempty"`
-	LinesChanged int              `json:"lines_changed,omitempty"`
-	Matches      int              `json:"matches,omitempty"`
+	LinesChanged int               `json:"lines_changed,omitempty"`
+	Matches      int               `json:"matches,omitempty"`
 	CacheHit       *bool                  `json:"cache_hit,omitempty"`
 	Normalizations []NormalizationApplied `json:"norms,omitempty"`
+	// Feedback / reinforcement fields
+	FeedbackPattern string `json:"feedback_pattern,omitempty"` // e.g. "truncation", "stale_read"
+	FeedbackStatus  string `json:"feedback_status,omitempty"`  // "warn" or "ko" (omitted when ok)
+	DiffLines       int    `json:"diff_lines,omitempty"`       // number of lines in the unified diff
 }
 
 // MetricsSnapshot is the periodic metrics dump written to metrics.json

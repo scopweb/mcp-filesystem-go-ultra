@@ -51,7 +51,7 @@ function shortPath(p) {
 let opRowCounter = 0;
 
 function operationRow(op, extended) {
-  const statusClass = op.status === 'ok' ? 'ok' : 'error';
+  const statusClass = op.status === 'ok' ? 'ok' : op.status === 'warn' ? 'warn' : 'error';
   const toolClass = toolBadgeClass(op.tool);
   const rowId = 'op-row-' + (opRowCounter++);
 
@@ -81,7 +81,12 @@ function operationRow(op, extended) {
     let details = [];
     if (op.sub_op) details.push(`<span class="detail-label">Sub-operation:</span> <span class="badge ${toolClass}">${op.sub_op}</span>`);
     if (op.risk) details.push(`<span class="detail-label">Risk:</span> <span class="risk-badge risk-${op.risk.toLowerCase()}">${op.risk}</span>`);
+    if (op.feedback_pattern) {
+      const fbClass = op.feedback_status === 'ko' ? 'error' : 'warn';
+      details.push(`<span class="detail-label">Pattern:</span> <span class="badge ${fbClass}">${op.feedback_pattern}</span>`);
+    }
     if (op.lines_changed) details.push(`<span class="detail-label">Lines changed:</span> ${op.lines_changed}`);
+    if (op.diff_lines) details.push(`<span class="detail-label">Diff lines:</span> ${op.diff_lines}`);
     if (op.matches) details.push(`<span class="detail-label">Matches:</span> ${op.matches}`);
     if (op.cache_hit !== undefined && op.cache_hit !== null) details.push(`<span class="detail-label">Cache hit:</span> ${op.cache_hit ? 'Yes' : 'No'}`);
     if (op.path) details.push(`<span class="detail-label">Full path:</span> <span class="path">${op.path}</span>`);

@@ -1000,7 +1000,7 @@ func (pe *PipelineExecutor) rollback(ctx context.Context, backupID string) error
 	if backupID == "" {
 		return fmt.Errorf("no backup ID provided")
 	}
-	_, err := pe.engine.backupManager.RestoreBackup(backupID, "", false)
+	_, _, err := pe.engine.backupManager.RestoreBackup(backupID, "", false)
 	return err
 }
 

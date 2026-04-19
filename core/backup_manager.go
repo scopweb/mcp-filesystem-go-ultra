@@ -319,21 +319,24 @@ func (bm *BackupManager) GetBackupInfo(backupID string) (*BackupInfo, error) {
 	return info, nil
 }
 
-// RestoreBackup restaura archivos desde un backup
-func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, createBackup bool) ([]string, error) {
+// RestoreBackup restaura archivos desde un backup.
+// Devuelve (restoredFiles, preRestoreBackupID, error).
+// preRestoreBackupID es el ID del backup creado antes de restaurar (safety net).
+func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, createBackup bool) ([]string, string, error) {
 	// Sanitize backup ID to prevent path traversal
 	if err := sanitizeBackupID(backupID); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// Obtener información del backup
 	info, err := bm.GetBackupInfo(backupID)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	backupBaseDir := filepath.Join(bm.backupDir, backupID)
 	var restoredFiles []string
+	var preRestoreID string
 
 	// Si se especificó un archivo, restaurar solo ese
 	if specificFile != "" {
@@ -342,15 +345,16 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 			if filepath.Clean(file.OriginalPath) == normalizedSpecific {
 				if createBackup {
 					// Crear backup del estado actual antes de restaurar
-					_, err := bm.CreateBackup(file.OriginalPath, "pre_restore")
+					id, err := bm.CreateBackup(file.OriginalPath, "pre_restore")
 					if err != nil {
-						return nil, fmt.Errorf("failed to create pre-restore backup: %w", err)
+						return nil, "", fmt.Errorf("failed to create pre-restore backup: %w", err)
 					}
+					preRestoreID = id
 				}
 
 				backupFilePath := filepath.Join(backupBaseDir, file.BackupPath)
 				if err := copyFile(backupFilePath, file.OriginalPath); err != nil {
-					return nil, fmt.Errorf("failed to restore %s: %w", file.OriginalPath, err)
+					return nil, "", fmt.Errorf("failed to restore %s: %w", file.OriginalPath, err)
 				}
 				restoredFiles = append(restoredFiles, file.OriginalPath)
 				break
@@ -358,7 +362,7 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 		}
 
 		if len(restoredFiles) == 0 {
-			return nil, fmt.Errorf("file %s not found in backup", specificFile)
+			return nil, "", fmt.Errorf("file %s not found in backup", specificFile)
 		}
 	} else {
 		// Restaurar todos los archivos
@@ -366,7 +370,9 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 			if createBackup {
 				// Solo crear backup si el archivo existe actualmente
 				if _, err := os.Stat(file.OriginalPath); err == nil {
-					bm.CreateBackup(file.OriginalPath, "pre_restore")
+					if id, err := bm.CreateBackup(file.OriginalPath, "pre_restore"); err == nil && preRestoreID == "" {
+						preRestoreID = id // captura el primero como referencia
+					}
 				}
 			}
 
@@ -387,7 +393,7 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 		}
 	}
 
-	return restoredFiles, nil
+	return restoredFiles, preRestoreID, nil
 }
 
 // CompareWithBackup compara un archivo actual con su versión en el backup

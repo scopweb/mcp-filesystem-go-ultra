@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -197,6 +198,9 @@ func registerCoreTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
 
+		// Record read for stale-read detection in feedback system
+		core.RecordRead(core.NormalizePath(path))
+
 		// Apply truncation if requested
 		if maxLines > 0 || mode != "all" {
 			content = truncateContent(content, maxLines, mode)
@@ -276,6 +280,30 @@ func registerCoreTools(reg *toolRegistry) {
 				return mcp.NewToolResultError(fmt.Sprintf("Invalid content: %v", err)), nil
 			}
 			content = c
+		}
+
+		// Feedback: check for truncation/inflation/full-rewrite patterns
+		var existingSize int64
+		if info, statErr := os.Stat(core.NormalizePath(path)); statErr == nil {
+			existingSize = info.Size()
+		}
+		if signal := core.CheckWriteOp(path, content, existingSize); signal.BlockOp {
+			core.SetFeedback(ctx, signal)
+			return mcp.NewToolResultError(signal.Message + "\n→ " + signal.Suggestion), nil
+		} else if signal.Status != core.FeedbackOK {
+			// Non-blocking warn — proceed but append feedback to response
+			err = engine.WriteFileContent(ctx, path, content)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+			}
+			core.SetFeedback(ctx, signal)
+			msg := fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), path)
+			if engine.IsCompactMode() {
+				msg = fmt.Sprintf("OK: %s written%s", formatSize(int64(len(content))), core.FormatFeedbackCompact(signal))
+			} else {
+				msg = core.FormatFeedback(signal, msg)
+			}
+			return mcp.NewToolResultText(msg), nil
 		}
 
 		err = engine.WriteFileContent(ctx, path, content)
@@ -462,6 +490,20 @@ func registerCoreTools(reg *toolRegistry) {
 			return mcp.NewToolResultError("old_text (or old_str) is required"), nil
 		}
 
+		// Feedback: check for stale-read and new_text size patterns
+		normPath := core.NormalizePath(path)
+		var fileSize int64
+		if info, statErr := os.Stat(normPath); statErr == nil {
+			fileSize = info.Size()
+		}
+		if warnSignal := core.CheckEditOp(path, oldText, fileSize); warnSignal.Status != core.FeedbackOK {
+			// Non-blocking — annotate response, don't block
+			_ = warnSignal // appended to response below
+		}
+		if newText != "" {
+			_ = core.CheckEditNewText(newText, fileSize) // result appended below
+		}
+
 		// If occurrence is specified, use ReplaceNthOccurrence
 		if occurrence != 0 {
 			wholeWord := false
@@ -486,9 +528,43 @@ func registerCoreTools(reg *toolRegistry) {
 		}
 
 		// Default: standard EditFile
+		// Read old content before edit to compute diff
+		oldContentRaw, _ := os.ReadFile(normPath)
+		oldContentStr := string(oldContentRaw)
+
 		result, err := engine.EditFile(ctx, path, oldText, newText, force, dryRun)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+			// Record failed old_text for reinforcement detection
+			core.RecordFailedOldText(path, oldText)
+			editSignal := core.CheckEditOp(path, oldText, fileSize)
+			core.SetFeedback(ctx, editSignal)
+			errMsg := fmt.Sprintf("Error: %v", err)
+			errMsg = core.FormatFeedback(editSignal, errMsg)
+			return mcp.NewToolResultError(errMsg), nil
+		}
+
+		// Successful edit — reset failure counter and record read
+		core.ResetFailedOldText(path, oldText)
+		core.RecordRead(normPath)
+
+		// Compute unified diff
+		newContentRaw, _ := os.ReadFile(normPath)
+		newContentStr := string(newContentRaw)
+		unifiedDiff := core.UnifiedDiff(oldContentStr, newContentStr, path)
+
+		// Annotate audit with diff line count
+		if unifiedDiff != "" {
+			core.SetDiffLines(ctx, strings.Count(unifiedDiff, "\n"))
+		}
+
+		// Collect non-blocking feedback signals
+		editSignal := core.CheckEditOp(path, oldText, fileSize)
+		newTextSignal := core.CheckEditNewText(newText, fileSize)
+		// Annotate audit with the most severe signal
+		if editSignal.Status != core.FeedbackOK {
+			core.SetFeedback(ctx, editSignal)
+		} else {
+			core.SetFeedback(ctx, newTextSignal)
 		}
 
 		// Bug #32: dry_run response format
@@ -515,7 +591,7 @@ func registerCoreTools(reg *toolRegistry) {
 				msg += fmt.Sprintf(" | %s#L%d-%d", path, result.StartLine, result.EndLine)
 			}
 			if result.BackupID != "" {
-				msg += fmt.Sprintf(" [with backup | UNDO: backup(action:\"restore\", backup_id:\"%s\")]", result.BackupID)
+				msg += fmt.Sprintf(" [backup | UNDO: backup(action:\"restore\", backup_id:\"%s\")]", result.BackupID)
 			}
 			if result.RiskWarning != "" {
 				msg += result.RiskWarning
@@ -523,8 +599,14 @@ func registerCoreTools(reg *toolRegistry) {
 			if result.EfficiencyHint != "" {
 				msg += "\n" + result.EfficiencyHint
 			}
+			msg += core.FormatFeedbackCompact(editSignal)
+			msg += core.FormatFeedbackCompact(newTextSignal)
+			if unifiedDiff != "" {
+				msg += "\n" + unifiedDiff
+			}
 			return mcp.NewToolResultText(msg), nil
 		}
+
 		msg := fmt.Sprintf("Successfully edited %s\nChanges: %d replacement(s) (+%d -%d)\nMatch confidence: %s\nFile total lines: %d",
 			path, result.ReplacementCount, result.LinesAdded, result.LinesRemoved, result.MatchConfidence, result.TotalLines)
 		if result.BackupID != "" {
@@ -538,7 +620,15 @@ func registerCoreTools(reg *toolRegistry) {
 		} else if result.LinesAffected > 10 {
 			msg += "\nTIP: Use read_file to verify large edits, or analyze_operation for dry-run preview"
 		}
+		// Append feedback signals (non-blocking)
+		msg = core.FormatFeedback(editSignal, msg)
+		msg = core.FormatFeedback(newTextSignal, msg)
+		// Append unified diff
+		if unifiedDiff != "" {
+			msg += "\n\nDiff:\n" + unifiedDiff
+		}
 		return mcp.NewToolResultText(msg), nil
 	})
 	reg.addTool(editFileTool, reg.editFileHandler)
 }
+
