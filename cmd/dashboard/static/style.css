@@ -133,6 +133,7 @@ tr:hover td { background: rgba(108, 138, 255, 0.05); }
 }
 
 .badge.ok { background: rgba(74, 222, 128, 0.15); color: var(--green); }
+.badge.warn { background: rgba(251, 191, 36, 0.15); color: var(--yellow); }
 .badge.error { background: rgba(248, 113, 113, 0.15); color: var(--red); }
 .badge.read { background: rgba(108, 138, 255, 0.15); color: var(--accent); }
 .badge.write { background: rgba(251, 191, 36, 0.15); color: var(--yellow); }

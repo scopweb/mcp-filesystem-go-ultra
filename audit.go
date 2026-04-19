@@ -69,10 +69,17 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 				entry.Path = p
 			}
 			entry.Args = summarizeArgs(args)
-			// Extract bytes_out from result
+			// Extract bytes_out from result — excluding the unified diff section
+			// to keep the metric representative of actual file bytes, not response text.
 			if res != nil && len(res.Content) > 0 {
 				if tc, ok := res.Content[0].(mcp.TextContent); ok {
-					entry.BytesOut = int64(len(tc.Text))
+					text := tc.Text
+					// Strip unified diff from byte count (starts after "\n\nDiff:\n")
+					if idx := strings.Index(text, "\n\nDiff:\n"); idx >= 0 {
+						entry.BytesOut = int64(idx)
+					} else {
+						entry.BytesOut = int64(len(text))
+					}
 				}
 			}
 		}

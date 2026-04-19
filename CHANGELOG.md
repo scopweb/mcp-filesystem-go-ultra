@@ -1,5 +1,135 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.3.0] - 2026-04-19
+
+### Feature — Unified Diff in edit responses (`core/diff.go`)
+
+Every successful `edit_file` call now appends a standard unified diff to the response.
+
+**Format**: standard 3-context-line hunks, `--- a/file` / `+++ b/file` / `@@ -N,M +N,M @@`.
+
+- **Compact mode**: diff appended inline after the status line
+- **Verbose mode**: diff appended under `Diff:` label
+- **Dry-run**: diff not generated (no changes applied)
+- `DiffStats(old, new)` helper available for compact `+N -M` summary
+
+**Implementation**: Pure LCS algorithm, zero external dependencies. `UnifiedDiffContext()` accepts configurable context lines.
+
+**Files added**: `core/diff.go`
+
+---
+
+### Feature — Pattern Reinforcement / Feedback system (`core/feedback.go`)
+
+The server detects common LLM anti-patterns and annotates responses with structured feedback — non-blocking warnings (`warn`) or hard blocks (`ko`) — instead of silent failures or cryptic errors.
+
+#### Detected patterns
+
+| Pattern | Trigger | Action |
+|---|---|---|
+| `truncation` | `write_file` with new content < 50% of existing file | **BLOCK** |
+| `inflation_loop` | `write_file` with new content > 3× existing file | **BLOCK** |
+| `full_rewrite` | `write_file` on existing file > 10KB | warn |
+| `stale_read` | `edit_file` on file not read in this session (last 10 min) | warn |
+| `repeated_old_text` | same `old_text` fails to match 2+ times on same file | warn |
+| `large_new_text` | `new_text` > 80% of file size | warn |
+
+#### Session state (in-memory, per server instance)
+- `RecordRead(path)` — called after every successful `read_file` and `edit_file`
+- `RecordFailedOldText(path, oldText)` — increments failure counter per path+text
+- `ResetFailedOldText(path, oldText)` — clears counter on successful edit
+
+#### Response format
+- **Compact mode**: inline tag `[WARN:stale_read]` or `[KO:truncation]`
+- **Verbose mode**: annotated block after the main response
+
+**Files added**: `core/feedback.go`
+
+---
+
+### Fix — Backup restore now returns pre-restore backup ID
+
+`RestoreBackup()` signature changed from `([]string, error)` to `([]string, string, error)`.
+The second return value is the ID of the safety backup created before restoring.
+
+**Before** — response was silent about the safety backup:
+```
+Restore completed successfully
+Restored 1 file(s): ...
+A backup of the current state was created before restoring
+```
+
+**After** — includes the pre-restore ID and UNDO command:
+```
+Restore completed successfully
+Restored from backup: 20260419-130000-abc
+Restored 1 file(s): ...
+Safety backup (state before restore): 20260419-140000-xyz
+UNDO this restore: backup(action:"restore", backup_id:"20260419-140000-xyz")
+```
+
+Same fix applied to `undo_last` — now exposes REDO command pointing to pre-undo backup.
+
+**Files changed**: `core/backup_manager.go`, `tools_batch.go`, `core/pipeline.go` (rollback call site)
+
+---
+
+### Fix — `edit_file` compact mode lost UNDO instruction
+
+The compact mode response had been shortened to `[backup:ID]`, losing the full restore command.
+Restored to `[backup | UNDO: backup(action:"restore", backup_id:"...")]`.
+
+**File changed**: `tools_core.go`
+
+---
+
+### Improvement — Audit log extended for feedback and diff
+
+`AuditEntry` gains three new fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `feedback_pattern` | string | Detected pattern ID (e.g. `stale_read`) |
+| `feedback_status` | string | `warn` or `ko` (omitted when ok) |
+| `diff_lines` | int | Lines in the generated unified diff |
+
+`Status` field now supports three values: `ok`, `warn`, `error` (previously only `ok`/`error`).
+
+`BytesOut` now excludes the unified diff text — metric remains representative of file bytes, not response size.
+
+New context helpers: `SetFeedback(ctx, signal)`, `SetDiffLines(ctx, n)`.
+
+**Files changed**: `core/audit_logger.go`, `audit.go`, `tools_core.go`
+
+---
+
+### Improvement — Dashboard UI updated for new log fields
+
+- `app.js`: `statusClass` now handles `ok`/`warn`/`error` (was binary ok/error)
+- `app.js`: Detail panel now renders `feedback_pattern` as colored badge and `diff_lines` count
+- `style.css`: Added `.badge.warn` — yellow, consistent with `--yellow` design token
+
+**Files changed**: `cmd/dashboard/static/app.js`, `cmd/dashboard/static/style.css`
+
+---
+
+### Summary of files changed
+
+| File | Change |
+|---|---|
+| `core/diff.go` | NEW — unified diff generator |
+| `core/feedback.go` | NEW — pattern detector + session state |
+| `core/audit_logger.go` | AuditEntry new fields + SetFeedback/SetDiffLines helpers |
+| `core/backup_manager.go` | RestoreBackup signature → ([]string, string, error) |
+| `core/pipeline.go` | rollback() updated for new RestoreBackup signature |
+| `tools_core.go` | read_file RecordRead, write_file CheckWriteOp, edit_file diff+feedback integration |
+| `tools_batch.go` | restore + undo_last expose pre-restore backup ID |
+| `audit.go` | BytesOut excludes diff text |
+| `cmd/dashboard/static/app.js` | warn status, feedback_pattern badge, diff_lines |
+| `cmd/dashboard/static/style.css` | .badge.warn style |
+
+---
+
 ## [4.2.2] - 2026-04-17
 
 ### Security — Bug #29: Write inflation loop protection
