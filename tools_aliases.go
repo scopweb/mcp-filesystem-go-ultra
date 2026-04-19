@@ -238,6 +238,27 @@ func registerSuperTool(reg *toolRegistry) {
 					"backup, wsl, server_info", actionStr)), nil
 		}
 
+		// Remove "action" from args before dispatching — the target handler's
+		// param validator doesn't know about "action" and will reject it.
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if _, hasAction := args["action"]; hasAction {
+				// Only strip "action" for tools that don't use it natively.
+				// backup/wsl/server_info re-inject it above; strip the fs-level one.
+				switch actionStr {
+				case "backup", "wsl", "server_info":
+					// keep "action" — already remapped from backup_action/wsl_action/server_action
+				default:
+					cleaned := make(map[string]interface{}, len(args))
+					for k, v := range args {
+						if k != "action" {
+							cleaned[k] = v
+						}
+					}
+					request.Params.Arguments = cleaned
+				}
+			}
+		}
+
 		return handler(ctx, request)
 	}))
 }

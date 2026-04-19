@@ -56,7 +56,7 @@ func registerFileTools(reg *toolRegistry) {
 		mcp.WithString("paths", mcp.Description("JSON array of paths to delete multiple files in one call, e.g. '[\"a.txt\",\"b.txt\"]'")),
 		mcp.WithBoolean("permanent", mcp.Description("Permanently delete instead of soft-delete (default: false)")),
 	)
-	reg.server.AddTool(deleteFileTool, auditWrap(engine, "delete_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	reg.addTool(deleteFileTool, auditWrap(engine, "delete_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		permanent := false
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if p, ok := args["permanent"].(bool); ok {
@@ -208,7 +208,7 @@ func registerFileTools(reg *toolRegistry) {
 		mcp.WithString("path", mcp.Description("Path to the file or directory. Required unless paths is provided.")),
 		mcp.WithString("paths", mcp.Description("JSON array of paths for batch file info, e.g. '[\"file1.txt\",\"dir/\"]'")),
 	)
-	reg.server.AddTool(fileInfoTool, auditWrap(engine, "get_file_info", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	reg.addTool(fileInfoTool, auditWrap(engine, "get_file_info", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Batch mode: get info for multiple files in one call
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if pathsJSON, ok := args["paths"].(string); ok && pathsJSON != "" {
