@@ -107,6 +107,7 @@ Create a `hooks.json` file:
 - **Wildcard**: `"*.go"` - Matches all .go files
 - **Wildcard**: `"test_*"` - Matches files starting with "test_"
 - **Universal**: `"*"` - Matches all files
+- **Regex** (prefix with `re:`): `"re:^(write|edit)_.*$"` - Compiled once, cached. Invalid regex is logged and treated as no-match.
 
 ### Hook Object
 

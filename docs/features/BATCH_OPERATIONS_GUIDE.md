@@ -127,7 +127,7 @@ Pipeline features:
 - **Templates**: `{{step_id.field}}` references to prior step results
 - **Parallel execution**: DAG-based scheduling with safety serialization for destructive ops
 
-See the main [CLAUDE.md](../../CLAUDE.md) for full pipeline documentation.
+See [PIPELINE_GUIDE.md](PIPELINE_GUIDE.md) for a full parallel pipeline walkthrough, or the main [CLAUDE.md](../../CLAUDE.md) for reference data.
 
 ## Error Handling
 
