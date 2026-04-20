@@ -31,10 +31,19 @@ type callToolParams struct {
 	Arguments map[string]interface{} `json:"arguments,omitempty"`
 }
 
+// initializeParams for extracting clientInfo from the MCP handshake
+type initializeParams struct {
+	ClientInfo struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	} `json:"clientInfo"`
+}
+
 // ProxyLogEntry is what we write to the JSONL log
 type ProxyLogEntry struct {
 	Timestamp  time.Time `json:"ts"`
-	Model      string    `json:"model,omitempty"`
+	Model      string    `json:"model,omitempty"`  // from --model flag (user-specified)
+	Client     string    `json:"client,omitempty"` // from MCP initialize clientInfo (auto-detected)
 	Tool       string    `json:"tool"`
 	Path       string    `json:"path,omitempty"`
 	BytesIn    int64     `json:"bytes_in"`
@@ -110,6 +119,7 @@ func main() {
 	// Track pending requests: id -> pendingCall
 	var mu sync.Mutex
 	pending := map[string]*pendingCall{}
+	detectedClient := "" // auto-populated from MCP initialize clientInfo
 
 	// Goroutine: relay Claude -> child (stdin), intercept requests
 	go func() {
@@ -123,15 +133,41 @@ func main() {
 
 			// Try to parse as JSON-RPC
 			var msg jsonRPCMessage
-			if err := json.Unmarshal(line, &msg); err == nil && msg.Method == "tools/call" {
+			if err := json.Unmarshal(line, &msg); err != nil {
+				continue
+			}
+
+			switch msg.Method {
+			case "initialize":
+				// Capture clientInfo (e.g. "Claude Desktop/0.9.2") from the MCP handshake.
+				// Note: this identifies the MCP client app, NOT the model — the model is not
+				// transmitted in the MCP protocol and must be set via --model flag.
+				var params initializeParams
+				if err := json.Unmarshal(msg.Params, &params); err == nil && params.ClientInfo.Name != "" {
+					client := params.ClientInfo.Name
+					if params.ClientInfo.Version != "" {
+						client += "/" + params.ClientInfo.Version
+					}
+					mu.Lock()
+					detectedClient = client
+					mu.Unlock()
+					log.Printf("mcp-proxy: client detected from initialize: %q", client)
+				}
+
+			case "tools/call":
 				var params callToolParams
 				if err := json.Unmarshal(msg.Params, &params); err == nil {
 					reqID := extractID(msg.ID)
 					argsBytes, _ := json.Marshal(params.Arguments)
 
+					mu.Lock()
+					client := detectedClient
+					mu.Unlock()
+
 					entry := ProxyLogEntry{
 						Timestamp: time.Now(),
 						Model:     *model,
+						Client:    client,
 						Tool:      params.Name,
 						BytesIn:   int64(len(argsBytes)),
 						TokensIn:  int64(len(argsBytes)) / 4,

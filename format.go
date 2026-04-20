@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -342,6 +343,44 @@ func formatPipelineResult(result *core.PipelineResult, compact bool) string {
 }
 
 // truncateContent truncates content based on mode and max lines
+// autoTruncateLargeFileLines is the line threshold above which read_file (full-file
+// mode, no range) automatically truncates and appends a total-lines footer.
+// This prevents silent MCP-response truncation from hiding the real extent of
+// large files — the model always sees how many lines exist and how to read more.
+const autoTruncateLargeFileLines = 500
+
+// autoTruncateLargeFile truncates large files read without a range and appends a
+// footer identical in style to ReadFileRange so the model always knows:
+//   - how many lines it received
+//   - the real total
+//   - which params to use to read the rest
+//
+// Files with <= autoTruncateLargeFileLines lines are returned unchanged.
+func autoTruncateLargeFile(content, path string) string {
+	lines := strings.Split(content, "\n")
+	// strings.Split on a newline-terminated string yields a trailing empty
+	// element (e.g. "a\nb\n" → ["a","b",""]). Remove it so the line count
+	// matches what editors and ReadFileRange report.
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	total := len(lines)
+	if total <= autoTruncateLargeFileLines {
+		return content
+	}
+	shown := lines[:autoTruncateLargeFileLines]
+	base := filepath.Base(path)
+	next := autoTruncateLargeFileLines + 1
+	nextEnd := autoTruncateLargeFileLines * 2
+	if nextEnd > total {
+		nextEnd = total
+	}
+	return strings.Join(shown, "\n") + fmt.Sprintf(
+		"\n\n[Lines 1-%d of %d total lines in %s — use start_line/end_line to read more, e.g. start_line=%d end_line=%d]",
+		autoTruncateLargeFileLines, total, base, next, nextEnd,
+	)
+}
+
 func truncateContent(content string, maxLines int, mode string) string {
 	lines := strings.Split(content, "\n")
 	totalLines := len(lines)
@@ -381,6 +420,22 @@ func truncateContent(content string, maxLines int, mode string) string {
 	}
 
 	return strings.Join(result, "\n") + truncMsg
+}
+
+// parseReplacementCount extracts the total replacement count from a SearchAndReplace
+// engine response (format: "... Total replacements: N ...").
+func parseReplacementCount(text string) int {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "Total replacements:") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				var n int
+				fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &n)
+				return n
+			}
+		}
+	}
+	return 0
 }
 
 // formatSize formats bytes to human readable format
