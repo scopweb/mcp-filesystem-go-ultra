@@ -21,6 +21,7 @@
     <button data-page="analysis">Edit Analysis</button>
     <button data-page="normalizer">Normalizer</button>
     <button data-page="error-patterns">Error Patterns</button>
+    <button data-page="roi">ROI / Savings</button>
   </nav>
 
   <main>
@@ -398,6 +399,82 @@
             <tr><th>Tool</th><th>Pattern</th><th>Count</th><th>Trend</th><th>First Seen</th><th>Last Seen</th><th>Suggested Rule</th></tr>
           </thead>
           <tbody id="ep-patterns"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ROI / Savings Page -->
+    <div class="page" id="page-roi">
+      <div class="cards">
+        <div class="card">
+          <div class="label">Tokens Saved (est.)</div>
+          <div class="value green" id="roi-saved">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Savings %</div>
+          <div class="value green" id="roi-pct">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Tokens Consumed</div>
+          <div class="value" id="roi-consumed">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Baseline (no FS)</div>
+          <div class="value yellow" id="roi-baseline">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Sessions</div>
+          <div class="value" id="roi-sessions">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Range Reads</div>
+          <div class="value" id="roi-range-pct">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Avg % File Read</div>
+          <div class="value" id="roi-avg-read-pct">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Time Span</div>
+          <div class="value" id="roi-timespan">—</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Savings by Tool</h2>
+        <table>
+          <thead>
+            <tr><th>Tool</th><th>Ops</th><th>Tokens Used</th><th>Baseline</th><th>Saved</th><th>Savings %</th><th>Avg Saved/Op</th></tr>
+          </thead>
+          <tbody id="roi-by-tool"></tbody>
+        </table>
+      </div>
+
+      <div class="section">
+        <h2>Top 10 Most Efficient Operations</h2>
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Tool</th><th>Path</th><th>File Size</th><th>Baseline</th><th>Used</th><th>Saved</th></tr>
+          </thead>
+          <tbody id="roi-top-savings"></tbody>
+        </table>
+      </div>
+
+      <div class="section">
+        <h2>Recent Sessions</h2>
+        <table>
+          <thead>
+            <tr><th>Session</th><th>Start</th><th>Duration</th><th>Ops</th><th>Tokens Used</th><th>Saved</th><th>Savings %</th><th>Errors</th></tr>
+          </thead>
+          <tbody id="roi-sessions-table"></tbody>
+        </table>
+      </div>
+
+      <div class="section" id="roi-antipatterns-section" style="display:none">
+        <h2>Anti-Patterns Detected</h2>
+        <table>
+          <thead><tr><th>Pattern</th><th>Count</th></tr></thead>
+          <tbody id="roi-antipatterns"></tbody>
         </table>
       </div>
     </div>

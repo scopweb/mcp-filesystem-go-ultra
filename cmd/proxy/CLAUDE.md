@@ -60,9 +60,20 @@ Claude Desktop ──stdin──▶ mcp-proxy ──stdin──▶ filesystem-ul
 
 ### How it works
 
-1. **stdin relay** (goroutine): Reads lines from Claude, forwards to child stdin. If the line is a `tools/call` JSON-RPC request, it records the request ID, tool name, path, and input bytes in a `pending` map.
+1. **stdin relay** (goroutine): Reads lines from Claude, forwards to child stdin. Intercepts two message types:
+   - `initialize`: extracts `clientInfo.name`/`version` → stored as `detectedClient` (e.g. `"Claude Desktop/0.9.2"`)
+   - `tools/call`: records request ID, tool name, path, input bytes, and attaches `model` + `client` to the pending entry
 2. **stdout relay** (main goroutine): Reads lines from child stdout, forwards to Claude. If the line is a JSON-RPC response matching a pending request ID, it calculates duration, output bytes, status (ok/error), and writes the log entry.
 3. **stderr**: Child stderr is piped directly to proxy stderr (no interception).
+
+### Model vs Client identity
+
+The MCP protocol **does not transmit the model name** in any message — there is no field for it in `tools/call` or any other method. The two identity fields in the log are:
+
+| Field | Source | Identifies |
+|-------|--------|------------|
+| `model` | `--model` flag | The AI model (e.g. `sonnet-4`) — must be set manually |
+| `client` | `initialize` clientInfo | The MCP client app (e.g. `Claude Desktop/0.9.2`) — auto-detected |
 
 ### Token estimation
 
@@ -76,6 +87,7 @@ Tokens are approximated as `bytes / 4` — not exact, but good enough for relati
 {
   "ts": "2026-03-17T10:30:00.123Z",
   "model": "sonnet-4",
+  "client": "Claude Desktop/0.9.2",
   "tool": "edit_file",
   "path": "/project/src/main.go",
   "bytes_in": 1234,
@@ -93,7 +105,8 @@ Tokens are approximated as `bytes / 4` — not exact, but good enough for relati
 | Field | Type | Description |
 |-------|------|-------------|
 | `ts` | datetime | When the request was sent |
-| `model` | string | From `--model` flag (empty if not set) |
+| `model` | string | From `--model` flag — AI model name (not in MCP wire format) |
+| `client` | string | Auto-detected from `initialize` clientInfo (e.g. `Claude Desktop/0.9.2`) |
 | `tool` | string | MCP tool name (e.g., `read_file`, `edit_file`) |
 | `path` | string | Extracted from tool arguments `path` field |
 | `bytes_in` | int | Serialized argument size |

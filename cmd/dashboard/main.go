@@ -213,6 +213,7 @@ func main() {
 	mux.HandleFunc("/api/normalizer", normalizerHandler(*logDir))
 	mux.HandleFunc("/api/error-patterns", errorPatternsHandler(*logDir))
 	mux.HandleFunc("/api/proxy-stats", proxyStatsHandler(*proxyLogDir))
+	mux.HandleFunc("/api/roi", roiHandler(*logDir))
 
 	// Serve embedded static files
 	staticFS, _ := fs.Sub(staticFiles, "static")
@@ -754,6 +755,15 @@ type AuditEntry struct {
 	Matches        int                    `json:"matches,omitempty"`
 	CacheHit       *bool                  `json:"cache_hit,omitempty"`
 	Normalizations []NormalizationApplied `json:"norms,omitempty"`
+	FeedbackPattern string `json:"feedback_pattern,omitempty"`
+	FeedbackStatus  string `json:"feedback_status,omitempty"`
+	// ROI / savings fields (v4.3.3+)
+	SessionID      string `json:"session_id,omitempty"`
+	FileLinesTotal int    `json:"file_lines_total,omitempty"`
+	LinesRead      int    `json:"lines_read,omitempty"`
+	TokensConsumed int64  `json:"tokens_consumed,omitempty"`
+	TokensBaseline int64  `json:"tokens_baseline,omitempty"`
+	TokensSaved    int64  `json:"tokens_saved,omitempty"`
 }
 
 type ToolStats struct {
@@ -1454,6 +1464,264 @@ func errorPatternsHandler(logDir string) http.HandlerFunc {
 			"total_errors":     totalErrors,
 			"unique_patterns":  len(patterns),
 			"with_suggestions": withSuggestions,
+		})
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ROI / Savings handler
+// ──────────────────────────────────────────────────────────────────────────────
+
+type SessionROI struct {
+	SessionID      string    `json:"session_id"`
+	FirstOp        time.Time `json:"first_op"`
+	LastOp         time.Time `json:"last_op"`
+	DurationMin    float64   `json:"duration_min"`
+	OpsCount       int64     `json:"ops_count"`
+	TokensConsumed int64     `json:"tokens_consumed"`
+	TokensBaseline int64     `json:"tokens_baseline"`
+	TokensSaved    int64     `json:"tokens_saved"`
+	SavingsPct     float64   `json:"savings_pct"`
+	Errors         int64     `json:"errors"`
+}
+
+type ToolROI struct {
+	Tool           string  `json:"tool"`
+	OpsCount       int64   `json:"ops_count"`
+	TokensConsumed int64   `json:"tokens_consumed"`
+	TokensBaseline int64   `json:"tokens_baseline"`
+	TokensSaved    int64   `json:"tokens_saved"`
+	SavingsPct     float64 `json:"savings_pct"`
+	AvgSavedPerOp  float64 `json:"avg_saved_per_op"`
+}
+
+type TopSavingOp struct {
+	Timestamp      time.Time `json:"ts"`
+	Tool           string    `json:"tool"`
+	Path           string    `json:"path,omitempty"`
+	TokensConsumed int64     `json:"tokens_consumed"`
+	TokensBaseline int64     `json:"tokens_baseline"`
+	TokensSaved    int64     `json:"tokens_saved"`
+	FileSize       int64     `json:"file_size,omitempty"`
+}
+
+type ROIResponse struct {
+	// Global totals
+	TotalOps       int64   `json:"total_ops"`
+	TokensConsumed int64   `json:"tokens_consumed"`
+	TokensBaseline int64   `json:"tokens_baseline"`
+	TokensSaved    int64   `json:"tokens_saved"`
+	SavingsPct     float64 `json:"savings_pct"`
+	// Range efficiency (read_file range vs full file)
+	RangeReadOps   int64   `json:"range_read_ops"`
+	RangeReadPct   float64 `json:"range_read_pct"` // % of reads that used range
+	AvgReadPct     float64 `json:"avg_read_pct"`   // avg % of file actually read
+	// Sessions
+	SessionCount   int64        `json:"session_count"`
+	Sessions       []SessionROI `json:"sessions"`
+	// By tool
+	ByTool         []ToolROI    `json:"by_tool"`
+	// Top savings operations
+	TopSavings     []TopSavingOp `json:"top_savings"`
+	// Anti-patterns detected
+	AntiPatterns   map[string]int64 `json:"anti_patterns"`
+	TimeSpan       string           `json:"time_span"`
+}
+
+func roiHandler(logDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		logPath := filepath.Join(logDir, "operations.jsonl")
+		data, err := os.ReadFile(logPath)
+		if err != nil {
+			json.NewEncoder(w).Encode(ROIResponse{})
+			return
+		}
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+
+		// Parse all entries
+		var entries []AuditEntry
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var e AuditEntry
+			if json.Unmarshal([]byte(line), &e) == nil {
+				entries = append(entries, e)
+			}
+		}
+
+		if len(entries) == 0 {
+			json.NewEncoder(w).Encode(ROIResponse{})
+			return
+		}
+
+		// Global accumulators
+		var totalConsumed, totalBaseline, totalSaved int64
+		var rangeReadOps int64
+		var sumReadPct float64
+		var readOpsWithLineInfo int64
+		antiPatterns := map[string]int64{}
+		toolMap := map[string]*ToolROI{}
+		sessionMap := map[string]*SessionROI{}
+		var topSavings []TopSavingOp
+		var earliest, latest time.Time
+
+		for i := range entries {
+			e := &entries[i]
+
+			// Time range
+			if earliest.IsZero() || e.Timestamp.Before(earliest) {
+				earliest = e.Timestamp
+			}
+			if latest.IsZero() || e.Timestamp.After(latest) {
+				latest = e.Timestamp
+			}
+
+			// Anti-patterns
+			if e.FeedbackPattern != "" {
+				antiPatterns[e.FeedbackPattern]++
+			}
+
+			// Token accumulators — only count ops with ROI data (v4.3.3+)
+			if e.TokensConsumed > 0 || e.TokensBaseline > 0 {
+				totalConsumed += e.TokensConsumed
+				totalBaseline += e.TokensBaseline
+				totalSaved += e.TokensSaved
+
+				// By tool
+				tr, ok := toolMap[e.Tool]
+				if !ok {
+					tr = &ToolROI{Tool: e.Tool}
+					toolMap[e.Tool] = tr
+				}
+				tr.OpsCount++
+				tr.TokensConsumed += e.TokensConsumed
+				tr.TokensBaseline += e.TokensBaseline
+				tr.TokensSaved += e.TokensSaved
+
+				// Top savings
+				if e.TokensSaved > 0 {
+					topSavings = append(topSavings, TopSavingOp{
+						Timestamp:      e.Timestamp,
+						Tool:           e.Tool,
+						Path:           e.Path,
+						TokensConsumed: e.TokensConsumed,
+						TokensBaseline: e.TokensBaseline,
+						TokensSaved:    e.TokensSaved,
+						FileSize:       e.FileSize,
+					})
+				}
+			}
+
+			// Range read efficiency
+			if (e.Tool == "read_file" || e.Tool == "read_text_file") && e.FileLinesTotal > 0 && e.LinesRead > 0 {
+				readOpsWithLineInfo++
+				pct := float64(e.LinesRead) / float64(e.FileLinesTotal) * 100
+				sumReadPct += pct
+				if e.LinesRead < e.FileLinesTotal {
+					rangeReadOps++
+				}
+			}
+
+			// Session aggregation
+			if e.SessionID != "" {
+				sr, ok := sessionMap[e.SessionID]
+				if !ok {
+					sr = &SessionROI{SessionID: e.SessionID, FirstOp: e.Timestamp, LastOp: e.Timestamp}
+					sessionMap[e.SessionID] = sr
+				}
+				sr.OpsCount++
+				sr.TokensConsumed += e.TokensConsumed
+				sr.TokensBaseline += e.TokensBaseline
+				sr.TokensSaved += e.TokensSaved
+				if e.Timestamp.Before(sr.FirstOp) {
+					sr.FirstOp = e.Timestamp
+				}
+				if e.Timestamp.After(sr.LastOp) {
+					sr.LastOp = e.Timestamp
+				}
+				if e.Status == "error" {
+					sr.Errors++
+				}
+			}
+		}
+
+		// Compute tool savings %
+		byTool := make([]ToolROI, 0, len(toolMap))
+		for _, tr := range toolMap {
+			if tr.OpsCount > 0 {
+				tr.AvgSavedPerOp = float64(tr.TokensSaved) / float64(tr.OpsCount)
+			}
+			if tr.TokensBaseline > 0 {
+				tr.SavingsPct = float64(tr.TokensSaved) / float64(tr.TokensBaseline) * 100
+			}
+			byTool = append(byTool, *tr)
+		}
+		sort.Slice(byTool, func(i, j int) bool { return byTool[i].TokensSaved > byTool[j].TokensSaved })
+
+		// Compute session stats
+		sessions := make([]SessionROI, 0, len(sessionMap))
+		for _, sr := range sessionMap {
+			sr.DurationMin = sr.LastOp.Sub(sr.FirstOp).Minutes()
+			if sr.TokensBaseline > 0 {
+				sr.SavingsPct = float64(sr.TokensSaved) / float64(sr.TokensBaseline) * 100
+			}
+			sessions = append(sessions, *sr)
+		}
+		sort.Slice(sessions, func(i, j int) bool { return sessions[i].FirstOp.After(sessions[j].FirstOp) })
+		if len(sessions) > 20 {
+			sessions = sessions[:20]
+		}
+
+		// Top savings ops (top 10)
+		sort.Slice(topSavings, func(i, j int) bool { return topSavings[i].TokensSaved > topSavings[j].TokensSaved })
+		if len(topSavings) > 10 {
+			topSavings = topSavings[:10]
+		}
+
+		// Global %
+		var savingsPct float64
+		if totalBaseline > 0 {
+			savingsPct = float64(totalSaved) / float64(totalBaseline) * 100
+		}
+
+		// Range read stats
+		var avgReadPct, rangeReadPct float64
+		if readOpsWithLineInfo > 0 {
+			avgReadPct = sumReadPct / float64(readOpsWithLineInfo)
+			rangeReadPct = float64(rangeReadOps) / float64(readOpsWithLineInfo) * 100
+		}
+
+		timeSpan := ""
+		if !earliest.IsZero() {
+			d := latest.Sub(earliest)
+			switch {
+			case d < time.Hour:
+				timeSpan = fmt.Sprintf("%.0f min", d.Minutes())
+			case d < 24*time.Hour:
+				timeSpan = fmt.Sprintf("%.1f h", d.Hours())
+			default:
+				timeSpan = fmt.Sprintf("%.1f days", d.Hours()/24)
+			}
+		}
+
+		json.NewEncoder(w).Encode(ROIResponse{
+			TotalOps:       int64(len(entries)),
+			TokensConsumed: totalConsumed,
+			TokensBaseline: totalBaseline,
+			TokensSaved:    totalSaved,
+			SavingsPct:     math.Round(savingsPct*10) / 10,
+			RangeReadOps:   rangeReadOps,
+			RangeReadPct:   math.Round(rangeReadPct*10) / 10,
+			AvgReadPct:     math.Round(avgReadPct*10) / 10,
+			SessionCount:   int64(len(sessionMap)),
+			Sessions:       sessions,
+			ByTool:         byTool,
+			TopSavings:     topSavings,
+			AntiPatterns:   antiPatterns,
+			TimeSpan:       timeSpan,
 		})
 	}
 }

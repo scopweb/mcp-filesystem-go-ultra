@@ -1,5 +1,156 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.3.5] - 2026-04-20
+
+### Feature — Regex support en hooks
+
+Los patrones de hook ahora aceptan prefijo `re:` para matching por expresión regular, manteniendo backward compatibility con los patrones exactos y de wildcard existentes.
+
+- `"pattern": "re:^(write|edit)_.*$"` — regex explícita
+- `"pattern": "*.go"` — wildcard (sin cambios)
+- `"pattern": "write_file"` — exacto (sin cambios)
+
+**Implementación**: `regexp.Compile` una sola vez por patrón, cacheado en `sync.Map`. Regex inválidas se loguean con `slog.Warn` y se tratan como no-match (nunca crashean el dispatcher).
+
+**Archivos**:
+- `core/hooks.go` — `matchesPattern()` detecta prefijo, `matchesRegex()` + cache compilado
+- `core/hooks_regex_test.go` — 10 casos (exact + wildcard + regex + cache + inválidos)
+- `docs/features/HOOKS.md` — documentada la nueva variante de patrón
+
+### Feature — Benchmark suite
+
+Nuevo conjunto de benchmarks estándar Go (`testing.B`) en el paquete `core` para detectar regresiones de performance entre releases.
+
+9 benchmarks: `BenchmarkReadFile_{Small,Medium,Large,CacheHit}`, `BenchmarkReadFileRange`, `BenchmarkWriteFile_{Small,Large}`, `BenchmarkEditFile`, `BenchmarkParallelReads`.
+
+```bash
+# Ejecutar con baseline
+go test ./core/ -run=xxx -bench=. -benchmem -benchtime=3s
+
+# Escalabilidad parallel
+go test ./core/ -run=xxx -bench=BenchmarkParallelReads -cpu=1,2,4,8,16
+```
+
+**Archivos**:
+- `core/engine_bench_test.go` — suite de benchmarks con `b.SetBytes` y `b.RunParallel`
+- `docs/features/BENCHMARKS.md` — guía de ejecución, comparativa con `benchstat`, interpretación
+
+### Docs — Pipeline paralelo end-to-end
+
+Nueva guía dedicada `docs/features/PIPELINE_GUIDE.md` con ejemplo completo de pipeline paralelo (TODO→FIXME cross-lenguaje Go + JS):
+
+- 8 steps organizados en 4 niveles DAG
+- Ilustra `input_from`, `input_from_all`, conditions (`count_gt`), template vars (`{{step.field}}`), destructive serialization, rollback con `stop_on_error + create_backup`
+- Link añadido desde `BATCH_OPERATIONS_GUIDE.md`
+
+---
+
+## [4.3.4] - 2026-04-20
+
+### Feature — ROI / Savings dashboard: tokens consumidos vs baseline sin filesystem
+
+Nueva página **ROI / Savings** en el dashboard y enriquecimiento del audit log para toma de decisiones.
+
+#### Nuevos campos en `operations.jsonl` (AuditEntry)
+
+| Campo | Descripción |
+|-------|-------------|
+| `session_id` | ID de sesión (hexadecimal 16 chars). Nueva sesión tras > 5 min de inactividad. Agrupa ops de la misma conversación Claude |
+| `file_lines_total` | Total de líneas del archivo objetivo (para calcular eficiencia de range-read) |
+| `lines_read` | Líneas realmente leídas/afectadas por la operación |
+| `tokens_consumed` | Tokens estimados consumidos por esta op: `(bytes_in + bytes_out) / 4` |
+| `tokens_baseline` | Tokens estimados sin filesystem (enfoque naive): `file_size/4` para reads, `file_size*2/4` para edits |
+| `tokens_saved` | `max(0, tokens_baseline - tokens_consumed)` |
+
+#### API nueva: `GET /api/roi`
+
+Agrega el log de operaciones y devuelve:
+- Totales globales: tokens consumidos, baseline, ahorro, % ahorro
+- Eficiencia de range-reads: % de reads con rango y % promedio del archivo leído
+- Sesiones recientes (últimas 20): duración, ops, tokens, ahorro por sesión
+- Desglose por herramienta: qué tools aportan más ahorro
+- Top 10 operaciones más eficientes
+- Anti-patrones detectados (`feedback_pattern` acumulados)
+
+#### Dashboard: página "ROI / Savings"
+
+8 cards + 4 tablas:
+- **Cards**: Tokens Saved / Savings % / Tokens Consumed / Baseline / Sessions / Range Reads / Avg % File Read / Time Span
+- **By Tool**: desglose por herramienta con ahorro promedio por op
+- **Top 10 savings**: operaciones individuales más eficientes
+- **Sessions**: historial de sesiones con tokens y errores
+- **Anti-patterns**: conteo de feedback patterns detectados
+
+#### Archivos modificados
+
+- `core/audit_logger.go` — nuevos campos en `AuditEntry` + `SetFileLinesTotal()` + `SetLinesRead()`
+- `core/engine.go` — `CurrentSessionID()` + session tracking con timeout de inactividad
+- `audit.go` — poblar `session_id` + cálculo `tokens_consumed/baseline/saved` en `auditWrap`
+- `tools_core.go` — `SetFileLinesTotal` + `SetLinesRead` en handler `read_file`
+- `cmd/dashboard/main.go` — `AuditEntry` actualizado + `roiHandler` + `/api/roi` endpoint
+- `cmd/dashboard/static/index.html` — página ROI / Savings
+- `cmd/dashboard/static/app.js` — `fetchROI()` + polling 30s
+
+---
+
+## [4.3.3] - 2026-04-20
+
+### Feature — Proxy captura `clientInfo` del handshake MCP (`cmd/proxy/main.go`)
+
+**Contexto**: El protocolo MCP no transmite el nombre del modelo en ningún mensaje — no existe campo para ello en `tools/call`. El `--model` flag era la única forma de identificación.
+
+**Mejora**: El proxy ahora intercepta el mensaje `initialize` del handshake MCP y extrae `clientInfo.name` + `clientInfo.version` automáticamente. Este valor se logea como campo `client` en cada entrada de `proxy.jsonl`.
+
+| Campo | Fuente | Identifica |
+|-------|--------|------------|
+| `model` | `--model` flag | Modelo AI (e.g. `sonnet-4`) — requiere config manual |
+| `client` | `initialize` clientInfo | App cliente MCP (e.g. `Claude Desktop/0.9.2`) — auto-detectado |
+
+El campo `client` aparece también en stderr al inicio: `mcp-proxy: client detected from initialize: "Claude Desktop/0.9.2"`.
+
+**Archivos modificados**: `cmd/proxy/main.go`, `cmd/proxy/CLAUDE.md`
+
+---
+
+## [4.3.2] - 2026-04-20
+
+### Fix — `batch_operations` write→edit en mismo batch fallaba por validación pre-ejecución (`core/batch_operations.go`)
+
+**Problema**: `validateOperations` hacía `os.Stat` en todos los ops antes de ejecutar ninguno. Si un batch contenía `write` seguido de `edit`/`copy`/`search_and_replace`/`move`/`delete` sobre el mismo archivo recién creado, la validación fallaba con "file does not exist" aunque la secuencia de ejecución fuera correcta.
+
+**Solución**: Se añade `pendingPaths map[string]bool` que se construye secuencialmente durante la validación:
+- `write` y `create_dir` agregan su path al set tras validarse
+- `copy` y `move` agregan el destination; `move` elimina el source
+- `delete` elimina el path del set
+- `edit`, `search_and_replace`, `copy` (source), `move` (source), `delete` — el check `os.IsNotExist` se combina con `!pendingPaths[path]`, permitiendo referencias a archivos que una op anterior del mismo batch creará
+
+Esto habilita cadenas completas como `write → edit → copy` en un único batch atómico.
+
+**Archivos modificados**: `core/batch_operations.go`
+
+---
+
+## [4.3.1] - 2026-04-20
+
+### Fix — Auto-truncación de archivos grandes en `read_file` sin rango (`format.go`, `tools_core.go`)
+
+**Problema**: `read_file(path)` sin `start_line`/`end_line` devolvía el contenido crudo sin ningún indicador del total de líneas del archivo. Si Claude Desktop truncaba silenciosamente la respuesta MCP, el modelo asumía que lo recibido era el archivo completo, causando ediciones incorrectas o análisis parciales.
+
+**Solución**: La ruta de lectura completa ahora pasa el contenido por `autoTruncateLargeFile()` antes de devolverlo:
+- Archivos ≤ 500 líneas → devueltos sin cambios (comportamiento idéntico al anterior)
+- Archivos > 500 líneas → truncados a las primeras 500 líneas con footer informativo:
+
+```
+[Lines 1-500 of 1869 total lines in ObservationsService.cs — use start_line/end_line to read more, e.g. start_line=501 end_line=1001]
+```
+
+El footer es idéntico en formato al que ya emitía `ReadFileRange`, garantizando un señal consistente independientemente del modo de llamada.
+
+**Archivos modificados**: `format.go`, `tools_core.go`  
+**Tests añadidos**: `format_test.go` — 3 casos: archivo pequeño sin cambios, truncación correcta, formato del footer
+
+---
+
 ## [4.3.0] - 2026-04-19
 
 ### Feature — Unified Diff in edit responses (`core/diff.go`)

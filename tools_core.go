@@ -189,6 +189,12 @@ func registerCoreTools(reg *toolRegistry) {
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
+			linesRead := endLine - startLine + 1
+			core.SetLinesRead(ctx, linesRead)
+			// Approximate total lines from file size (avg 50 chars/line)
+			if info, err2 := os.Stat(path); err2 == nil && info.Size() > 0 {
+				core.SetFileLinesTotal(ctx, int(info.Size()/50)+1)
+			}
 			return mcp.NewToolResultText(content), nil
 		}
 
@@ -201,10 +207,19 @@ func registerCoreTools(reg *toolRegistry) {
 		// Record read for stale-read detection in feedback system
 		core.RecordRead(core.NormalizePath(path))
 
-		// Apply truncation if requested
+		// Apply truncation if explicitly requested
 		if maxLines > 0 || mode != "all" {
 			content = truncateContent(content, maxLines, mode)
+		} else {
+			// Auto-truncate large files so the model always knows the real total
+			// even when Claude Desktop silently truncates the MCP response.
+			content = autoTruncateLargeFile(content, path)
 		}
+
+		// Annotate lines read for ROI analysis
+		totalLines := strings.Count(content, "\n") + 1
+		core.SetFileLinesTotal(ctx, totalLines)
+		core.SetLinesRead(ctx, totalLines)
 
 		return mcp.NewToolResultText(content), nil
 	})
@@ -475,14 +490,38 @@ func registerCoreTools(reg *toolRegistry) {
 				}
 			}
 
+			normPath := core.NormalizePath(path)
+			oldContentRaw, _ := os.ReadFile(normPath)
+
 			resp, err := engine.SearchAndReplace(ctx, path, pattern, replacement, false)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			if len(resp.Content) > 0 {
-				return mcp.NewToolResultText(resp.Content[0].Text), nil
+			if len(resp.Content) == 0 {
+				return mcp.NewToolResultText("No output"), nil
 			}
-			return mcp.NewToolResultText("No output"), nil
+			respText := resp.Content[0].Text
+
+			// Compute unified diff
+			newContentRaw, _ := os.ReadFile(normPath)
+			unifiedDiff := core.UnifiedDiff(string(oldContentRaw), string(newContentRaw), path)
+
+			if engine.IsCompactMode() {
+				if strings.Contains(respText, "No matches") {
+					return mcp.NewToolResultText("OK: 0 replacements"), nil
+				}
+				count := parseReplacementCount(respText)
+				msg := fmt.Sprintf("OK: %d replacements (search_replace)", count)
+				if unifiedDiff != "" {
+					msg += "\n" + unifiedDiff
+				}
+				return mcp.NewToolResultText(msg), nil
+			}
+
+			if unifiedDiff != "" {
+				respText += "\nDiff:\n" + unifiedDiff
+			}
+			return mcp.NewToolResultText(respText), nil
 		}
 
 		// ---- MODE: replace (default) with optional occurrence ----
@@ -631,4 +670,3 @@ func registerCoreTools(reg *toolRegistry) {
 	})
 	reg.addTool(editFileTool, reg.editFileHandler)
 }
-

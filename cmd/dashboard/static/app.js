@@ -758,6 +758,7 @@ fetchStats();
 fetchProxyStats();
 fetchNormalizer();
 fetchErrorPatterns();
+fetchROI();
 connectSSE();
 
 // Poll every 5 seconds
@@ -768,3 +769,76 @@ setInterval(fetchStats, 15000);
 setInterval(fetchProxyStats, 15000);
 setInterval(fetchNormalizer, 10000);
 setInterval(fetchErrorPatterns, 30000);
+setInterval(fetchROI, 30000);
+
+// ─── ROI / Savings page ───────────────────────────────────────────────────────
+async function fetchROI() {
+  try {
+    const res = await fetch('/api/roi?_t=' + Date.now());
+    const d = await res.json();
+
+    const fmt = n => (n || 0).toLocaleString();
+    const pct = n => (n || 0).toFixed(1) + '%';
+    const kb  = n => n > 1024 ? (n/1024).toFixed(1) + ' KB' : n + ' B';
+
+    $('#roi-saved').textContent     = fmt(d.tokens_saved);
+    $('#roi-pct').textContent       = pct(d.savings_pct);
+    $('#roi-consumed').textContent  = fmt(d.tokens_consumed);
+    $('#roi-baseline').textContent  = fmt(d.tokens_baseline);
+    $('#roi-sessions').textContent  = fmt(d.session_count);
+    $('#roi-range-pct').textContent = pct(d.range_read_pct) + ' of reads';
+    $('#roi-avg-read-pct').textContent = pct(d.avg_read_pct);
+    $('#roi-timespan').textContent  = d.time_span || '—';
+
+    // By tool table
+    const byTool = d.by_tool || [];
+    $('#roi-by-tool').innerHTML = byTool.map(t => `<tr>
+      <td><span class="badge ${toolBadgeClass(t.tool)}">${t.tool}</span></td>
+      <td>${fmt(t.ops_count)}</td>
+      <td>${fmt(t.tokens_consumed)}</td>
+      <td>${fmt(t.tokens_baseline)}</td>
+      <td class="green">${fmt(t.tokens_saved)}</td>
+      <td>${pct(t.savings_pct)}</td>
+      <td>${t.avg_saved_per_op.toFixed(0)}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="empty">No ROI data yet — requires v4.3.3+ server</td></tr>';
+
+    // Top savings
+    const top = d.top_savings || [];
+    $('#roi-top-savings').innerHTML = top.map(op => `<tr>
+      <td>${formatTime(op.ts)}</td>
+      <td><span class="badge ${toolBadgeClass(op.tool)}">${op.tool}</span></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(op.path||'')}">${escapeHtml(op.path||'—')}</td>
+      <td>${op.file_size ? kb(op.file_size) : '—'}</td>
+      <td>${fmt(op.tokens_baseline)}</td>
+      <td>${fmt(op.tokens_consumed)}</td>
+      <td class="green">${fmt(op.tokens_saved)}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="empty">No data</td></tr>';
+
+    // Sessions table
+    const sessions = d.sessions || [];
+    $('#roi-sessions-table').innerHTML = sessions.map(s => `<tr>
+      <td><code>${s.session_id}</code></td>
+      <td>${formatTime(s.first_op)}</td>
+      <td>${s.duration_min < 1 ? '<1 min' : s.duration_min.toFixed(0) + ' min'}</td>
+      <td>${fmt(s.ops_count)}</td>
+      <td>${fmt(s.tokens_consumed)}</td>
+      <td class="green">${fmt(s.tokens_saved)}</td>
+      <td>${pct(s.savings_pct)}</td>
+      <td>${s.errors > 0 ? `<span style="color:var(--red)">${s.errors}</span>` : '0'}</td>
+    </tr>`).join('') || '<tr><td colspan="8" class="empty">No session data yet</td></tr>';
+
+    // Anti-patterns
+    const ap = d.anti_patterns || {};
+    const apEntries = Object.entries(ap).sort((a,b) => b[1]-a[1]);
+    if (apEntries.length > 0) {
+      $('#roi-antipatterns-section').style.display = '';
+      $('#roi-antipatterns').innerHTML = apEntries.map(([k, v]) =>
+        `<tr><td>${escapeHtml(k)}</td><td>${v}</td></tr>`
+      ).join('');
+    } else {
+      $('#roi-antipatterns-section').style.display = 'none';
+    }
+  } catch(e) {
+    // silent
+  }
+}

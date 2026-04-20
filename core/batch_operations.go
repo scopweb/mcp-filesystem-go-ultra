@@ -189,6 +189,10 @@ func (m *BatchOperationManager) ExecuteBatch(request BatchRequest) BatchResult {
 func (m *BatchOperationManager) validateOperations(operations []FileOperation) []string {
 	errors := make([]string, 0)
 
+	// Track paths that will be created/available by earlier ops in this batch
+	// so that write→edit, create_dir→write, copy→edit chains validate correctly.
+	pendingPaths := make(map[string]bool)
+
 	for i, op := range operations {
 		// Security: enforce allowed-paths on every path in the operation.
 		// Without this check, batch operations bypass --allowed-paths access control.
@@ -215,11 +219,12 @@ func (m *BatchOperationManager) validateOperations(operations []FileOperation) [
 			if op.Path == "" {
 				errors = append(errors, fmt.Sprintf("Op %d: path is required for write", i))
 			}
-			// Validar que el directorio padre existe o se puede crear
+			// Validar que el directorio padre existe o será creado por una op anterior del batch
 			dir := filepath.Dir(op.Path)
-			if _, err := os.Stat(dir); os.IsNotExist(err) {
+			if _, err := os.Stat(dir); os.IsNotExist(err) && !pendingPaths[dir] {
 				errors = append(errors, fmt.Sprintf("Op %d: parent directory does not exist: %s", i, dir))
 			}
+			pendingPaths[op.Path] = true // este archivo existirá tras la op
 
 		case "edit":
 			if op.Path == "" {
@@ -228,8 +233,8 @@ func (m *BatchOperationManager) validateOperations(operations []FileOperation) [
 			if op.OldText == "" && op.NewText == "" {
 				errors = append(errors, fmt.Sprintf("Op %d: old_text or new_text required for edit", i))
 			}
-			// Validar que el archivo existe
-			if _, err := os.Stat(op.Path); os.IsNotExist(err) {
+			// Permitir si una op anterior del batch crea el archivo
+			if _, err := os.Stat(op.Path); os.IsNotExist(err) && !pendingPaths[op.Path] {
 				errors = append(errors, fmt.Sprintf("Op %d: file does not exist: %s", i, op.Path))
 			}
 
@@ -240,7 +245,7 @@ func (m *BatchOperationManager) validateOperations(operations []FileOperation) [
 			if op.OldText == "" {
 				errors = append(errors, fmt.Sprintf("Op %d: old_text (pattern) is required for search_and_replace", i))
 			}
-			if _, err := os.Stat(op.Path); os.IsNotExist(err) {
+			if _, err := os.Stat(op.Path); os.IsNotExist(err) && !pendingPaths[op.Path] {
 				errors = append(errors, fmt.Sprintf("Op %d: path does not exist: %s", i, op.Path))
 			}
 
@@ -248,41 +253,43 @@ func (m *BatchOperationManager) validateOperations(operations []FileOperation) [
 			if op.Source == "" || op.Destination == "" {
 				errors = append(errors, fmt.Sprintf("Op %d: source and destination required for move", i))
 			}
-			// Validar que el source existe
-			if _, err := os.Stat(op.Source); os.IsNotExist(err) {
+			if _, err := os.Stat(op.Source); os.IsNotExist(err) && !pendingPaths[op.Source] {
 				errors = append(errors, fmt.Sprintf("Op %d: source does not exist: %s", i, op.Source))
 			}
-			// Validar que el destino no existe
-			if _, err := os.Stat(op.Destination); err == nil {
+			// Validar que el destino no existe ni será creado por una op anterior
+			if _, err := os.Stat(op.Destination); err == nil && !pendingPaths[op.Destination] {
 				errors = append(errors, fmt.Sprintf("Op %d: destination already exists: %s", i, op.Destination))
 			}
+			pendingPaths[op.Destination] = true // el archivo existirá en el destino
+			delete(pendingPaths, op.Source)      // ya no estará en el origen
 
 		case "copy":
 			if op.Source == "" || op.Destination == "" {
 				errors = append(errors, fmt.Sprintf("Op %d: source and destination required for copy", i))
 			}
-			// Validar que el source existe
-			if _, err := os.Stat(op.Source); os.IsNotExist(err) {
+			if _, err := os.Stat(op.Source); os.IsNotExist(err) && !pendingPaths[op.Source] {
 				errors = append(errors, fmt.Sprintf("Op %d: source does not exist: %s", i, op.Source))
 			}
+			pendingPaths[op.Destination] = true // la copia existirá
 
 		case "delete":
 			if op.Path == "" {
 				errors = append(errors, fmt.Sprintf("Op %d: path is required for delete", i))
 			}
-			// Validar que el archivo existe
-			if _, err := os.Stat(op.Path); os.IsNotExist(err) {
+			if _, err := os.Stat(op.Path); os.IsNotExist(err) && !pendingPaths[op.Path] {
 				errors = append(errors, fmt.Sprintf("Op %d: file does not exist: %s", i, op.Path))
 			}
+			delete(pendingPaths, op.Path) // ya no estará disponible
 
 		case "create_dir":
 			if op.Path == "" {
 				errors = append(errors, fmt.Sprintf("Op %d: path is required for create_dir", i))
 			}
-			// Validar que el directorio no existe
+			// Validar que el directorio no existe ya (en disco ni pendiente)
 			if _, err := os.Stat(op.Path); err == nil {
 				errors = append(errors, fmt.Sprintf("Op %d: directory already exists: %s", i, op.Path))
 			}
+			pendingPaths[op.Path] = true // el directorio existirá tras la op
 
 		default:
 			errors = append(errors, fmt.Sprintf("Op %d: unknown operation type: %s", i, op.Type))

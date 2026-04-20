@@ -113,7 +113,17 @@ type UltraFastEngine struct {
 
 	// Request normalizer for parameter aliasing and coercion
 	normalizer *Normalizer
+
+	// Session tracking: groups consecutive operations into conversation sessions.
+	// A new session starts when > sessionInactivityTimeout elapses between operations.
+	session struct {
+		mu        sync.Mutex
+		id        string
+		lastOpAt  time.Time
+	}
 }
+
+const sessionInactivityTimeout = 5 * time.Minute
 
 // PerformanceMetrics tracks real-time performance statistics
 type PerformanceMetrics struct {
@@ -342,6 +352,24 @@ func (e *UltraFastEngine) Audit(entry AuditEntry) {
 // AuditEnabled returns true when the audit logger is active (--log-dir was set)
 func (e *UltraFastEngine) AuditEnabled() bool {
 	return e.auditLogger != nil
+}
+
+// CurrentSessionID returns the active session identifier, starting a new session
+// if more than sessionInactivityTimeout has elapsed since the last operation.
+// Sessions group operations belonging to the same Claude conversation.
+func (e *UltraFastEngine) CurrentSessionID() string {
+	e.session.mu.Lock()
+	defer e.session.mu.Unlock()
+
+	now := time.Now()
+	if e.session.id == "" || now.Sub(e.session.lastOpAt) > sessionInactivityTimeout {
+		// Generate 8-byte random hex ID (16 chars) — short but collision-resistant per session
+		var b [8]byte
+		rand.Read(b[:])
+		e.session.id = hex.EncodeToString(b[:])
+	}
+	e.session.lastOpAt = now
+	return e.session.id
 }
 
 // GetNormalizer returns the request normalizer

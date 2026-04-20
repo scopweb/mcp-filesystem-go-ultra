@@ -18,7 +18,11 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 		start := time.Now()
 
 		// Create audit entry and inject into context for sub-op annotation
-		entry := &core.AuditEntry{Timestamp: start, Tool: tool}
+		entry := &core.AuditEntry{
+			Timestamp: start,
+			Tool:      tool,
+			SessionID: engine.CurrentSessionID(),
+		}
 		ctx = context.WithValue(ctx, core.AuditEntryKey{}, entry)
 
 		// Run normalizer on arguments
@@ -82,6 +86,32 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 					}
 				}
 			}
+		}
+
+		// ROI: compute token estimates for savings analysis.
+		// tokens_consumed = actual tokens used by this tool call (request + response).
+		// tokens_baseline = what would be spent without the filesystem server (naive approach).
+		// tokens_saved    = max(0, baseline - consumed).
+		entry.TokensConsumed = (entry.BytesIn + entry.BytesOut) / 4
+		switch tool {
+		case "read_file", "read_text_file":
+			if entry.FileSize > 0 {
+				// Baseline: user would paste the whole file into context.
+				entry.TokensBaseline = entry.FileSize / 4
+			}
+		case "edit_file", "multi_edit", "edit":
+			if entry.FileSize > 0 {
+				// Baseline: read full file + write full file back.
+				entry.TokensBaseline = entry.FileSize * 2 / 4
+			}
+		case "search_files", "search":
+			// Baseline hard to estimate; use 0 (no savings claimed).
+		default:
+			// write_file, list_directory, etc.: no meaningful baseline difference.
+			entry.TokensBaseline = entry.TokensConsumed
+		}
+		if entry.TokensBaseline > entry.TokensConsumed {
+			entry.TokensSaved = entry.TokensBaseline - entry.TokensConsumed
 		}
 
 		// Log the audit entry

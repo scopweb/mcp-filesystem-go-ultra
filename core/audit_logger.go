@@ -36,6 +36,22 @@ func SetDiffLines(ctx context.Context, n int) {
 	}
 }
 
+// SetFileLinesTotal records the total number of lines in the target file.
+// Used to compute range-read efficiency ratio in ROI analysis.
+func SetFileLinesTotal(ctx context.Context, n int) {
+	if entry, ok := ctx.Value(AuditEntryKey{}).(*AuditEntry); ok {
+		entry.FileLinesTotal = n
+	}
+}
+
+// SetLinesRead records how many lines were actually read/affected by this operation.
+// Combined with FileLinesTotal, this shows how efficiently the model used range reads.
+func SetLinesRead(ctx context.Context, n int) {
+	if entry, ok := ctx.Value(AuditEntryKey{}).(*AuditEntry); ok {
+		entry.LinesRead = n
+	}
+}
+
 // SetSubOp annotates the current audit entry's sub-operation via context.
 // Safe to call even when no audit entry is in context (no-op).
 func SetSubOp(ctx context.Context, subOp string) {
@@ -78,6 +94,14 @@ type AuditEntry struct {
 	FeedbackPattern string `json:"feedback_pattern,omitempty"` // e.g. "truncation", "stale_read"
 	FeedbackStatus  string `json:"feedback_status,omitempty"`  // "warn" or "ko" (omitted when ok)
 	DiffLines       int    `json:"diff_lines,omitempty"`       // number of lines in the unified diff
+
+	// ROI / savings analysis fields
+	SessionID      string `json:"session_id,omitempty"`      // groups ops belonging to the same conversation (reset after 5min gap)
+	FileLinesTotal int    `json:"file_lines_total,omitempty"` // total lines in the target file (for range-read efficiency)
+	LinesRead      int    `json:"lines_read,omitempty"`       // lines actually read/affected (range ops)
+	TokensConsumed int64  `json:"tokens_consumed,omitempty"`  // estimated tokens used by this op (bytes/4)
+	TokensBaseline int64  `json:"tokens_baseline,omitempty"`  // estimated tokens without filesystem (naive approach)
+	TokensSaved    int64  `json:"tokens_saved,omitempty"`     // max(0, tokens_baseline - tokens_consumed)
 }
 
 // MetricsSnapshot is the periodic metrics dump written to metrics.json
