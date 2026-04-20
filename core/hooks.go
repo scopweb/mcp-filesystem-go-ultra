@@ -7,11 +7,20 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 )
+
+// regexPatternPrefix marks a hook pattern as a regular expression.
+// Example: "re:^write_.*$" matches any tool starting with "write_".
+const regexPatternPrefix = "re:"
+
+// compiledRegexCache stores compiled regex patterns for hook matchers
+// to avoid re-compilation on every hook dispatch.
+var compiledRegexCache sync.Map
 
 // HookEvent represents the different hook execution points
 type HookEvent string
@@ -213,7 +222,12 @@ func (hm *HookManager) ExecuteHooks(ctx context.Context, event HookEvent, hookCt
 	return hm.aggregateResults(results, event)
 }
 
-// matchesPattern checks if a tool name matches a pattern
+// matchesPattern checks if a tool name matches a pattern.
+// Supported pattern forms:
+//   - Exact: "write_file"
+//   - Global wildcard: "*"
+//   - Simple wildcard: "write_*", "*_file", "pre_*_hook"
+//   - Regex (prefixed with "re:"): "re:^write_.*$"
 func (hm *HookManager) matchesPattern(pattern, toolName string) bool {
 	// Exact match
 	if pattern == toolName {
@@ -225,13 +239,41 @@ func (hm *HookManager) matchesPattern(pattern, toolName string) bool {
 		return true
 	}
 
+	// Regex match (explicit opt-in via "re:" prefix)
+	if strings.HasPrefix(pattern, regexPatternPrefix) {
+		return hm.matchesRegex(pattern[len(regexPatternPrefix):], toolName)
+	}
+
 	// Simple wildcard patterns (e.g., "write_*", "*_file")
 	if strings.Contains(pattern, "*") {
 		return hm.matchesWildcard(pattern, toolName)
 	}
 
-	// TODO: Add regex support if needed
 	return false
+}
+
+// matchesRegex compiles the expression once, caches it, and evaluates it
+// against the tool name. Invalid expressions are logged and treated as no-match
+// so a malformed hook config never crashes the dispatcher.
+func (hm *HookManager) matchesRegex(expr, toolName string) bool {
+	if cached, ok := compiledRegexCache.Load(expr); ok {
+		re, _ := cached.(*regexp.Regexp)
+		if re == nil {
+			// Previously compiled as invalid; never matches.
+			return false
+		}
+		return re.MatchString(toolName)
+	}
+
+	re, err := regexp.Compile(expr)
+	if err != nil {
+		slog.Warn("Invalid hook regex pattern, ignoring", "pattern", expr, "error", err)
+		compiledRegexCache.Store(expr, (*regexp.Regexp)(nil))
+		return false
+	}
+
+	compiledRegexCache.Store(expr, re)
+	return re.MatchString(toolName)
 }
 
 // matchesWildcard performs simple wildcard matching
