@@ -1,5 +1,26 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.3.6] - 2026-04-24
+
+### Security — Prompt injection mitigation
+
+Removidas instrucciones imperativas del servidor MCP que se inyectaban en cada mensaje del usuario.
+
+#### Cambios
+
+- **`main.go`** — `serverInstructions` reducido de ~25 líneas de reglas/TOOLS/WORKFLOW/RISK a solo:
+  `"MCP Filesystem Ultra — File operations server. Run 'help' for tool list."`
+
+- **`tools_aliases.go`** — Descripción del tool `help` limpiada de "CALL THIS FIRST to discover all 16 filesystem tools..."
+
+- **`.claude/skills/filesystem-ultra-tools/skill.md`** — Removidas secciones "Never use bash alternatives", "Recommended workflow" con imperativos hacia el LLM
+
+#### Background
+
+El servidor enviaba `WithInstructions()` durante el handshake MCP. El cliente concatenaba este contenido a cada mensaje del usuario, violando el principio de que las instrucciones de estilo las configura el usuario, no el MCP.
+
+---
+
 ## [4.3.5] - 2026-04-20
 
 ### Feature — Regex support en hooks

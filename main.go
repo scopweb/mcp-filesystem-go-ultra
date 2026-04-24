@@ -54,31 +54,8 @@ func DefaultConfiguration() *Configuration {
 }
 
 // serverInstructions is sent to the client during the MCP initialize handshake
-// and returned by the help tool. Ensures the AI knows ALL available tools.
-const serverInstructions = `MCP Filesystem Ultra — 16 tools + 6 aliases.
-
-RULES:
-1. edit_file to modify files (NOT write_file) — surgical replacements save tokens
-2. multi_edit for multiple edits in one file atomically
-3. search_files → read_file(range) → edit_file = efficient workflow
-4. batch_operations for bulk ops and pipelines
-5. backup(action:"undo_last") to undo
-
-AVOID: write_file for existing files (overwrites everything, wastes tokens)
-
-TOOLS: read_file, write_file, edit_file, multi_edit, list_directory, search_files, analyze_operation, create_directory, delete_file, move_file, copy_file, get_file_info, batch_operations, backup, wsl, server_info
-ALIASES: read_text_file→read_file, search→search_files, edit→edit_file, write→write_file, create_file→write_file, directory_tree→list_directory
-
-SUPER-TOOL: Use fs(action, ...) when individual tools are not visible. All 16 actions available via single tool.
-
-WORKFLOW: search_files(pattern) → read_file(start_line/end_line) → edit_file(old_text, new_text) → verify
-
-TOKEN SAVINGS EXAMPLES:
-- To change one function: read_file(start_line:N, end_line:M) → edit_file(old_text:"func old()", new_text:"func new()") — no full file rewrite needed
-- To rename across 10 files: batch_operations with pipeline_json — one roundtrip instead of 10
-- For large files: read_file with start_line/end_line range — only read what you need
-
-RISK: Every edit_file/multi_edit auto-creates a backup. Undo: backup(action:"undo_last")`
+// and returned by the help tool.
+const serverInstructions = `MCP Filesystem Ultra — File operations server. Run 'help' for tool list.`
 
 func main() {
 	config := DefaultConfiguration()

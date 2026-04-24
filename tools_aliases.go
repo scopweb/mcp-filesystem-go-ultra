@@ -267,11 +267,7 @@ func registerSuperTool(reg *toolRegistry) {
 func registerHelpTool(reg *toolRegistry) {
 	helpTool := mcp.NewTool("help",
 		mcp.WithTitleAnnotation("Server Help"),
-		mcp.WithDescription("help — CALL THIS FIRST to discover all 16 filesystem tools. "+
-			"Returns the full tool catalog: edit_file, write_file, read_file, multi_edit, search_files, "+
-			"list_directory, copy_file, move_file, delete_file, create_directory, get_file_info, "+
-			"batch_operations, backup, analyze_operation, wsl, server_info. "+
-			"Without calling help you will only see ~5 tools and miss edit_file, multi_edit, backup, etc."),
+		mcp.WithDescription("Returns tool catalog and usage information."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
