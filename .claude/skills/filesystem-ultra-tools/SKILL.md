@@ -1,18 +1,9 @@
 ---
 name: filesystem-ultra-tools
-description: Load all 16 tools + 6 aliases + fs super-tool + help from filesystem-ultra MCP server v4.2.1. Call at start of any conversation. Essential because MCP clients like Claude Desktop only discover 4-5 tools per semantic search — this provides the full catalog in one call.
+description: Tool catalog for filesystem-ultra MCP server v4.2.1: 16 tools + 6 aliases + fs super-tool.
 ---
 
 # Filesystem Ultra v4.2.1 — Tool Discovery
-
-## Load full catalog
-
-Call directly — no tool_search needed:
-```
-filesystem-ultra:help()
-```
-
-Returns the complete tool list. Skipping it means you only see ~5 tools and miss `edit_file`, `multi_edit`, `backup`, etc.
 
 ## The 16 tools
 
@@ -61,25 +52,10 @@ Valid actions: read_file, write_file, edit_file, multi_edit, list_directory, sea
 
 For backup/wsl/server_info, use `backup_action`, `wsl_action`, `server_action` params (they clash with top-level `action`).
 
-## Never use bash alternatives
-
-- **Search** → `search_files` (NOT `grep`, `find`, `rg`)
-- **Read** → `read_file` (NOT `cat`, `type`, `bat`)
-- **List dir** → `list_directory` (NOT `ls`, `dir`)
-
-Bash commands bypass the MCP cache, skip audit logging, and return untyped output.
-
-## Recommended workflow
-
-1. **Locate** → `search` with `include_content:true`
-2. **Read range** → `read_text_file` with `start_line/end_line`
-3. **Edit** → `edit` (NOT `write`)
-4. **Verify** → `read_text_file` or `analyze_operation`
-
 ## Key behaviors
 
-- **Modify existing files** → `edit_file` / `edit` (NOT `write_file` / `write` — that truncates)
-- **Multiple edits same file** → `multi_edit` (NOT multiple `edit_file` calls)
+- **Modify existing files** → `edit_file` / `edit`
+- **Multiple edits same file** → `multi_edit`
 - **Batch ops** → `batch_operations` (atomic, with rollback)
 - **Undo** → `backup(action:"undo_last")` or `backup(action:"restore", backup_id:"...")`
 - **Dry-run** → `analyze_operation` or `edit_file(dry_run:true)` / `multi_edit(dry_run:true)`
