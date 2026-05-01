@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -106,6 +107,10 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 	caseSensitive, _ := request.Arguments["case_sensitive"].(bool)
 	wholeWord, _ := request.Arguments["whole_word"].(bool)
 	includeContext, _ := request.Arguments["include_context"].(bool)
+	outputFormat, _ := request.Arguments["output_format"].(string)
+	if outputFormat == "" {
+		outputFormat = "text"
+	}
 
 	contextLines := 3
 	if cl, ok := request.Arguments["context_lines"].(float64); ok {
@@ -234,11 +239,62 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 	hookCtx2.Metadata["match_count"] = len(matches)
 	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostSearch, hookCtx2)
 
+	// JSON output format for AI parsing
+	if outputFormat == "json" {
+		return &mcp.CallToolResponse{
+			Content: []mcp.TextContent{
+				{Text: formatSearchMatchesJSON(matches, pattern, path)},
+			},
+		}, nil
+	}
+
 	return &mcp.CallToolResponse{
 		Content: []mcp.TextContent{
 			{Text: result.String()},
 		},
 	}, nil
+}
+
+// formatSearchMatchesJSON formats search matches as structured JSON for AI parsing
+func formatSearchMatchesJSON(matches []SearchMatch, pattern, path string) string {
+	var buf strings.Builder
+	buf.WriteString("{\n")
+	buf.WriteString(fmt.Sprintf(`  "pattern": %s, `, jsonString(pattern)))
+	buf.WriteString(fmt.Sprintf(`  "path": %s, `, jsonString(path)))
+	buf.WriteString(fmt.Sprintf(`  "total_matches": %d, `, len(matches)))
+	buf.WriteString(`  "matches": [`)
+
+	for i, m := range matches {
+		if i > 0 {
+			buf.WriteString(", ")
+		}
+		buf.WriteString(fmt.Sprintf(`{"file": %s, "line": %d, "line_number": %d, "match_start": %d, "match_end": %d, "line_content": %s`,
+			jsonString(m.File), m.LineNumber, m.LineNumber, m.MatchStart, m.MatchEnd, jsonString(m.Line)))
+		if len(m.Context) > 0 {
+			buf.WriteString(`, "context": [`)
+			for j, ctx := range m.Context {
+				if j > 0 {
+					buf.WriteString(", ")
+				}
+				buf.WriteString(jsonString(ctx))
+			}
+			buf.WriteString("]")
+		}
+		buf.WriteString("}")
+	}
+
+	buf.WriteString("],\n")
+	buf.WriteString(`  "summary": `)
+	buf.WriteString(jsonString(fmt.Sprintf("Found %d matches for pattern '%s' in %s", len(matches), pattern, path)))
+	buf.WriteString("\n}")
+
+	return buf.String()
+}
+
+// jsonString escapes a string for JSON
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 // performSmartSearch

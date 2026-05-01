@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -44,17 +45,18 @@ type ProcessingConfig struct {
 
 // ProcessingResult holds results of file processing
 type ProcessingResult struct {
-	Success          bool          // Whether processing succeeded
-	InputPath        string        // Input file path
-	OutputPath       string        // Output file path
-	BytesProcessed   int64         // Total bytes processed
-	LinesProcessed   int           // Total lines processed
-	ChunksProcessed  int           // Total chunks processed
-	TransformedLines int           // Lines that were transformed
-	Duration         time.Duration // Processing duration
-	BackupID         string        // Backup ID if created
-	Errors           []string      // Any errors encountered
-	Mode             string        // Mode used (in-memory, streaming)
+	Success           bool          // Whether processing succeeded
+	InputPath         string        // Input file path
+	OutputPath        string        // Output file path
+	BytesProcessed    int64         // Total bytes processed
+	LinesProcessed    int           // Total lines processed
+	ChunksProcessed   int           // Total chunks processed
+	TransformedLines  int           // Lines that were transformed
+	Duration          time.Duration // Processing duration
+	BackupID          string        // Backup ID if created
+	Errors            []string      // Any errors encountered
+	Mode              string        // Mode used (in-memory, streaming)
+	TransformedContent string       // Transformed content (only in DryRun mode)
 }
 
 // LargeFileProcessor handles processing of large files
@@ -198,6 +200,11 @@ func (p *LargeFileProcessor) processInMemory(ctx context.Context, config Process
 		result.TransformedLines = 1 // Mark as transformed
 	}
 
+	// Store transformed content for dry run diff
+	if config.DryRun {
+		result.TransformedContent = processed
+	}
+
 	// Write result if not dry run
 	if !config.DryRun {
 		// Use existing StreamingWriteFile for atomic write
@@ -252,6 +259,7 @@ func (p *LargeFileProcessor) processLineByLine(ctx context.Context, config Proce
 	writer := bufio.NewWriter(outputFile)
 	defer writer.Flush()
 
+	var dryRunContent strings.Builder
 	lineNumber := 0
 	for scanner.Scan() {
 		lineNumber++
@@ -293,6 +301,12 @@ func (p *LargeFileProcessor) processLineByLine(ctx context.Context, config Proce
 				writer.WriteString("\n")
 			}
 			writer.WriteString(processedLine)
+		} else if config.DryRun {
+			// Collect for dry run diff
+			if dryRunContent.Len() > 0 {
+				dryRunContent.WriteString("\n")
+			}
+			dryRunContent.WriteString(processedLine)
 		}
 	}
 
@@ -301,6 +315,11 @@ func (p *LargeFileProcessor) processLineByLine(ctx context.Context, config Proce
 	}
 
 	result.LinesProcessed = lineNumber
+
+	// Store transformed content for dry run diff
+	if config.DryRun {
+		result.TransformedContent = dryRunContent.String()
+	}
 
 	// Flush and close files before rename
 	if !config.DryRun {
@@ -421,6 +440,12 @@ func (p *LargeFileProcessor) processChunkByChunk(ctx context.Context, config Pro
 			}
 			return fmt.Errorf("error reading chunk: %w", err)
 		}
+	}
+
+	// For chunk mode, we can't easily reconstruct line-based diff
+	// but we can note if changes occurred
+	if config.DryRun && result.TransformedLines > 0 {
+		result.TransformedContent = "[file would be modified - " + fmt.Sprintf("%d chunks changed", result.TransformedLines) + "]"
 	}
 
 	result.ChunksProcessed = chunkIndex

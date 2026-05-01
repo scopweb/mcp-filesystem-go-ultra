@@ -45,16 +45,17 @@ type PatternResult struct {
 
 // RegexTransformResult holds transformation results
 type RegexTransformResult struct {
-	Success           bool            // Whether transformation succeeded
-	FilePath          string          // File that was transformed
-	PatternsApplied   int             // Number of patterns successfully applied
-	TotalReplacements int             // Total replacements across all patterns
-	LinesAffected     int             // Unique lines affected
-	Duration          time.Duration   // Processing duration
-	BackupID          string          // Backup ID if created
-	Details           []PatternResult // Per-pattern results
-	Errors            []string        // Any errors encountered
-	Mode              string          // Mode used (sequential, parallel)
+	Success            bool            // Whether transformation succeeded
+	FilePath           string          // File that was transformed
+	PatternsApplied    int             // Number of patterns successfully applied
+	TotalReplacements  int             // Total replacements across all patterns
+	LinesAffected      int             // Unique lines affected
+	Duration           time.Duration   // Processing duration
+	BackupID           string          // Backup ID if created
+	Details            []PatternResult // Per-pattern results
+	Errors             []string        // Any errors encountered
+	Mode               string          // Mode used (sequential, parallel)
+	TransformedContent string          // Transformed content for dry run diff
 }
 
 // RegexTransformer handles advanced regex transformations
@@ -124,6 +125,7 @@ func (rt *RegexTransformer) Transform(ctx context.Context, config RegexTransform
 	result.BackupID = procResult.BackupID
 	result.Duration = time.Since(startTime)
 	result.LinesAffected = procResult.TransformedLines
+	result.TransformedContent = procResult.TransformedContent
 
 	// Calculate patterns applied
 	for _, detail := range result.Details {

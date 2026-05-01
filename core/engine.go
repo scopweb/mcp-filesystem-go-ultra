@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"log/slog"
 	"os"
@@ -84,6 +85,10 @@ type UltraFastEngine struct {
 
 	// Backup manager for file protection
 	backupManager *BackupManager
+
+	// Backup chain for step-through undo (path → current backupID in chain)
+	backupChain map[string]string
+	backupChainMu sync.RWMutex
 
 	// Risk thresholds for impact analysis
 	riskThresholds RiskThresholds
@@ -180,6 +185,7 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 		cache:     config.Cache,
 		metrics:   &PerformanceMetrics{},
 		semaphore: make(chan struct{}, config.ParallelOps),
+		backupChain: make(map[string]string),
 	}
 
 	// Initialize buffer pool for memory-efficient I/O operations
@@ -911,28 +917,24 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 	var result strings.Builder
 
 	if e.config.CompactMode {
-		// Compact mode: minimal format
-		result.WriteString(path)
-		result.WriteString(": ")
+		// Compact mode: ls-style, AI-friendly
+		result.WriteString(fmt.Sprintf("%s |", path))
 
 		maxItems := e.config.MaxListItems
 		count := 0
 		for _, entry := range entries {
 			if count >= maxItems {
-				result.WriteString(fmt.Sprintf("... (%d more)", len(entries)-count))
+				result.WriteString(fmt.Sprintf(" | ...+%d", len(entries)-count))
 				break
 			}
 
-			if count > 0 {
-				result.WriteString(", ")
-			}
-
+			result.WriteString(" ")
 			if entry.IsDir() {
 				result.WriteString(entry.Name())
 				result.WriteString("/")
 			} else {
 				info, err := entry.Info()
-				if err == nil && info.Size() > 1024 {
+				if err == nil && info.Size() > 512 {
 					result.WriteString(fmt.Sprintf("%s(%s)", entry.Name(), formatSize(info.Size())))
 				} else {
 					result.WriteString(entry.Name())
@@ -940,9 +942,17 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 			}
 			count++
 		}
+		result.WriteString(fmt.Sprintf(" | %d/%d", count, len(entries)))
 	} else {
-		// Verbose mode: detailed format
-		result.WriteString(fmt.Sprintf("Directory listing for: %s\n\n", path))
+		// Verbose mode: ls -la style, AI-friendly
+		totalDirs, totalFiles := 0, 0
+		for _, entry := range entries {
+			if entry.IsDir() {
+				totalDirs++
+			} else {
+				totalFiles++
+			}
+		}
 
 		for _, entry := range entries {
 			info, err := entry.Info()
@@ -950,16 +960,15 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 				continue
 			}
 
-			entryType := "[FILE]"
 			if entry.IsDir() {
-				entryType = "[DIR] "
+				result.WriteString(fmt.Sprintf("DIR  %s/", entry.Name()))
+			} else {
+				result.WriteString(fmt.Sprintf("FILE %s %s", entry.Name(), formatSize(info.Size())))
 			}
-
-			result.WriteString(fmt.Sprintf("%s %s (file://%s) - %d bytes\n",
-				entryType, entry.Name(), filepath.Join(path, entry.Name()), info.Size()))
+			result.WriteString(fmt.Sprintf(" | %s\n", path))
 		}
 
-		result.WriteString(fmt.Sprintf("\nDirectory: %s", path))
+		result.WriteString(fmt.Sprintf("--- | %d dirs, %d files | %s", totalDirs, totalFiles, path))
 	}
 
 	responseText := result.String()
@@ -1529,6 +1538,94 @@ func (e *UltraFastEngine) GetAutoSyncStatus() map[string]interface{} {
 // GetBackupManager returns the backup manager instance
 func (e *UltraFastEngine) GetBackupManager() *BackupManager {
 	return e.backupManager
+}
+
+// GetCurrentBackupID returns the current backup ID in the undo chain for a file
+func (e *UltraFastEngine) GetCurrentBackupID(path string) string {
+	e.backupChainMu.RLock()
+	defer e.backupChainMu.RUnlock()
+	return e.backupChain[path]
+}
+
+// SetCurrentBackupID updates the current backup ID in the undo chain for a file
+func (e *UltraFastEngine) SetCurrentBackupID(path, backupID string) {
+	e.backupChainMu.Lock()
+	defer e.backupChainMu.Unlock()
+	e.backupChain[path] = backupID
+}
+
+// ClearBackupID removes the backup chain entry for a file
+func (e *UltraFastEngine) ClearBackupID(path string) {
+	e.backupChainMu.Lock()
+	defer e.backupChainMu.Unlock()
+	delete(e.backupChain, path)
+}
+
+// FileIntegrityResult holds the result of a file integrity verification
+type FileIntegrityResult struct {
+	OK           bool   `json:"ok"`
+	Lines        int    `json:"lines"`
+	SizeBytes    int64  `json:"size_bytes"`
+	Readable     bool   `json:"readable"`
+	Hash         string `json:"hash,omitempty"`
+	Warning      string `json:"warning,omitempty"`
+	Verification string `json:"verification"` // "OK", "WARNING", "ERROR"
+}
+
+// VerifyFileIntegrity performs a lightweight integrity check after HIGH/CRITICAL edits
+// Checks: file is readable, size is reasonable, line count is reasonable
+func (e *UltraFastEngine) VerifyFileIntegrity(path string, expectedChangePct float64) *FileIntegrityResult {
+	result := &FileIntegrityResult{
+		Verification: "OK",
+	}
+
+	// Get file info
+	info, err := os.Stat(path)
+	if err != nil {
+		result.OK = false
+		result.Verification = "ERROR"
+		result.Warning = fmt.Sprintf("Cannot stat file: %v", err)
+		return result
+	}
+
+	result.SizeBytes = info.Size()
+	result.Readable = true
+
+	// Read file content to verify it's intact and get line count
+	content, err := os.ReadFile(path)
+	if err != nil {
+		result.OK = false
+		result.Verification = "ERROR"
+		result.Warning = fmt.Sprintf("Cannot read file: %v", err)
+		return result
+	}
+
+	result.Lines = strings.Count(string(content), "\n")
+	if !strings.HasSuffix(string(content), "\n") {
+		result.Lines++
+	}
+
+	// Basic hash for reference (CRC32 for speed)
+	result.Hash = fmt.Sprintf("%x", crc32.ChecksumIEEE(content))
+
+	// Check for suspiciously small file after high-change operation
+	if expectedChangePct > 50 && info.Size() < 100 {
+		result.OK = false
+		result.Verification = "WARNING"
+		result.Warning = fmt.Sprintf("File is only %d bytes after a %.0f%% change — verify content", info.Size(), expectedChangePct)
+		return result
+	}
+
+	// Check for truncation (empty file after non-trivial edit)
+	if expectedChangePct > 30 && info.Size() == 0 {
+		result.OK = false
+		result.Verification = "ERROR"
+		result.Warning = "File is empty after a non-trivial edit"
+		return result
+	}
+
+	result.OK = true
+	return result
 }
 
 // ExecutePipeline executes a multi-step file transformation pipeline

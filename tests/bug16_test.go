@@ -91,11 +91,11 @@ func TestBug16_ShouldBlockOnlyCritical(t *testing.T) {
 			expectRisk:  "high",
 		},
 		{
-			name:        "CRITICAL risk - BLOCKS",
+			name:        "CRITICAL risk - no block (always warn, never block)",
 			content:     strings.Repeat("A", 10),
 			oldText:     strings.Repeat("A", 10),
 			newText:     strings.Repeat("B", 10),
-			expectBlock: true,
+			expectBlock: false,
 			expectRisk:  "critical",
 		},
 	}

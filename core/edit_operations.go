@@ -28,6 +28,8 @@ type EditResult struct {
 	BackupID         string // ID of backup created before edit
 	RiskWarning      string // Non-blocking risk warning for MEDIUM/HIGH (empty if LOW/none)
 	EfficiencyHint   string // Token-saving hint when full-file rewrite detected (e.g., "Consider search_files + edit_file for surgical edits")
+	Analysis         *ChangeAnalysis // Full change analysis for AI visibility (plan mode style)
+	Integrity        *FileIntegrityResult // Auto-verification result for HIGH/CRITICAL edits
 }
 
 // SearchMatch represents a text search match
@@ -95,12 +97,22 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 	// Skip backup creation in dry_run mode (Bug #32: dry_run must not modify anything)
 	var backupID string
 	if e.backupManager != nil && !dryRun {
-		backupID, err = e.backupManager.CreateBackupWithContext(path, "edit_file",
+		// Get previous backup ID from chain for linked undo
+		e.backupChainMu.RLock()
+		previousBackupID := e.backupChain[path]
+		e.backupChainMu.RUnlock()
+
+		backupID, err = e.backupManager.CreateBackupWithContextAndParent(path, "edit_file",
 			fmt.Sprintf("Edit: %d occurrences, %.1f%% change, risk=%s",
-				impact.Occurrences, impact.ChangePercentage, impact.RiskLevel))
+				impact.Occurrences, impact.ChangePercentage, impact.RiskLevel), previousBackupID)
 		if err != nil {
 			return nil, fmt.Errorf("could not create backup: %w", err)
 		}
+
+		// Update backup chain with new backup ID
+		e.backupChainMu.Lock()
+		e.backupChain[path] = backupID
+		e.backupChainMu.Unlock()
 	}
 
 	// Bug #22: edit_file NEVER blocks — backup is already created, data is safe.
@@ -226,6 +238,18 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 	// Detect when Claude sent a large old_text that likely represents a full-file rewrite
 	if len(oldText) > 1000 && result.ReplacementCount == 1 {
 		result.EfficiencyHint = "💡 TIP: For a single replacement, consider using search_files(pattern) → read_file(start_line/end_line) → edit_file(old_text, new_text) to save tokens"
+	}
+
+	// Generate full change analysis for AI visibility (Plan Mode style)
+	if analysis, err := e.AnalyzeEditChange(ctx, path, oldText, newText); err == nil {
+		result.Analysis = analysis
+	}
+
+	// Auto-verify file integrity for HIGH/CRITICAL operations
+	if impact.RiskLevel == "high" || impact.RiskLevel == "critical" {
+		if verify := e.VerifyFileIntegrity(path, impact.ChangePercentage); verify != nil {
+			result.Integrity = verify
+		}
 	}
 
 	return result, nil
@@ -979,6 +1003,8 @@ type MultiEditResult struct {
 	BackupID        string       `json:"backup_id,omitempty"`
 	RiskWarning     string       `json:"risk_warning,omitempty"`
 	EditDetails     []EditDetail `json:"edit_details,omitempty"`
+	Analysis        *ChangeAnalysis `json:"analysis,omitempty"` // Full change analysis for AI visibility
+	Integrity       *FileIntegrityResult `json:"integrity,omitempty"` // Auto-verification for HIGH/CRITICAL edits
 }
 
 // MultiEdit performs multiple edits on a single file atomically
@@ -1060,11 +1086,21 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	// Skip backup creation in dry_run mode (Bug #32)
 	var backupID string
 	if e.backupManager != nil && !dryRun {
-		backupID, err = e.backupManager.CreateBackupWithContext(path, "multi_edit",
-			fmt.Sprintf("MultiEdit: %d edits, risk=%s", len(edits), aggregateImpact.RiskLevel))
+		// Get previous backup ID from chain for linked undo
+		e.backupChainMu.RLock()
+		previousBackupID := e.backupChain[path]
+		e.backupChainMu.RUnlock()
+
+		backupID, err = e.backupManager.CreateBackupWithContextAndParent(path, "multi_edit",
+			fmt.Sprintf("MultiEdit: %d edits, risk=%s", len(edits), aggregateImpact.RiskLevel), previousBackupID)
 		if err != nil {
 			return nil, fmt.Errorf("could not create backup: %w", err)
 		}
+
+		// Update backup chain with new backup ID
+		e.backupChainMu.Lock()
+		e.backupChain[path] = backupID
+		e.backupChainMu.Unlock()
 	}
 
 	// Bug #22: multi_edit NEVER blocks — backup is already created, data is safe.
@@ -1305,6 +1341,28 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	result.BackupID = backupID
 	if aggregateImpact.IsRisky {
 		result.RiskWarning = aggregateImpact.FormatRiskNotice(backupID, path)
+	}
+
+	// Generate aggregate change analysis for AI visibility
+	result.Analysis = &ChangeAnalysis{
+		FilePath:      path,
+		OperationType: "multi_edit",
+		FileExists:     true,
+		RiskLevel:     aggregateImpact.RiskLevel,
+		RiskFactors:    aggregateImpact.RiskFactors,
+		LinesAdded:     result.LinesAdded,
+		LinesRemoved:   result.LinesRemoved,
+		LinesModified:  result.LinesAffected,
+		CharactersChanged: int(aggregateImpact.CharactersChanged),
+		Impact: fmt.Sprintf("MultiEdit: %d/%d edits succeeded. Lines: +%d -%d",
+			result.SuccessfulEdits, result.TotalEdits, result.LinesAdded, result.LinesRemoved),
+	}
+
+	// Auto-verify file integrity for HIGH/CRITICAL operations
+	if aggregateImpact.RiskLevel == "high" || aggregateImpact.RiskLevel == "critical" {
+		if verify := e.VerifyFileIntegrity(path, aggregateImpact.ChangePercentage); verify != nil {
+			result.Integrity = verify
+		}
 	}
 
 	return result, nil

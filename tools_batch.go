@@ -159,6 +159,11 @@ func registerBatchTools(reg *toolRegistry) {
 			return mcp.NewToolResultText(msg), nil
 		}
 
+		// Update backup chain for undo step-through
+		if result.BackupID != "" {
+			engine.SetCurrentBackupID(path, result.BackupID)
+		}
+
 		// Format result (Bug #17: added SkippedEdits and EditDetails)
 		if engine.IsCompactMode() {
 			msg := ""
@@ -168,40 +173,51 @@ func registerBatchTools(reg *toolRegistry) {
 			total := result.TotalEdits
 
 			if failed > 0 {
-				msg = fmt.Sprintf("OK: %d/%d edits (+%d -%d) | %d lines", applied+skipped, total, result.LinesAdded, result.LinesRemoved, result.TotalLines)
+				msg = fmt.Sprintf("M %s | %d/%d@+%d-%d | %dL | ERRORS:%d", path, applied+skipped, total, result.LinesAdded, result.LinesRemoved, result.TotalLines, failed)
 			} else if skipped > 0 {
-				msg = fmt.Sprintf("OK: %d edits (%d applied, %d already present) (+%d -%d) | %d lines",
-					total, applied, skipped, result.LinesAdded, result.LinesRemoved, result.TotalLines)
+				msg = fmt.Sprintf("M %s | %d/%d@+%d-%d | %dL | skip:%d", path, applied, total, result.LinesAdded, result.LinesRemoved, result.TotalLines, skipped)
 			} else {
-				msg = fmt.Sprintf("OK: %d edits (+%d -%d) | %d lines", applied, result.LinesAdded, result.LinesRemoved, result.TotalLines)
-			}
-			if result.StartLine > 0 {
-				msg += fmt.Sprintf(" | %s#L%d-%d", path, result.StartLine, result.EndLine)
+				msg = fmt.Sprintf("M %s | %d@+%d-%d | %dL", path, applied, result.LinesAdded, result.LinesRemoved, result.TotalLines)
 			}
 			if result.BackupID != "" {
-				msg += fmt.Sprintf(" [with backup | UNDO: backup(action:\"restore\", backup_id:\"%s\")]", result.BackupID)
+				// Truncate to timestamp only (12 chars) for display
+				shortID := result.BackupID
+				if len(shortID) > 12 {
+					shortID = shortID[:12]
+				}
+				msg += fmt.Sprintf(" | UNDO:%s", shortID)
+
+				// Show parent chain if exists
+				if info, err := engine.GetBackupManager().GetBackupInfo(result.BackupID); err == nil && info.PreviousBackupID != "" {
+					parentShort := info.PreviousBackupID
+					if len(parentShort) > 12 {
+						parentShort = parentShort[:12]
+					}
+					msg += fmt.Sprintf(" | chain:%s", parentShort)
+				}
 			}
 			if result.RiskWarning != "" {
-				msg += result.RiskWarning
+				msg += " | " + strings.TrimPrefix(result.RiskWarning, "⚠️ ")
 			}
 			return mcp.NewToolResultText(msg), nil
 		}
 
+		// Verbose format: single line summary + optional sections
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("Multi-edit completed on %s\n", path))
-		sb.WriteString(fmt.Sprintf("Total edits: %d\n", result.TotalEdits))
-		sb.WriteString(fmt.Sprintf("Applied: %d\n", result.SuccessfulEdits))
+		sb.WriteString(fmt.Sprintf("M %s | %d/%d edits | +%d -%d | %dL\n", path, result.SuccessfulEdits, result.TotalEdits, result.LinesAdded, result.LinesRemoved, result.TotalLines))
+		if result.BackupID != "" {
+			sb.WriteString(fmt.Sprintf("✓ UNDO:%s", result.BackupID))
+			// Show parent chain if exists
+			if info, err := engine.GetBackupManager().GetBackupInfo(result.BackupID); err == nil && info.PreviousBackupID != "" {
+				sb.WriteString(fmt.Sprintf(" ← chain:%s", info.PreviousBackupID))
+			}
+			sb.WriteString("\n")
+		}
 		if result.SkippedEdits > 0 {
-			sb.WriteString(fmt.Sprintf("Already present: %d\n", result.SkippedEdits))
+			sb.WriteString(fmt.Sprintf("  skip: %d already present\n", result.SkippedEdits))
 		}
 		if result.FailedEdits > 0 {
-			sb.WriteString(fmt.Sprintf("Failed: %d\n", result.FailedEdits))
-		}
-		sb.WriteString(fmt.Sprintf("Changes: +%d -%d (lines added/removed)\n", result.LinesAdded, result.LinesRemoved))
-		sb.WriteString(fmt.Sprintf("File total lines: %d\n", result.TotalLines))
-		sb.WriteString(fmt.Sprintf("Confidence: %s\n", result.MatchConfidence))
-		if result.BackupID != "" {
-			sb.WriteString(fmt.Sprintf("Backup ID: %s\nUNDO: backup(action:\"restore\", backup_id:\"%s\")\n", result.BackupID, result.BackupID))
+			sb.WriteString(fmt.Sprintf("  fail: %d\n", result.FailedEdits))
 		}
 
 		if len(result.EditDetails) > 0 {
@@ -229,6 +245,30 @@ func registerBatchTools(reg *toolRegistry) {
 
 		if result.RiskWarning != "" {
 			sb.WriteString(result.RiskWarning)
+		}
+
+		// Append file integrity verification result for HIGH/CRITICAL operations
+		if result.Integrity != nil {
+			inv := result.Integrity
+			if inv.Verification == "OK" {
+				sb.WriteString(fmt.Sprintf("✓ integrity:%s|%dL|%dB\n", inv.Hash[:8], inv.Lines, inv.SizeBytes))
+			} else if inv.Verification == "WARNING" {
+				sb.WriteString(fmt.Sprintf("⚠️ integrity:WARNING | %s\n", inv.Warning))
+			} else {
+				sb.WriteString(fmt.Sprintf("✗ integrity:ERROR | %s\n", inv.Warning))
+			}
+		}
+
+		// Annotate audit log with backup chain and integrity info
+		if result.BackupID != "" {
+			prevID := ""
+			if info, err := engine.GetBackupManager().GetBackupInfo(result.BackupID); err == nil {
+				prevID = info.PreviousBackupID
+			}
+			core.SetBackupID(ctx, result.BackupID, prevID)
+		}
+		if result.Integrity != nil {
+			core.SetIntegrityStatus(ctx, result.Integrity.Verification, result.Integrity.Warning)
 		}
 
 		return mcp.NewToolResultText(sb.String()), nil
@@ -558,7 +598,47 @@ func registerBatchTools(reg *toolRegistry) {
 			return mcp.NewToolResultText(output.String()), nil
 
 		case "undo_last":
-			// Find the most recent backup
+			// Get file_path if specified
+			var targetFile string
+			if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+				if fp, ok := args["file_path"].(string); ok && fp != "" {
+					targetFile = fp
+				}
+			}
+
+			// Try step-through undo via backup chain first
+			if targetFile != "" {
+				currentBackupID := engine.GetCurrentBackupID(targetFile)
+				if currentBackupID != "" {
+					restoredFiles, prevID, hasMore, err := engine.GetBackupManager().RestorePreviousInChain(currentBackupID, targetFile)
+					if err == nil {
+						// Update chain
+						if prevID != "" {
+							engine.SetCurrentBackupID(targetFile, prevID)
+						} else {
+							engine.ClearBackupID(targetFile)
+						}
+
+						var output strings.Builder
+						output.WriteString(fmt.Sprintf("UNDO step — restored from backup %s\n\n", currentBackupID))
+						output.WriteString(fmt.Sprintf("File: %s\n", targetFile))
+						output.WriteString(fmt.Sprintf("Restored %d file(s):\n", len(restoredFiles)))
+						for _, file := range restoredFiles {
+							output.WriteString(fmt.Sprintf("   - %s\n", file))
+						}
+						if hasMore {
+							output.WriteString(fmt.Sprintf("\nMore undo available. Previous backup: %s\n", prevID))
+							output.WriteString("Run backup(action:\"undo_last\", file_path:\"...\", preview:true) to preview next step\n")
+						} else {
+							output.WriteString("\nNo more undo available — reached earliest backup in chain\n")
+						}
+						return mcp.NewToolResultText(output.String()), nil
+					}
+					// Fall through to old behavior if error
+				}
+			}
+
+			// Fallback: find the most recent backup (old behavior)
 			backups, err := engine.GetBackupManager().ListBackups(1, "all", "", 0)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to list backups: %v", err)), nil
@@ -609,6 +689,54 @@ func registerBatchTools(reg *toolRegistry) {
 				output.WriteString(fmt.Sprintf("REDO (re-apply): backup(action:\"restore\", backup_id:\"%s\")\n", preRestoreID))
 			}
 			output.WriteString("\nA backup of the current state was created before restoring\n")
+			return mcp.NewToolResultText(output.String()), nil
+
+		case "undo_chain":
+			// Show the undo chain for a file
+			var targetFile string
+			if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+				if fp, ok := args["file_path"].(string); ok && fp != "" {
+					targetFile = fp
+				}
+			}
+
+			if targetFile == "" {
+				return mcp.NewToolResultError("file_path is required for undo_chain action"), nil
+			}
+
+			currentBackupID := engine.GetCurrentBackupID(targetFile)
+			if currentBackupID == "" {
+				return mcp.NewToolResultText(fmt.Sprintf("No undo chain found for %s\nNo edits have been tracked for this file in this session.", targetFile)), nil
+			}
+
+			var output strings.Builder
+			output.WriteString(fmt.Sprintf("Undo chain for: %s\n\n", targetFile))
+			output.WriteString("Backups (newest → oldest):\n")
+
+			visited := make(map[string]bool)
+			backupID := currentBackupID
+			step := 1
+			for backupID != "" && !visited[backupID] {
+				visited[backupID] = true
+				info, err := engine.GetBackupManager().GetBackupInfo(backupID)
+				if err != nil {
+					break
+				}
+				arrow := "→ "
+				if step == 1 {
+					arrow = "● "
+				}
+				output.WriteString(fmt.Sprintf("  %s%s | %s | %s\n", arrow, backupID,
+					info.Timestamp.Format("15:04:05"), info.Operation))
+				backupID = info.PreviousBackupID
+				step++
+				if step > 100 {
+					output.WriteString("  ... (possible cycle detected)\n")
+					break
+				}
+			}
+
+			output.WriteString("\nUse backup(action:\"undo_last\", file_path:\"...\") to step backward\n")
 			return mcp.NewToolResultText(output.String()), nil
 
 		default:
