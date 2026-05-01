@@ -283,9 +283,9 @@ func registerCoreTools(reg *toolRegistry) {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
 			if engine.IsCompactMode() {
-				return mcp.NewToolResultText(fmt.Sprintf("OK: %s written", formatSize(int64(bytesWritten)))), nil
+				return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB", path, bytesWritten)), nil
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("Successfully wrote %d bytes (from base64) to %s", bytesWritten, path)), nil
+			return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB base64", path, bytesWritten)), nil
 		}
 
 		// Normal text write
@@ -312,13 +312,10 @@ func registerCoreTools(reg *toolRegistry) {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
 			core.SetFeedback(ctx, signal)
-			msg := fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), path)
 			if engine.IsCompactMode() {
-				msg = fmt.Sprintf("OK: %s written%s", formatSize(int64(len(content))), core.FormatFeedbackCompact(signal))
-			} else {
-				msg = core.FormatFeedback(signal, msg)
+				return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB | %s", path, len(content), core.FormatFeedbackCompact(signal))), nil
 			}
-			return mcp.NewToolResultText(msg), nil
+			return mcp.NewToolResultText(core.FormatFeedback(signal, fmt.Sprintf("WRITTEN %s | %dB", path, len(content)))), nil
 		}
 
 		err = engine.WriteFileContent(ctx, path, content)
@@ -326,9 +323,9 @@ func registerCoreTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
 		if engine.IsCompactMode() {
-			return mcp.NewToolResultText(fmt.Sprintf("OK: %s written", formatSize(int64(len(content))))), nil
+			return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB", path, len(content))), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), path)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB", path, len(content))), nil
 	})
 	reg.addTool(writeFileTool, reg.writeFileHandler)
 
@@ -412,6 +409,8 @@ func registerCoreTools(reg *toolRegistry) {
 				return mcp.NewToolResultError("patterns_json is required for mode:\"regex\""), nil
 			}
 
+			normPath := core.NormalizePath(path)
+
 			var patterns []core.TransformPattern
 			if err := json.Unmarshal([]byte(patternsJSON), &patterns); err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to parse patterns JSON: %v", err)), nil
@@ -457,6 +456,18 @@ func registerCoreTools(reg *toolRegistry) {
 
 			if result.BackupID != "" {
 				output.WriteString(fmt.Sprintf("Backup ID: %s\n", result.BackupID))
+			}
+
+			// Add diff preview for dry run
+			if dryRun && result.TransformedContent != "" {
+				newContentStr := result.TransformedContent
+				oldContentRaw, _ := os.ReadFile(normPath)
+				unifiedDiff := core.UnifiedDiff(string(oldContentRaw), newContentStr, path)
+				if unifiedDiff != "" {
+					output.WriteString("\nDiff (DRY RUN - no changes made):\n")
+					output.WriteString(unifiedDiff)
+					output.WriteString("\n")
+				}
 			}
 
 			if len(result.Errors) > 0 {
@@ -586,6 +597,11 @@ func registerCoreTools(reg *toolRegistry) {
 		core.ResetFailedOldText(path, oldText)
 		core.RecordRead(normPath)
 
+		// Update backup chain for undo step-through
+		if result.BackupID != "" {
+			engine.SetCurrentBackupID(path, result.BackupID)
+		}
+
 		// Compute unified diff
 		newContentRaw, _ := os.ReadFile(normPath)
 		newContentStr := string(newContentRaw)
@@ -625,39 +641,47 @@ func registerCoreTools(reg *toolRegistry) {
 		}
 
 		if engine.IsCompactMode() {
-			msg := fmt.Sprintf("OK: %d changes (+%d -%d) | %d lines", result.ReplacementCount, result.LinesAdded, result.LinesRemoved, result.TotalLines)
-			if result.StartLine > 0 {
-				msg += fmt.Sprintf(" | %s#L%d-%d", path, result.StartLine, result.EndLine)
-			}
+			// New terse format: M path/to/file | N@+N-N | NL | UNDO:id | chain:parent
+			msg := fmt.Sprintf("M %s | %d@+%d-%d | %dL", path, result.ReplacementCount, result.LinesAdded, result.LinesRemoved, result.TotalLines)
 			if result.BackupID != "" {
-				msg += fmt.Sprintf(" [backup | UNDO: backup(action:\"restore\", backup_id:\"%s\")]", result.BackupID)
+				// Truncate to timestamp only (12 chars) for display
+				shortID := result.BackupID
+				if len(shortID) > 12 {
+					shortID = shortID[:12]
+				}
+				msg += fmt.Sprintf(" | UNDO:%s", shortID)
+
+				// Show parent chain if exists (for undo step-through)
+				if prevID := result.BackupID; len(prevID) > 12 {
+					if info, err := engine.GetBackupManager().GetBackupInfo(result.BackupID); err == nil && info.PreviousBackupID != "" {
+						parentShort := info.PreviousBackupID
+						if len(parentShort) > 12 {
+							parentShort = parentShort[:12]
+						}
+						msg += fmt.Sprintf(" | chain:%s", parentShort)
+					}
+				}
 			}
 			if result.RiskWarning != "" {
-				msg += result.RiskWarning
+				msg += " | " + strings.TrimPrefix(result.RiskWarning, "⚠️ ")
 			}
-			if result.EfficiencyHint != "" {
-				msg += "\n" + result.EfficiencyHint
-			}
-			msg += core.FormatFeedbackCompact(editSignal)
-			msg += core.FormatFeedbackCompact(newTextSignal)
 			if unifiedDiff != "" {
 				msg += "\n" + unifiedDiff
 			}
 			return mcp.NewToolResultText(msg), nil
 		}
 
-		msg := fmt.Sprintf("Successfully edited %s\nChanges: %d replacement(s) (+%d -%d)\nMatch confidence: %s\nFile total lines: %d",
-			path, result.ReplacementCount, result.LinesAdded, result.LinesRemoved, result.MatchConfidence, result.TotalLines)
+		// Verbose format: single line summary + optional sections
+		msg := fmt.Sprintf("M %s | %d replacement(s) | +%d -%d | %dL", path, result.ReplacementCount, result.LinesAdded, result.LinesRemoved, result.TotalLines)
 		if result.BackupID != "" {
-			msg += fmt.Sprintf("\nBackup ID: %s\nUNDO: backup(action:\"restore\", backup_id:\"%s\")", result.BackupID, result.BackupID)
+			msg += fmt.Sprintf("\n✓ UNDO:%s", result.BackupID)
+			// Show parent chain if exists
+			if info, err := engine.GetBackupManager().GetBackupInfo(result.BackupID); err == nil && info.PreviousBackupID != "" {
+				msg += fmt.Sprintf(" ← chain:%s", info.PreviousBackupID)
+			}
 		}
 		if result.RiskWarning != "" {
-			msg += result.RiskWarning
-		}
-		if result.EfficiencyHint != "" {
-			msg += "\n" + result.EfficiencyHint
-		} else if result.LinesAffected > 10 {
-			msg += "\nTIP: Use read_file to verify large edits, or analyze_operation for dry-run preview"
+			msg += "\n" + result.RiskWarning
 		}
 		// Append feedback signals (non-blocking)
 		msg = core.FormatFeedback(editSignal, msg)
@@ -666,6 +690,70 @@ func registerCoreTools(reg *toolRegistry) {
 		if unifiedDiff != "" {
 			msg += "\n\nDiff:\n" + unifiedDiff
 		}
+		// Append full change analysis for AI visibility
+		if result.Analysis != nil {
+			a := result.Analysis
+			msg += "\n\n---\nChange Analysis\n---\n"
+			msg += fmt.Sprintf("File: %s\nOperation: edit\nFile exists: %v\n\n", a.FilePath, a.FileExists)
+			msg += fmt.Sprintf("Risk Level: %s\n", strings.ToUpper(a.RiskLevel))
+			if len(a.RiskFactors) > 0 {
+				msg += "Risk Factors:\n"
+				for _, factor := range a.RiskFactors {
+					msg += fmt.Sprintf("  - %s\n", factor)
+				}
+			}
+			if a.LinesAdded > 0 || a.LinesRemoved > 0 {
+				msg += "Changes:\n"
+				if a.LinesAdded > 0 {
+					msg += fmt.Sprintf("  + %d lines added\n", a.LinesAdded)
+				}
+				if a.LinesRemoved > 0 {
+					msg += fmt.Sprintf("  - %d lines removed\n", a.LinesRemoved)
+				}
+				if a.LinesModified > 0 {
+					msg += fmt.Sprintf("  ~ %d lines modified\n", a.LinesModified)
+				}
+			}
+			if a.Impact != "" {
+				msg += fmt.Sprintf("Impact: %s\n", a.Impact)
+			}
+			if a.Preview != "" {
+				msg += fmt.Sprintf("Preview:\n%s\n", a.Preview)
+			}
+			if len(a.Suggestions) > 0 {
+				msg += "Suggestions:\n"
+				for _, s := range a.Suggestions {
+					msg += fmt.Sprintf("  - %s\n", s)
+				}
+			}
+			if a.EfficiencyTip != "" {
+				msg += a.EfficiencyTip + "\n"
+			}
+		}
+		// Append file integrity verification result for HIGH/CRITICAL operations
+		if result.Integrity != nil {
+			inv := result.Integrity
+			if inv.Verification == "OK" {
+				msg += fmt.Sprintf("\n✓ integrity:%s|%dL|%dB", inv.Hash[:8], inv.Lines, inv.SizeBytes)
+			} else if inv.Verification == "WARNING" {
+				msg += fmt.Sprintf("\n⚠️ integrity:WARNING | %s", inv.Warning)
+			} else {
+				msg += fmt.Sprintf("\n✗ integrity:ERROR | %s", inv.Warning)
+			}
+		}
+
+		// Annotate audit log with backup chain and integrity info
+		if result.BackupID != "" {
+			prevID := ""
+			if info, err := engine.GetBackupManager().GetBackupInfo(result.BackupID); err == nil {
+				prevID = info.PreviousBackupID
+			}
+			core.SetBackupID(ctx, result.BackupID, prevID)
+		}
+		if result.Integrity != nil {
+			core.SetIntegrityStatus(ctx, result.Integrity.Verification, result.Integrity.Warning)
+		}
+
 		return mcp.NewToolResultText(msg), nil
 	})
 	reg.addTool(editFileTool, reg.editFileHandler)

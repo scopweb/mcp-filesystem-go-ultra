@@ -50,6 +50,10 @@ function shortPath(p) {
 // Global counter for unique operation row IDs
 let opRowCounter = 0;
 
+// When true, the Operations page stops redrawing #all-ops (both polling and SSE)
+// so the user can inspect an expanded detail row without it being wiped.
+let operationsPaused = false;
+
 function operationRow(op, extended) {
   const statusClass = op.status === 'ok' ? 'ok' : op.status === 'warn' ? 'warn' : 'error';
   const toolClass = toolBadgeClass(op.tool);
@@ -89,6 +93,17 @@ function operationRow(op, extended) {
     if (op.diff_lines) details.push(`<span class="detail-label">Diff lines:</span> ${op.diff_lines}`);
     if (op.matches) details.push(`<span class="detail-label">Matches:</span> ${op.matches}`);
     if (op.cache_hit !== undefined && op.cache_hit !== null) details.push(`<span class="detail-label">Cache hit:</span> ${op.cache_hit ? 'Yes' : 'No'}`);
+    if (op.backup_id) {
+      let backupInfo = `Backup: ${op.backup_id}`;
+      if (op.previous_backup_id) backupInfo += ` → parent ${op.previous_backup_id}`;
+      details.push(`<span class="detail-label">Undo chain:</span> <span class="backup-chain" title="Parent: ${op.previous_backup_id || 'none'}">${backupInfo}</span>`);
+    }
+    if (op.integrity_status) {
+      const invClass = op.integrity_status === 'OK' ? 'ok' : op.integrity_status === 'WARNING' ? 'warn' : 'error';
+      let invLabel = `Integrity: <span class="badge ${invClass}">${op.integrity_status}</span>`;
+      if (op.integrity_warn) invLabel += ` — ${escapeHtml(op.integrity_warn)}`;
+      details.push(invLabel);
+    }
     if (op.path) details.push(`<span class="detail-label">Full path:</span> <span class="path">${op.path}</span>`);
 
     // Args table
@@ -173,9 +188,12 @@ async function fetchOperations() {
     const recentHtml = ops.slice(0, 10).map(op => operationRow(op, false)).join('');
     $('#recent-ops').innerHTML = recentHtml || '<tr><td colspan="5" class="empty">No operations yet</td></tr>';
 
-    // All ops (operations page)
-    const allHtml = ops.map(op => operationRow(op, true)).join('');
-    $('#all-ops').innerHTML = allHtml || '<tr><td colspan="10" class="empty">No operations yet</td></tr>';
+    // All ops (operations page) — skip rewrite while paused so the user can
+    // inspect an expanded detail row without it being blown away.
+    if (!operationsPaused) {
+      const allHtml = ops.map(op => operationRow(op, true)).join('');
+      $('#all-ops').innerHTML = allHtml || '<tr><td colspan="10" class="empty">No operations yet</td></tr>';
+    }
   } catch (e) {
     // silent
   }
@@ -589,9 +607,10 @@ function connectSSE() {
           recentTbody.removeChild(recentTbody.lastChild);
         }
       }
-      // Prepend to all ops (Operations page)
+      // Prepend to all ops (Operations page) — but not while paused,
+      // so the user can study an expanded detail row uninterrupted.
       const allTbody = $('#all-ops');
-      if (allTbody) {
+      if (allTbody && !operationsPaused) {
         allTbody.insertAdjacentHTML('afterbegin', operationRow(op, true));
         // Keep max 200 rows
         while (allTbody.children.length > 400) { // 2 rows per op (data + detail)
@@ -640,6 +659,18 @@ document.addEventListener('DOMContentLoaded', () => {
     searchBackups();
   });
   if (opSel) opSel.addEventListener('change', () => { backupPage.offset = 0; searchBackups(); });
+
+  // Operations page — pause/resume toggle. While paused, fetchOperations and SSE
+  // stop rewriting #all-ops so the user can inspect an expanded row.
+  const pauseBtn = $('#ops-pause-btn');
+  if (pauseBtn) {
+    pauseBtn.addEventListener('click', () => {
+      operationsPaused = !operationsPaused;
+      pauseBtn.textContent = operationsPaused ? 'Resume refresh' : 'Pause refresh';
+      pauseBtn.style.background = operationsPaused ? 'var(--red, #d9534f)' : '';
+      pauseBtn.style.color = operationsPaused ? '#fff' : '';
+    });
+  }
 });
 
 // Normalizer Status

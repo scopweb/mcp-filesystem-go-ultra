@@ -274,19 +274,17 @@ func (bci *BatchChangeImpact) FormatBatchRiskWarning() string {
 	return warning.String()
 }
 
-// ShouldBlockOperation determina si una operación debe ser bloqueada.
-// Only CRITICAL risk (>=90% file rewrite) blocks the operation.
-// MEDIUM and HIGH risk auto-proceed with backup + warning (Bug #16).
+// ShouldBlockOperation determines if an operation should be blocked.
+// Returns false for all risk levels — blocking is disabled (Bug #22: always warn, never block).
+// MEDIUM, HIGH, and CRITICAL risk auto-proceed with backup + warning.
+// Use force: true only to bypass interactive confirmation prompts, not to override blocking.
 func (ci *ChangeImpact) ShouldBlockOperation(force bool) bool {
-	if force {
-		return false
-	}
-	return ci.RiskLevel == "critical"
+	return false
 }
 
 // FormatRiskNotice generates a non-blocking, actionable warning appended to success responses.
 // Used for MEDIUM and HIGH risk operations that auto-proceed with backup (Bug #16).
-// For HIGH risk, includes a VERIFY instruction to prompt the AI to check the result.
+// For HIGH/CRITICAL risk: add actionable VERIFY instruction
 func (ci *ChangeImpact) FormatRiskNotice(backupID string, filePath ...string) string {
 	if !ci.IsRisky || ci.RiskLevel == "low" {
 		return ""
@@ -309,13 +307,13 @@ func (ci *ChangeImpact) FormatRiskNotice(backupID string, filePath ...string) st
 	return notice.String()
 }
 
-// GetRecommendation retorna una recomendación basada en el riesgo
+// GetRecommendation returns a recommendation based on risk level
 func (ci *ChangeImpact) GetRecommendation() string {
 	switch ci.RiskLevel {
 	case "critical":
-		return "CRITICAL risk detected. Operation blocked. Use analyze_edit first, then add force: true to confirm."
+		return "CRITICAL risk - auto-backup created. Use backup(action:\"undo_last\") to revert if needed. VERIFY: read_file(mode:\"tail\") to confirm file is complete."
 	case "high":
-		return "HIGH risk - auto-backup created. Use backup(action:\"undo_last\") to revert if needed."
+		return "HIGH risk - auto-backup created. Use backup(action:\"undo_last\") to revert if needed. VERIFY: read_file(mode:\"tail\") to confirm file is complete."
 	case "medium":
 		return "MEDIUM risk - auto-backup created. Use backup(action:\"undo_last\") to revert if needed."
 	default:

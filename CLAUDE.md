@@ -157,7 +157,7 @@ Tools are registered in `registerTools()` (tools_core.go) via `toolRegistry.addT
 - VeryLarge: < 50MB (special handling, edit rejected above this)
 
 ### Risk Assessment
-Operations that modify > 30% of file or have > 50 occurrences get MEDIUM risk. > 50% or > 100 occurrences = HIGH (requires `force: true`). > 90% = CRITICAL.
+Operations that modify > 30% of file or have > 50 occurrences get MEDIUM risk. > 50% or > 100 occurrences = HIGH. > 90% = CRITICAL. **All operations auto-proceed with backup — never blocked.** HIGH/CRITICAL include VERIFY instruction in response.
 
 ### Backup System
 Backups stored in configurable dir (default: temp/mcp-batch-backups). Backup IDs are `timestamp-random` format. Metadata stored as JSON alongside backup files. Sanitized against path traversal.
@@ -385,6 +385,7 @@ When `--log-dir` is set, each completed step emits a separate audit entry with `
 | Search files | `search_files` | `path`, `pattern`, `file_types` (optional) |
 | Content search | `search_files` | `path`, `pattern`, `include_content: true` |
 | Advanced search | `search_files` | `path`, `pattern`, `case_sensitive: true`, `include_context: true` |
+| JSON output | `search_files` | `path`, `pattern`, `include_context: true`, `output_format: "json"` |
 | Count pattern | `search_files` | `path`, `pattern`, `count_only: true` |
 
 ### File Operations
@@ -491,13 +492,26 @@ For replacing large code blocks (>10 lines):
 - If a tool returns no response (timeout): retry once, the file system may have been briefly locked
 
 ### 10. Disaster Recovery — UNDO and backup restore
-- Every `edit_file` and `multi_edit` response includes: `UNDO: backup(action:"restore", backup_id:"...")`
+
+**Backup format in responses:**
+- Compact: `M file.go | 7@+7-0 | 42L | UNDO:20260501-123650 | chain:20260501-123649`
+  - `UNDO:20260501-123650` — truncated ID (12 chars), use for display or `backup(action:"undo_last", file_path:"...")`
+  - `chain:20260501-123649` — parent backup ID, indicates previous version available for step-through undo
+- Verbose: `✓ UNDO:20260501-123650-333c964cc3af7a82 ← chain:20260501-123649-...`
+
+**Undo operations:**
 - Quick undo (no backup_id needed): `backup(action:"undo_last")`
-- Preview before undo: `backup(action:"undo_last", preview:true)`
+- **Step-through undo** (recomendado): `backup(action:"undo_last", file_path:"...")` — recorre la cadena de backups hacia atrás, uno a uno
+- Preview next step: `backup(action:"undo_last", file_path:"...", preview:true)`
+- Ver cadena completa: `backup(action:"undo_chain", file_path:"...")`
+- Restore specific backup: `backup(action:"restore", backup_id:"20260501-123650-333c964cc3af7a82")` (full ID required)
 - Find backups for a specific file: `backup(action:"list", filter_path:"filename")`
-- If edits make things WORSE, **STOP editing and RESTORE** from backup — repeated edits on a broken file make recovery harder
-- For HIGH risk edits, verify the result: `read_file(path, mode:"tail")` to confirm file is complete
-- Full recovery guide: `server_info(action:"help", topic:"recovery")`
+
+**Auto-verify integrity**: operaciones HIGH/CRITICAL incluyen verificación automática post-edit (legibilidad, tamaño, hash). Si el archivo quedó corrupto o truncado, se reporta inmediatamente.
+
+For HIGH risk edits, verify the result: `read_file(path, mode:"tail")` to confirm file is complete.
+
+Full recovery guide: `server_info(action:"help", topic:"recovery")`
 
 ### 11. Use filesystem tools — never bash alternatives
 - **Search files** → `search_files` (never `grep`, `find`, `rg`)

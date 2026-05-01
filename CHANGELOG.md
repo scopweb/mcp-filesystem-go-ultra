@@ -1,5 +1,177 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.3.9] - 2026-05-01
+
+### Feature — New AI-optimized response formats
+
+Respuestas reformateadas para mejor parseo por LLMs, menor consumo de tokens, y chain de undo visible.
+
+**edit_file:**
+- Compact: `M path/file | N@+N-N | NL | UNDO:202605011236 | chain:202605011235`
+- Verbose: `M path/file | N replacement(s) | +N -N | NL\n✓ UNDO:full-id ← chain:parent-id`
+
+**multi_edit:**
+- Compact: `M path/file | 3/5@+10-2 | 50L | skip:2 | UNDO:202605011236 | chain:202605011235`
+- Verbose: similar con detalles expandidos
+
+**write_file:**
+- Compact/Verbose: `WRITTEN path/file | 1234B`
+
+**list_directory:**
+- Compact: `path/to/dir | file1 file2/ dir/ | 3/12`
+- Verbose: `FILE file1 1.2KB | path/to/dir\nDIR subdir/ | path/to/dir\n--- | 1 dirs, 2 files`
+
+**Backup ID truncation:**
+- Display: 12 chars (timestamp only) para eficiencia
+- Chain: `chain:parentID` muestra parent para undo step-through
+- Full ID disponible en audit log / backup list
+
+---
+
+## [4.3.8] - 2026-04-30
+
+### Feature — Undo step-through via backup chain
+
+Sistema de undo que permite recorrer la cadena de backups hacia atrás, uno a uno, en lugar de restaurar todo de golpe. Cada backup conoce su "parent" vía `PreviousBackupID`.
+
+**Uso:**
+```json
+backup(action: "undo_last", file_path: "file.go")
+// Reversible: ejecuta un paso, muestra cuántas opciones quedan
+backup(action: "undo_last", file_path: "file.go", preview: true)
+// Preview: solo muestra qué haría sin ejecutar
+backup(action: "undo_chain", file_path: "file.go")
+// Muestra la cadena completa de backups para el archivo
+```
+
+**Cambios:**
+
+- **`core/backup_manager.go`** — `BackupInfo` incluye `PreviousBackupID string` + `CreateBackupWithContextAndParent()` + `RestorePreviousInChain()`
+- **`core/engine.go`** — `backupChain map[string]string` para tracking + getter/setter `GetCurrentBackupID()`, `SetCurrentBackupID()`, `ClearBackupID()`
+- **`core/edit_operations.go`** — `EditFile()` y `MultiEdit()` crean backups enlazados y actualizan la cadena
+- **`tools_batch.go`** — `undo_last` con `file_path` sigue la cadena hacia atrás; nuevo `undo_chain` action
+
+---
+
+### Feature — Auto-verificación de integridad post-edit (HIGH/CRITICAL)
+
+Después de `edit_file` o `multi_edit` con riesgo HIGH o CRITICAL, se ejecuta automáticamente una verificación ligera del archivo:
+- ¿Archivo legible?
+- ¿Tamaño razonable? (no truncado a poqu bytes tras cambio masivo)
+- ¿Líneas contadas cuadran?
+- Hash CRC32 para referencia
+
+**Output ejemplo:**
+```
+File Integrity
+---
+✓ Verified: 847 lines, 23456 bytes, hash a3f2b1c9
+```
+
+**Warning:**
+```
+⚠️  Integrity Warning: File is only 50 bytes after a 80% change — verify content
+```
+
+**Cambios:**
+
+- **`core/engine.go`** — `VerifyFileIntegrity(path, expectedChangePct)` + `FileIntegrityResult` struct
+- **`core/edit_operations.go`** — `EditResult` y `MultiEditResult` incluyen campo `Integrity`
+- **`tools_core.go`** / **`tools_batch.go`** — Output de integridad adjuntado a respuestas de edit/multi_edit
+
+---
+
+## [4.3.7] - 2026-04-30
+
+### Feature — Análisis completo en respuestas de edit
+
+Las respuestas de `edit_file` y `multi_edit` ahora incluyen análisis detallado (Plan Mode style) para que la IA vea el impacto completo después de cada operación.
+
+**Cambios:**
+
+- **`core/edit_operations.go`** — `EditResult` y `MultiEditResult` ahora incluyen campo `Analysis *ChangeAnalysis`
+- **`core/edit_operations.go`** — `EditFile()` y `MultiEdit()` generan análisis completo post-ejecución
+- **`tools_core.go`** — La respuesta de `edit_file` ahora incluye diff preview, risk factors, suggestions
+
+**Output ejemplo:**
+```
+Successfully edited file.go
+Changes: 2 replacement(s) (+5 -3)
+...
+
+---
+Change Analysis
+---
+File: file.go
+Operation: edit
+Risk Level: HIGH
+Risk Factors:
+  - ⚠️ Large portion of file affected (42.5%)
+Changes:
+  + 5 lines added
+  - 3 lines removed
+Impact: Multiple surgical edits
+Suggestions:
+  - Consider using search_files + read_file(start_line/end_line) for surgical edits
+```
+
+---
+
+### Feature — Diff preview en dry_run de regex
+
+Los modes `regex` y `search_replace` ahora incluyen unified diff completo cuando se usa `dry_run: true`.
+
+**Cambios:**
+
+- **`core/large_file_processor.go`** — `ProcessingResult` incluye `TransformedContent` para DryRun
+- **`core/regex_transformer.go`** — `RegexTransformResult` propaga contenido transformado
+- **`tools_core.go`** — DryRun de regex ahora incluye diff en la respuesta
+
+---
+
+### Feature — JSON output para search_files
+
+Nuevo parámetro `output_format: "json"` en `search_files` para output estructurado que la IA puede parsear fácilmente.
+
+**Uso:**
+```json
+search_files(path: ".", pattern: "TODO", include_context: true, output_format: "json")
+```
+
+**Output:**
+```json
+{
+  "pattern": "TODO",
+  "path": ".",
+  "total_matches": 3,
+  "matches": [
+    {"file": "a.go", "line": 10, "line_number": 10, "match_start": 0, "match_end": 4, "line_content": "// TODO: fix this", "context": ["func foo() {", "// TODO: fix this", "}"]}
+  ],
+  "summary": "Found 3 matches for pattern 'TODO' in ."
+}
+```
+
+**Cambios:**
+
+- **`tools_search.go`** — Nuevo parámetro `output_format` en tool definition
+- **`core/search_operations.go`** — `AdvancedTextSearch` soporta `output_format: "json"` con función `formatSearchMatchesJSON`
+
+---
+
+### Fix — CRITICAL risk ya no bloquea operaciones
+
+Removido el blocking de operaciones CRITICAL. Ahora todas las operaciones se ejecutan con backup automático y warning. La IA decide si procede basándose en la información completa.
+
+**Cambios:**
+
+- **`core/impact_analyzer.go`** — `ShouldBlockOperation()` ahora retorna `false` siempre
+- **`core/impact_analyzer.go`** — `GetRecommendation()` para CRITICAL ya no dice "blocked"
+- **`tests/bug16_test.go`** — Test actualizado para reflejar nuevo comportamiento
+
+**Razón:** El blocking consumía recursos (backup, simulación) y luego la IA no podía hacer el trabajo. Con backup automático y warning completo, la IA puede decidir con información completa.
+
+---
+
 ## [4.3.6] - 2026-04-24
 
 ### Security — Prompt injection mitigation

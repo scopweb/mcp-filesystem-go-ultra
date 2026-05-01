@@ -27,12 +27,13 @@ type BackupMetadata struct {
 
 // BackupInfo contiene información sobre un backup completo
 type BackupInfo struct {
-	BackupID    string           `json:"backup_id"`
-	Timestamp   time.Time        `json:"timestamp"`
-	Operation   string           `json:"operation"`
-	UserContext string           `json:"user_context"`
-	Files       []BackupMetadata `json:"files"`
-	TotalSize   int64            `json:"total_size"`
+	BackupID        string           `json:"backup_id"`
+	PreviousBackupID string          `json:"previous_backup_id,omitempty"` // Parent backup in chain (for undo step-through)
+	Timestamp       time.Time        `json:"timestamp"`
+	Operation       string           `json:"operation"`
+	UserContext     string           `json:"user_context"`
+	Files           []BackupMetadata `json:"files"`
+	TotalSize        int64            `json:"total_size"`
 }
 
 // BackupManager gestiona todos los backups del sistema
@@ -80,6 +81,11 @@ func (bm *BackupManager) CreateBackup(path string, operation string) (string, er
 
 // CreateBackupWithContext crea un backup con contexto adicional
 func (bm *BackupManager) CreateBackupWithContext(path string, operation string, userContext string) (string, error) {
+	return bm.CreateBackupWithContextAndParent(path, operation, userContext, "")
+}
+
+// CreateBackupWithContextAndParent crea un backup con padre en cadena de undo
+func (bm *BackupManager) CreateBackupWithContextAndParent(path string, operation string, userContext string, previousBackupID string) (string, error) {
 	bm.mutex.Lock()
 	defer bm.mutex.Unlock()
 
@@ -99,11 +105,9 @@ func (bm *BackupManager) CreateBackupWithContext(path string, operation string, 
 		return "", fmt.Errorf("failed to create backup directory: %w", err)
 	}
 
-	// Calcular ruta relativa para mantener estructura
+	// Copiar archivo y calcular hash
 	fileName := filepath.Base(path)
 	backupFilePath := filepath.Join(backupFilesDir, fileName)
-
-	// Copiar archivo y calcular hash
 	hash, err := copyFileWithHash(path, backupFilePath)
 	if err != nil {
 		os.RemoveAll(backupBaseDir) // Limpiar en caso de error
@@ -120,12 +124,13 @@ func (bm *BackupManager) CreateBackupWithContext(path string, operation string, 
 	}
 
 	backupInfo := BackupInfo{
-		BackupID:    backupID,
-		Timestamp:   time.Now(),
-		Operation:   operation,
-		UserContext: userContext,
-		Files:       []BackupMetadata{metadata},
-		TotalSize:   fileInfo.Size(),
+		BackupID:        backupID,
+		PreviousBackupID: previousBackupID,
+		Timestamp:       time.Now(),
+		Operation:       operation,
+		UserContext:     userContext,
+		Files:           []BackupMetadata{metadata},
+		TotalSize:       fileInfo.Size(),
 	}
 
 	// Guardar metadata
@@ -134,12 +139,7 @@ func (bm *BackupManager) CreateBackupWithContext(path string, operation string, 
 		return "", fmt.Errorf("failed to save metadata: %w", err)
 	}
 
-	// Actualizar cache
 	bm.metadataCache[backupID] = &backupInfo
-
-	// Limpiar backups antiguos si es necesario
-	go bm.cleanupIfNeeded()
-
 	return backupID, nil
 }
 
@@ -394,6 +394,81 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 	}
 
 	return restoredFiles, preRestoreID, nil
+}
+
+// RestorePreviousInChain restaura el backup anterior en la cadena de undo para un archivo.
+// Devuelve (restoredFiles, previousBackupID, hasMoreBackups, error).
+// Si hasMoreBackups es true, hay más backups disponibles para deshacer.
+func (bm *BackupManager) RestorePreviousInChain(currentBackupID string, filePath string) ([]string, string, bool, error) {
+	info, err := bm.GetBackupInfo(currentBackupID)
+	if err != nil {
+		return nil, "", false, err
+	}
+
+	previousID := info.PreviousBackupID
+	hasMore := previousID != ""
+
+	restoredFiles := []string{}
+
+	// If no parent, restore from current backup (this is the first backup in chain)
+	if previousID == "" {
+		// Find the file in this backup
+		var prevFile *BackupMetadata
+		for i := range info.Files {
+			if info.Files[i].OriginalPath == filePath {
+				prevFile = &info.Files[i]
+				break
+			}
+		}
+		if prevFile == nil {
+			return restoredFiles, "", false, fmt.Errorf("file %s not found in backup %s", filePath, currentBackupID)
+		}
+		// Restore from current backup
+		prevBackupDir := filepath.Join(bm.backupDir, currentBackupID)
+		prevBackupFilePath := filepath.Join(prevBackupDir, prevFile.BackupPath)
+		if err := copyFile(prevBackupFilePath, filePath); err != nil {
+			return restoredFiles, "", false, fmt.Errorf("failed to restore file: %w", err)
+		}
+		restoredFiles = append(restoredFiles, filePath)
+		return restoredFiles, "", false, nil
+	}
+
+	// Get previous backup info to find the file
+	prevInfo, err := bm.GetBackupInfo(previousID)
+	if err != nil {
+		return restoredFiles, "", false, fmt.Errorf("failed to get previous backup info: %w", err)
+	}
+
+	// Find the file in previous backup
+	var prevFile *BackupMetadata
+	for i := range prevInfo.Files {
+		if prevInfo.Files[i].OriginalPath == filePath {
+			prevFile = &prevInfo.Files[i]
+			break
+		}
+	}
+	if prevFile == nil {
+		return restoredFiles, "", false, fmt.Errorf("file %s not found in previous backup %s", filePath, previousID)
+	}
+
+	// Restore from previous backup
+	prevBackupDir := filepath.Join(bm.backupDir, previousID)
+	prevBackupFilePath := filepath.Join(prevBackupDir, prevFile.BackupPath)
+	if err := copyFile(prevBackupFilePath, filePath); err != nil {
+		return restoredFiles, "", false, fmt.Errorf("failed to restore file: %w", err)
+	}
+	found := false
+	for _, f := range restoredFiles {
+		if f == filePath {
+			found = true
+			break
+		}
+	}
+	if !found {
+		restoredFiles = append(restoredFiles, filePath)
+	}
+
+	return restoredFiles, previousID, hasMore, nil
 }
 
 // CompareWithBackup compara un archivo actual con su versión en el backup

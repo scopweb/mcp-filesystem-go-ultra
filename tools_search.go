@@ -59,6 +59,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithNumber("context_lines", mcp.Description("Number of context lines (default: 3)")),
 		mcp.WithBoolean("count_only", mcp.Description("Count pattern occurrences without full search (default: false)")),
 		mcp.WithString("return_lines", mcp.Description("Return line numbers of count matches (true/false, for count_only mode)")),
+		mcp.WithString("output_format", mcp.Description("Output format: 'text' or 'json' (default: 'text'). Use 'json' for structured AI parsing.")),
 	)
 	reg.searchFilesHandler = auditWrap(engine, "search_files", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -82,6 +83,7 @@ func registerSearchTools(reg *toolRegistry) {
 		contextLines := 3
 		fileTypes := []interface{}{}
 		returnLines := false
+		outputFormat := "text"
 
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if co, ok := args["count_only"].(bool); ok {
@@ -113,6 +115,9 @@ func registerSearchTools(reg *toolRegistry) {
 			} else if rl, ok := args["return_lines"].(bool); ok {
 				returnLines = rl
 			}
+			if of, ok := args["output_format"].(string); ok {
+				outputFormat = of
+			}
 		}
 
 		// Count-only mode: dispatch to CountOccurrences
@@ -132,6 +137,7 @@ func registerSearchTools(reg *toolRegistry) {
 				"path": path, "pattern": pattern,
 				"case_sensitive": caseSensitive, "whole_word": wholeWord,
 				"include_context": includeContext, "context_lines": contextLines,
+				"output_format": outputFormat,
 			}}
 			resp, err := engine.AdvancedTextSearch(ctx, engineReq)
 			if err != nil {

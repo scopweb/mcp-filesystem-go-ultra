@@ -72,6 +72,25 @@ func AppendSubOp(ctx context.Context, subOp string) {
 	}
 }
 
+// SetBackupID annotates the audit entry with backup chain info.
+func SetBackupID(ctx context.Context, backupID, previousBackupID string) {
+	if entry, ok := ctx.Value(AuditEntryKey{}).(*AuditEntry); ok {
+		entry.BackupID = backupID
+		entry.PreviousBackupID = previousBackupID
+	}
+}
+
+// SetIntegrityStatus annotates the audit entry with file integrity verification result.
+func SetIntegrityStatus(ctx context.Context, status, warning string) {
+	if entry, ok := ctx.Value(AuditEntryKey{}).(*AuditEntry); ok {
+		entry.IntegrityStatus = status
+		entry.IntegrityWarn = warning
+		if status == "ERROR" && entry.Status == "ok" {
+			entry.Status = "warn"
+		}
+	}
+}
+
 // AuditEntry represents a single MCP tool operation log entry
 type AuditEntry struct {
 	Timestamp    time.Time         `json:"ts"`
@@ -102,6 +121,14 @@ type AuditEntry struct {
 	TokensConsumed int64  `json:"tokens_consumed,omitempty"`  // estimated tokens used by this op (bytes/4)
 	TokensBaseline int64  `json:"tokens_baseline,omitempty"`  // estimated tokens without filesystem (naive approach)
 	TokensSaved    int64  `json:"tokens_saved,omitempty"`     // max(0, tokens_baseline - tokens_consumed)
+
+	// Backup chain tracking (undo step-through)
+	BackupID        string `json:"backup_id,omitempty"`          // backup created for this edit
+	PreviousBackupID string `json:"previous_backup_id,omitempty"` // parent in undo chain
+
+	// File integrity verification (for HIGH/CRITICAL edits)
+	IntegrityStatus string `json:"integrity_status,omitempty"` // "OK", "WARNING", "ERROR"
+	IntegrityWarn   string `json:"integrity_warn,omitempty"`    // warning message if verification had issues
 }
 
 // MetricsSnapshot is the periodic metrics dump written to metrics.json
