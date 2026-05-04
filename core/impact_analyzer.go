@@ -282,6 +282,12 @@ func (ci *ChangeImpact) ShouldBlockOperation(force bool) bool {
 	return false
 }
 
+// IsSmallFile returns true when the file is too small for percentage-based risk metrics.
+// For small files, percentage changes are meaningless (e.g., 1 line → 36 lines = 3500% but trivial).
+func (ci *ChangeImpact) IsSmallFile() bool {
+	return ci.TotalLines < 10 && ci.CharactersChanged < 200
+}
+
 // FormatRiskNotice generates a non-blocking, actionable warning appended to success responses.
 // Used for MEDIUM and HIGH risk operations that auto-proceed with backup (Bug #16).
 // For HIGH/CRITICAL risk: add actionable VERIFY instruction
@@ -292,7 +298,13 @@ func (ci *ChangeImpact) FormatRiskNotice(backupID string, filePath ...string) st
 
 	var notice strings.Builder
 
-	notice.WriteString(fmt.Sprintf("\n⚠️ %s RISK (%.0f%% changed)", strings.ToUpper(ci.RiskLevel), ci.ChangePercentage))
+	if ci.IsSmallFile() {
+		// For small files, percentage is meaningless — show line count instead
+		notice.WriteString(fmt.Sprintf("\n⚠️ %s RISK (small file: %d lines, %d chars affected — percentage not meaningful)",
+			strings.ToUpper(ci.RiskLevel), ci.TotalLines, ci.CharactersChanged))
+	} else {
+		notice.WriteString(fmt.Sprintf("\n⚠️ %s RISK (%.0f%% changed)", strings.ToUpper(ci.RiskLevel), ci.ChangePercentage))
+	}
 
 	// For HIGH/CRITICAL risk: add actionable VERIFY instruction
 	if ci.RiskLevel == "high" || ci.RiskLevel == "critical" {
