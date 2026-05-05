@@ -73,7 +73,8 @@ func TestBug16_ShouldBlockOnlyCritical(t *testing.T) {
 			expectRisk:  "low",
 		},
 		{
-			// CharactersChanged = (100+100) = 200, content = 500 → 40% = MEDIUM
+			// Honest metric: CharactersChanged = max(100, 100) * 1 = 100,
+			// content = 500 → 20% = MEDIUM (threshold MediumPercentage=20.0).
 			name:        "MEDIUM risk - no block",
 			content:     strings.Repeat("A", 200) + strings.Repeat("B", 100) + strings.Repeat("C", 200),
 			oldText:     strings.Repeat("B", 100),
@@ -82,11 +83,15 @@ func TestBug16_ShouldBlockOnlyCritical(t *testing.T) {
 			expectRisk:  "medium",
 		},
 		{
-			// CharactersChanged = (200+200) = 400, content = 500 → 80% = HIGH
+			// Honest metric: CharactersChanged = max(400, 400) * 1 = 400,
+			// content = 500 → 80% = HIGH (threshold HighPercentage=75.0).
+			// Old (incorrect) formula counted (oldLen+newLen)*occurrences and
+			// reached HIGH with only 200-byte oldText/newText; that double-
+			// counted bytes that the edit never actually moved.
 			name:        "HIGH risk - no block",
-			content:     strings.Repeat("A", 150) + strings.Repeat("B", 200) + strings.Repeat("C", 150),
-			oldText:     strings.Repeat("B", 200),
-			newText:     strings.Repeat("D", 200),
+			content:     strings.Repeat("A", 50) + strings.Repeat("B", 400) + strings.Repeat("C", 50),
+			oldText:     strings.Repeat("B", 400),
+			newText:     strings.Repeat("D", 400),
 			expectBlock: false,
 			expectRisk:  "high",
 		},
@@ -125,7 +130,8 @@ func TestBug16_ShouldBlockOnlyCritical(t *testing.T) {
 func TestBug16_MediumRiskAutoProceeds(t *testing.T) {
 	engine, tempDir := setupBug16Engine(t)
 
-	// CharactersChanged = (100+100) = 200, content = 500 → 40% = MEDIUM
+	// Honest metric: CharactersChanged = max(100,100) * 1 = 100,
+	// content = 500 → 20% = MEDIUM (threshold MediumPercentage=20.0).
 	content := strings.Repeat("A", 200) + strings.Repeat("B", 100) + strings.Repeat("C", 200)
 	testFile := filepath.Join(tempDir, "medium_risk.txt")
 	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
@@ -157,14 +163,15 @@ func TestBug16_MediumRiskAutoProceeds(t *testing.T) {
 func TestBug16_HighRiskAutoProceeds(t *testing.T) {
 	engine, tempDir := setupBug16Engine(t)
 
-	// CharactersChanged = (200+200) = 400, content = 500 → 80% = HIGH
-	content := strings.Repeat("A", 150) + strings.Repeat("B", 200) + strings.Repeat("C", 150)
+	// Honest metric: CharactersChanged = max(400,400) * 1 = 400,
+	// content = 500 → 80% = HIGH (threshold HighPercentage=75.0).
+	content := strings.Repeat("A", 50) + strings.Repeat("B", 400) + strings.Repeat("C", 50)
 	testFile := filepath.Join(tempDir, "high_risk.txt")
 	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 200), strings.Repeat("D", 200), false, false)
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 400), strings.Repeat("D", 400), false, false)
 	if err != nil {
 		t.Fatalf("HIGH risk edit should NOT block, got error: %v", err)
 	}
@@ -303,14 +310,31 @@ func TestBug16_MultiEditWithForce(t *testing.T) {
 	}
 }
 
-// TestBug16_FormatRiskNotice verifies non-blocking warning format
+// TestBug16_FormatRiskNotice verifies the informational notice format.
+//
+// History: this notice used to be an alarmist "⚠️ CRITICAL RISK (90%
+// changed)" string emitted from a metric that double-counted bytes. It
+// triggered emergency rollback behaviour against edits that were fine.
+//
+// The notice is now informational, lowercase, and uses an honest byte
+// count. The verify hint is conditional ("if needed") and only at >=40%.
 func TestBug16_FormatRiskNotice(t *testing.T) {
 	thresholds := core.DefaultRiskThresholds()
 
-	// Create a MEDIUM risk impact: CharactersChanged = (100+100) = 200, content = 500 → 40%
-	content := strings.Repeat("A", 200) + strings.Repeat("B", 100) + strings.Repeat("C", 200)
-	oldText := strings.Repeat("B", 100)
-	newText := strings.Repeat("D", 100)
+	// MEDIUM risk: scope = max(200, 200) * 1 = 200, content = 600 → 33%.
+	//
+	// Constraints satisfied by these inputs:
+	//   - TotalLines >= 10 → not a small file (escapes IsSmallFile branch)
+	//   - CharactersChanged >= 200 → not a small file
+	//   - 20% <= changePct < 40% → MEDIUM, but BELOW the verify-hint
+	//     threshold (40%) so we can assert the hint is absent.
+	//
+	// Earlier draft used a content with no newlines, which made
+	// TotalLines == 1 and triggered the small-file branch — assertions
+	// for the normal branch did not match.
+	content := strings.Repeat("A\n", 50) + strings.Repeat("B", 200) + strings.Repeat("\nC", 50) + strings.Repeat("D", 200)
+	oldText := strings.Repeat("B", 200)
+	newText := strings.Repeat("E", 200)
 
 	impact := core.CalculateChangeImpact(content, oldText, newText, thresholds)
 
@@ -319,11 +343,86 @@ func TestBug16_FormatRiskNotice(t *testing.T) {
 		t.Fatal("FormatRiskNotice should return non-empty string for MEDIUM risk")
 	}
 
-	// Notice should contain risk level and percentage (UNDO is now in main response, not in notice)
-	if !strings.Contains(notice, "RISK") {
-		t.Error("Notice should contain RISK level")
+	// Tone: informational, not alarmist. Old format was "⚠️ MEDIUM RISK";
+	// new format leads with lowercase "note:".
+	if !strings.Contains(notice, "note:") {
+		t.Errorf("notice should lead with informational \"note:\" prefix, got: %q", notice)
 	}
-	if !strings.Contains(notice, "changed") {
-		t.Error("Notice should contain change percentage")
+	if strings.Contains(notice, "RISK") {
+		t.Errorf("notice must not contain alarmist \"RISK\" word (regression of tone fix), got: %q", notice)
+	}
+	if strings.Contains(notice, "⚠") {
+		t.Errorf("notice must not contain ⚠ emoji (regression of tone fix), got: %q", notice)
+	}
+
+	// The percentage must still be present so the reader can judge scope.
+	if !strings.Contains(notice, "of file") {
+		t.Errorf("notice should contain \"of file\" with the percentage, got: %q", notice)
+	}
+
+	// Backup ID must be referenced inline.
+	if !strings.Contains(notice, "backup:test-backup-123") {
+		t.Errorf("notice should reference backup id, got: %q", notice)
+	}
+
+	// MEDIUM (20%) is below the 40% verify-hint threshold — the hint must
+	// NOT appear here.
+	if strings.Contains(notice, "verify with") {
+		t.Errorf("notice at MEDIUM (20%%) must not include verify hint, got: %q", notice)
+	}
+}
+
+// TestBug16_FormatRiskNotice_HighRiskHasVerifyHint verifies that the verify
+// hint appears at >=40% (the configured threshold) but with conditional
+// phrasing rather than the previous imperative "VERIFY:" form.
+func TestBug16_FormatRiskNotice_HighRiskHasVerifyHint(t *testing.T) {
+	thresholds := core.DefaultRiskThresholds()
+
+	// HIGH risk: max(400,400) * 1 = 400, content = 500 → 80%.
+	content := strings.Repeat("A", 50) + strings.Repeat("B", 400) + strings.Repeat("C", 50)
+	oldText := strings.Repeat("B", 400)
+	newText := strings.Repeat("D", 400)
+
+	impact := core.CalculateChangeImpact(content, oldText, newText, thresholds)
+
+	notice := impact.FormatRiskNotice("test-backup-456", "/tmp/foo.txt")
+	if notice == "" {
+		t.Fatal("FormatRiskNotice should return non-empty string at 80% change")
+	}
+
+	if !strings.Contains(notice, "verify with") {
+		t.Errorf("notice at 80%% must include verify hint, got: %q", notice)
+	}
+	// Conditional, not imperative.
+	if !strings.Contains(notice, "if needed") {
+		t.Errorf("verify hint must be conditional (\"if needed\"), got: %q", notice)
+	}
+	if strings.Contains(notice, "VERIFY:") {
+		t.Errorf("notice must not use imperative \"VERIFY:\" wording, got: %q", notice)
+	}
+	// File path should be inlined into the hint when provided.
+	if !strings.Contains(notice, "/tmp/foo.txt") {
+		t.Errorf("verify hint should reference the file path when provided, got: %q", notice)
+	}
+}
+
+// TestBug16_FormatRiskNotice_BelowMinIsSilent verifies that edits whose
+// scope is below noticeMinPercent (10%%) emit no notice at all. The backup
+// is still created — silence here means "not worth interrupting the user
+// over", not "unprotected".
+func TestBug16_FormatRiskNotice_BelowMinIsSilent(t *testing.T) {
+	thresholds := core.DefaultRiskThresholds()
+
+	// Build an impact at ~5% change: content=2000 bytes, edit touches 100.
+	content := strings.Repeat("A", 1000) + strings.Repeat("B", 100) + strings.Repeat("C", 900)
+	oldText := strings.Repeat("B", 100)
+	newText := strings.Repeat("D", 100)
+
+	impact := core.CalculateChangeImpact(content, oldText, newText, thresholds)
+
+	notice := impact.FormatRiskNotice("test-backup-789")
+	if notice != "" {
+		t.Errorf("notice should be empty for edit at %.1f%% (below 10%% threshold), got: %q",
+			impact.ChangePercentage, notice)
 	}
 }
