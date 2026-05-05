@@ -47,11 +47,24 @@ func CalculateChangeImpact(content, oldText, newText string, thresholds RiskThre
 		RiskFactors: []string{},
 	}
 
-	// Calcular caracteres afectados
+	// Bytes affected by the edit. Honest metric: per occurrence, the
+	// scope of the change is bounded by max(len(oldText), len(newText))
+	// — that is the size of the region this edit intentionally touches.
+	//
+	// The previous formula used (oldLen + newLen) * occurrences, which
+	// double-counted every byte and produced inflated percentages. For
+	// example, replacing 100 bytes with 100 bytes was reported as 200
+	// bytes "changed" — exactly twice the real footprint. Combined with
+	// the byte-by-byte alignment count in calculateMultiEditImpact (which
+	// counts every shifted byte after an insertion as "changed"), small
+	// targeted edits routinely tripped the CRITICAL threshold and emitted
+	// alarmist warnings that did not reflect the actual edit scope.
 	if impact.Occurrences > 0 {
-		charsRemoved := len(oldText) * impact.Occurrences
-		charsAdded := len(newText) * impact.Occurrences
-		impact.CharactersChanged = int64(charsRemoved + charsAdded)
+		perOccurrence := len(oldText)
+		if len(newText) > perOccurrence {
+			perOccurrence = len(newText)
+		}
+		impact.CharactersChanged = int64(perOccurrence * impact.Occurrences)
 	}
 
 	// Calcular porcentaje del archivo afectado
@@ -288,9 +301,30 @@ func (ci *ChangeImpact) IsSmallFile() bool {
 	return ci.TotalLines < 10 && ci.CharactersChanged < 200
 }
 
-// FormatRiskNotice generates a non-blocking, actionable warning appended to success responses.
-// Used for MEDIUM and HIGH risk operations that auto-proceed with backup (Bug #16).
-// For HIGH/CRITICAL risk: add actionable VERIFY instruction
+// Visibility threshold for FormatRiskNotice. Edits whose scope is below
+// this percentage of the file are silenced entirely — the backup still
+// exists, but routine targeted edits no longer emit any notice.
+const noticeMinPercent = 10.0
+
+// Verify-hint threshold. At or above this percentage of the file, the
+// notice appends a non-imperative "verify with read_file(mode:\"tail\")
+// if needed" suggestion. Below this, the suggestion is omitted to avoid
+// seeding doubt about edits whose footprint is moderate.
+const noticeVerifyHintPercent = 40.0
+
+// FormatRiskNotice generates a non-blocking, INFORMATIONAL note appended to
+// success responses. Tone: factual, lowercase, no panic vocabulary.
+//
+// Design notes (the user explicitly chose this shape):
+//   - Word "RISK" and emoji ⚠️ are deliberately gone. They produced reflexive
+//     undo behaviour against edits that were perfectly fine — the previous
+//     formula counted every shifted byte as "changed" and tripped CRITICAL
+//     for routine 3-replacement edits.
+//   - The verify hint is preserved (option C in the discussion) but reframed
+//     as a conditional suggestion ("if needed") and only at >=40%, so it
+//     stops appearing on every medium-sized edit.
+//   - Below 10% the notice is silenced entirely. The backup record is still
+//     written; absence of a notice is not absence of a backup.
 func (ci *ChangeImpact) FormatRiskNotice(backupID string, filePath ...string) string {
 	if !ci.IsRisky || ci.RiskLevel == "low" {
 		return ""
@@ -299,19 +333,47 @@ func (ci *ChangeImpact) FormatRiskNotice(backupID string, filePath ...string) st
 	var notice strings.Builder
 
 	if ci.IsSmallFile() {
-		// For small files, percentage is meaningless — show line count instead
-		notice.WriteString(fmt.Sprintf("\n⚠️ %s RISK (small file: %d lines, %d chars affected — percentage not meaningful)",
-			strings.ToUpper(ci.RiskLevel), ci.TotalLines, ci.CharactersChanged))
-	} else {
-		notice.WriteString(fmt.Sprintf("\n⚠️ %s RISK (%.0f%% changed)", strings.ToUpper(ci.RiskLevel), ci.ChangePercentage))
+		// Small file: percentage is meaningless. Report counts honestly.
+		notice.WriteString(fmt.Sprintf("\nnote: edit on small file (%d lines, ~%d bytes affected, %d replacements)",
+			ci.TotalLines, ci.CharactersChanged, ci.Occurrences))
+		if backupID != "" {
+			notice.WriteString(fmt.Sprintf(". backup:%s", backupID))
+		}
+		notice.WriteString("\n")
+		return notice.String()
 	}
 
-	// For HIGH/CRITICAL risk: add actionable VERIFY instruction
-	if ci.RiskLevel == "high" || ci.RiskLevel == "critical" {
+	// Below the visibility threshold the notice is suppressed entirely.
+	if ci.ChangePercentage < noticeMinPercent {
+		return ""
+	}
+
+	// Pick a neutral magnitude word from the percentage. We deliberately do
+	// NOT echo the internal RiskLevel ("critical", "high") because those
+	// strings carry pre-existing alarm semantics for both human and AI
+	// readers. The percentage and byte count speak for themselves.
+	magnitude := "edit"
+	switch {
+	case ci.ChangePercentage >= 80.0:
+		magnitude = "very large edit"
+	case ci.ChangePercentage >= noticeVerifyHintPercent:
+		magnitude = "large edit"
+	}
+
+	notice.WriteString(fmt.Sprintf("\nnote: %s (~%d bytes affected, %d replacements, %.0f%% of file)",
+		magnitude, ci.CharactersChanged, ci.Occurrences, ci.ChangePercentage))
+
+	if backupID != "" {
+		notice.WriteString(fmt.Sprintf(". backup:%s", backupID))
+	}
+
+	// Verify hint only at or above the configured threshold. Conditional
+	// phrasing ("if needed"), not imperative.
+	if ci.ChangePercentage >= noticeVerifyHintPercent {
 		if len(filePath) > 0 && filePath[0] != "" {
-			notice.WriteString(fmt.Sprintf("\n⚠️ VERIFY: read_file(\"%s\", mode:\"tail\") to confirm file is complete", filePath[0]))
+			notice.WriteString(fmt.Sprintf(" — verify with read_file(\"%s\", mode:\"tail\") if needed", filePath[0]))
 		} else {
-			notice.WriteString("\n⚠️ VERIFY: read_file with mode:\"tail\" to confirm file is complete")
+			notice.WriteString(" — verify with read_file(mode:\"tail\") if needed")
 		}
 	}
 	notice.WriteString("\n")

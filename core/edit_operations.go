@@ -1138,7 +1138,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 			simContent = simResult.ModifiedContent
 		}
 	}
-	aggregateImpact := calculateMultiEditImpact(originalContent, simContent, e.riskThresholds)
+	aggregateImpact := calculateMultiEditImpact(originalContent, simContent, edits, e.riskThresholds)
 
 	// Create persistent backup BEFORE blocking decision (Bug #16)
 	// Skip backup creation in dry_run mode (Bug #32)
@@ -1429,9 +1429,31 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	return result, nil
 }
 
-// calculateMultiEditImpact computes aggregate risk by comparing original to final content.
-// This avoids double-counting that would occur with per-edit CalculateChangeImpact on overlapping edits.
-func calculateMultiEditImpact(originalContent, finalContent string, thresholds RiskThresholds) *ChangeImpact {
+// calculateMultiEditImpact computes aggregate risk for a batch of edits.
+//
+// History (important for anyone touching this function):
+//
+// The original implementation compared originalContent vs finalContent
+// byte-by-byte at aligned positions:
+//
+//	for i := 0; i < min(oldLen, newLen); i++ {
+//	    if originalContent[i] != finalContent[i] { diffChars++ }
+//	}
+//
+// That counted every byte SHIFTED by an insertion or deletion as "changed",
+// even when the byte itself was untouched. Concrete consequence: a single
+// edit on line 50 that removed 100 bytes made every byte from offset 50
+// onwards "different" at its old offset, so a routine 3-edit operation
+// on a 12 KB file routinely reported >90% changed and printed a
+// CRITICAL-RISK warning. Both humans and AI agents reading that warning
+// reflexively triggered emergency rollbacks against perfectly good edits.
+//
+// Honest metric instead: per edit, the bytes intentionally touched are
+// bounded by max(len(oldText), len(newText)). Summing that over all edits
+// gives a true upper bound on the edit's footprint. Edits in multi_edit
+// do not overlap (each operates on the result of the previous), so the
+// sum does not double-count.
+func calculateMultiEditImpact(originalContent, finalContent string, edits []MultiEditOperation, thresholds RiskThresholds) *ChangeImpact {
 	impact := &ChangeImpact{
 		TotalLines:  len(strings.Split(originalContent, "\n")),
 		RiskFactors: []string{},
@@ -1442,31 +1464,34 @@ func calculateMultiEditImpact(originalContent, finalContent string, thresholds R
 		return impact
 	}
 
-	// Character-level diff approximation
+	// Honest scope: for each edit, max(len(oldText), len(newText)) is the
+	// bound on the bytes that edit can touch. Sum across the batch.
+	var scope int64
+	for _, e := range edits {
+		perEdit := len(e.OldText)
+		if len(e.NewText) > perEdit {
+			perEdit = len(e.NewText)
+		}
+		scope += int64(perEdit)
+	}
+
+	// Net length difference is a hard floor on what really changed.
 	oldLen := len(originalContent)
 	newLen := len(finalContent)
-
-	// Length difference
-	var lenDiff int
+	var netDiff int64
 	if oldLen > newLen {
-		lenDiff = oldLen - newLen
+		netDiff = int64(oldLen - newLen)
 	} else {
-		lenDiff = newLen - oldLen
+		netDiff = int64(newLen - oldLen)
 	}
 
-	// Count differing characters in the overlapping portion
-	minLen := oldLen
-	if newLen < minLen {
-		minLen = newLen
+	// Use the larger of the two so we never under-report a real change
+	// (e.g., when an edit replaces N bytes with N different bytes the
+	// net length difference is zero but the scope is N).
+	impact.CharactersChanged = scope
+	if netDiff > impact.CharactersChanged {
+		impact.CharactersChanged = netDiff
 	}
-	diffChars := 0
-	for i := 0; i < minLen; i++ {
-		if originalContent[i] != finalContent[i] {
-			diffChars++
-		}
-	}
-
-	impact.CharactersChanged = int64(lenDiff + diffChars)
 
 	if oldLen > 0 {
 		impact.ChangePercentage = (float64(impact.CharactersChanged) / float64(oldLen)) * 100.0

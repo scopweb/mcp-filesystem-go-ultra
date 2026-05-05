@@ -264,14 +264,16 @@ func TestUndoChain_MultiEditChain(t *testing.T) {
 func TestVerifyIntegrity_HighRisk(t *testing.T) {
 	engine, tempDir := setupUndoEngine(t)
 
-	// HIGH risk: 80% change
-	content := strings.Repeat("A", 150) + strings.Repeat("B", 200) + strings.Repeat("C", 150)
+	// HIGH risk: ~75% change (requires >=75% under honest metric:
+	// max(oldLen,newLen)*occurrences / totalBytes)
+	// 300 bytes replaced in a 400 byte file = 75% → HIGH
+	content := strings.Repeat("A", 50) + strings.Repeat("B", 300) + strings.Repeat("C", 50)
 	testFile := filepath.Join(tempDir, "high_risk_verify.txt")
 	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 200), strings.Repeat("D", 200), false, false)
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 300), strings.Repeat("D", 300), false, false)
 	if err != nil {
 		t.Fatalf("HIGH risk edit failed: %v", err)
 	}
@@ -353,13 +355,14 @@ func TestVerifyIntegrity_ResultFields(t *testing.T) {
 
 	testFile := filepath.Join(tempDir, "integrity_fields.txt")
 
-	// Create a file and then do a HIGH risk edit (replace 200 B's with 200 D's = 80% change)
-	content := strings.Repeat("A", 150) + strings.Repeat("B", 200) + strings.Repeat("C", 150)
+	// Create a file and then do a HIGH risk edit (~75% change)
+	// 300 bytes replaced in 400 byte file = 75% → HIGH (meets threshold)
+	content := strings.Repeat("A", 50) + strings.Repeat("B", 300) + strings.Repeat("C", 50)
 	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	result, _ := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 200), strings.Repeat("D", 200), false, false)
+	result, _ := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 300), strings.Repeat("D", 300), false, false)
 	inv := result.Integrity
 
 	if inv == nil {
