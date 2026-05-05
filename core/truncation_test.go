@@ -382,3 +382,116 @@ func TestReadFileWithStartEndLineDoesNotTruncate(t *testing.T) {
 		t.Error("File content was modified!")
 	}
 }
+
+// TestReadFileRange_FooterReportsRealTotal is a regression test for the
+// "lying footer" bug. ReadFileRange used to break out of its scan loop as
+// soon as lineNum > endLine, which left totalLines = endLine + 1 — the
+// footer would then claim the file had only endLine+1 total lines, even
+// when the real file was orders of magnitude larger.
+//
+// Symptom for the user: reading lines 15-50 of a 685-line file returned
+//   "[Lines 15-50 of 51 total lines in foo.go]"
+// Both humans and AI agents reading that footer concluded the file had
+// been truncated to 51 lines and triggered emergency rollbacks against
+// files that were never damaged.
+//
+// This test pins three properties of the footer that, together, make the
+// bug impossible to reintroduce silently:
+//
+//  1. Total reported equals the real file line count.
+//  2. When the requested range does NOT reach the end of the file, the
+//     footer includes a hint of the form "start_line=X end_line=Y".
+//  3. When the requested range DOES reach the end of the file, the hint
+//     is absent (no spurious "read more" suggestion at EOF).
+func TestReadFileRange_FooterReportsRealTotal(t *testing.T) {
+	tmpDir := t.TempDir()
+	engine := newTestEngine(tmpDir)
+	defer engine.Close()
+
+	testFile := filepath.Join(tmpDir, "FooterTest.go")
+
+	// Build a 685-line file (matches the size of the file that exposed
+	// the bug in the wild — easier to correlate with the issue history).
+	const totalLines = 685
+	var b strings.Builder
+	for i := 1; i <= totalLines; i++ {
+		fmt.Fprintf(&b, "line %d\n", i)
+	}
+	if err := os.WriteFile(testFile, []byte(b.String()), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	t.Run("middle range reports real total and includes continuation hint", func(t *testing.T) {
+		result, err := engine.ReadFileRange(context.Background(), testFile, 15, 50)
+		if err != nil {
+			t.Fatalf("ReadFileRange failed: %v", err)
+		}
+
+		wantTotal := fmt.Sprintf("of %d total lines", totalLines)
+		if !strings.Contains(result, wantTotal) {
+			t.Errorf("footer must report real total %q\n--- footer tail of result ---\n%s",
+				wantTotal, lastNRunes(result, 200))
+		}
+
+		// The buggy footer contained the substring "of 51 total lines" for
+		// this exact input. Pin that specific lie.
+		if strings.Contains(result, "of 51 total lines") {
+			t.Errorf("footer regressed to lying total \"of 51 total lines\"\n%s",
+				lastNRunes(result, 200))
+		}
+
+		// Should suggest the next contiguous range of equal size (51..86).
+		wantHint := "start_line=51 end_line=86"
+		if !strings.Contains(result, wantHint) {
+			t.Errorf("footer must include continuation hint %q\n%s",
+				wantHint, lastNRunes(result, 200))
+		}
+	})
+
+	t.Run("range reaching EOF reports real total and OMITS continuation hint", func(t *testing.T) {
+		// Ask for a range whose end matches totalLines exactly.
+		result, err := engine.ReadFileRange(context.Background(), testFile, 600, totalLines)
+		if err != nil {
+			t.Fatalf("ReadFileRange failed: %v", err)
+		}
+
+		wantTotal := fmt.Sprintf("of %d total lines", totalLines)
+		if !strings.Contains(result, wantTotal) {
+			t.Errorf("footer must report real total %q\n%s", wantTotal, lastNRunes(result, 200))
+		}
+
+		// At EOF there is nothing more to read — the hint must NOT appear.
+		if strings.Contains(result, "use start_line/end_line to read more") {
+			t.Errorf("footer must not suggest reading more when range covers EOF\n%s",
+				lastNRunes(result, 200))
+		}
+	})
+
+	t.Run("range past EOF clamps end and still reports real total", func(t *testing.T) {
+		// Ask beyond the last line. ReadFileRange clamps actualEndLine.
+		result, err := engine.ReadFileRange(context.Background(), testFile, totalLines-5, totalLines+1000)
+		if err != nil {
+			t.Fatalf("ReadFileRange failed: %v", err)
+		}
+
+		wantTotal := fmt.Sprintf("of %d total lines", totalLines)
+		if !strings.Contains(result, wantTotal) {
+			t.Errorf("footer must report real total %q even when end_line exceeds it\n%s",
+				wantTotal, lastNRunes(result, 200))
+		}
+		if strings.Contains(result, "use start_line/end_line to read more") {
+			t.Errorf("footer must not suggest reading more when end_line >= totalLines\n%s",
+				lastNRunes(result, 200))
+		}
+	})
+}
+
+// lastNRunes returns the last n runes of s for diagnostics in test failures.
+// Keeps assertion error output focused on the footer area.
+func lastNRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return "..." + string(r[len(r)-n:])
+}

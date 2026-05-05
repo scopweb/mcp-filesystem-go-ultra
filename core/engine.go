@@ -685,6 +685,20 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 		finalContent = hookResult.ModifiedContent
 	}
 
+	// EOL preservation (Bug #33): if the file already exists, detect its EOL
+	// style and convert finalContent to match. For new files, leave content as-is
+	// (let the caller decide the EOL style).
+	if existing, statErr := os.Stat(path); statErr == nil && !existing.IsDir() {
+		if existingBytes, readErr := os.ReadFile(path); readErr == nil {
+			existingEOL := detectEOL(string(existingBytes))
+			if existingEOL != "\n" {
+				// Normalize finalContent to LF first (it may already be LF, or carry CRLF
+				// from the LLM), then restore the file's original EOL.
+				finalContent = restoreEOL(normalizeLineEndings(finalContent), existingEOL)
+			}
+		}
+	}
+
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {

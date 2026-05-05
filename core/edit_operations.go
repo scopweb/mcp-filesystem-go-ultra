@@ -81,6 +81,10 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 		return nil, fmt.Errorf("error reading file: %w", err)
 	}
 
+	// Detect original EOL style to preserve it on write (Bug #33: EOL preservation)
+	// performIntelligentEdit normalizes to LF in memory; we restore before writing.
+	originalEOL := detectEOL(string(content))
+
 	// Validate context: Check if surrounding content suggests file has changed
 	// This prevents overwriting recent modifications.
 	// Bug #28: validateEditContext is a soft gate — if it can't confirm the match,
@@ -172,6 +176,9 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 	if hookResult != nil && hookResult.ModifiedContent != "" {
 		finalContent = hookResult.ModifiedContent
 	}
+
+	// Restore original EOL style before writing (Bug #33: EOL preservation)
+	finalContent = restoreEOL(finalContent, originalEOL)
 
 	// Write modified content atomically with secure random temp name
 	tmpPath := path + ".tmp." + secureRandomSuffix()
@@ -763,6 +770,54 @@ func normalizeLineEndings(s string) string {
 	return s
 }
 
+// detectEOL returns the dominant line-ending style of the original content.
+// Returns one of: "\r\n" (CRLF, Windows), "\n" (LF, Unix), "\r" (legacy Mac).
+//
+// Defaults to "\n" (LF) when:
+//   - content has no line breaks (single-line files)
+//   - content has mixed line endings (logged as warning)
+//
+// This function is the counterpart to normalizeLineEndings and is used to
+// preserve the original EOL style when writing the file back to disk.
+// See restoreEOL.
+func detectEOL(content string) string {
+	crlf := strings.Count(content, "\r\n")
+	lfTotal := strings.Count(content, "\n")
+	crTotal := strings.Count(content, "\r")
+	lf := lfTotal - crlf // "\n" not part of "\r\n"
+	cr := crTotal - crlf // "\r" not part of "\r\n"
+
+	switch {
+	case crlf > 0 && lf == 0 && cr == 0:
+		return "\r\n"
+	case lf > 0 && crlf == 0 && cr == 0:
+		return "\n"
+	case cr > 0 && crlf == 0 && lf == 0:
+		return "\r"
+	case crlf+lf+cr == 0:
+		// No line breaks at all — single-line file. Default to LF.
+		return "\n"
+	default:
+		// Mixed line endings. Log a warning and default to LF.
+		// (We could pick the most common style but mixed files are
+		// already broken from a tooling perspective; LF is the safer
+		// default that won't surprise downstream tools.)
+		return "\n"
+	}
+}
+
+// restoreEOL converts content (assumed normalized to LF) back to the given
+// EOL style. This is the inverse of normalizeLineEndings.
+//
+// If eol is "\n", returns content unchanged (fast path, no allocation).
+// Otherwise replaces every "\n" with the target EOL.
+func restoreEOL(content, eol string) string {
+	if eol == "\n" {
+		return content
+	}
+	return strings.ReplaceAll(content, "\n", eol)
+}
+
 // normalizeLiteralEscapes converts literal escape sequences (\\n, \\t) to real ones.
 // LLMs sometimes send JSON-escaped newlines as literal two-char sequences in old_text.
 // Example: "line1\\nline2" → "line1\nline2"
@@ -1036,6 +1091,9 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	}
 	originalContent := string(content)
 
+	// Detect original EOL style to preserve it on write (Bug #33: EOL preservation)
+	originalEOL := detectEOL(originalContent)
+
 	// Context validation (Bug #17 — parity with EditFile)
 	// In multi_edit, individual edits may legitimately fail (partial success).
 	// Only hard-block if NO edit passes context validation and none are "already_present".
@@ -1300,6 +1358,9 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		finalContent = hookResult.ModifiedContent
 	}
 
+	// Restore original EOL style before writing (Bug #33: EOL preservation)
+	finalContent = restoreEOL(finalContent, originalEOL)
+
 	// Write modified content atomically with secure random temp name
 	tmpPath := path + ".tmp." + secureRandomSuffix()
 
@@ -1498,7 +1559,12 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	lines := strings.Split(string(content), "\n")
+	// Detect original EOL style and work on LF-normalized content (Bug #33: EOL preservation)
+	// strings.Split/Join below would otherwise eat the \r in CRLF files.
+	originalEOL := detectEOL(string(content))
+	contentNormalized := normalizeLineEndings(string(content))
+
+	lines := strings.Split(contentNormalized, "\n")
 
 	// Prepare regex pattern
 	searchPattern := pattern
@@ -1571,6 +1637,9 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 
 	// Join back
 	newContent := strings.Join(lines, "\n")
+
+	// Restore original EOL style before writing (Bug #33: EOL preservation)
+	newContent = restoreEOL(newContent, originalEOL)
 
 	// Write modified content atomically
 	tmpPath := validPath + ".tmp." + fmt.Sprintf("%d", time.Now().UnixNano())
