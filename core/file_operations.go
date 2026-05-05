@@ -627,46 +627,74 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 	scanner.Buffer(buf, maxCapacity)
 
 	lineNum := 0
-	totalLines := 0
 	foundLines := 0
 
-	// Read file line by line
+	// Read file line by line.
+	//
+	// IMPORTANT: we keep iterating past endLine WITHOUT collecting content,
+	// so the footer can report the REAL total line count of the file.
+	//
+	// Earlier versions broke out of this loop as soon as lineNum > endLine,
+	// which left totalLines = endLine + 1 and produced a footer like
+	//   "[Lines 15-50 of 51 total lines in foo.go]"
+	// for a file that actually had 685 lines. Both humans and AI agents
+	// reading that footer concluded the file had been truncated to 51 lines
+	// — a silent reporting bug that mimicked catastrophic data loss.
+	//
+	// The cost of finishing the scan without buffering is negligible
+	// (just newline detection per line), and it eliminates the lying footer.
 	for scanner.Scan() {
 		lineNum++
-		totalLines = lineNum
 
-		// If we're before the start line, skip
+		// Before the requested range: skip cheaply.
 		if lineNum < startLine {
 			continue
 		}
 
-		// If we're in the range, collect the line
-		if lineNum >= startLine && lineNum <= endLine {
+		// Inside the requested range: collect the line.
+		if lineNum <= endLine {
 			if result.Len() > 0 {
 				result.WriteString("\n")
 			}
 			result.WriteString(scanner.Text())
 			foundLines++
 		}
-
-		// If we've passed the end line, we can stop reading
-		if lineNum > endLine {
-			break
-		}
+		// After the range: keep iterating to get the real totalLines, but
+		// do not call scanner.Text() (avoids buffer copies for unused lines).
 	}
+	totalLines := lineNum
 
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("error reading file: %w", err)
 	}
 
-	// If endLine was beyond file length, adjust it
+	// If endLine was beyond the actual file length, clamp for display.
 	actualEndLine := endLine
 	if actualEndLine > totalLines {
 		actualEndLine = totalLines
 	}
 
-	// Add metadata footer
-	result.WriteString(fmt.Sprintf("\n\n[Lines %d-%d of %d total lines in %s]", startLine, actualEndLine, totalLines, filepath.Base(path)))
+	// Footer: report the REAL total. When the response does not include
+	// the tail of the file, append a concrete hint for how to read more,
+	// matching the format used by autoTruncateLargeFile so consumers see
+	// a single consistent shape across read paths.
+	footer := fmt.Sprintf("\n\n[Lines %d-%d of %d total lines in %s",
+		startLine, actualEndLine, totalLines, filepath.Base(path))
+	if actualEndLine < totalLines {
+		rangeSize := endLine - startLine
+		if rangeSize < 0 {
+			rangeSize = 0
+		}
+		nextStart := actualEndLine + 1
+		nextEnd := nextStart + rangeSize
+		if nextEnd > totalLines {
+			nextEnd = totalLines
+		}
+		footer += fmt.Sprintf(" \u2014 use start_line/end_line to read more, e.g. start_line=%d end_line=%d",
+			nextStart, nextEnd)
+	}
+	footer += "]"
+	result.WriteString(footer)
 
 	return result.String(), nil
 }
