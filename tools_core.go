@@ -7,12 +7,28 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/mcp/filesystem-ultra/core"
 )
+
+// resolveAbsForResponse returns the absolute, normalized path that the engine
+// will actually operate on. Used in success responses so the caller can see
+// exactly where the file was written, even when the input path was a WSL path,
+// relative path, or otherwise transformed by NormalizePath.
+//
+// Falls back to the input path on any error so we never break the response.
+func resolveAbsForResponse(path string) string {
+	abs, err := filepath.Abs(core.NormalizePath(path))
+	if err != nil || abs == "" {
+		return path
+	}
+	return abs
+}
 
 // toolHandler is a shorthand for MCP tool handler functions
 type toolHandler = func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)
@@ -246,6 +262,18 @@ func registerCoreTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
 		}
 
+		// Pre-flight path validation (surfaces specific error instead of engine's
+		// generic "access denied"). Catches pseudo-Linux paths on Windows, NTFS
+		// ADS, dangerous Unicode, reserved device names.
+		if validationErr := core.ValidatePathSecurity(path); validationErr != nil {
+			return mcp.NewToolResultError(validationErr.Error()), nil
+		}
+
+		// Resolve the absolute target path so the response shows where the file
+		// actually landed (NormalizePath converts WSL → Windows, filepath.Abs
+		// resolves relatives). Falls back to the input path on error.
+		absPath := resolveAbsForResponse(path)
+
 		// Check for base64 content
 		contentBase64 := ""
 		encoding := ""
@@ -283,9 +311,9 @@ func registerCoreTools(reg *toolRegistry) {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
 			if engine.IsCompactMode() {
-				return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB", path, bytesWritten)), nil
+				return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB", absPath, bytesWritten)), nil
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB base64", path, bytesWritten)), nil
+			return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB base64", absPath, bytesWritten)), nil
 		}
 
 		// Normal text write
@@ -313,9 +341,9 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			core.SetFeedback(ctx, signal)
 			if engine.IsCompactMode() {
-				return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB | %s", path, len(content), core.FormatFeedbackCompact(signal))), nil
+				return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB | %s", absPath, len(content), core.FormatFeedbackCompact(signal))), nil
 			}
-			return mcp.NewToolResultText(core.FormatFeedback(signal, fmt.Sprintf("WRITTEN %s | %dB", path, len(content)))), nil
+			return mcp.NewToolResultText(core.FormatFeedback(signal, fmt.Sprintf("WRITTEN %s | %dB", absPath, len(content)))), nil
 		}
 
 		err = engine.WriteFileContent(ctx, path, content)
@@ -323,9 +351,9 @@ func registerCoreTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
 		if engine.IsCompactMode() {
-			return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB", path, len(content))), nil
+			return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB", absPath, len(content))), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB", path, len(content))), nil
+		return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB", absPath, len(content))), nil
 	})
 	reg.addTool(writeFileTool, reg.writeFileHandler)
 
@@ -351,13 +379,13 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\"")),
 		mcp.WithNumber("occurrence", mcp.Description("Which occurrence to replace: 1=first, 2=second, -1=last, -2=second-to-last (default: all)")),
 		// search_replace mode params
-		mcp.WithString("pattern", mcp.Description("Regex or literal pattern (for search_replace and regex modes)")),
-		mcp.WithString("replacement", mcp.Description("Replacement text (for search_replace mode)")),
+		mcp.WithString("pattern", mcp.Description("Regex or literal pattern. In search_replace mode: literal pattern, all occurrences. In regex mode: regex pattern (synthesized into a single-pattern transformation if patterns_json is not provided).")),
+		mcp.WithString("replacement", mcp.Description("Replacement text. Used in search_replace mode, and in regex mode when pattern is provided without patterns_json.")),
 		// regex mode params
-		mcp.WithString("patterns_json", mcp.Description("JSON array of patterns for regex mode: [{\"pattern\": \"regex\", \"replacement\": \"$1...\", \"limit\": -1}]")),
+		mcp.WithString("patterns_json", mcp.Description("JSON array of patterns for regex mode: [{\"pattern\": \"regex\", \"replacement\": \"$1...\", \"limit\": -1}]. Optional: if omitted in regex mode, pattern + replacement (or new_text) are used as a single transformation.")),
 		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive matching (default: true, for regex mode)")),
 		mcp.WithBoolean("create_backup", mcp.Description("Create backup before transformation (default: true, for regex mode)")),
-		mcp.WithBoolean("dry_run", mcp.Description("Validate without applying changes (default: false, for regex mode)")),
+		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Supported in modes: replace (default), search_replace, regex. Default: false.")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false, for occurrence mode)")),
 	)
 	regexTransform := reg.regexTransform
@@ -400,20 +428,38 @@ func registerCoreTools(reg *toolRegistry) {
 		// ---- MODE: regex ----
 		if mode == "regex" {
 			patternsJSON := ""
+			singlePattern := ""
+			singleReplacement := ""
 			if args != nil {
 				if pj, ok := args["patterns_json"].(string); ok {
 					patternsJSON = pj
 				}
-			}
-			if patternsJSON == "" {
-				return mcp.NewToolResultError("patterns_json is required for mode:\"regex\""), nil
+				if p, ok := args["pattern"].(string); ok {
+					singlePattern = p
+				}
+				if r, ok := args["replacement"].(string); ok {
+					singleReplacement = r
+				} else if nt, ok := args["new_text"].(string); ok {
+					singleReplacement = nt
+				}
 			}
 
 			normPath := core.NormalizePath(path)
 
 			var patterns []core.TransformPattern
-			if err := json.Unmarshal([]byte(patternsJSON), &patterns); err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Failed to parse patterns JSON: %v", err)), nil
+			if patternsJSON != "" {
+				if err := json.Unmarshal([]byte(patternsJSON), &patterns); err != nil {
+					return mcp.NewToolResultError(fmt.Sprintf("Failed to parse patterns JSON: %v", err)), nil
+				}
+			} else if singlePattern != "" {
+				// Synthesize a single-pattern array from pattern + replacement (or new_text)
+				patterns = []core.TransformPattern{{
+					Pattern:     singlePattern,
+					Replacement: singleReplacement,
+					Limit:       -1,
+				}}
+			} else {
+				return mcp.NewToolResultError("mode:\"regex\" requires either patterns_json, or pattern (with replacement/new_text)"), nil
 			}
 
 			caseSensitive := true
@@ -504,7 +550,7 @@ func registerCoreTools(reg *toolRegistry) {
 			normPath := core.NormalizePath(path)
 			oldContentRaw, _ := os.ReadFile(normPath)
 
-			resp, err := engine.SearchAndReplace(ctx, path, pattern, replacement, false)
+			resp, err := engine.SearchAndReplace(ctx, path, pattern, replacement, false, dryRun)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -513,16 +559,33 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			respText := resp.Content[0].Text
 
-			// Compute unified diff
-			newContentRaw, _ := os.ReadFile(normPath)
-			unifiedDiff := core.UnifiedDiff(string(oldContentRaw), string(newContentRaw), path)
+			// Compute unified diff. In dry-run mode the file on disk is unchanged,
+			// so we synthesize the would-be content in memory using the same logic
+			// as searchAndReplaceInFile (literal pattern, regexp.QuoteMeta).
+			var unifiedDiff string
+			if dryRun {
+				if re, reErr := regexp.Compile(regexp.QuoteMeta(pattern)); reErr == nil {
+					previewContent := re.ReplaceAllString(string(oldContentRaw), replacement)
+					unifiedDiff = core.UnifiedDiff(string(oldContentRaw), previewContent, path)
+				}
+			} else {
+				newContentRaw, _ := os.ReadFile(normPath)
+				unifiedDiff = core.UnifiedDiff(string(oldContentRaw), string(newContentRaw), path)
+			}
 
 			if engine.IsCompactMode() {
 				if strings.Contains(respText, "No matches") {
 					return mcp.NewToolResultText("OK: 0 replacements"), nil
 				}
 				count := parseReplacementCount(respText)
-				msg := fmt.Sprintf("OK: %d replacements (search_replace)", count)
+				prefix := "OK"
+				if dryRun {
+					prefix = "DRY RUN"
+				}
+				msg := fmt.Sprintf("%s: %d replacements (search_replace)", prefix, count)
+				if dryRun {
+					msg += " — no changes written to disk"
+				}
 				if unifiedDiff != "" {
 					msg += "\n" + unifiedDiff
 				}

@@ -262,8 +262,10 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 	return result, nil
 }
 
-// SearchAndReplace performs search and replace operations across files
-func (e *UltraFastEngine) SearchAndReplace(ctx context.Context, path, pattern, replacement string, caseSensitive bool) (*mcp.CallToolResponse, error) {
+// SearchAndReplace performs search and replace operations across files.
+// When dryRun is true, no writes are performed; only the would-be replacement
+// count is computed and reported.
+func (e *UltraFastEngine) SearchAndReplace(ctx context.Context, path, pattern, replacement string, caseSensitive bool, dryRun bool) (*mcp.CallToolResponse, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
@@ -296,10 +298,10 @@ func (e *UltraFastEngine) SearchAndReplace(ctx context.Context, path, pattern, r
 
 	if info.IsDir() {
 		// Search and replace in directory
-		err = e.searchAndReplaceInDirectory(validPath, pattern, replacement, caseSensitive, &results, &totalReplacements)
+		err = e.searchAndReplaceInDirectory(validPath, pattern, replacement, caseSensitive, dryRun, &results, &totalReplacements)
 	} else {
 		// Search and replace in single file
-		replacements, err := e.searchAndReplaceInFile(validPath, pattern, replacement, caseSensitive)
+		replacements, err := e.searchAndReplaceInFile(validPath, pattern, replacement, caseSensitive, dryRun)
 		if err == nil && replacements > 0 {
 			results = append(results, fmt.Sprintf("📄 %s: %d replacements", validPath, replacements))
 			totalReplacements += replacements
@@ -323,10 +325,18 @@ func (e *UltraFastEngine) SearchAndReplace(ctx context.Context, path, pattern, r
 	}
 
 	var resultBuilder strings.Builder
-	resultBuilder.WriteString("✅ Search and replace completed!\n")
+	if dryRun {
+		resultBuilder.WriteString("🟡 DRY RUN — no changes written to disk\n")
+	} else {
+		resultBuilder.WriteString("✅ Search and replace completed!\n")
+	}
 	resultBuilder.WriteString(fmt.Sprintf("🔍 Pattern: '%s'\n", pattern))
 	resultBuilder.WriteString(fmt.Sprintf("🔄 Replacement: '%s'\n", replacement))
-	resultBuilder.WriteString(fmt.Sprintf("📊 Total replacements: %d\n\n", totalReplacements))
+	if dryRun {
+		resultBuilder.WriteString(fmt.Sprintf("📊 Would-be replacements: %d\n\n", totalReplacements))
+	} else {
+		resultBuilder.WriteString(fmt.Sprintf("📊 Total replacements: %d\n\n", totalReplacements))
+	}
 
 	for _, result := range results {
 		resultBuilder.WriteString(result + "\n")
@@ -670,8 +680,9 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 	}, fmt.Errorf("no matches found for text: %q", oldText)
 }
 
-// searchAndReplaceInDirectory performs search and replace in all files in a directory
-func (e *UltraFastEngine) searchAndReplaceInDirectory(dirPath, pattern, replacement string, caseSensitive bool, results *[]string, totalReplacements *int) error {
+// searchAndReplaceInDirectory performs search and replace in all files in a directory.
+// When dryRun is true, replacement counts are computed but no files are modified.
+func (e *UltraFastEngine) searchAndReplaceInDirectory(dirPath, pattern, replacement string, caseSensitive bool, dryRun bool, results *[]string, totalReplacements *int) error {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return err
@@ -682,13 +693,13 @@ func (e *UltraFastEngine) searchAndReplaceInDirectory(dirPath, pattern, replacem
 
 		if entry.IsDir() {
 			// Recursively search subdirectories
-			err := e.searchAndReplaceInDirectory(fullPath, pattern, replacement, caseSensitive, results, totalReplacements)
+			err := e.searchAndReplaceInDirectory(fullPath, pattern, replacement, caseSensitive, dryRun, results, totalReplacements)
 			if err != nil {
 				continue // Continue with other directories
 			}
 		} else {
 			// Process file
-			replacements, err := e.searchAndReplaceInFile(fullPath, pattern, replacement, caseSensitive)
+			replacements, err := e.searchAndReplaceInFile(fullPath, pattern, replacement, caseSensitive, dryRun)
 			if err == nil && replacements > 0 {
 				*results = append(*results, fmt.Sprintf("📄 %s: %d replacements", fullPath, replacements))
 				*totalReplacements += replacements
@@ -699,8 +710,10 @@ func (e *UltraFastEngine) searchAndReplaceInDirectory(dirPath, pattern, replacem
 	return nil
 }
 
-// searchAndReplaceInFile performs search and replace in a single file
-func (e *UltraFastEngine) searchAndReplaceInFile(filePath, pattern, replacement string, caseSensitive bool) (int, error) {
+// searchAndReplaceInFile performs search and replace in a single file.
+// When dryRun is true, the would-be replacement count is returned but the file
+// is not modified.
+func (e *UltraFastEngine) searchAndReplaceInFile(filePath, pattern, replacement string, caseSensitive bool, dryRun bool) (int, error) {
 	// Check if file is text and not too large
 	info, err := os.Stat(filePath)
 	if err != nil {
@@ -741,6 +754,11 @@ func (e *UltraFastEngine) searchAndReplaceInFile(filePath, pattern, replacement 
 	matches := re.FindAllString(contentStr, -1)
 	if len(matches) == 0 {
 		return 0, nil
+	}
+
+	// Dry-run: report count without writing
+	if dryRun {
+		return len(matches), nil
 	}
 
 	// Perform replacement
