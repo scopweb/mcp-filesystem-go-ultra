@@ -16,9 +16,20 @@ import (
 //  2. Unicode directional overrides and zero-width chars — blocks RTLO spoofing (U+202E)
 //     and zero-width hook-pattern evasion (U+200B etc.)
 //  3. Windows reserved device names — blocks DoS via CON/NUL/COM1/LPT1 etc.
+//  4. Pseudo-Linux absolute paths on Windows — blocks accidental container/sandbox path leakage
+//     (e.g. /home/claude/, /tmp/, /sessions/...) which Go's filepath.Abs would silently
+//     reinterpret as drive-relative paths (C:\home\claude\...) — usually NOT what the caller wants.
 //
 // This function is called unconditionally by IsPathAllowed, so security checks
 // always run even when --allowed-paths is not configured.
+//
+// Exported so handlers can run pre-flight validation and surface a specific
+// error message to the caller instead of the generic "access denied" returned
+// when the engine internally fails IsPathAllowed.
+func ValidatePathSecurity(path string) error {
+	return validatePathSecurity(path)
+}
+
 func validatePathSecurity(path string) error {
 	if path == "" {
 		return nil
@@ -52,7 +63,52 @@ func validatePathSecurity(path string) error {
 		}
 	}
 
+	// 4. Pseudo-Linux absolute paths on Windows
+	if isPseudoLinuxPathOnWindows(path) {
+		return &ValidationError{
+			Field: "path",
+			Value: path,
+			Message: fmt.Sprintf("Unix-style absolute path %q is not valid on Windows. "+
+				"Use a Windows path (C:\\...) or a WSL path (/mnt/<drive>/...). "+
+				"This usually means the path leaked from a Linux container, sandbox, or bash environment.", path),
+		}
+	}
+
 	return nil
+}
+
+// isPseudoLinuxPathOnWindows reports whether path looks like a Unix-style absolute
+// path that was passed to a Windows host by mistake (e.g. /home/foo, /tmp/x, /sessions/...).
+//
+// On Windows, Go's filepath.Abs will silently rewrite such paths as drive-relative
+// (e.g. /home/claude → C:\home\claude), which causes writes to land in unexpected
+// locations and confuses the caller. This is a defense-in-depth check on top of
+// --allowed-paths, useful when the server is launched in open-access mode.
+//
+// WSL-style paths /mnt/<single-letter>(/...)? are explicitly allowed because
+// NormalizePath converts them to Windows form correctly.
+func isPseudoLinuxPathOnWindows(path string) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	// Only Unix-absolute paths are suspicious; everything else (relative, C:\..., C:/...)
+	// is normal Windows usage.
+	if path == "" || path[0] != '/' {
+		return false
+	}
+	// Allow /mnt/<single-letter> and /mnt/<single-letter>/...
+	// NormalizePath converts these to Windows drive letters.
+	if strings.HasPrefix(path, "/mnt/") {
+		rest := path[5:]
+		if len(rest) >= 1 {
+			c := rest[0]
+			isLetter := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+			if isLetter && (len(rest) == 1 || rest[1] == '/') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // hasNTFSAlternateDataStream returns true when the path references an NTFS ADS.

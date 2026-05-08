@@ -39,9 +39,10 @@ func buildEditRegistry(t *testing.T, allowedDir string, compact bool) *toolRegis
 
 	s := server.NewMCPServer("test", "0.0.0")
 	reg := &toolRegistry{
-		server:   s,
-		engine:   engine,
-		handlers: make(map[string]toolHandler),
+		server:         s,
+		engine:         engine,
+		handlers:       make(map[string]toolHandler),
+		regexTransform: core.NewRegexTransformer(engine),
 	}
 	registerCoreTools(reg)
 	return reg

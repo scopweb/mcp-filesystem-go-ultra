@@ -513,7 +513,7 @@ func (m *BatchOperationManager) executeSearchAndReplace(op FileOperation, result
 	if m.engine == nil {
 		return fmt.Errorf("search_and_replace requires engine (not available in standalone batch mode)")
 	}
-	replacements, err := m.engine.searchAndReplaceInFile(op.Path, op.OldText, op.NewText, true)
+	replacements, err := m.engine.searchAndReplaceInFile(op.Path, op.OldText, op.NewText, true, false)
 	if err != nil {
 		return err
 	}
