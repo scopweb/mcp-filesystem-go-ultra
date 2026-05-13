@@ -94,13 +94,14 @@ cmd/
     main.go              # Separate binary: HTTP dashboard for logs/metrics/backups
     static/              # Embedded web UI (go:embed) - HTML + vanilla JS + CSS
 
-## Tool Inventory (v4.1.3 — 24 tools total)
+## Tool Inventory (v4.4.0 — 31 tools total)
 
 ```
 16 CORE:   read_file, write_file, edit_file, list_directory, search_files,
            get_file_info, move_file, copy_file, delete_file, create_directory,
            batch_operations, backup, analyze_operation, wsl, server_info, multi_edit
-6 ALIASES: read_text_file, search, edit, write, create_file, directory_tree
+13 ALIASES: read_text_file, search, edit, write, create_file, directory_tree,
+            View, Edit, Write, Replace, LS, GlobTool, GrepTool
 1 HELP:    help         (discovery tool — call first to see all tools)
 1 SUPER:   fs           (dispatch to all 16 ops via action param)
 ```

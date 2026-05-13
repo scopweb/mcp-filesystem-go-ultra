@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -153,7 +154,7 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 		}, nil
 	}
 
-	matches, err := e.performAdvancedTextSearch(validPath, pattern, caseSensitive, wholeWord, includeContext, contextLines)
+	matches, err := e.performAdvancedTextSearch(ctx, validPath, pattern, caseSensitive, wholeWord, includeContext, contextLines, outputFormat)
 	if err != nil {
 		return &mcp.CallToolResponse{
 			Content: []mcp.TextContent{
@@ -310,15 +311,26 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 	maxResults := e.config.MaxSearchResults
 
 	// Compile regex pattern (uses engine cache to avoid repeated compilation)
-	regexPattern, err := e.CompileRegex(pattern)
-	if err != nil {
-		// If not valid regex, use literal search
-		regexPattern, _ = e.CompileRegex(regexp.QuoteMeta(pattern))
+	// For glob patterns (*, ?), use filepath.Match instead to avoid regex misinterpretation
+	isGlob := isGlobPattern(pattern)
+	var regexPattern *regexp.Regexp
+	var regexErr error
+	if isGlob {
+		// Glob pattern: match via filepath.Match (e.g., "Reports.*" → "Reports" + anything)
+		// No regex compilation needed; we handle it inline in the walk callback
+		regexPattern = nil
+	} else {
+		regexPattern, regexErr = e.CompileRegex(pattern)
+		if regexErr != nil {
+			// If not valid regex, use literal search
+			regexPattern, _ = e.CompileRegex(regexp.QuoteMeta(pattern))
+		}
 	}
 
 	// First pass: collect all files to search
 	var filesToSearch []string
-	err = filepath.Walk(path, func(currentPath string, info os.FileInfo, err error) error {
+	var walkErr error
+	filepath.Walk(path, func(currentPath string, info os.FileInfo, err error) error {
 		// Check context in walk callback
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr // Stop walk if context is cancelled
@@ -352,7 +364,14 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 		}
 
 		// Check filename match
-		if regexPattern.MatchString(info.Name()) {
+		var matched bool
+		if isGlob {
+			// Glob pattern: use filepath.Match (e.g., "Reports.*" matches "Reports.dll")
+			matched, _ = filepath.Match(pattern, info.Name())
+		} else {
+			matched = regexPattern.MatchString(info.Name())
+		}
+		if matched {
 			resultsMu.Lock()
 			if len(results) < maxResults {
 				results = append(results, fmt.Sprintf("📄 %s", currentPath))
@@ -369,9 +388,8 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 
 		return nil
 	})
-
-	if err != nil {
-		return "", err
+	if walkErr != nil {
+		return "", walkErr
 	}
 
 	// Second pass: parallel content search using worker pool
@@ -418,7 +436,10 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 				for scanner.Scan() {
 					lineNum++
 					line := scanner.Text()
-					if regexPattern.MatchString(line) {
+					if !isGlob && regexPattern.MatchString(line) {
+						// Only do regex content search for non-glob patterns.
+						// Glob patterns (e.g., "Reports.*") are for filename matching only.
+						// Content search with glob patterns would misinterpret * as regex.
 						// Calculate character offset of pattern match
 						matchStart, matchEnd := calculateCharacterOffset(line, regexPattern)
 						match := SearchMatch{
@@ -448,12 +469,6 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 		}
 
 		wg.Wait()
-	}
-
-	err = nil
-
-	if err != nil {
-		return "", err
 	}
 
 	var resultBuilder strings.Builder
@@ -539,9 +554,19 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 }
 
 // performAdvancedTextSearch implements advanced text search with parallelization
-func (e *UltraFastEngine) performAdvancedTextSearch(path, pattern string, caseSensitive, wholeWord, includeContext bool, contextLines int) ([]SearchMatch, error) {
+func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, pattern string, caseSensitive, wholeWord, includeContext bool, contextLines int, outputFormat string) ([]SearchMatch, error) {
 	var matchesMu sync.Mutex
 	var matches []SearchMatch
+
+	// Try ripgrep if available and output format is json
+	if e.ripgrepAvailable && outputFormat == "json" {
+		rgMatches, rgErr := e.RunRipgrepSearch(ctx, path, pattern, caseSensitive, wholeWord, includeContext, contextLines)
+		if rgErr == nil {
+			return rgMatches, nil
+		}
+		// Fall through to Go-native on error
+		slog.Debug("Ripgrep fallback", "reason", rgErr)
+	}
 
 	// Prepare the pattern
 	searchPattern := pattern
@@ -690,6 +715,13 @@ var searchSkipDirs = map[string]bool{
 	"__pycache__": true, ".venv": true, "venv": true, ".eggs": true,
 	// General build/cache dirs
 	"build": true, ".cache": true, ".tmp": true,
+}
+
+// isGlobPattern returns true if the pattern contains glob wildcards (*, ?, [)
+// These should be matched via filepath.Match, not regex, to avoid misinterpretation.
+// For example, "Reports.*" as regex means "Report" + zero+ 's' + literal dot, not "anything after Report".
+func isGlobPattern(pattern string) bool {
+	return strings.ContainsAny(pattern, "*?[")
 }
 
 // textExtensionsMap is a pre-computed map for O(1) text extension lookup

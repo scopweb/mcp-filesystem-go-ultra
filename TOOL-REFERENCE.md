@@ -1,4 +1,4 @@
-# filesystem-ultra Tool Reference (v4.2.2 — 24 tools)
+# filesystem-ultra Tool Reference (v4.4.0 — 31 tools)
 
 ### Reading Files
 
