@@ -1018,9 +1018,11 @@ func (pe *PipelineExecutor) performSmartSearchInternal(ctx context.Context, path
 
 	matches := []PipelineSearchMatch{}
 
-	// Compile regex if it looks like a pattern
+	// Check if pattern is a glob (contains *, ?, [) - glob patterns should use literal matching
+	// because users expect "Reports.*" to mean "Reports." followed by anything, not regex
+	isGlob := strings.ContainsAny(pattern, "*?[")
 	var regexPattern *regexp.Regexp
-	if strings.ContainsAny(pattern, ".*+?[]{}()^$|\\") {
+	if !isGlob && strings.ContainsAny(pattern, ".*+?[]{}()^$|\\") {
 		var compileErr error
 		regexPattern, compileErr = regexp.Compile(pattern)
 		if compileErr != nil {

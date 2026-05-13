@@ -205,18 +205,35 @@ func (e *UltraFastEngine) collectFilesForRename(path string, isDir bool, recursi
 	// Compile file pattern if provided
 	var patternRegex *regexp.Regexp
 	if filePattern != "" {
-		// Convert glob pattern to regex
-		regexPattern := "^" + strings.ReplaceAll(strings.ReplaceAll(filePattern, ".", "\\."), "*", ".*") + "$"
-		var err error
-		patternRegex, err = regexp.Compile(regexPattern)
-		if err != nil {
-			return nil, fmt.Errorf("invalid file pattern: %w", err)
+		// Check if it's a glob pattern (contains * or ?)
+		if strings.ContainsAny(filePattern, "*?") {
+			// Use filepath.Match for glob patterns to avoid regex misinterpretation
+			// (e.g., "file_?.txt" should match "file_1.txt", not "file_" then optional 'q' then ".txt")
+			patternRegex = nil // Signal glob mode
+		} else {
+			// Convert glob-like pattern to regex for literal matching
+			// Escape special regex chars except *, then convert * to .*
+			regexPattern := "^" + strings.ReplaceAll(regexp.QuoteMeta(filePattern), "\\*", ".*") + "$"
+			var err error
+			patternRegex, err = regexp.Compile(regexPattern)
+			if err != nil {
+				return nil, fmt.Errorf("invalid file pattern: %w", err)
+			}
 		}
 	}
 
 	if !isDir {
 		// Single file
-		if patternRegex == nil || patternRegex.MatchString(filepath.Base(path)) {
+		matched := false
+		if patternRegex != nil {
+			matched = patternRegex.MatchString(filepath.Base(path))
+		} else if filePattern != "" {
+			// Glob mode
+			matched, _ = filepath.Match(filePattern, filepath.Base(path))
+		} else {
+			matched = true
+		}
+		if matched {
 			files = append(files, path)
 		}
 		return files, nil
@@ -249,8 +266,15 @@ func (e *UltraFastEngine) collectFilesForRename(path string, isDir bool, recursi
 		}
 
 		// Check file pattern
-		if patternRegex != nil && !patternRegex.MatchString(info.Name()) {
-			return nil
+		if patternRegex != nil {
+			if !patternRegex.MatchString(info.Name()) {
+				return nil
+			}
+		} else if filePattern != "" {
+			// Glob mode
+			if matched, _ := filepath.Match(filePattern, info.Name()); !matched {
+				return nil
+			}
 		}
 
 		// Validate path
