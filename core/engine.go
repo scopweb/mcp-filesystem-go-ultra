@@ -126,6 +126,10 @@ type UltraFastEngine struct {
 		id        string
 		lastOpAt  time.Time
 	}
+
+	// Ripgrep support: detected once at startup for high-performance search
+	ripgrepAvailable bool
+	ripgrepVersion   string
 }
 
 const sessionInactivityTimeout = 5 * time.Minute
@@ -217,6 +221,15 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 	engine.workerPool = workerPool
 
 	slog.Info("Ultra-fast engine initialized", "parallel_ops", config.ParallelOps, "buffer", "64KB")
+
+	// Detect ripgrep availability for high-performance search
+	if available, version := DetectRipgrep(); available {
+		engine.ripgrepAvailable = true
+		engine.ripgrepVersion = version
+		slog.Info("Ripgrep detected for accelerated search", "version", version)
+	} else {
+		slog.Info("Ripgrep not found - using Go-native search")
+	}
 
 	// Initialize Claude Desktop optimizer
 	engine.optimizer = NewClaudeDesktopOptimizer(engine)

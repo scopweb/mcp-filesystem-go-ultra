@@ -1,5 +1,53 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.4.0] - 2026-05-11
+
+### Feature — Claude Code tool name aliases
+
+Nuevos aliases que coinciden con los nombres de herramientas de Claude Code para compatibilidad directa.
+
+**Aliases agregados** (`tools_aliases.go`):
+- `View` — alias de `read_file`
+- `Edit` — alias de `edit_file`
+- `Write` — alias de `write_file`
+- `Replace` — alias de `write_file`
+- `LS` — alias de `list_directory`
+- `GlobTool` — alias de `search_files` (modo filename-only)
+- `GrepTool` — alias de `search_files` (con contenido, usa ripgrep cuando está disponible)
+
+**Motivación:** El source code de Claude Code se filtró en marzo 2026. Estos aliases permiten que prompts/scripts escritos para Claude Code funcionen directamente con este servidor MCP.
+
+---
+
+### Feature — Ripgrep as optional search backend
+
+Búsqueda acelerada via ripgrep (`rg`) con fallback a Go-native.
+
+**Implementación:**
+- **`core/ripgrep_search.go`** — `DetectRipgrep()` + `RunRipgrepSearch()`
+- **`core/engine.go`** — Detección al inicio, `ripgrepAvailable` + `ripgrepVersion`
+- **`core/search_operations.go`** — Dispatch automático a ripgrep cuando `output_format="json"` y `rg` disponible
+
+**Fallback chain:**
+1. `rg` en PATH → usar directamente
+2. Binario embebido (con `embed_rg` build tag) → extraer y usar
+3. No disponible → Go-native regex (sin cambios de comportamiento)
+
+**Binarios embebidos** (`embed/ripgrep/`):
+- `rg-windows-amd64.exe` (4.1MB, v15.1.0)
+- `download.sh` para descargar más plataformas (Linux amd64/arm64, macOS Intel/Apple Silicon)
+
+**Builds:**
+```bash
+# Default (sin embed)
+go build -ldflags="-s -w" -trimpath -o filesystem-ultra-v4.exe .
+
+# Con ripgrep embebido
+go build -ldflags="-s -w" -trimpath -tags embed_rg -o filesystem-ultra-v4-embed.exe .
+```
+
+---
+
 ## [4.3.9] - 2026-05-01
 
 ### Feature — New AI-optimized response formats

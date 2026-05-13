@@ -100,6 +100,117 @@ func registerAliases(reg *toolRegistry) {
 	), reg.listDirHandler)
 }
 
+// registerClaudeCodeAliases registers 7 aliases matching Claude Code tool names:
+// View, Edit, Write, Replace, LS, GlobTool, GrepTool
+func registerClaudeCodeAliases(reg *toolRegistry) {
+	s := reg.server
+
+	s.AddTool(mcp.NewTool("View",
+		mcp.WithTitleAnnotation("View File (Claude Code style)"),
+		mcp.WithDescription("Read file from local filesystem. By default reads up to 2000 lines from the start. "+
+			"Alias for read_file. Related: edit_file, write_file, search_files."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file (WSL or Windows format)")),
+		mcp.WithNumber("max_lines", mcp.Description("Max lines (optional, 0=all)")),
+		mcp.WithString("mode", mcp.Description("Mode: all, head, tail")),
+		mcp.WithNumber("start_line", mcp.Description("Starting line number (1-indexed)")),
+		mcp.WithNumber("end_line", mcp.Description("Ending line number (inclusive)")),
+		mcp.WithString("encoding", mcp.Description("Set to \"base64\" to read file as base64-encoded binary")),
+	), reg.readFileHandler)
+
+	s.AddTool(mcp.NewTool("Edit",
+		mcp.WithTitleAnnotation("Edit File (Claude Code style)"),
+		mcp.WithDescription("Edit files. For large edits use Write to overwrite entire file. "+
+			"Alias for edit_file with auto-backup. Related: read_file, write_file, multi_edit."),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file (WSL or Windows format)")),
+		mcp.WithString("old_text", mcp.Description("Text to be replaced")),
+		mcp.WithString("new_text", mcp.Description("New text to replace with")),
+		mcp.WithString("old_str", mcp.Description("Alias for old_text")),
+		mcp.WithString("new_str", mcp.Description("Alias for new_text")),
+		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
+		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\"")),
+		mcp.WithNumber("occurrence", mcp.Description("Which occurrence to replace: 1=first, -1=last")),
+		mcp.WithString("pattern", mcp.Description("Regex or literal pattern (for search_replace and regex modes)")),
+		mcp.WithString("replacement", mcp.Description("Replacement text (for search_replace mode)")),
+		mcp.WithString("patterns_json", mcp.Description("JSON array of patterns for regex mode")),
+		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive matching (default: true)")),
+		mcp.WithBoolean("create_backup", mcp.Description("Create backup before edit (default: true)")),
+		mcp.WithBoolean("dry_run", mcp.Description("Validate without applying changes (default: false)")),
+		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only")),
+	), reg.editFileHandler)
+
+	s.AddTool(mcp.NewTool("Write",
+		mcp.WithTitleAnnotation("Write File (Claude Code style)"),
+		mcp.WithDescription("Write/overwrite entire file. Before using: read with View, verify directory with LS. "+
+			"Alias for write_file. Related: read_file, edit_file."),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path where to write")),
+		mcp.WithString("content", mcp.Description("Text content to write")),
+		mcp.WithString("content_base64", mcp.Description("Base64-encoded binary content")),
+		mcp.WithString("encoding", mcp.Description("Set to \"base64\" for base64 content")),
+	), reg.writeFileHandler)
+
+	s.AddTool(mcp.NewTool("Replace",
+		mcp.WithTitleAnnotation("Replace File (Claude Code style)"),
+		mcp.WithDescription("Same as Write — overwrites the entire file. "+
+			"Alias for write_file. Related: read_file, edit_file."),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path where to write")),
+		mcp.WithString("content", mcp.Description("Text content to write")),
+		mcp.WithString("content_base64", mcp.Description("Base64-encoded binary content")),
+		mcp.WithString("encoding", mcp.Description("Set to \"base64\" for base64 content")),
+	), reg.writeFileHandler)
+
+	s.AddTool(mcp.NewTool("LS",
+		mcp.WithTitleAnnotation("List Directory (Claude Code style)"),
+		mcp.WithDescription("List files and directories. Path must be absolute. "+
+			"Alias for list_directory. Related: search_files, read_file."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to directory")),
+	), reg.listDirHandler)
+
+	s.AddTool(mcp.NewTool("GlobTool",
+		mcp.WithTitleAnnotation("Glob Pattern (Claude Code style)"),
+		mcp.WithDescription("Fast pattern matching over any codebase. Supports patterns like *.go, **/*.ts. "+
+			"Returns paths ordered by modification time. Alias for search_files (filename-only mode). "+
+			"Related: GrepTool, read_file."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Base directory (WSL or Windows format)")),
+		mcp.WithString("pattern", mcp.Required(), mcp.Description("Glob pattern (e.g., *.go, **/*.ts)")),
+		mcp.WithString("file_types", mcp.Description("Comma-separated extensions filter (e.g., '.go,.txt')")),
+	), reg.searchFilesHandler)
+
+	s.AddTool(mcp.NewTool("GrepTool",
+		mcp.WithTitleAnnotation("Grep Search (Claude Code style)"),
+		mcp.WithDescription("Fast content search by regex. Built on ripgrep when available. "+
+			"Filter files with include parameter. Alias for search_files with content search. "+
+			"Related: GlobTool, read_file, edit_file."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Base directory or file (WSL or Windows format)")),
+		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex pattern")),
+		mcp.WithString("include", mcp.Description("Glob pattern to filter files (e.g., *.go, **/*.ts)")),
+		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive (default: false)")),
+		mcp.WithBoolean("include_context", mcp.Description("Include context lines (default: false)")),
+		mcp.WithNumber("context_lines", mcp.Description("Number of context lines (default: 3)")),
+		mcp.WithString("output", mcp.Description("Output mode: content, files_with_matches, count")),
+	), reg.searchFilesHandler)
+}
+
 // registerSuperTool registers the fs super-tool that dispatches to all 16 tools
 func registerSuperTool(reg *toolRegistry) {
 	s := reg.server
