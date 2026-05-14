@@ -1,11 +1,11 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.2.1: 16 tools + 6 aliases + fs super-tool.
+description: Tool catalog for filesystem-ultra MCP server v4.4.0: 16 core tools + help. Aliases and fs super-tool disabled.
 ---
 
-# Filesystem Ultra v4.2.1 — Tool Discovery
+# Filesystem Ultra v4.4.0 — Tool Discovery
 
-## The 16 tools
+## The 16 core tools
 
 | Tool | Purpose |
 |------|---------|
@@ -26,36 +26,42 @@ description: Tool catalog for filesystem-ultra MCP server v4.2.1: 16 tools + 6 a
 | `wsl` | WSL/Windows sync and path conversion |
 | `server_info` | Stats, help, artifact capture |
 
-## 6 aliases (complete schemas)
+## search_files ripgrep-compatible params
 
-| Alias | → Original | Key params |
-|-------|-----------|------------|
-| `read_text_file` | `read_file` | path, start_line, end_line, max_lines, mode, encoding |
-| `search` | `search_files` | path, pattern, include_content, file_types, case_sensitive, whole_word, include_context, context_lines, count_only, return_lines |
-| `edit` | `edit_file` | path, old_text, new_text, old_str, new_str, mode, pattern, replacement, patterns_json, occurrence, force, case_sensitive, create_backup, dry_run, whole_word |
-| `write` | `write_file` | path, content, content_base64, encoding |
-| `create_file` | `write_file` | path, content, content_base64, encoding |
-| `directory_tree` | `list_directory` | path |
+`search_files` accepts both native names and ripgrep-compatible aliases:
 
-## fs super-tool
-
-Single entry point for ALL 16 operations via `action` param — for clients with limited tool loading:
-
-```
-fs(action:"read_file", path:"/some/file", start_line:1, end_line:50)
-fs(action:"edit_file", path:"/some/file", old_text:"x", new_text:"y")
-fs(action:"search_files", path:"/dir", pattern:"TODO", include_content:true)
-fs(action:"backup", backup_action:"undo_last")
-```
-
-Valid actions: read_file, write_file, edit_file, multi_edit, list_directory, search_files, analyze_operation, create_directory, delete_file, move_file, copy_file, get_file_info, batch_operations, backup, wsl, server_info
-
-For backup/wsl/server_info, use `backup_action`, `wsl_action`, `server_action` params (they clash with top-level `action`).
+| Native | Alias | Purpose |
+|--------|-------|---------|
+| `file_types` | `include` | Glob pattern filter (e.g., `*.go`, `**/*.ts`) |
+| `output_format` | `output` | `content`, `files_with_matches`, `count` |
 
 ## Key behaviors
 
-- **Modify existing files** → `edit_file` / `edit`
+- **Modify existing files** → `edit_file`
 - **Multiple edits same file** → `multi_edit`
 - **Batch ops** → `batch_operations` (atomic, with rollback)
 - **Undo** → `backup(action:"undo_last")` or `backup(action:"restore", backup_id:"...")`
 - **Dry-run** → `analyze_operation` or `edit_file(dry_run:true)` / `multi_edit(dry_run:true)`
+- **Fast search** → `search_files` with `output_format:"json"` uses ripgrep when available
+
+## Disabled (v4.4.0 cleanup)
+
+- 13 aliases (`read_text_file`, `search`, `edit`, `write`, `create_file`, `directory_tree`, `View`, `Edit`, `Write`, `Replace`, `LS`, `GlobTool`, `GrepTool`)
+- `fs` super-tool
+
+These were disabled to reduce discovery noise and token overhead. The 16 core tools are self-sufficient.
+
+## Ripgrep backend
+
+When `rg` (ripgrep) is available on PATH or embedded, `search_files` with `output_format:"json"` uses ripgrep for 10-100x faster search.
+
+**Detection priority:**
+1. `rg` in PATH
+2. Embedded binary (build with `embed_rg` tag)
+3. Fallback to Go-native regex
+
+**Log output:**
+```
+INFO Ripgrep detected for accelerated search version=14.x.x
+INFO Ripgrep not found - using Go-native search
+```
