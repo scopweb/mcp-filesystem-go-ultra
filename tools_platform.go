@@ -349,7 +349,11 @@ func registerPlatformTools(reg *toolRegistry) {
 	reg.addTool(serverInfoTool, auditWrap(engine, "server_info", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		action := "help"
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
-			if a, ok := args["action"].(string); ok && a != "" {
+			// server_action is set by fs super-tool remapping; action is used when
+			// called directly as server_info tool
+			if a, ok := args["server_action"].(string); ok && a != "" {
+				action = a
+			} else if a, ok := args["action"].(string); ok && a != "" && a != "server_info" {
 				action = a
 			}
 		}
@@ -447,7 +451,7 @@ func registerPlatformTools(reg *toolRegistry) {
 			return mcp.NewToolResultText(help), nil
 
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("Unknown action: %s. Valid: help, stats, artifact", action)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Unknown server_action: %s. Valid: help, stats, artifact (or use sub_action for artifact options)", action)), nil
 		}
 	}))
 }
