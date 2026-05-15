@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/mcp/filesystem-ultra/embed/ripgrep"
@@ -29,24 +27,16 @@ func DetectRipgrep() (available bool, version string) {
 		}
 	}
 
-	// Second try: check if embedded binary exists (only with embed_rg tag)
+	// Second try: extract embedded binary (only with embed_rg tag)
 	if ripgrep.IsEmbedded() {
-		binPath := ripgrep.EmbeddedBin()
-		if binPath != "" {
-			// Resolve relative path from executable location
-			execPath, err := os.Executable()
-			if err == nil {
-				binDir := filepath.Dir(execPath)
-				fullPath := filepath.Join(binDir, "embed", "ripgrep", filepath.Base(binPath))
-				if _, err := os.Stat(fullPath); err == nil {
-					// Try to get version from embedded binary
-					cmd := exec.Command(fullPath, "--version")
-					if output, err := cmd.Output(); err == nil {
-						parts := strings.Fields(string(output))
-						if len(parts) >= 2 {
-							return true, parts[1]
-						}
-					}
+		binPath, err := ripgrep.GetExtractedPath()
+		if err == nil {
+			// Try to get version from extracted binary
+			cmd := exec.Command(binPath, "--version")
+			if output, err := cmd.Output(); err == nil {
+				parts := strings.Fields(string(output))
+				if len(parts) >= 2 {
+					return true, parts[1]
 				}
 			}
 		}
@@ -58,7 +48,6 @@ func DetectRipgrep() (available bool, version string) {
 // runVersionCheck attempts to run rg --version without capturing output.
 // Returns true if successful (rg is available).
 func runVersionCheck(cmd *exec.Cmd) bool {
-	// Try to run with small timeout
 	cmd.Run()
 	return cmd.ProcessState != nil && cmd.ProcessState.Success()
 }
@@ -110,7 +99,15 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 
 	args = append(args, pattern, path)
 
-	cmd := exec.CommandContext(ctx, "rg", args...)
+	// Determine which ripgrep binary to use
+	rgBin := "rg" // default: PATH
+	if ripgrep.IsEmbedded() {
+		if embeddedPath, err := ripgrep.GetExtractedPath(); err == nil {
+			rgBin = embeddedPath
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, rgBin, args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("ripgrep failed: %w", err)

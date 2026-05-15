@@ -68,12 +68,13 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	registerFileTools(reg)
 	registerBatchTools(reg)
 	registerPlatformTools(reg)
-	registerAliases(reg)
-	registerClaudeCodeAliases(reg)
-	registerSuperTool(reg)
+	// Aliases disabled: duplicates add noise to discovery, hurt token budget.
+	// registerAliases(reg)
+	// registerClaudeCodeAliases(reg)
+	// registerSuperTool(reg)
 	registerHelpTool(reg)
 
-	log.Printf("Registered 31 tools (16 core + 13 aliases + help + fs super-tool) for v4.4.0")
+	log.Printf("Registered 18 tools (16 core + help + fs super-tool) for v4.4.0 — aliases disabled")
 	return nil
 }
 

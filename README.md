@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra-Fast
 
-**v4.2.1** · Go · MCP 2025-11-25 · 16 tools + 6 aliases + fs super-tool
+**v4.4.0** · Go · MCP 2025-11-25 · 16 tools + 13 aliases + fs super-tool
 
 A high-performance [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go. Designed for use with Claude Desktop and Claude Code, with first-class support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -9,6 +9,7 @@ A high-performance [Model Context Protocol](https://modelcontextprotocol.io) fil
 ## Features
 
 - **16 MCP tools** (consolidated from 59 in v3.x) — all functionality preserved, zero tool bloat
+- **31 tools total** (16 core + 13 aliases) with Claude Code-compatible names (View, Edit, Write, LS, GlobTool, GrepTool, etc.)
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
 - **Intelligent editing** with automatic backup, risk assessment, and rollback on failure
 - **3-tier cache** (BigCache + go-cache) with file watcher invalidation for O(1) reads
@@ -32,8 +33,12 @@ A high-performance [Model Context Protocol](https://modelcontextprotocol.io) fil
 # Build (Windows) — v4 binary
 go build -ldflags="-s -w" -trimpath -o filesystem-ultra-v4.exe .
 
-# Or use the build script
-build-windows.bat
+# With ripgrep embedded (~4MB larger)
+go build -ldflags="-s -w" -trimpath -tags embed_rg -o filesystem-ultra-v4-embed.exe .
+
+# Or use the build scripts
+build-windows.bat        # default
+build-windows-embed.bat  # with ripgrep
 ```
 
 Requires Go 1.26+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).

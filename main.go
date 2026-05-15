@@ -96,7 +96,7 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("MCP Filesystem Server Ultra-Fast v4.2.1\n")
+		fmt.Printf("MCP Filesystem Server Ultra-Fast v4.4.0\n")
 		fmt.Printf("Protocol: MCP 2025-11-25\n")
 		fmt.Printf("Build: %s\n", time.Now().Format("2006-01-02"))
 		fmt.Printf("Go: %s\n", runtime.Version())
@@ -153,7 +153,7 @@ func main() {
 	// Setup logging
 	setupLogging(config)
 
-	log.Printf("Starting MCP Filesystem Server Ultra-Fast v4.2.1")
+	log.Printf("Starting MCP Filesystem Server Ultra-Fast v4.4.0")
 	log.Printf("Config: Cache=%s, Parallel=%d, Binary=%s, VSCode=%v, Compact=%v",
 		formatSize(config.CacheSize), config.ParallelOps,
 		formatSize(config.BinaryThreshold), config.VSCodeAPIEnabled, config.CompactMode)

@@ -335,8 +335,10 @@ func registerSuperTool(reg *toolRegistry) {
 			case "server_info":
 				if sa, ok := args["server_action"].(string); ok && sa != "" {
 					args["action"] = sa
-					request.Params.Arguments = args
+				} else if sa, ok := args["sub_action"].(string); ok && sa != "" {
+					args["action"] = sa
 				}
+				request.Params.Arguments = args
 			}
 		}
 

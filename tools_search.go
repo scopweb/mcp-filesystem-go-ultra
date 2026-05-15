@@ -53,6 +53,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal pattern")),
 		mcp.WithBoolean("include_content", mcp.Description("Include file content search (default: false)")),
 		mcp.WithString("file_types", mcp.Description("Comma-separated file extensions (e.g., '.go,.txt')")),
+		mcp.WithString("include", mcp.Description("Glob pattern to filter files — alias for file_types (e.g., '*.go', '**/*.ts')")),
 		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive search (default: false)")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false)")),
 		mcp.WithBoolean("include_context", mcp.Description("Include context lines (default: false)")),
@@ -60,6 +61,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithBoolean("count_only", mcp.Description("Count pattern occurrences without full search (default: false)")),
 		mcp.WithString("return_lines", mcp.Description("Return line numbers of count matches (true/false, for count_only mode)")),
 		mcp.WithString("output_format", mcp.Description("Output format: 'text' or 'json' (default: 'text'). Use 'json' for structured AI parsing.")),
+		mcp.WithString("output", mcp.Description("Alias for output_format: content, files_with_matches, count")),
 	)
 	reg.searchFilesHandler = auditWrap(engine, "search_files", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -109,6 +111,12 @@ func registerSearchTools(reg *toolRegistry) {
 				for _, part := range parts {
 					fileTypes = append(fileTypes, strings.TrimSpace(part))
 				}
+			} else if inc, ok := args["include"].(string); ok && inc != "" {
+				// "include" is the ripgrep-compatible alias for file_types
+				parts := strings.Split(inc, ",")
+				for _, part := range parts {
+					fileTypes = append(fileTypes, strings.TrimSpace(part))
+				}
 			}
 			if rl, ok := args["return_lines"].(string); ok {
 				returnLines = (rl == "true" || rl == "True" || rl == "TRUE")
@@ -117,6 +125,9 @@ func registerSearchTools(reg *toolRegistry) {
 			}
 			if of, ok := args["output_format"].(string); ok {
 				outputFormat = of
+			} else if out, ok := args["output"].(string); ok {
+				// "output" is the ripgrep-compatible alias for output_format
+				outputFormat = out
 			}
 		}
 

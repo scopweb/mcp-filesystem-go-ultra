@@ -11,7 +11,7 @@ func IsEmbedded() bool {
 	return false
 }
 
-// EmbeddedBin returns empty string when embed_rg build tag is not set.
-func EmbeddedBin() string {
-	return ""
+// GetExtractedPath returns empty when embed_rg is not set.
+func GetExtractedPath() (string, error) {
+	return "", nil
 }

@@ -598,6 +598,18 @@ func registerBatchTools(reg *toolRegistry) {
 			return mcp.NewToolResultText(output.String()), nil
 
 		case "undo_last":
+			// Check for dry_run / preview first
+			isDryRun := false
+			isPreview := false
+			if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+				if dr, ok := args["dry_run"].(bool); ok && dr {
+					isDryRun = true
+				}
+				if p, ok := args["preview"].(bool); ok && p {
+					isPreview = true
+				}
+			}
+
 			// Get file_path if specified
 			var targetFile string
 			if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
@@ -612,6 +624,24 @@ func registerBatchTools(reg *toolRegistry) {
 				if currentBackupID != "" {
 					restoredFiles, prevID, hasMore, err := engine.GetBackupManager().RestorePreviousInChain(currentBackupID, targetFile)
 					if err == nil {
+						// Preview/dry-run: show what would happen without executing
+						if isDryRun || isPreview {
+							var output strings.Builder
+							output.WriteString(fmt.Sprintf("Preview — Would undo step for: %s\n\n", targetFile))
+							output.WriteString(fmt.Sprintf("Backup being reverted: %s\n", currentBackupID))
+							output.WriteString(fmt.Sprintf("Files would be restored: %d\n", len(restoredFiles)))
+							for _, file := range restoredFiles {
+								output.WriteString(fmt.Sprintf("   - %s\n", file))
+							}
+							if hasMore {
+								output.WriteString(fmt.Sprintf("\nPrevious backup in chain: %s\n", prevID))
+							} else {
+								output.WriteString("\nNo more undo available after this step\n")
+							}
+							output.WriteString("\nRun without preview/dry_run to execute undo\n")
+							return mcp.NewToolResultText(output.String()), nil
+						}
+
 						// Update chain
 						if prevID != "" {
 							engine.SetCurrentBackupID(targetFile, prevID)
@@ -649,15 +679,7 @@ func registerBatchTools(reg *toolRegistry) {
 
 			lastBackup := backups[0]
 
-			// Check for preview mode
-			preview := false
-			if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
-				if p, ok := args["preview"].(bool); ok {
-					preview = p
-				}
-			}
-
-			if preview {
+			if isDryRun || isPreview {
 				var output strings.Builder
 				output.WriteString(fmt.Sprintf("Preview — Last backup: %s\n", lastBackup.BackupID))
 				output.WriteString(fmt.Sprintf("Time: %s (%s)\n", lastBackup.Timestamp.Format("2006-01-02 15:04:05"), core.FormatAge(lastBackup.Timestamp)))
@@ -666,7 +688,7 @@ func registerBatchTools(reg *toolRegistry) {
 				for _, file := range lastBackup.Files {
 					output.WriteString(fmt.Sprintf("   - %s\n", file.OriginalPath))
 				}
-				output.WriteString("\nRun backup(action:\"undo_last\") without preview to restore these files\n")
+				output.WriteString("\nRun without preview/dry_run to restore these files\n")
 				return mcp.NewToolResultText(output.String()), nil
 			}
 
