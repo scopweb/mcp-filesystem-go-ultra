@@ -789,6 +789,38 @@ func (e *UltraFastEngine) isTextFile(path string) bool {
 	// Check by extension first (O(1) map lookup - very fast)
 	ext := strings.ToLower(filepath.Ext(path))
 	if textExtensionsMap[ext] {
+		// Extension matched: still need to check for binary-in-text encodings (UTF-16, UTF-32)
+		// because content search would fail on garbled output
+		file, err := os.Open(path)
+		if err != nil {
+			return true // assume text if can't open (extension is authoritative)
+		}
+		defer file.Close()
+
+		// Read first 512 bytes to check for binary-in-text signatures
+		buffer := make([]byte, 512)
+		n, err := file.Read(buffer)
+		if err != nil && n == 0 {
+			return true
+		}
+
+		// Check for UTF-16 / UTF-32 BOM (common in Windows .cs files with non-ASCII chars)
+		// UTF-16 LE: FF FE, UTF-16 BE: FE FF, UTF-32 LE: FF FE 00 00, UTF-32 BE: 00 00 FE FF
+		if n >= 4 && ((buffer[0] == 0xFF && buffer[1] == 0xFE && buffer[2] == 0x00 && buffer[3] == 0x00) ||
+			(buffer[0] == 0x00 && buffer[1] == 0x00 && buffer[2] == 0xFE && buffer[3] == 0xFF)) {
+			return false // UTF-32 - skip from text search
+		}
+		if n >= 2 && ((buffer[0] == 0xFF && buffer[1] == 0xFE) || (buffer[0] == 0xFE && buffer[1] == 0xFF)) {
+			return false // UTF-16 - skip from text search
+		}
+
+		// Check for null bytes (common in binary files)
+		for i := 0; i < n; i++ {
+			if buffer[i] == 0 {
+				return false
+			}
+		}
+
 		return true
 	}
 
