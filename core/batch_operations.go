@@ -61,25 +61,31 @@ type OperationResult struct {
 
 // BatchOperationManager maneja operaciones en batch con soporte para rollback
 type BatchOperationManager struct {
-	backupDir     string
-	maxBackups    int
-	mutex         sync.Mutex
-	currentBackup string
-	engine        *UltraFastEngine // Reference to engine for intelligent edit (Bug #18)
+	backupDir       string          // Local backup directory (for tests or when no shared manager)
+	backupManager   *BackupManager  // Shared backup manager (统一backup系统)
+	maxBackups      int
+	mutex           sync.Mutex
+	currentBackup   string
+	engine          *UltraFastEngine // Reference to engine for intelligent edit (Bug #18)
 }
 
-// NewBatchOperationManager crea un nuevo manager de operaciones batch
+// NewBatchOperationManager creates a new batch operation manager
+// backupDir is kept for test compatibility; use SetBackupManager for shared backup system
 func NewBatchOperationManager(backupDir string, maxBackups int) *BatchOperationManager {
 	if backupDir == "" {
 		backupDir = filepath.Join(os.TempDir(), "mcp-batch-backups")
 	}
-
 	os.MkdirAll(backupDir, 0755)
-
 	return &BatchOperationManager{
-		backupDir:  backupDir,
+		backupDir:   backupDir,
 		maxBackups: maxBackups,
 	}
+}
+
+// SetBackupManager sets the shared backup manager for unified backup system
+// Call this in production to use the engine's BackupManager
+func (m *BatchOperationManager) SetBackupManager(manager *BackupManager) {
+	m.backupManager = manager
 }
 
 // SetEngine sets the engine reference for intelligent edit support in batch operations.
@@ -389,6 +395,14 @@ func (m *BatchOperationManager) rollback(rollbackInfo []rollbackData) {
 	}
 }
 
+// getBackupDir returns the effective backup directory
+func (m *BatchOperationManager) getBackupDir() string {
+	if m.backupManager != nil {
+		return m.backupManager.backupDir
+	}
+	return m.backupDir
+}
+
 // createBackup crea un backup de todos los archivos afectados
 func (m *BatchOperationManager) createBackup(operations []FileOperation) (string, error) {
 	m.mutex.Lock()
@@ -396,21 +410,21 @@ func (m *BatchOperationManager) createBackup(operations []FileOperation) (string
 
 	// Crear directorio de backup con timestamp
 	timestamp := time.Now().Format("20060102-150405")
-	backupPath := filepath.Join(m.backupDir, fmt.Sprintf("batch-%s", timestamp))
+	backupID := fmt.Sprintf("batch-%s", timestamp)
+	backupPath := filepath.Join(m.getBackupDir(), backupID)
 
 	if err := os.MkdirAll(backupPath, 0755); err != nil {
 		return "", err
 	}
 
-	// Guardar metadatos del batch
-	metadata := map[string]interface{}{
-		"timestamp":  timestamp,
-		"operations": len(operations),
-		"created_at": time.Now().Format(time.RFC3339),
+	// Preparar metadatos compatibles con BackupInfo
+	filesBackupDir := filepath.Join(backupPath, "files")
+	if err := os.MkdirAll(filesBackupDir, 0755); err != nil {
+		return "", err
 	}
 
-	metadataJSON, _ := json.MarshalIndent(metadata, "", "  ")
-	os.WriteFile(filepath.Join(backupPath, "metadata.json"), metadataJSON, 0644)
+	var backupMetadatas []BackupMetadata
+	var totalSize int64
 
 	// Hacer backup de archivos afectados
 	for i, op := range operations {
@@ -424,14 +438,46 @@ func (m *BatchOperationManager) createBackup(operations []FileOperation) (string
 		}
 
 		if sourceFile != "" {
-			if _, err := os.Stat(sourceFile); err == nil {
+			if fileInfo, err := os.Stat(sourceFile); err == nil {
 				// El archivo existe, hacer backup
-				backupFile := filepath.Join(backupPath, fmt.Sprintf("op-%d-%s", i, filepath.Base(sourceFile)))
-				if err := copyFile(sourceFile, backupFile); err != nil {
+				backupFileName := fmt.Sprintf("op-%d-%s", i, filepath.Base(sourceFile))
+				backupFilePath := filepath.Join(filesBackupDir, backupFileName)
+				hash, err := copyFileWithHash(sourceFile, backupFilePath)
+				if err != nil {
 					return "", fmt.Errorf("failed to backup %s: %w", sourceFile, err)
 				}
+				backupMetadatas = append(backupMetadatas, BackupMetadata{
+					OriginalPath: sourceFile,
+					BackupPath:   filepath.Join("files", backupFileName),
+					Size:         fileInfo.Size(),
+					Hash:         hash,
+					ModifiedTime: fileInfo.ModTime(),
+				})
+				totalSize += fileInfo.Size()
 			}
 		}
+	}
+
+	// Guardar metadatos en formato compatible con BackupManager
+	info := BackupInfo{
+		BackupID:  backupID,
+		Timestamp: time.Now(),
+		Operation: "batch_operation",
+		Files:     backupMetadatas,
+		TotalSize: totalSize,
+	}
+
+	metadataJSON, err := json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal backup metadata: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(backupPath, "metadata.json"), metadataJSON, 0644); err != nil {
+		return "", fmt.Errorf("failed to write metadata: %w", err)
+	}
+
+	// Registrar en el cache del backup manager si está disponible
+	if m.backupManager != nil {
+		m.backupManager.metadataCache[backupID] = &info
 	}
 
 	// Limpiar backups antiguos
@@ -579,7 +625,7 @@ func (m *BatchOperationManager) collectPaths(op FileOperation) []string {
 
 // cleanOldBackups limpia backups antiguos manteniendo solo los últimos N
 func (m *BatchOperationManager) cleanOldBackups() {
-	entries, err := os.ReadDir(m.backupDir)
+	entries, err := os.ReadDir(m.getBackupDir())
 	if err != nil {
 		return
 	}
@@ -589,8 +635,9 @@ func (m *BatchOperationManager) cleanOldBackups() {
 	}
 
 	// Ordenar por fecha de modificación y eliminar los más antiguos
+	backupDir := m.getBackupDir()
 	for i := 0; i < len(entries)-m.maxBackups; i++ {
-		path := filepath.Join(m.backupDir, entries[i].Name())
+		path := filepath.Join(backupDir, entries[i].Name())
 		os.RemoveAll(path)
 	}
 }

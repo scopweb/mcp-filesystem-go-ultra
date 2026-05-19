@@ -40,6 +40,7 @@ func TestBatchOperationsPathValidation(t *testing.T) {
 	}
 
 	batchManager := core.NewBatchOperationManager("", 10)
+	batchManager.SetBackupManager(engine.GetBackupManager())
 	batchManager.SetEngine(engine)
 
 	t.Run("write to forbidden path is blocked", func(t *testing.T) {
@@ -202,6 +203,7 @@ func TestBatchPathValidationJSON(t *testing.T) {
 	engine, _ := core.NewUltraFastEngine(config)
 
 	batchManager := core.NewBatchOperationManager("", 10)
+	batchManager.SetBackupManager(engine.GetBackupManager())
 	batchManager.SetEngine(engine)
 
 	// Simulate what main.go does: parse JSON then execute

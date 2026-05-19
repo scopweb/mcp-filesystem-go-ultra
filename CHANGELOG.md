@@ -1,5 +1,28 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.4.1] - 2026-05-19
+
+### Fix — Sistema de backup unificado para batch_operations
+
+**Problema:** `batch_operations` usaba su propio sistema de backup privado (`mcp-batch-backups/` con IDs `batch-YYYYMMDD-HHMMSS`) que no era visible para `backup(action:"list")` ni restaurable con `backup(action:"restore")`.
+
+**Solución:**
+- `BatchOperationManager` ahora acepta un `BackupManager` compartido vía `SetBackupManager()`
+- Los backups de `batch_operations` ahora se crean en el mismo directorio que `edit_file`
+- Metadatos mejorados en formato `BackupInfo` compatible con el sistema principal
+
+**Cambios:**
+- **`core/batch_operations.go`** — `SetBackupManager()`, `getBackupDir()`, metadata mejorado con `BackupInfo`
+- **`tools_batch.go`** — Usa `SetBackupManager(engine.GetBackupManager())` para compartir backup manager
+- **`tests/batch_security_test.go`** — Actualizado para nueva API
+
+**Resultado:**
+- Backups de `batch_operations` ahora aparecen en `backup(action:"list")` ✅
+- IDs `batch-YYYYMMDD-HHMMSS` son aceptados por `backup(action:"restore")` ✅
+- `BackupPath` devuelto por batch es útil para recovery ✅
+
+---
+
 ## [4.4.0] - 2026-05-11
 
 ### Feature — Claude Code tool name aliases
