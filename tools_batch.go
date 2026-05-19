@@ -361,6 +361,7 @@ func registerBatchTools(reg *toolRegistry) {
 		}
 
 		batchManager := core.NewBatchOperationManager("", 10)
+		batchManager.SetBackupManager(engine.GetBackupManager())
 		batchManager.SetEngine(engine)
 		result := batchManager.ExecuteBatch(batchReq)
 
