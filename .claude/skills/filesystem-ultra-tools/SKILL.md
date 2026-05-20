@@ -1,11 +1,11 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.4.0: 16 core tools + help. Aliases and fs super-tool disabled.
+description: Tool catalog for filesystem-ultra MCP server v4.5.0: 17 core tools + help. Aliases and fs super-tool disabled.
 ---
 
-# Filesystem Ultra v4.4.0 — Tool Discovery
+# Filesystem Ultra v4.5.0 — Tool Discovery
 
-## The 16 core tools
+## The 17 core tools
 
 | Tool | Purpose |
 |------|---------|
@@ -13,6 +13,7 @@ description: Tool catalog for filesystem-ultra MCP server v4.4.0: 16 core tools 
 | `write_file` | Write/create files (binary via base64) |
 | `edit_file` | Replace exact text, regex, nth occurrence |
 | `multi_edit` | Multiple edits in one file |
+| `project_replace` | Project-wide find/replace in one call |
 | `list_directory` | List directory contents |
 | `search_files` | Search by pattern (regex or literal) |
 | `get_file_info` | File info (single or batch) |
@@ -39,17 +40,49 @@ description: Tool catalog for filesystem-ultra MCP server v4.4.0: 16 core tools 
 
 - **Modify existing files** → `edit_file`
 - **Multiple edits same file** → `multi_edit`
+- **Project-wide find/replace** → `project_replace` (1 call instead of N)
 - **Batch ops** → `batch_operations` (atomic, with rollback)
 - **Undo** → `backup(action:"undo_last")` or `backup(action:"restore", backup_id:"...")`
-- **Dry-run** → `analyze_operation` or `edit_file(dry_run:true)` / `multi_edit(dry_run:true)`
+- **Dry-run** → `analyze_operation` or `edit_file(dry_run:true)` / `multi_edit(dry_run:true)` / `project_replace(preview:true)`
 - **Fast search** → `search_files` with `output_format:"json"` uses ripgrep when available
+
+## project_replace — Project-wide find/replace
+
+Replaces N calls to `multi_edit` with 1 call. Scans directory tree, matches pattern, replaces all occurrences.
+
+**Parameters:**
+- `path` — root directory (required)
+- `find` — text or regex (required)
+- `replace` — replacement text (required)
+- `literal` — if false, find is regex (default: true)
+- `case_sensitive` — (default: true)
+- `file_types` — ".php,.html" (comma-separated)
+- `exclude_paths` — ["jotajotape/**"] (globs to skip)
+- `preview` — diff without writing (default: false)
+- `create_backup` — single consolidated backup (default: true)
+- `parallel` — process files concurrently (default: true)
+- `max_files` — safety cap (default: 1000)
+
+**Example:**
+```json
+{
+  "path": "C:\\project\\public_html",
+  "find": "utf8_encode(",
+  "replace": "utf8e(",
+  "file_types": ".php",
+  "exclude_paths": ["jotajotape/**"],
+  "preview": false
+}
+```
+
+**Response:** `files_changed`, `total_replacements`, `backup_id`, `per_file` array
 
 ## Disabled (v4.4.0 cleanup)
 
 - 13 aliases (`read_text_file`, `search`, `edit`, `write`, `create_file`, `directory_tree`, `View`, `Edit`, `Write`, `Replace`, `LS`, `GlobTool`, `GrepTool`)
 - `fs` super-tool
 
-These were disabled to reduce discovery noise and token overhead. The 16 core tools are self-sufficient.
+These were disabled to reduce discovery noise and token overhead. The 17 core tools are self-sufficient.
 
 ## Ripgrep backend
 

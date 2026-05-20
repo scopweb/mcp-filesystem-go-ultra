@@ -1,5 +1,49 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.0] - 2026-05-20
+
+### Feature — project_replace: project-wide find/replace in one call
+
+Nueva herramienta para reemplazar patrones en todo un árbol de proyecto en una sola llamada MCP. Reemplaza el patrón de N llamadas `multi_edit` por 1.
+
+**Motivación:** Operaciones de find/replace en proyectos grandes (45+ archivos) requieren 45+ round-trips cliente↔servidor, creando 45 backups individuales y consumiendo contexto innecesario.
+
+**Parámetros:**
+- `path` (requerido) — raíz del scan
+- `find` (requerido) — texto o regex a buscar
+- `replace` (requerido) — texto de reemplazo
+- `literal` (default: true) — si false, regex
+- `case_sensitive` (default: true)
+- `file_types` — extensiones separadas por coma (".php,.html")
+- `include_paths` / `exclude_paths` — globs opcionales
+- `preview` — diff sin escribir
+- `create_backup` (default: true) — backup consolidado único
+- `parallel` (default: true)
+- `max_files` (default: 1000) — safety cap
+
+**Respuesta:**
+```json
+{
+  "files_changed": 45,
+  "total_replacements": 230,
+  "backup_id": "20260520-...",
+  "per_file": [{"path": "...", "replacements": 5}, ...]
+}
+```
+
+**Cambios:**
+- **`core/project_replace.go`** — nueva implementación con scan + replace + backup batch
+- **`tools_batch.go`** — registrado como tool `project_replace`
+- **`tests/project_replace_test.go`** — 10 tests (basic, dry_run, file_types, exclude_paths, regex, case_insensitive, max_files, no_matches, backup, empty_dir)
+
+**Ganancias:**
+- Latencia: 1 round-trip en vez de N
+- Tokens: 1 respuesta en vez de N confirmaciones de "1@+N-N"
+- Backups: 1 chain ID en vez de N
+- Preview: diff agregado sin múltiples analyze_operation
+
+---
+
 ## [4.4.1] - 2026-05-19
 
 ### Fix — Sistema de backup unificado para batch_operations
