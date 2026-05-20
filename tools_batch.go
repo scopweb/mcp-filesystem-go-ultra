@@ -375,7 +375,141 @@ func registerBatchTools(reg *toolRegistry) {
 	}))
 
 	// ============================================================================
-	// 14. backup — Backup and recovery (enhanced: + restore action)
+	// 14. project_replace — Project-wide find/replace in one call
+	// ============================================================================
+	projectReplaceTool := mcp.NewTool("project_replace",
+		mcp.WithTitleAnnotation("Project Replace"),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithDescription("project_replace — Find and replace across an entire project tree in a single call. "+
+			"Replaces N calls to multi_edit with 1 call. Creates single consolidated backup. "+
+			"Related: multi_edit (single file), edit_file (one edit), search_files (discovery)."),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Root directory to scan (WSL or Windows format)")),
+		mcp.WithString("find", mcp.Required(), mcp.Description("Text or regex pattern to find")),
+		mcp.WithString("replace", mcp.Required(), mcp.Description("Replacement text")),
+		mcp.WithBoolean("literal", mcp.Description("If true, find is literal text (default); if false, find is regex")),
+		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive matching (default: true)")),
+		mcp.WithString("file_types", mcp.Description("Comma-separated file extensions to include (e.g. '.php,.html')")),
+		mcp.WithString("include_paths", mcp.Description("JSON array of glob patterns to include")),
+		mcp.WithString("exclude_paths", mcp.Description("JSON array of glob patterns to exclude (e.g. 'jotajotape/**')")),
+		mcp.WithBoolean("preview", mcp.Description("Preview changes without writing (default: false)")),
+		mcp.WithBoolean("create_backup", mcp.Description("Create single consolidated backup (default: true)")),
+		mcp.WithBoolean("parallel", mcp.Description("Process files in parallel (default: true)")),
+		mcp.WithNumber("max_files", mcp.Description("Maximum files to process (safety cap, default: 1000)")),
+		mcp.WithBoolean("force", mcp.Description("Force operation even if HIGH/CRITICAL risk (default: false)")),
+	)
+	reg.addTool(projectReplaceTool, auditWrap(engine, "project_replace", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path, err := request.RequireString("path")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+
+		find, err := request.RequireString("find")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid find: %v", err)), nil
+		}
+
+		replace := ""
+		if r, ok := request.GetArguments()["replace"].(string); ok {
+			replace = r
+		}
+
+		args := request.GetArguments()
+		literal := true
+		if l, ok := args["literal"].(bool); ok {
+			literal = l
+		}
+		caseSensitive := true
+		if cs, ok := args["case_sensitive"].(bool); ok {
+			caseSensitive = cs
+		}
+		fileTypes := ""
+		if ft, ok := args["file_types"].(string); ok {
+			fileTypes = ft
+		}
+		preview := false
+		if p, ok := args["preview"].(bool); ok {
+			preview = p
+		}
+		createBackup := true
+		if cb, ok := args["create_backup"].(bool); ok {
+			createBackup = cb
+		}
+		parallel := true
+		if par, ok := args["parallel"].(bool); ok {
+			parallel = par
+		}
+		maxFiles := 1000
+		if mf, ok := args["max_files"].(float64); ok {
+			maxFiles = int(mf)
+		}
+
+		// Parse include/exclude paths
+		var includePaths, excludePaths []string
+		if inc, ok := args["include_paths"].(string); ok && inc != "" {
+			json.Unmarshal([]byte(inc), &includePaths)
+		}
+		if exc, ok := args["exclude_paths"].(string); ok && exc != "" {
+			json.Unmarshal([]byte(exc), &excludePaths)
+		}
+
+		result, err := engine.ProjectReplace(ctx, path, find, replace, literal, caseSensitive, fileTypes, includePaths, excludePaths, preview, createBackup, parallel, maxFiles)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("project_replace error: %v", err)), nil
+		}
+
+		// Format response
+		if engine.IsCompactMode() {
+			msg := fmt.Sprintf("PR %s | find:'%s' | %d files | %d replacements", path, find, result.FilesChanged, result.TotalReplaced)
+			if result.BackupID != "" {
+				shortID := result.BackupID
+				if len(shortID) > 12 {
+					shortID = shortID[:12]
+				}
+				msg += fmt.Sprintf(" | UNDO:%s", shortID)
+			}
+			if result.RiskWarning != "" {
+				msg += " | " + strings.TrimPrefix(result.RiskWarning, "⚠️ ")
+			}
+			if result.DryRun {
+				msg += " (preview)"
+			}
+			return mcp.NewToolResultText(msg), nil
+		}
+
+		// Verbose format
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("project_replace: '%s' → '%s'\n", find, replace))
+		sb.WriteString(fmt.Sprintf("Path: %s\n", path))
+		sb.WriteString(fmt.Sprintf("Files changed: %d\n", result.FilesChanged))
+		sb.WriteString(fmt.Sprintf("Total replacements: %d\n", result.TotalReplaced))
+		if result.BackupID != "" {
+			sb.WriteString(fmt.Sprintf("✓ Backup/UNDO: %s\n", result.BackupID))
+		}
+		if result.RiskLevel != "" && result.RiskLevel != "LOW" {
+			sb.WriteString(fmt.Sprintf("⚠️ Risk: %s\n", result.RiskLevel))
+		}
+		if result.DryRun {
+			sb.WriteString("(preview mode - no changes written)\n")
+		}
+		if len(result.PerFileResults) > 0 && len(result.PerFileResults) <= 20 {
+			sb.WriteString("\nPer-file results:\n")
+			for _, fr := range result.PerFileResults {
+				sb.WriteString(fmt.Sprintf("  %s: %d replacements\n", fr.Path, fr.Replaced))
+			}
+		} else if len(result.PerFileResults) > 20 {
+			sb.WriteString(fmt.Sprintf("\n(Showing 20 of %d files — use verbose=true for full list)\n", len(result.PerFileResults)))
+			for _, fr := range result.PerFileResults[:20] {
+				sb.WriteString(fmt.Sprintf("  %s: %d replacements\n", fr.Path, fr.Replaced))
+			}
+		}
+
+		return mcp.NewToolResultText(sb.String()), nil
+	}))
+
+	// ============================================================================
+	// 15. backup — Backup and recovery (enhanced: + restore action)
 	// ============================================================================
 	backupTool := mcp.NewTool("backup",
 		mcp.WithTitleAnnotation("Backup & Restore"),
