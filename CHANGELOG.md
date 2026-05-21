@@ -1,5 +1,13 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.1] - 2026-05-21
+
+### Fix — search_replace: escape $ in replacement text
+
+Fixes bug where `search_replace` mode consumed `$` characters from PHP variables (e.g. `$variable` became `variable`). Go's `ReplaceAllString` interprets `$` as capture group reference — now escaped to `$$` for literal output.
+
+**Affected:** `edit_file` with `mode: "search_replace"` and replacement text containing `$`
+
 ## [4.5.0] - 2026-05-20
 
 ### Feature — project_replace: project-wide find/replace in one call
