@@ -2,6 +2,35 @@
 
 ## [4.5.1] - 2026-05-21
 
+### Fix — search_replace: $ escaping in dry_run diff (regression)
+
+The previous fix (4.5.1 escape `$` → `$$` in replacement) was incomplete — it only fixed the actual file write in `searchAndReplaceInFile`, but NOT the dry_run diff preview in `tools_core.go:570`. This caused dry_run to show incorrect diffs with `$var` corruption even though the actual write was correct.
+
+**Fixed:** dry_run diff now uses the same `$` escaping as the actual replacement.
+
+### Fix — backup/restore: multiple critical bugs fixed
+
+**Bug 1: project_replace backup included files never modified**
+- `matchedFiles` was backed up BEFORE processing — all files passing path filters, not just those with actual replacements
+- Now backup is created AFTER processing, only with files that actually had `replaced > 0`
+- **File:** `core/project_replace.go` (line ~222)
+
+**Bug 2: No hash verification on restore**
+- `BackupMetadata.Hash` was stored but never verified after restore
+- Added `copyFileAndVerifyHash()` that computes SHA256 of destination and compares to stored hash
+- If hash mismatch, restore fails with error — no silent corruption
+- **File:** `core/backup_manager.go` (line ~760)
+
+**Bug 3: Silent continuation on copy failure**
+- `copyFile` failures were logged and silently continued, allowing partial restore with no error
+- Now any failure (hash mismatch, copy error, dir creation) returns error with list of failed files
+- **File:** `core/backup_manager.go` (line ~420)
+
+**Bug 4: No dry-run for full restore**
+- `undo_last` had dry_run, but `restore_backup` did not
+- Added `dry_run:true` parameter for full restore preview (lists all files, sizes, hashes)
+- **File:** `tools_batch.go` (line ~702)
+
 ### Fix — search_replace: escape $ in replacement text
 
 Fixes bug where `search_replace` mode consumed `$` characters from PHP variables (e.g. `$variable` became `variable`). Go's `ReplaceAllString` interprets `$` as capture group reference — now escaped to `$$` for literal output.

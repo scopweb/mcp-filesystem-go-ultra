@@ -74,7 +74,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	// registerSuperTool(reg)
 	registerHelpTool(reg)
 
-	log.Printf("Registered 18 tools (16 core + help + fs super-tool) for v4.4.0 — aliases disabled")
+	log.Printf("Registered 18 tools (17 core + help) for v4.5.0 — aliases disabled")
 	return nil
 }
 
@@ -567,7 +567,9 @@ func registerCoreTools(reg *toolRegistry) {
 			var unifiedDiff string
 			if dryRun {
 				if re, reErr := regexp.Compile(regexp.QuoteMeta(pattern)); reErr == nil {
-					previewContent := re.ReplaceAllString(string(oldContentRaw), replacement)
+					// Escape $ in replacement (Go interprets $ as capture group reference)
+					safeReplacement := strings.ReplaceAll(replacement, "$", "$$")
+					previewContent := re.ReplaceAllString(string(oldContentRaw), safeReplacement)
 					unifiedDiff = core.UnifiedDiff(string(oldContentRaw), previewContent, path)
 				}
 			} else {

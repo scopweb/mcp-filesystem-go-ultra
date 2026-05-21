@@ -219,18 +219,6 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 		return result, nil
 	}
 
-	// Create single consolidated backup if requested
-	var backupID string
-	if createBackup && e.backupManager != nil {
-		// Use batch backup for multiple files
-		backupID, err = e.backupManager.CreateBatchBackup(matchedFiles, "project_replace",
-			fmt.Sprintf("ProjectReplace: %d files, %d replacements, risk=%s", len(matchedFiles), totalOccurrences, riskLevel))
-		if err != nil {
-			return nil, fmt.Errorf("backup failed: %w", err)
-		}
-		result.BackupID = backupID
-	}
-
 	// Process files
 	type fileResult struct {
 		path     string
@@ -314,6 +302,21 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 			OldSize:  r.oldSize,
 			NewSize:  r.newSize,
 		})
+	}
+
+	// Create backup AFTER processing, only for files that actually had replacements
+	var backupID string
+	if createBackup && e.backupManager != nil && len(results) > 0 {
+		changedFiles := make([]string, 0, len(results))
+		for _, r := range results {
+			changedFiles = append(changedFiles, r.path)
+		}
+		backupID, err = e.backupManager.CreateBatchBackup(changedFiles, "project_replace",
+			fmt.Sprintf("ProjectReplace: %d files, %d replacements, risk=%s", len(results), result.TotalReplaced, riskLevel))
+		if err != nil {
+			return nil, fmt.Errorf("backup failed: %w", err)
+		}
+		result.BackupID = backupID
 	}
 
 	if riskLevel == "HIGH" || riskLevel == "CRITICAL" {
