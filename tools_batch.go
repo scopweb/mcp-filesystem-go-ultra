@@ -690,12 +690,16 @@ func registerBatchTools(reg *toolRegistry) {
 
 			filePath := ""
 			preview := false
+			dryRun := false
 			if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 				if f, ok := args["file_path"].(string); ok {
 					filePath = f
 				}
 				if p, ok := args["preview"].(bool); ok {
 					preview = p
+				}
+				if dr, ok := args["dry_run"].(bool); ok {
+					dryRun = dr
 				}
 			}
 
@@ -710,6 +714,26 @@ func registerBatchTools(reg *toolRegistry) {
 				}
 
 				return mcp.NewToolResultText(fmt.Sprintf("Preview - Changes to be restored:\n\n%s", diff)), nil
+			}
+
+			// Dry run for full restore preview
+			if dryRun && filePath == "" {
+				info, err := engine.GetBackupManager().GetBackupInfo(backupID)
+				if err != nil {
+					return mcp.NewToolResultError(fmt.Sprintf("Failed to get backup info: %v", err)), nil
+				}
+
+				var output strings.Builder
+				output.WriteString(fmt.Sprintf("DRY RUN — Restore preview for backup: %s\n", backupID))
+				output.WriteString(fmt.Sprintf("Operation: %s\n", info.Operation))
+				output.WriteString(fmt.Sprintf("Files to restore: %d\n\n", len(info.Files)))
+
+				for _, file := range info.Files {
+					output.WriteString(fmt.Sprintf("   - %s (size: %d bytes, hash: %s)\n",
+						file.OriginalPath, file.Size, file.Hash[:8]))
+				}
+				output.WriteString("\nRun without dry_run:true to execute restore")
+				return mcp.NewToolResultText(output.String()), nil
 			}
 
 			// Actual restore

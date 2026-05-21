@@ -27,13 +27,31 @@ type BackupMetadata struct {
 
 // BackupInfo contiene información sobre un backup completo
 type BackupInfo struct {
-	BackupID        string           `json:"backup_id"`
-	PreviousBackupID string          `json:"previous_backup_id,omitempty"` // Parent backup in chain (for undo step-through)
-	Timestamp       time.Time        `json:"timestamp"`
-	Operation       string           `json:"operation"`
-	UserContext     string           `json:"user_context"`
-	Files           []BackupMetadata `json:"files"`
+	BackupID         string           `json:"backup_id"`
+	PreviousBackupID string           `json:"previous_backup_id,omitempty"` // Parent backup in chain (for undo step-through)
+	Timestamp        time.Time        `json:"timestamp"`
+	Operation        string           `json:"operation"`
+	UserContext      string           `json:"user_context"`
+	Files            []BackupMetadata `json:"files"`
 	TotalSize        int64            `json:"total_size"`
+}
+
+// RestoreFileResult contains the result of restoring a single file
+type RestoreFileResult struct {
+	Path      string `json:"path"`
+	Restored  bool   `json:"restored"`
+	HashMatch bool   `json:"hash_match"`
+	Error     string `json:"error,omitempty"`
+}
+
+// RestoreResult contains the overall result of a restore operation
+type RestoreResult struct {
+	BackupID      string             `json:"backup_id"`
+	TotalFiles    int                `json:"total_files"`
+	RestoredFiles int                `json:"restored_files"`
+	FailedFiles   int                `json:"failed_files"`
+	FileResults   []RestoreFileResult `json:"file_results"`
+	PreRestoreID  string             `json:"pre_restore_id,omitempty"`
 }
 
 // BackupManager gestiona todos los backups del sistema
@@ -322,6 +340,8 @@ func (bm *BackupManager) GetBackupInfo(backupID string) (*BackupInfo, error) {
 // RestoreBackup restaura archivos desde un backup.
 // Devuelve (restoredFiles, preRestoreBackupID, error).
 // preRestoreBackupID es el ID del backup creado antes de restaurar (safety net).
+// Ahora verifica hash de cada archivo restaurado contra el hash almacenado.
+// Retorna error si algún archivo falla o el hash no coincide.
 func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, createBackup bool) ([]string, string, error) {
 	// Sanitize backup ID to prevent path traversal
 	if err := sanitizeBackupID(backupID); err != nil {
@@ -337,6 +357,7 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 	backupBaseDir := filepath.Join(bm.backupDir, backupID)
 	var restoredFiles []string
 	var preRestoreID string
+	var failedFiles []string
 
 	// Si se especificó un archivo, restaurar solo ese
 	if specificFile != "" {
@@ -353,7 +374,7 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 				}
 
 				backupFilePath := filepath.Join(backupBaseDir, file.BackupPath)
-				if err := copyFile(backupFilePath, file.OriginalPath); err != nil {
+				if err := copyFileAndVerifyHash(backupFilePath, file.OriginalPath, file.Hash); err != nil {
 					return nil, "", fmt.Errorf("failed to restore %s: %w", file.OriginalPath, err)
 				}
 				restoredFiles = append(restoredFiles, file.OriginalPath)
@@ -381,16 +402,22 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 			// Asegurar que el directorio destino existe
 			destDir := filepath.Dir(file.OriginalPath)
 			if err := os.MkdirAll(destDir, 0755); err != nil {
-				slog.Warn("Failed to create directory for restore", "path", file.OriginalPath, "error", err)
+				slog.Error("Failed to create directory for restore", "path", file.OriginalPath, "error", err)
+				failedFiles = append(failedFiles, file.OriginalPath+": "+err.Error())
 				continue
 			}
 
-			if err := copyFile(backupFilePath, file.OriginalPath); err != nil {
-				slog.Warn("Failed to restore file", "path", file.OriginalPath, "error", err)
+			if err := copyFileAndVerifyHash(backupFilePath, file.OriginalPath, file.Hash); err != nil {
+				slog.Error("Failed to restore file", "path", file.OriginalPath, "error", err)
+				failedFiles = append(failedFiles, file.OriginalPath+": "+err.Error())
 				continue
 			}
 			restoredFiles = append(restoredFiles, file.OriginalPath)
 		}
+	}
+
+	if len(failedFiles) > 0 {
+		return restoredFiles, preRestoreID, fmt.Errorf("restore failed for %d files: %v", len(failedFiles), failedFiles)
 	}
 
 	return restoredFiles, preRestoreID, nil
@@ -723,6 +750,41 @@ func copyFileWithHash(src, dst string) (string, error) {
 	}
 
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// copyFileAndVerifyHash copies src to dst and verifies the restored file's hash
+// matches the expectedHash. Returns error if hashes don't match or copy fails.
+func copyFileAndVerifyHash(src, dst, expectedHash string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	hashWriter := sha256.New()
+	writer := io.MultiWriter(destFile, hashWriter)
+
+	if _, err := io.Copy(writer, sourceFile); err != nil {
+		return err
+	}
+
+	// Ensure all data is flushed to disk
+	if err := destFile.Sync(); err != nil {
+		return err
+	}
+
+	actualHash := hex.EncodeToString(hashWriter.Sum(nil))
+	if actualHash != expectedHash {
+		return fmt.Errorf("hash mismatch for %s: expected %s, got %s", dst, expectedHash, actualHash)
+	}
+
+	return nil
 }
 
 func generateSimpleDiff(backup, current, filename string) string {
