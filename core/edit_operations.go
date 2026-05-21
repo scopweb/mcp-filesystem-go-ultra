@@ -762,7 +762,8 @@ func (e *UltraFastEngine) searchAndReplaceInFile(filePath, pattern, replacement 
 	}
 
 	// Perform replacement
-	newContent := re.ReplaceAllString(contentStr, replacement)
+	// Escape $ to $$ for literal replacement (Go interprets $ as capture group reference)
+	newContent := re.ReplaceAllString(contentStr, strings.ReplaceAll(replacement, "$", "$$"))
 
 	// Write back to file atomically with secure random temp name
 	tmpPath := filePath + ".tmp." + secureRandomSuffix()
