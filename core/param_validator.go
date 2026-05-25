@@ -87,6 +87,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"context_lines":   {ParamNumber, false},
 		"count_only":      {ParamBoolean, false},
 		"return_lines":    {ParamString, false},  // string "true"/"false" or bool
+		"include":         {ParamString, false},   // glob pattern (alias for file_types)
 		"output_format":   {ParamString, false},   // "text" or "json"
 		"output":          {ParamString, false},   // alias for output_format
 	},
@@ -188,6 +189,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"context_lines":   {ParamNumber, false},
 		"count_only":      {ParamBoolean, false},
 		"return_lines":    {ParamString, false},
+		"include":         {ParamString, false},
 		"output_format":   {ParamString, false},
 		"output":          {ParamString, false},
 	},
