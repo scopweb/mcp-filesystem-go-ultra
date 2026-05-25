@@ -86,7 +86,9 @@ var toolSchemas = map[string]ToolParamSchema{
 		"include_context": {ParamBoolean, false},
 		"context_lines":   {ParamNumber, false},
 		"count_only":      {ParamBoolean, false},
-		"return_lines":    {ParamBoolean, false}, // normalizer coerces string→bool
+		"return_lines":    {ParamString, false},  // string "true"/"false" or bool
+		"output_format":   {ParamString, false},   // "text" or "json"
+		"output":          {ParamString, false},   // alias for output_format
 	},
 
 	// ---- EDIT+ (1) ----
@@ -185,7 +187,9 @@ var toolSchemas = map[string]ToolParamSchema{
 		"include_context": {ParamBoolean, false},
 		"context_lines":   {ParamNumber, false},
 		"count_only":      {ParamBoolean, false},
-		"return_lines":    {ParamBoolean, false},
+		"return_lines":    {ParamString, false},
+		"output_format":   {ParamString, false},
+		"output":          {ParamString, false},
 	},
 	"edit": {
 		"path":           {ParamString, true},
