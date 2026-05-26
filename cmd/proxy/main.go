@@ -2,16 +2,18 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -27,8 +29,8 @@ type jsonRPCMessage struct {
 
 // CallToolParams for extracting tool name and args
 type callToolParams struct {
-	Name      string                 `json:"name"`
-	Arguments map[string]interface{} `json:"arguments,omitempty"`
+	Name      string         `json:"name"`
+	Arguments map[string]any `json:"arguments,omitempty"`
 }
 
 // initializeParams for extracting clientInfo from the MCP handshake
@@ -65,11 +67,12 @@ type pendingCall struct {
 func main() {
 	model := flag.String("model", "", "Model name to tag in logs (e.g. opus-4, sonnet-4)")
 	logDir := flag.String("log-dir", "", "Directory for proxy logs (required)")
+	timeout := flag.Duration("timeout", 0, "Kill child after this duration of inactivity (0 = no timeout)")
 	flag.Parse()
 
 	args := flag.Args()
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: mcp-proxy [--model NAME] [--log-dir DIR] -- <command> [args...]")
+		fmt.Fprintln(os.Stderr, "Usage: mcp-proxy [--model NAME] [--log-dir DIR] [--timeout DURATION] -- <command> [args...]")
 		fmt.Fprintln(os.Stderr, "  The target MCP server command follows after --")
 		os.Exit(1)
 	}
@@ -97,7 +100,7 @@ func main() {
 	defer logger.Close()
 
 	log.SetOutput(os.Stderr)
-	log.Printf("mcp-proxy: model=%q log-dir=%q target=%v", *model, *logDir, args)
+	log.Printf("mcp-proxy: model=%q log-dir=%q timeout=%v target=%v", *model, *logDir, *timeout, args)
 
 	// Start child process
 	cmd := exec.Command(args[0], args[1:]...)
@@ -121,11 +124,30 @@ func main() {
 	pending := map[string]*pendingCall{}
 	detectedClient := "" // auto-populated from MCP initialize clientInfo
 
+	// Channel to signal shutdown
+	done := make(chan struct{})
+
+	// Handle shutdown signals: graceful shutdown of child
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sigChan
+		log.Printf("mcp-proxy: received signal, shutting down child")
+		cmd.Process.Kill()
+		close(done)
+	}()
+
 	// Goroutine: relay Claude -> child (stdin), intercept requests
 	go func() {
 		scanner := bufio.NewScanner(os.Stdin)
 		scanner.Buffer(make([]byte, 10*1024*1024), 10*1024*1024) // 10MB buffer
 		for scanner.Scan() {
+			select {
+			case <-done:
+				return
+			default:
+			}
+
 			line := scanner.Bytes()
 			// Write to child immediately
 			childStdin.Write(line)
@@ -185,13 +207,47 @@ func main() {
 				}
 			}
 		}
+		if err := scanner.Err(); err != nil {
+			log.Printf("mcp-proxy: stdin scanner error: %v", err)
+		}
 		childStdin.Close()
+		close(done)
 	}()
 
 	// Main goroutine: relay child -> Claude (stdout), intercept responses
+	// Use a context with timeout for activity monitoring
+	ctx, cancel := context.WithCancel(context.Background())
+	if *timeout > 0 {
+		go func() {
+			ticker := time.NewTicker(*timeout)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					mu.Lock()
+					hasPending := len(pending) > 0
+					mu.Unlock()
+					if hasPending {
+						log.Printf("mcp-proxy: timeout reached (%v) with pending requests, killing child", *timeout)
+						cmd.Process.Kill()
+						cancel()
+						return
+					}
+				case <-ctx.Done():
+					return
+				case <-done:
+					return
+				}
+			}
+		}()
+	}
+
 	scanner := bufio.NewScanner(childStdout)
 	scanner.Buffer(make([]byte, 10*1024*1024), 10*1024*1024)
 	for scanner.Scan() {
+		if ctx.Err() != nil {
+			break
+		}
 		line := scanner.Bytes()
 		// Write to Claude immediately
 		os.Stdout.Write(line)
@@ -214,7 +270,7 @@ func main() {
 				pc.entry.BytesOut = int64(len(line))
 				pc.entry.TokensOut = int64(len(line)) / 4
 
-				if msg.Error != nil && len(msg.Error) > 0 && string(msg.Error) != "null" {
+				if len(msg.Error) > 0 && string(msg.Error) != "null" {
 					pc.entry.Status = "error"
 					// Extract error message
 					var errObj struct{ Message string `json:"message"` }
@@ -234,6 +290,14 @@ func main() {
 			}
 		}
 	}
+
+	// Report any scanner errors
+	if err := scanner.Err(); err != nil {
+		log.Printf("mcp-proxy: scanner error: %v", err)
+	}
+
+	cancel()
+	close(done)
 
 	// Wait for child to finish
 	cmd.Wait()
@@ -321,17 +385,4 @@ func (l *proxyLogger) Close() error {
 		return nil
 	}
 	return l.file.Close()
-}
-
-// flushWriter wraps stdout to ensure immediate writes
-type flushWriter struct {
-	w io.Writer
-}
-
-func (fw *flushWriter) Write(p []byte) (int, error) {
-	n, err := fw.w.Write(p)
-	if f, ok := fw.w.(*os.File); ok {
-		f.Sync()
-	}
-	return n, err
 }
