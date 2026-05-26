@@ -16,6 +16,33 @@ import (
 	"github.com/mcp/filesystem-ultra/core"
 )
 
+// diskPrefix extracts a short disk/volume tag from an absolute path:
+//   - C:\, D:\... → [C], [D]
+//   - /mnt/c/... → [WSL]
+// Used in success responses so the caller immediately sees which volume
+// the operation targeted, preventing cross-volume confusion.
+func diskPrefix(absPath string) string {
+	// Strip leading \ or / so HasPrefix/Contains checks work uniformly
+	absPath = strings.TrimPrefix(strings.TrimPrefix(absPath, `\`), `/`)
+	if strings.HasPrefix(absPath, `mnt/`) {
+		// /mnt/c/Users/... → WSL:C
+		parts := strings.SplitN(absPath, "/", 4)
+		if len(parts) >= 3 {
+			return "[WSL:" + strings.ToUpper(parts[2]) + "]"
+		}
+		return "[WSL]"
+	}
+	// C:\Users\... → C
+	if len(absPath) >= 2 && absPath[1] == ':' {
+		return "[" + strings.ToUpper(absPath[:1]) + "]"
+	}
+	// Fallback
+	if len(absPath) > 0 {
+		return "[HOST]"
+	}
+	return "[?]"
+}
+
 // resolveAbsForResponse returns the absolute, normalized path that the engine
 // will actually operate on. Used in success responses so the caller can see
 // exactly where the file was written, even when the input path was a WSL path,
@@ -87,7 +114,9 @@ func registerCoreTools(reg *toolRegistry) {
 	// ============================================================================
 	readFileTool := mcp.NewTool("read_file",
 		mcp.WithTitleAnnotation("Read File"),
-		mcp.WithDescription("read_file — Read and view file contents. Supports line ranges (start_line/end_line), head/tail mode, base64 for binary. "+
+		mcp.WithDescription("read_file — Read file contents from the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
+			"Use read_file for ALL project files. Never use runtime built-in read tools for files on the host disk. "+
+			"Supports line ranges (start_line/end_line), head/tail mode, base64 for binary. "+
 			"Batch: pass paths (JSON array) to read multiple files in one call. "+
 			"To MODIFY files use edit_file. Related: edit_file, write_file, search_files, multi_edit, batch_operations."),
 		mcp.WithReadOnlyHintAnnotation(true),
@@ -248,8 +277,10 @@ func registerCoreTools(reg *toolRegistry) {
 	// ============================================================================
 	writeFileTool := mcp.NewTool("write_file",
 		mcp.WithTitleAnnotation("Write File"),
-		mcp.WithDescription("write_file — Create NEW files or full overwrite. WARNING: To modify/edit/change existing files use edit_file instead (not this tool). "+
-			"Supports base64 binary (encoding:\"base64\"). Related: edit_file, multi_edit, copy_file, batch_operations."),
+		mcp.WithDescription("write_file — Write/Create files on the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
+			"Use write_file for ALL project files — never use the runtime's built-in write/create tools for host paths. "+
+			"Creates or overwrites. For binary use content_base64 with encoding:\"base64\". "+
+			"WARNING: To modify/edit existing files use edit_file instead. Related: edit_file, multi_edit, copy_file, batch_operations."),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -313,9 +344,9 @@ func registerCoreTools(reg *toolRegistry) {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
 			if engine.IsCompactMode() {
-				return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB", absPath, bytesWritten)), nil
+				return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, bytesWritten)), nil
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB base64", absPath, bytesWritten)), nil
+			return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s %s | %dB base64", diskPrefix(absPath), absPath, bytesWritten)), nil
 		}
 
 		// Normal text write
@@ -343,9 +374,9 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			core.SetFeedback(ctx, signal)
 			if engine.IsCompactMode() {
-				return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB | %s", absPath, len(content), core.FormatFeedbackCompact(signal))), nil
+				return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s %s | %dB | %s", diskPrefix(absPath), absPath, len(content), core.FormatFeedbackCompact(signal))), nil
 			}
-			return mcp.NewToolResultText(core.FormatFeedback(signal, fmt.Sprintf("WRITTEN %s | %dB", absPath, len(content)))), nil
+			return mcp.NewToolResultText(core.FormatFeedback(signal, fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, len(content)))), nil
 		}
 
 		err = engine.WriteFileContent(ctx, path, content)
@@ -353,9 +384,9 @@ func registerCoreTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
 		if engine.IsCompactMode() {
-			return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB", absPath, len(content))), nil
+			return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, len(content))), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s | %dB", absPath, len(content))), nil
+		return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, len(content))), nil
 	})
 	reg.addTool(writeFileTool, reg.writeFileHandler)
 
@@ -367,11 +398,10 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("edit_file — Edit, modify, change, replace, or update text in existing files. "+
-			"Use edit_file (NOT write_file) whenever you need to change file contents. "+
+		mcp.WithDescription("edit_file — Edit existing files on the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
+			"Use edit_file for ALL project file modifications — never use the runtime's built-in edit tools for host paths. "+
 			"Modes: default (exact match replace), search_replace (regex/literal all occurrences), regex (capture groups). "+
-			"Auto-backup on every edit — undo with backup(action:\"undo_last\"). "+
-			"Related: multi_edit (multiple edits atomically), read_file, search_files, batch_operations."),
+			"Auto-backup on every edit — undo with backup(action:\"undo_last\"). Related: multi_edit, read_file, search_files, batch_operations."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file (WSL or Windows format)")),
 		mcp.WithString("old_text", mcp.Description("Text to be replaced (default mode)")),
 		mcp.WithString("new_text", mcp.Description("New text to replace with (default mode)")),
