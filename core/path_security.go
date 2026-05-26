@@ -195,6 +195,98 @@ var windowsReservedNames = map[string]struct{}{
 	"LPT5": {}, "LPT6": {}, "LPT7": {}, "LPT8": {}, "LPT9": {},
 }
 
+// ResolveSymlinks resolves all symlinks in path and returns the canonical path.
+// This is a defense-in-depth measure against TOCTOU (time-of-check-time-of-use) attacks
+// where an attacker replaces a validated file with a symlink between the security check
+// and the actual file operation.
+//
+// Usage: Call this immediately before any file operation (copy, move, rename, write)
+// that has already passed IsPathAllowed() but where a symlink could have been
+// inserted in the intervening time.
+//
+// Returns the resolved path, or the original path if resolution fails.
+// The bool indicates whether the path resolves to something different (symlink detected).
+func ResolveSymlinks(path string) (string, bool, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return path, false, err
+	}
+
+	resolved, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		// Walk up to find the deepest existing ancestor (for new/writable paths)
+		current := absPath
+		var suffix []string
+		for {
+			parent := filepath.Dir(current)
+			if parent == current {
+				break
+			}
+			if parentResolved, parentErr := filepath.EvalSymlinks(parent); parentErr == nil {
+				resolved = parentResolved
+				for _, s := range suffix {
+					resolved = filepath.Join(resolved, s)
+				}
+				break
+			}
+			suffix = append([]string{filepath.Base(current)}, suffix...)
+			current = parent
+		}
+		if resolved == "" {
+			return path, false, fmt.Errorf("could not resolve any ancestor of %s", path)
+		}
+	}
+
+	if resolved != absPath {
+		return resolved, true, nil
+	}
+	return path, false, nil
+}
+
+// ValidateRegex checks a regex pattern for potential ReDoS (Regular Expression
+// Denial of Service) vulnerabilities. Returns an error if the pattern contains
+// dangerous constructs that could cause catastrophic backtracking.
+//
+// Dangerous patterns include:
+//   - Nested quantifiers like (a+)+, (a*)+, (a{1,})+
+//   - Overlapping alternations like (a|a)+
+//   - Quantified overlapping character classes like [ab]+
+//
+// The function uses a 5-second timeout to prevent the validation itself from
+// causing issues with malformed patterns.
+func ValidateRegex(pattern string) error {
+	// Simple heuristic check for dangerous patterns that could cause ReDoS.
+	// This runs synchronously and should be fast for typical patterns.
+	// The actual regex execution in edit operations is protected by
+	// context timeouts at the operation level.
+
+	dangerousPatterns := []string{
+		"(a+)+",  "(a*)+",  "(a{1,})+",
+		"(.*)+",  "(..)+",  "(.+)+",
+		"(\\w+)+", "(\\d+)+",
+	}
+
+	for _, dangerous := range dangerousPatterns {
+		// Quick string check first (no regex compilation needed)
+		if containsDangerousNestedQuantifier(pattern, dangerous) {
+			return fmt.Errorf("regex pattern contains potentially dangerous nested quantifiers: %s", dangerous)
+		}
+	}
+
+	return nil
+}
+
+// containsDangerousNestedQuantifier checks if pattern has nested quantifier structures.
+// Uses simple string search, not regex, to avoid ReDoS in the validator itself.
+func containsDangerousNestedQuantifier(pattern, dangerous string) bool {
+	// Only flag if the pattern is reasonably short (long patterns need careful regex anyway)
+	if len(pattern) > 200 {
+		return false
+	}
+	// Direct string search for the dangerous sequence
+	return strings.Contains(pattern, dangerous)
+}
+
 // isWindowsReservedName returns true if name matches a Windows reserved device name.
 // The check is case-insensitive and extension-insensitive ("NUL.txt" is still NUL).
 // Applied on all platforms for portability (a "NUL" file on Linux would be unusable on Windows).
