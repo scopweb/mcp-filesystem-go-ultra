@@ -745,6 +745,11 @@ func (e *UltraFastEngine) searchAndReplaceInFile(filePath, pattern, replacement 
 		searchPattern = regexp.QuoteMeta(pattern)
 	}
 
+	// Validate pattern for ReDoS before compiling
+	if err := ValidateRegex(searchPattern); err != nil {
+		return 0, fmt.Errorf("unsafe pattern: %w", err)
+	}
+
 	re, err := regexp.Compile(searchPattern)
 	if err != nil {
 		return 0, err

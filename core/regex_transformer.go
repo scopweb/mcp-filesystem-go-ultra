@@ -143,6 +143,11 @@ func (rt *RegexTransformer) compilePatterns(config *RegexTransformConfig) error 
 	for i := range config.Patterns {
 		pattern := config.Patterns[i].Pattern
 
+		// Validate pattern for ReDoS vulnerabilities before compiling
+		if err := ValidateRegex(pattern); err != nil {
+			return fmt.Errorf("unsafe pattern '%s': %w", config.Patterns[i].Pattern, err)
+		}
+
 		// Add case-insensitive flag if needed
 		if !config.CaseSensitive {
 			if !strings.HasPrefix(pattern, "(?i)") {

@@ -48,6 +48,17 @@ func (e *UltraFastEngine) RenameFile(ctx context.Context, oldPath, newPath strin
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
+	// TOCTOU defense: re-resolve symlinks immediately before rename.
+	// An attacker could have replaced the source with a symlink between
+	// the earlier IsPathAllowed check and now.
+	oldResolved, wasSymlink, err := ResolveSymlinks(oldPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve source path: %w", err)
+	}
+	if wasSymlink {
+		return fmt.Errorf("security: source path resolved to symlink %q", oldResolved)
+	}
+
 	// Perform the rename
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return fmt.Errorf("failed to rename file: %w", err)
@@ -385,6 +396,17 @@ func (e *UltraFastEngine) MoveFile(ctx context.Context, sourcePath, destPath str
 		return fmt.Errorf("pre-move hook denied operation: %w", err)
 	}
 
+	// TOCTOU defense: re-resolve symlinks immediately before move.
+	// An attacker could have replaced the source with a symlink between
+	// the earlier IsPathAllowed check and now.
+	sourceResolved, wasSymlink, err := ResolveSymlinks(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve source path: %w", err)
+	}
+	if wasSymlink {
+		return fmt.Errorf("security: source path resolved to symlink %q", sourceResolved)
+	}
+
 	// Perform the move
 	if err := os.Rename(sourcePath, destPath); err != nil {
 		return fmt.Errorf("failed to move: %w", err)
@@ -440,6 +462,17 @@ func (e *UltraFastEngine) CopyFile(ctx context.Context, sourcePath, destPath str
 		return fmt.Errorf("destination already exists: %s", destPath)
 	}
 
+	// TOCTOU defense: re-resolve symlinks immediately before copy.
+	// An attacker could have replaced the source with a symlink between
+	// the earlier IsPathAllowed check and now.
+	sourceResolved, wasSymlink, err := ResolveSymlinks(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve source path: %w", err)
+	}
+	if wasSymlink {
+		return fmt.Errorf("security: source path resolved to symlink %q", sourceResolved)
+	}
+
 	// Execute pre-copy hook
 	workingDir, _ := os.Getwd()
 	hookCtx := &HookContext{
@@ -477,6 +510,17 @@ func (e *UltraFastEngine) CopyFile(ctx context.Context, sourcePath, destPath str
 
 // copyFile copies a single file using io.Copy for memory efficiency
 func (e *UltraFastEngine) copyFile(src, dst string) error {
+	// TOCTOU defense: re-resolve symlinks immediately before copy.
+	// An attacker could have replaced the file with a symlink between
+	// the earlier IsPathAllowed check and now.
+	srcResolved, wasSymlink, err := ResolveSymlinks(src)
+	if err != nil {
+		return fmt.Errorf("failed to resolve source path: %w", err)
+	}
+	if wasSymlink {
+		return fmt.Errorf("security: source path resolved to symlink %q", srcResolved)
+	}
+
 	// Get source file permissions
 	sourceInfo, err := os.Stat(src)
 	if err != nil {
