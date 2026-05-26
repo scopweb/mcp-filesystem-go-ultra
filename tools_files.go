@@ -22,7 +22,9 @@ func registerFileTools(reg *toolRegistry) {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDescription("create_directory — Create directories (recursive). Related: list_directory, write_file, delete_file, batch_operations."),
+		mcp.WithDescription("create_directory — Create directories on the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
+			"Use create_directory for ALL project directory creation — never use the runtime's built-in mkdir tools for host paths. "+
+			"Recursive creation supported. Related: list_directory, write_file, delete_file, batch_operations."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the directory to create")),
 	)
 	reg.addTool(createDirTool, auditWrap(engine, "create_directory", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -50,7 +52,9 @@ func registerFileTools(reg *toolRegistry) {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("delete_file — Delete files or directories. Default: soft-delete (trash), permanent:true for hard delete. "+
+		mcp.WithDescription("delete_file — Delete files from the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
+			"Use delete_file for ALL project file deletions — never use the runtime's built-in delete tools for host paths. "+
+			"Default: soft-delete (to trash folder), permanent:true for hard delete. "+
 			"Batch: pass paths (JSON array) to delete multiple files in one call. Related: copy_file, move_file, edit_file, backup."),
 		mcp.WithString("path", mcp.Description("Path to the file or directory to delete. Required unless paths is provided.")),
 		mcp.WithString("paths", mcp.Description("JSON array of paths to delete multiple files in one call, e.g. '[\"a.txt\",\"b.txt\"]'")),
@@ -135,7 +139,9 @@ func registerFileTools(reg *toolRegistry) {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("move_file — Move or rename files and directories. Related: copy_file, delete_file, edit_file, batch_operations."),
+		mcp.WithDescription("move_file — Move or rename files on the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
+			"Use move_file for ALL project file moves — never use the runtime's built-in move/rename tools for host paths. "+
+			"Related: copy_file, delete_file, edit_file, batch_operations."),
 		mcp.WithString("source_path", mcp.Required(), mcp.Description("Current path of the file/directory")),
 		mcp.WithString("dest_path", mcp.Required(), mcp.Description("New path for the file/directory")),
 	)
@@ -169,7 +175,9 @@ func registerFileTools(reg *toolRegistry) {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDescription("copy_file — Copy files and directories. Related: move_file, delete_file, edit_file, batch_operations, backup."),
+		mcp.WithDescription("copy_file — Copy files on the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
+			"Use copy_file for ALL project file copies — never use the runtime's built-in copy tools for host paths. "+
+			"Also copies directories recursively. Related: move_file, delete_file, edit_file, batch_operations, backup."),
 		mcp.WithString("source_path", mcp.Required(), mcp.Description("Path of the file/directory to copy")),
 		mcp.WithString("dest_path", mcp.Required(), mcp.Description("Destination path for the copy")),
 	)

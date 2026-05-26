@@ -22,8 +22,10 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("multi_edit — Apply multiple edits to one file atomically. Faster than calling edit_file multiple times. "+
-			"Auto-backup with undo. Related: edit_file (single edit), read_file, search_files, batch_operations."),
+		mcp.WithDescription("multi_edit — Apply multiple edits to a single file on the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
+			"Use multi_edit for ALL multi-edit operations — never use the runtime's built-in edit tools for host paths. "+
+			"Atomically applies all replacements. Auto-backup with undo. "+
+			"Related: edit_file (single edit), read_file, search_files, batch_operations."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
 		mcp.WithString("edits_json", mcp.Required(), mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]. Also accepts old_str/new_str as aliases.")),
 		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
@@ -282,7 +284,9 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("batch_operations — Bulk file operations, pipelines, and batch rename in one call. Params: request_json, pipeline_json, or rename_json. "+
+		mcp.WithDescription("batch_operations — Execute atomic file operations (write, edit, copy, move, delete, create_dir) on the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
+			"Use batch_operations for ALL batch/atomic operations on the host disk — never use the runtime's built-in tools for host paths. "+
+			"Supports pipelines, rename, dry_run, rollback on error. Params: request_json, pipeline_json, or rename_json. "+
 			"Related: edit_file (single edit), multi_edit (multi-edit one file), search_files, backup."),
 		mcp.WithString("request_json", mcp.Description("JSON with operations array and options. Fields: operations (array), atomic (bool), create_backup (bool), validate_only (bool)")),
 		mcp.WithString("pipeline_json", mcp.Description("JSON-encoded pipeline definition with name, steps, and optional flags (dry_run, force, stop_on_error, create_backup, verbose, parallel)")),
