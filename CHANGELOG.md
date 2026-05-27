@@ -1,5 +1,20 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.3] - 2026-05-27
+
+### Fix — return_lines parameter accepts bool (closes #29)
+
+The `search_files` tool's `return_lines` parameter was declared as `ParamString` in the schema, but the handler already accepted both `bool` and `string` (`"true"/"false"`). When Claude Desktop sent `return_lines: true` as a JSON boolean, validation failed with `"expected string, got bool"`.
+
+**Fixed:**
+- Change `return_lines` schema from `ParamString` to `ParamBoolean` in `search_files` and `search` alias
+- Update `typeMatches()` for `ParamBoolean` to also accept string `"true"/"false"` (backwards compatible)
+- Add test coverage for `return_lines` bool value
+
+**Files:** `core/param_validator.go`
+
+---
+
 ## [4.5.2] - 2026-05-27
 
 ### Feature — Git Version Control Integration
