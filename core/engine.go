@@ -1303,6 +1303,11 @@ func (e *UltraFastEngine) IsCompactMode() bool {
 	return e.config.CompactMode
 }
 
+// GetHookManager returns the hook manager for external use (e.g., git operations)
+func (e *UltraFastEngine) GetHookManager() *HookManager {
+	return e.hookManager
+}
+
 // GetAllowedPaths returns the configured allowed paths
 func (e *UltraFastEngine) GetAllowedPaths() []string {
 	return e.config.AllowedPaths
