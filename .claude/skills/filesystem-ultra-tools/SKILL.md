@@ -1,11 +1,11 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.5.0: 17 core tools + help. Aliases and fs super-tool disabled.
+description: Tool catalog for filesystem-ultra MCP server v4.5.2: 17 core tools + git + help. Aliases and fs super-tool disabled.
 ---
 
-# Filesystem Ultra v4.5.0 — Tool Discovery
+# Filesystem Ultra v4.5.2 — Tool Discovery
 
-## The 17 core tools
+## The 18 tools (17 core + git + help)
 
 | Tool | Purpose |
 |------|---------|
@@ -26,6 +26,7 @@ description: Tool catalog for filesystem-ultra MCP server v4.5.0: 17 core tools 
 | `analyze_operation` | Dry-run impact analysis |
 | `wsl` | WSL/Windows sync and path conversion |
 | `server_info` | Stats, help, artifact capture |
+| `git` | Version control (status, diff, log, add, commit, restore, branch, init) |
 
 ## search_files ripgrep-compatible params
 
@@ -43,6 +44,7 @@ description: Tool catalog for filesystem-ultra MCP server v4.5.0: 17 core tools 
 - **Project-wide find/replace** → `project_replace` (1 call instead of N)
 - **Batch ops** → `batch_operations` (atomic, with rollback)
 - **Undo** → `backup(action:"undo_last")` or `backup(action:"restore", backup_id:"...")`
+- **Git operations** → `git` tool (status, diff, log, add, commit, restore, branch, init)
 - **Dry-run** → `analyze_operation` or `edit_file(dry_run:true)` / `multi_edit(dry_run:true)` / `project_replace(preview:true)`
 - **Fast search** → `search_files` with `output_format:"json"` uses ripgrep when available
 
