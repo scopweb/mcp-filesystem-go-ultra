@@ -102,7 +102,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	// registerSuperTool(reg)
 	registerHelpTool(reg)
 
-	log.Printf("Registered 19 tools (18 core + help) for v4.5.0 — aliases disabled - git integrated")
+	log.Printf("Registered 19 tools (17 core + git + help) for v4.5.2 — aliases disabled")
 	return nil
 }
 
