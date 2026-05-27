@@ -1,5 +1,43 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.2] - 2026-05-27
+
+### Feature — Git Version Control Integration
+
+New `git` tool for version control operations inside git repositories. Fully integrated with existing security (allowed paths), hooks, and audit systems.
+
+**Actions:**
+
+| Action | Parameters | Description |
+|--------|------------|-------------|
+| `status` | `path?` | Compact or full porcelain status |
+| `diff` | `path?`, `staged?`, `commit_range?` | Unified diff with truncation at 50 lines |
+| `log` | `path?`, `max_count?` | Oneline commit history |
+| `add` | `path?`, `all?`, `dry_run?` | Stage files with pre/post hooks |
+| `commit` | `message`, `auto_message?`, `force?` | Commit with risk assessment |
+| `restore` | `paths`, `staged?`, `source?`, `dry_run?` | Restore from index or commit |
+| `branch` | `branch_action?`, `branch_name?`, `force?` | List/create/delete branches |
+| `init` | `path?` | Initialize new repository |
+
+**Risk Assessment (git_commit):**
+- LOW: <15 files, <800 insertions
+- MEDIUM: 15-40 files or 800-3000 insertions
+- HIGH: >40 files, >3000 insertions, or >500 deletions
+- Blocked unless `force: true`
+
+**auto_message:** Generates conventional commit messages using `--numstat --name-only`:
+- Detects type: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
+- Heuristics: file names (tests, docs, config), deletion counts
+
+**Files:**
+- **`core/git.go`** — `FindGitRoot()`, `IsGitRepo()` (walks up tree, handles Windows `.git` file with `gitdir:` prefix)
+- **`tools_git.go`** — Full `git` tool with 8 actions, compact mode, hook integration
+- **`core/engine.go`** — `GetHookManager()` exported for git hook access
+
+**New commands:** 19 tools total (was 18 core + help)
+
+---
+
 ## [4.5.1] - 2026-05-21
 
 ### Fix — search_replace: $ escaping in dry_run diff (regression)
@@ -2819,6 +2857,6 @@ Estimated speedup for multiple edits:
 
 ---
 
-**Current Version**: 3.13.2
-**Last Updated**: 2026-02-07
+**Current Version**: 4.5.2
+**Last Updated**: 2026-05-27
 **Status**: Production Ready
