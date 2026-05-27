@@ -482,51 +482,53 @@ func parseShortStat(shortstat string) (files, insertions, deletions int) {
 }
 
 // generateAutoCommitMessage generates a conventional commit message from staged changes
+// Uses a single --numstat --name-only call to get both file names and deletion counts
 func generateAutoCommitMessage(repoRoot string, stagedFiles int) string {
-	diff, _ := execGitCommand(repoRoot, "git", "diff", "--cached", "--name-only")
-	if diff == "" {
+	// Single call: --numstat --name-only gives "ins del filename" per line
+	output, _ := execGitCommand(repoRoot, "git", "diff", "--cached", "--numstat", "--name-only")
+	if output == "" {
 		return ""
 	}
 
-	files := strings.Split(strings.TrimSpace(diff), "\n")
+	files := strings.Split(strings.TrimSpace(output), "\n")
+	var fileNames []string
 	hasTests, hasDocs, hasFix, hasConfig, hasRefactor := false, false, false, false, false
-	deletedLines := 0
+	totalDeletions := 0
 
-	for _, f := range files {
-		lower := strings.ToLower(f)
-		if strings.Contains(f, "_test.go") || strings.Contains(f, ".test.") {
-			hasTests = true
+	for _, line := range files {
+		if line == "" {
+			continue
 		}
-		if strings.HasSuffix(f, ".md") || strings.Contains(f, "docs/") {
-			hasDocs = true
-		}
-		if strings.Contains(lower, "fix") || strings.Contains(lower, "bug") || strings.Contains(lower, "patch") {
-			hasFix = true
-		}
-		if strings.Contains(f, "config") || strings.HasSuffix(f, ".json") || strings.HasSuffix(f, ".yaml") || strings.HasSuffix(f, ".yml") {
-			hasConfig = true
-		}
-		if strings.Contains(lower, "refactor") || strings.Contains(lower, "rename") || strings.Contains(lower, "move") {
-			hasRefactor = true
-		}
-	}
-
-	// Detect deletion-heavy changes as refactor/fix
-	diffContent, _ := execGitCommand(repoRoot, "git", "diff", "--cached", "--numstat")
-	for _, line := range strings.Split(diffContent, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) >= 2 {
-			var del int
-			if _, err := fmt.Sscanf(fields[1], "%d", &del); err == nil && del > 50 {
-				deletedLines += del
+		if len(fields) >= 3 {
+			// "N     N     path/to/file" — fields[0]=ins, fields[1]=del, fields[2]=path
+			if fields[1] != "-" {
+				var del int
+				fmt.Sscanf(fields[1], "%d", &del)
+				totalDeletions += del
 			}
+			fileNames = append(fileNames, fields[2])
+		} else if len(fields) >= 1 {
+			fileNames = append(fileNames, fields[0])
 		}
 	}
+
+	// Detect commit type from file names
+	for _, f := range fileNames {
+		hasTests = hasTests || strings.Contains(f, "_test.go") || strings.Contains(f, ".test.")
+		hasDocs = hasDocs || strings.HasSuffix(f, ".md") || strings.Contains(f, "docs/")
+		hasConfig = hasConfig || strings.Contains(f, "config") || strings.HasSuffix(f, ".json") || strings.HasSuffix(f, ".yaml") || strings.HasSuffix(f, ".yml")
+	}
+
+	// Fallback: inspect raw output for fix/refactor keywords
+	lower := strings.ToLower(output)
+	hasFix = strings.Contains(lower, "fix") || strings.Contains(lower, "bug") || strings.Contains(lower, "patch")
+	hasRefactor = strings.Contains(lower, "refactor") || strings.Contains(lower, "rename") || strings.Contains(lower, "move")
 
 	description := fmt.Sprintf("update %d file(s)", stagedFiles)
 
 	switch {
-	case hasFix || deletedLines > 200:
+	case hasFix || totalDeletions > 200:
 		return "fix: " + description
 	case hasTests && !hasDocs:
 		return "test: " + description
@@ -534,7 +536,7 @@ func generateAutoCommitMessage(repoRoot string, stagedFiles int) string {
 		return "docs: " + description
 	case hasConfig:
 		return "chore: " + description
-	case hasRefactor || deletedLines > 100:
+	case hasRefactor || totalDeletions > 100:
 		return "refactor: " + description
 	default:
 		return "feat: " + description
