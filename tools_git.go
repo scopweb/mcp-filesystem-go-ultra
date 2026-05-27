@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -18,21 +19,24 @@ func registerGitTools(reg *toolRegistry) {
 
 	gitTool := mcp.NewTool("git",
 		mcp.WithTitleAnnotation("Git Version Control"),
-		mcp.WithDescription("git — Git operations: status, diff, log, add, commit, branch, init. "+
+		mcp.WithDescription("git — Git operations: status, diff, log, add, commit, branch, restore, init. "+
 			"Must be run from within a git repository. Related: analyze_operation, edit_file."),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, diff, log, add, commit, branch, init")),
+		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, diff, log, add, commit, branch, restore, init")),
 		mcp.WithString("path", mcp.Description("Working directory or file path (default: auto-detect repo root)")),
 		mcp.WithString("message", mcp.Description("Commit message (for commit action)")),
+		mcp.WithBoolean("auto_message", mcp.Description("Auto-generate conventional commit message from staged changes (default: false)")),
+		mcp.WithString("paths", mcp.Description("JSON array of file paths (for add, restore)")),
 		mcp.WithString("branch_action", mcp.Description("For branch: list (default), create, delete")),
 		mcp.WithString("branch_name", mcp.Description("Branch name for create/delete")),
-		mcp.WithBoolean("staged", mcp.Description("Show staged diff instead of unstaged (default: false)")),
+		mcp.WithString("source", mcp.Description("Source commit for restore (e.g. HEAD~1, abc1234)")),
+		mcp.WithBoolean("staged", mcp.Description("Restore staged changes instead of working tree (for restore action)")),
 		mcp.WithBoolean("all", mcp.Description("Stage all modified files (for add action)")),
 		mcp.WithString("commit_range", mcp.Description("Diff between two commits: commit1..commit2")),
 		mcp.WithNumber("max_count", mcp.Description("Max log entries to return (default: 10)")),
-		mcp.WithBoolean("dry_run", mcp.Description("Preview without applying (for add)")),
+		mcp.WithBoolean("dry_run", mcp.Description("Preview without applying (for add, restore)")),
 		mcp.WithBoolean("force", mcp.Description("Force push/delete (skip safety checks)")),
 	)
 
@@ -74,10 +78,12 @@ func registerGitTools(reg *toolRegistry) {
 			return gitAdd(ctx, engine, repoRoot, args)
 		case "commit":
 			return gitCommit(ctx, engine, repoRoot, args)
+		case "restore":
+			return gitRestore(ctx, engine, repoRoot, args)
 		case "branch":
 			return gitBranch(ctx, engine, repoRoot, args)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("Unknown action: %s. Valid: status, diff, log, add, commit, branch, init", action)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Unknown action: %s. Valid: status, diff, log, add, commit, restore, branch, init", action)), nil
 		}
 	}))
 }
@@ -349,9 +355,8 @@ func gitAdd(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 // gitCommit commits staged changes
 func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	message, _ := args["message"].(string)
-	if message == "" {
-		return mcp.NewToolResultError("commit message is required. Usage: git(action:\"commit\", message:\"your message\")"), nil
-	}
+	autoMessage, _ := args["auto_message"].(bool)
+	force, _ := args["force"].(bool)
 
 	// Pre-write hook — can deny commit
 	hookCtx := &core.HookContext{
@@ -359,22 +364,53 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 		ToolName:  "git",
 		FilePath:  repoRoot,
 		Operation: "commit",
-		Content:   message,
 		Metadata:  map[string]interface{}{"git_operation": "commit"},
 	}
 	if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreWrite, hookCtx); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git commit denied by hook: %v", err)), nil
 	}
 
-	// Check for staged changes
-	stagedOutput, werr := execGitCommand(repoRoot, "git", "diff", "--cached", "--stat")
+	// Get staged diff --stat for risk assessment
+	stagedStat, werr := execGitCommand(repoRoot, "git", "diff", "--cached", "--shortstat")
 	if werr != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("git commit failed: %v staging check: %s", werr, stagedOutput)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("git commit failed: %v", werr)), nil
 	}
 
-	if strings.TrimSpace(stagedOutput) == "" {
-		return mcp.NewToolResultError("No staged changes to commit. Stage files first: git(action:\"add\") or git(action:\"add\", path:\".\")"), nil
+	if strings.TrimSpace(stagedStat) == "" {
+		return mcp.NewToolResultError("No staged changes to commit. Stage files first: git(action:\"add\") or git(action:\"add\", all:true)"), nil
 	}
+
+	// Risk assessment
+	stagedFiles, stagedInsertions, stagedDeletions := parseShortStat(stagedStat)
+	riskLevel := "LOW"
+	if stagedFiles > 15 || stagedInsertions > 800 {
+		riskLevel = "MEDIUM"
+	}
+	if stagedFiles > 40 || stagedInsertions > 3000 || stagedDeletions > 500 {
+		riskLevel = "HIGH"
+	}
+
+	if riskLevel == "HIGH" && !force {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"HIGH risk commit detected: %d files, ~%d insertions, %d deletions. Set force:true if you want to proceed anyway.", stagedFiles, stagedInsertions, stagedDeletions)), nil
+	}
+
+	// Auto-generate message from staged content if requested
+	if autoMessage && message == "" {
+		message = generateAutoCommitMessage(repoRoot, stagedFiles)
+		if message == "" {
+			return mcp.NewToolResultError("auto_message: true but could not determine commit type. Please provide message manually."), nil
+		}
+	}
+
+	if message == "" {
+		return mcp.NewToolResultError("commit message is required. Usage: git(action:\"commit\", message:\"your message\") or git(action:\"commit\", auto_message:true)"), nil
+	}
+
+	hookCtx.Content = message
+	hookCtx.Metadata["risk"] = riskLevel
+	hookCtx.Metadata["staged_files"] = stagedFiles
+	hookCtx.Metadata["staged_insertions"] = stagedInsertions
 
 	// Execute commit
 	output, werr := execGitCommand(repoRoot, "git", "commit", "-m", message)
@@ -400,6 +436,124 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 	}
 
 	return mcp.NewToolResultText(output), nil
+}
+
+// parseShortStat parses "N files changed, M insertions(+), D deletions(-)" from git diff --shortstat
+func parseShortStat(shortstat string) (files, insertions, deletions int) {
+	parts := strings.Fields(shortstat)
+	for i, p := range parts {
+		if p == "file" && i > 0 {
+			fmt.Sscanf(parts[i-1], "%d", &files)
+		}
+		if p == "insertion(+)" && i > 0 {
+			fmt.Sscanf(parts[i-1], "%d", &insertions)
+		}
+		if strings.HasPrefix(p, "deletion") && i > 0 {
+			fmt.Sscanf(parts[i-1], "%d", &deletions)
+		}
+	}
+	return
+}
+
+// generateAutoCommitMessage generates a conventional commit message from staged changes
+func generateAutoCommitMessage(repoRoot string, stagedFiles int) string {
+	// Get diff to determine type
+	diffOutput, _ := execGitCommand(repoRoot, "git", "diff", "--cached", "--stat")
+	if diffOutput == "" {
+		return ""
+	}
+
+	// Simple heuristic: check for test files, docs, config changes
+	hasTests := strings.Contains(diffOutput, "_test.go") || strings.Contains(diffOutput, ".test.")
+	hasDocs := strings.Contains(diffOutput, ".md") || strings.Contains(diffOutput, "docs/")
+	hasConfig := strings.Contains(diffOutput, "config") || strings.Contains(diffOutput, ".json") || strings.Contains(diffOutput, ".yaml")
+
+	// Determine type based on files changed
+	commitType := "feat"
+	if hasTests && !hasDocs {
+		commitType = "test"
+	} else if hasDocs && !hasTests {
+		commitType = "docs"
+	} else if hasConfig {
+		commitType = "chore"
+	}
+
+	// Generate message from stats
+	description := fmt.Sprintf("update %d file(s)", stagedFiles)
+
+	return fmt.Sprintf("%s: %s", commitType, description)
+}
+
+// gitRestore restores files from index or a specific commit
+func gitRestore(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	pathsStr, _ := args["paths"].(string)
+	staged, _ := args["staged"].(bool)
+	source, _ := args["source"].(string)
+	dryRun, _ := args["dry_run"].(bool)
+
+	// Pre-delete hook for restore (it's destructive to working tree)
+	hookCtx := &core.HookContext{
+		Event:     core.HookPreDelete,
+		ToolName:  "git",
+		FilePath:  repoRoot,
+		Operation: "restore",
+		Metadata:  map[string]interface{}{"git_operation": "restore", "staged": staged, "source": source},
+	}
+	if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreDelete, hookCtx); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("git restore denied by hook: %v", err)), nil
+	}
+
+	var cmdArgs []string
+	if staged {
+		cmdArgs = append(cmdArgs, "--staged")
+	}
+	if source != "" {
+		cmdArgs = append(cmdArgs, source)
+	}
+
+	var paths []string
+	if pathsStr != "" {
+		if err := json.Unmarshal([]byte(pathsStr), &paths); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid paths JSON: %v", err)), nil
+		}
+	}
+
+	if len(paths) == 0 {
+		return mcp.NewToolResultError("paths required for restore. Usage: git(action:\"restore\", paths:'[\"file1.txt\",\"file2.txt\"]')"), nil
+	}
+
+	for i := range paths {
+		paths[i] = core.NormalizePath(paths[i])
+	}
+
+	cmdArgs = append(cmdArgs, "--")
+	cmdArgs = append(cmdArgs, paths...)
+
+	if dryRun {
+		cmdArgs = append([]string{"restore", "-n"}, cmdArgs...)
+		output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+		if werr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("git restore dry-run failed: %v\n%s", werr, output)), nil
+		}
+		if engine.IsCompactMode() {
+			return mcp.NewToolResultText("DRY RUN: would restore:\n" + output), nil
+		}
+		return mcp.NewToolResultText("Dry run — would restore:\n" + output), nil
+	}
+
+	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	if werr != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("git restore failed: %v\n%s", werr, output)), nil
+	}
+
+	hookCtx.Event = core.HookPostDelete
+	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostDelete, hookCtx)
+
+	if engine.IsCompactMode() {
+		return mcp.NewToolResultText(fmt.Sprintf("OK: restored %d file(s) from %s", len(paths), source)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Restored %d file(s)%s\n%s",
+		len(paths), func() string { if source != "" { return " from " + source }; return "" }(), output)), nil
 }
 
 // extractCommitHash extracts the commit hash from git commit output
