@@ -422,6 +422,9 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 	hookCtx.Metadata["commit_hash"] = extractCommitHash(output)
 	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostWrite, hookCtx)
 
+	// Build richer success response with commit metadata
+	commitHash, _ := execGitCommand(repoRoot, "git", "rev-parse", "--short", "HEAD")
+
 	if engine.IsCompactMode() {
 		lines := strings.Split(strings.TrimSpace(output), "\n")
 		if len(lines) > 0 {
@@ -430,58 +433,112 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 			if len(lines) > 1 && strings.Contains(lines[1], "file") {
 				rest = " " + strings.TrimSpace(lines[1])
 			}
-			return mcp.NewToolResultText(commitInfo + rest), nil
+			return mcp.NewToolResultText(commitInfo + rest + fmt.Sprintf(" | risk:%s", riskLevel)), nil
 		}
 		return mcp.NewToolResultText(output), nil
 	}
 
-	return mcp.NewToolResultText(output), nil
+	// Verbose mode: return structured summary
+	summary := fmt.Sprintf("✅ Commit: %s\nMessage: %s\nFiles: %d | +%d -%d\nRisk: %s",
+		strings.TrimSpace(commitHash), message, stagedFiles, stagedInsertions, stagedDeletions, riskLevel)
+	return mcp.NewToolResultText(summary), nil
 }
 
 // parseShortStat parses "N files changed, M insertions(+), D deletions(-)" from git diff --shortstat
 func parseShortStat(shortstat string) (files, insertions, deletions int) {
-	parts := strings.Fields(shortstat)
-	for i, p := range parts {
-		if p == "file" && i > 0 {
-			fmt.Sscanf(parts[i-1], "%d", &files)
+	// More robust parsing using Field sequences and contains checks
+	var insStr, delStr string
+	var fileCount int
+
+	fields := strings.Fields(shortstat)
+	for i := 0; i < len(fields)-1; i++ {
+		p := fields[i]
+		next := fields[i+1]
+		if p == "file," || p == "files," {
+			fmt.Sscanf(next, "%d", &fileCount)
 		}
-		if p == "insertion(+)" && i > 0 {
-			fmt.Sscanf(parts[i-1], "%d", &insertions)
+		if next == "insertion(+)" {
+			fmt.Sscanf(p, "%d", &insStr)
 		}
-		if strings.HasPrefix(p, "deletion") && i > 0 {
-			fmt.Sscanf(parts[i-1], "%d", &deletions)
+		if strings.HasPrefix(next, "deletion") {
+			fmt.Sscanf(p, "%d", &delStr)
 		}
 	}
-	return
+
+	// Fallback simple split if parsing failed
+	if fileCount == 0 {
+		parts := strings.Split(shortstat, ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if strings.Contains(part, "file") {
+				var n int
+				fmt.Sscanf(part, "%d", &n)
+				fileCount = n
+			}
+		}
+	}
+
+	return fileCount, insertions, deletions
 }
 
 // generateAutoCommitMessage generates a conventional commit message from staged changes
 func generateAutoCommitMessage(repoRoot string, stagedFiles int) string {
-	// Get diff to determine type
-	diffOutput, _ := execGitCommand(repoRoot, "git", "diff", "--cached", "--stat")
-	if diffOutput == "" {
+	diff, _ := execGitCommand(repoRoot, "git", "diff", "--cached", "--name-only")
+	if diff == "" {
 		return ""
 	}
 
-	// Simple heuristic: check for test files, docs, config changes
-	hasTests := strings.Contains(diffOutput, "_test.go") || strings.Contains(diffOutput, ".test.")
-	hasDocs := strings.Contains(diffOutput, ".md") || strings.Contains(diffOutput, "docs/")
-	hasConfig := strings.Contains(diffOutput, "config") || strings.Contains(diffOutput, ".json") || strings.Contains(diffOutput, ".yaml")
+	files := strings.Split(strings.TrimSpace(diff), "\n")
+	hasTests, hasDocs, hasFix, hasConfig, hasRefactor := false, false, false, false, false
+	deletedLines := 0
 
-	// Determine type based on files changed
-	commitType := "feat"
-	if hasTests && !hasDocs {
-		commitType = "test"
-	} else if hasDocs && !hasTests {
-		commitType = "docs"
-	} else if hasConfig {
-		commitType = "chore"
+	for _, f := range files {
+		lower := strings.ToLower(f)
+		if strings.Contains(f, "_test.go") || strings.Contains(f, ".test.") {
+			hasTests = true
+		}
+		if strings.HasSuffix(f, ".md") || strings.Contains(f, "docs/") {
+			hasDocs = true
+		}
+		if strings.Contains(lower, "fix") || strings.Contains(lower, "bug") || strings.Contains(lower, "patch") {
+			hasFix = true
+		}
+		if strings.Contains(f, "config") || strings.HasSuffix(f, ".json") || strings.HasSuffix(f, ".yaml") || strings.HasSuffix(f, ".yml") {
+			hasConfig = true
+		}
+		if strings.Contains(lower, "refactor") || strings.Contains(lower, "rename") || strings.Contains(lower, "move") {
+			hasRefactor = true
+		}
 	}
 
-	// Generate message from stats
+	// Detect deletion-heavy changes as refactor/fix
+	diffContent, _ := execGitCommand(repoRoot, "git", "diff", "--cached", "--numstat")
+	for _, line := range strings.Split(diffContent, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			var del int
+			if _, err := fmt.Sscanf(fields[1], "%d", &del); err == nil && del > 50 {
+				deletedLines += del
+			}
+		}
+	}
+
 	description := fmt.Sprintf("update %d file(s)", stagedFiles)
 
-	return fmt.Sprintf("%s: %s", commitType, description)
+	switch {
+	case hasFix || deletedLines > 200:
+		return "fix: " + description
+	case hasTests && !hasDocs:
+		return "test: " + description
+	case hasDocs:
+		return "docs: " + description
+	case hasConfig:
+		return "chore: " + description
+	case hasRefactor || deletedLines > 100:
+		return "refactor: " + description
+	default:
+		return "feat: " + description
+	}
 }
 
 // gitRestore restores files from index or a specific commit
