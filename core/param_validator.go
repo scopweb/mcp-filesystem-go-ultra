@@ -86,7 +86,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"include_context": {ParamBoolean, false},
 		"context_lines":   {ParamNumber, false},
 		"count_only":      {ParamBoolean, false},
-		"return_lines":    {ParamString, false},  // string "true"/"false" or bool
+		"return_lines":    {ParamBoolean, false}, // bool or string "true"/"false"
 		"include":         {ParamString, false},   // glob pattern (alias for file_types)
 		"output_format":   {ParamString, false},   // "text" or "json"
 		"output":          {ParamString, false},   // alias for output_format
@@ -188,7 +188,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"include_context": {ParamBoolean, false},
 		"context_lines":   {ParamNumber, false},
 		"count_only":      {ParamBoolean, false},
-		"return_lines":    {ParamString, false},
+		"return_lines":    {ParamBoolean, false},
 		"include":         {ParamString, false},
 		"output_format":   {ParamString, false},
 		"output":          {ParamString, false},
@@ -278,8 +278,14 @@ func typeMatches(expected ParamType, v interface{}) bool {
 		_, ok := v.(float64)
 		return ok
 	case ParamBoolean:
-		_, ok := v.(bool)
-		return ok
+		if _, ok := v.(bool); ok {
+			return true
+		}
+		// Also accept string "true"/"false" for params that coerce from string
+		if s, ok := v.(string); ok {
+			return s == "true" || s == "false"
+		}
+		return false
 	}
 	return true
 }

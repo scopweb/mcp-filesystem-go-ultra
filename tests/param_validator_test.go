@@ -53,6 +53,15 @@ func TestSearchFilesParams(t *testing.T) {
 		}
 	})
 
+	t.Run("return_lines bool true is valid", func(t *testing.T) {
+		errs := core.ValidateToolParams("search_files", map[string]interface{}{
+			"path": ".", "pattern": "foo", "return_lines": true,
+		})
+		if len(errs) > 0 {
+			t.Errorf("return_lines bool should be valid: %v", errs)
+		}
+	})
+
 	t.Run("include alias works", func(t *testing.T) {
 		errs := core.ValidateToolParams("search_files", map[string]interface{}{
 			"path": ".", "pattern": "foo", "include": "*.go",
