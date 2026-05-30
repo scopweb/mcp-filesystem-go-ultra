@@ -17,7 +17,7 @@ func TestCondition_HasMatches(t *testing.T) {
 	})
 
 	cond := &core.StepCondition{Type: "has_matches", StepRef: "find"}
-	shouldRun, _ := core.EvaluateCondition(cond, pCtx)
+	shouldRun, _ := core.EvaluateCondition(cond, pCtx, nil)
 	if !shouldRun {
 		t.Fatal("expected has_matches to be true when files matched")
 	}
@@ -25,7 +25,7 @@ func TestCondition_HasMatches(t *testing.T) {
 	// Empty matches
 	pCtx.SetStepResult("empty", &core.StepResult{Success: true, FilesMatched: nil})
 	cond2 := &core.StepCondition{Type: "has_matches", StepRef: "empty"}
-	shouldRun2, reason := core.EvaluateCondition(cond2, pCtx)
+	shouldRun2, reason := core.EvaluateCondition(cond2, pCtx, nil)
 	if shouldRun2 {
 		t.Fatal("expected has_matches to be false when no files matched")
 	}
@@ -39,14 +39,14 @@ func TestCondition_NoMatches(t *testing.T) {
 	pCtx.SetStepResult("find", &core.StepResult{Success: true, FilesMatched: nil})
 
 	cond := &core.StepCondition{Type: "no_matches", StepRef: "find"}
-	shouldRun, _ := core.EvaluateCondition(cond, pCtx)
+	shouldRun, _ := core.EvaluateCondition(cond, pCtx, nil)
 	if !shouldRun {
 		t.Fatal("expected no_matches to be true when no files matched")
 	}
 
 	pCtx.SetStepResult("find2", &core.StepResult{Success: true, FilesMatched: []string{"a.go"}})
 	cond2 := &core.StepCondition{Type: "no_matches", StepRef: "find2"}
-	shouldRun2, _ := core.EvaluateCondition(cond2, pCtx)
+	shouldRun2, _ := core.EvaluateCondition(cond2, pCtx, nil)
 	if shouldRun2 {
 		t.Fatal("expected no_matches to be false when files matched")
 	}
@@ -61,14 +61,14 @@ func TestCondition_CountGT(t *testing.T) {
 
 	// 5+3=8 > 5 → true
 	cond := &core.StepCondition{Type: "count_gt", StepRef: "count", Value: "5"}
-	shouldRun, _ := core.EvaluateCondition(cond, pCtx)
+	shouldRun, _ := core.EvaluateCondition(cond, pCtx, nil)
 	if !shouldRun {
 		t.Fatal("expected count_gt to be true (8 > 5)")
 	}
 
 	// 8 > 10 → false
 	cond2 := &core.StepCondition{Type: "count_gt", StepRef: "count", Value: "10"}
-	shouldRun2, _ := core.EvaluateCondition(cond2, pCtx)
+	shouldRun2, _ := core.EvaluateCondition(cond2, pCtx, nil)
 	if shouldRun2 {
 		t.Fatal("expected count_gt to be false (8 > 10)")
 	}
@@ -82,7 +82,7 @@ func TestCondition_CountLT(t *testing.T) {
 	})
 
 	cond := &core.StepCondition{Type: "count_lt", StepRef: "count", Value: "5"}
-	shouldRun, _ := core.EvaluateCondition(cond, pCtx)
+	shouldRun, _ := core.EvaluateCondition(cond, pCtx, nil)
 	if !shouldRun {
 		t.Fatal("expected count_lt to be true (2 < 5)")
 	}
@@ -96,7 +96,7 @@ func TestCondition_CountEQ(t *testing.T) {
 	})
 
 	cond := &core.StepCondition{Type: "count_eq", StepRef: "count", Value: "5"}
-	shouldRun, _ := core.EvaluateCondition(cond, pCtx)
+	shouldRun, _ := core.EvaluateCondition(cond, pCtx, nil)
 	if !shouldRun {
 		t.Fatal("expected count_eq to be true (3+2 == 5)")
 	}
@@ -111,13 +111,13 @@ func TestCondition_FileExists(t *testing.T) {
 	pCtx := core.NewPipelineContext()
 
 	cond := &core.StepCondition{Type: "file_exists", Path: tmpFile}
-	shouldRun, _ := core.EvaluateCondition(cond, pCtx)
+	shouldRun, _ := core.EvaluateCondition(cond, pCtx, nil)
 	if !shouldRun {
 		t.Fatal("expected file_exists to be true for existing file")
 	}
 
 	cond2 := &core.StepCondition{Type: "file_exists", Path: filepath.Join(tmpDir, "nope.txt")}
-	shouldRun2, _ := core.EvaluateCondition(cond2, pCtx)
+	shouldRun2, _ := core.EvaluateCondition(cond2, pCtx, nil)
 	if shouldRun2 {
 		t.Fatal("expected file_exists to be false for non-existent file")
 	}
@@ -128,7 +128,7 @@ func TestCondition_FileNotExists(t *testing.T) {
 	pCtx := core.NewPipelineContext()
 
 	cond := &core.StepCondition{Type: "file_not_exists", Path: filepath.Join(tmpDir, "gone.txt")}
-	shouldRun, _ := core.EvaluateCondition(cond, pCtx)
+	shouldRun, _ := core.EvaluateCondition(cond, pCtx, nil)
 	if !shouldRun {
 		t.Fatal("expected file_not_exists to be true for non-existent file")
 	}
@@ -139,14 +139,14 @@ func TestCondition_StepSucceeded(t *testing.T) {
 	pCtx.SetStepResult("prev", &core.StepResult{Success: true})
 
 	cond := &core.StepCondition{Type: "step_succeeded", StepRef: "prev"}
-	shouldRun, _ := core.EvaluateCondition(cond, pCtx)
+	shouldRun, _ := core.EvaluateCondition(cond, pCtx, nil)
 	if !shouldRun {
 		t.Fatal("expected step_succeeded to be true")
 	}
 
 	pCtx.SetStepResult("fail", &core.StepResult{Success: false})
 	cond2 := &core.StepCondition{Type: "step_succeeded", StepRef: "fail"}
-	shouldRun2, _ := core.EvaluateCondition(cond2, pCtx)
+	shouldRun2, _ := core.EvaluateCondition(cond2, pCtx, nil)
 	if shouldRun2 {
 		t.Fatal("expected step_succeeded to be false for failed step")
 	}
@@ -157,7 +157,7 @@ func TestCondition_StepFailed(t *testing.T) {
 	pCtx.SetStepResult("fail", &core.StepResult{Success: false, Error: "some error"})
 
 	cond := &core.StepCondition{Type: "step_failed", StepRef: "fail"}
-	shouldRun, _ := core.EvaluateCondition(cond, pCtx)
+	shouldRun, _ := core.EvaluateCondition(cond, pCtx, nil)
 	if !shouldRun {
 		t.Fatal("expected step_failed to be true for failed step")
 	}
@@ -165,7 +165,7 @@ func TestCondition_StepFailed(t *testing.T) {
 
 func TestCondition_NilCondition(t *testing.T) {
 	pCtx := core.NewPipelineContext()
-	shouldRun, _ := core.EvaluateCondition(nil, pCtx)
+	shouldRun, _ := core.EvaluateCondition(nil, pCtx, nil)
 	if !shouldRun {
 		t.Fatal("nil condition should always return true")
 	}

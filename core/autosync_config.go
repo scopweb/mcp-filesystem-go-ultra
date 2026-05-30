@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -38,12 +39,13 @@ func DefaultAutoSyncConfig() *AutoSyncConfig {
 
 // AutoSyncManager handles automatic syncing between WSL and Windows
 type AutoSyncManager struct {
-	config    *AutoSyncConfig
-	configMu  sync.RWMutex
-	isWSL     bool
-	winUser   string
-	enabled   bool
-	configPath string
+	config       *AutoSyncConfig
+	configMu     sync.RWMutex
+	isWSL        bool
+	winUser      string
+	enabled      bool
+	configPath   string
+	allowedPaths []string // Copied from engine for safety checks during sync
 }
 
 // NewAutoSyncManager creates a new AutoSyncManager
@@ -60,6 +62,35 @@ func NewAutoSyncManager() *AutoSyncManager {
 	manager.loadConfig()
 
 	return manager
+}
+
+// SetAllowedPaths allows the engine to provide the list of allowed paths so that
+// auto-sync can respect --allowed-paths boundaries when converting and copying files.
+func (m *AutoSyncManager) SetAllowedPaths(paths []string) {
+	m.configMu.Lock()
+	defer m.configMu.Unlock()
+	m.allowedPaths = append([]string(nil), paths...)
+}
+
+// isTargetAllowed checks if a target path (after conversion) would be allowed
+// under the current AllowedPaths policy. If no policy is set, everything is allowed.
+func (m *AutoSyncManager) isTargetAllowed(targetPath string) bool {
+	m.configMu.RLock()
+	allowed := m.allowedPaths
+	m.configMu.RUnlock()
+
+	if len(allowed) == 0 {
+		return true
+	}
+
+	normalized := NormalizePath(targetPath)
+	for _, base := range allowed {
+		baseNorm := NormalizePath(base)
+		if strings.HasPrefix(normalized, baseNorm) {
+			return true
+		}
+	}
+	return false
 }
 
 // getConfigPath returns the configuration file path
@@ -190,9 +221,19 @@ func (m *AutoSyncManager) IsEnabled() bool {
 // UpdateConfig updates the configuration
 func (m *AutoSyncManager) UpdateConfig(config *AutoSyncConfig) error {
 	m.configMu.Lock()
+	defer m.configMu.Unlock()
+
+	// Validate that any custom target mappings point to allowed paths
+	if len(m.allowedPaths) > 0 && config.TargetMapping != nil {
+		for src, dst := range config.TargetMapping {
+			if !m.isTargetAllowed(dst) {
+				return fmt.Errorf("target mapping %s -> %s points outside allowed paths", src, dst)
+			}
+		}
+	}
+
 	m.config = config
 	m.enabled = config.Enabled && m.isWSL
-	m.configMu.Unlock()
 
 	return m.saveConfig()
 }
@@ -283,6 +324,13 @@ func (m *AutoSyncManager) AfterDelete(path string) error {
 		return nil // Silent fail
 	}
 
+	if !m.isTargetAllowed(winPath) {
+		if !m.config.Silent {
+			fmt.Fprintf(os.Stderr, "[AutoSync] Blocked delete sync to path outside allowed directories: %s\n", winPath)
+		}
+		return nil
+	}
+
 	// Delete on Windows side (ignore errors)
 	os.Remove(winPath)
 	return nil
@@ -305,6 +353,13 @@ func (m *AutoSyncManager) syncToWindows(wslPath string) error {
 		winPath = customTarget
 	}
 	m.configMu.RUnlock()
+
+	if !m.isTargetAllowed(winPath) {
+		if !m.config.Silent {
+			fmt.Fprintf(os.Stderr, "[AutoSync] Blocked sync to path outside allowed directories: %s\n", winPath)
+		}
+		return nil
+	}
 
 	// Perform copy asynchronously to not block the main operation
 	go func() {

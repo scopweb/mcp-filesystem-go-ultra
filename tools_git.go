@@ -22,8 +22,9 @@ func registerGitTools(reg *toolRegistry) {
 		mcp.WithDescription("git — Git operations: status, diff, log, add, commit, branch, restore, init. "+
 			"Must be run from within a git repository. Related: analyze_operation, edit_file."),
 		mcp.WithReadOnlyHintAnnotation(false),
-		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(true),   // Some actions (restore, branch delete, etc.) are destructive
+		mcp.WithIdempotentHintAnnotation(false),   // commit, restore, branch delete are not idempotent
+
 		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, diff, log, add, commit, branch, restore, init")),
 		mcp.WithString("path", mcp.Description("Working directory or file path (default: auto-detect repo root)")),
 		mcp.WithString("message", mcp.Description("Commit message (for commit action)")),
@@ -65,6 +66,13 @@ func registerGitTools(reg *toolRegistry) {
 		// Check access control
 		if !engine.IsPathAllowed(repoRoot) {
 			return mcp.NewToolResultError("access denied: path outside allowed directories"), nil
+		}
+
+		// Anti-destructive protection for dangerous git operations
+		if isDestructiveGitAction(action, args) && !getBoolArg(args, "force") {
+			return mcp.NewToolResultError(
+				fmt.Sprintf("Destructive git operation '%s' requires force=true for safety. "+
+					"Use force=true only if you are sure.", action)), nil
 		}
 
 		switch action {
@@ -734,17 +742,19 @@ func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 // execGitCommand executes a git command in the given directory
 func execGitCommand(dir, command string, args ...string) (string, error) {
 	if runtime.GOOS == "windows" {
-		// Try git directly first
+		// Try git directly first (safest)
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
 		output, err := cmd.CombinedOutput()
 		if err == nil {
 			return string(output), nil
 		}
-		// Fallback through cmd /c — escape args properly for shell
+
+		// Safer fallback: pass arguments properly instead of string concatenation
+		// This prevents command injection even if paths contain special characters.
+		cmdArgs := append([]string{"/c", "git"}, args...)
 		var stderr bytes.Buffer
-		fullCmd := "git " + strings.Join(args, " ")
-		cmd2 := exec.Command("cmd", "/c", fullCmd)
+		cmd2 := exec.Command("cmd", cmdArgs...)
 		cmd2.Dir = dir
 		cmd2.Stderr = &stderr
 		output, err = cmd2.CombinedOutput()
@@ -761,4 +771,34 @@ func execGitCommand(dir, command string, args ...string) (string, error) {
 		return string(output), fmt.Errorf("%v: %s", err, stderr.String())
 	}
 	return string(output), nil
+}
+
+// isDestructiveGitAction returns true for git operations that can cause data loss
+// or are generally considered dangerous in an AI-driven environment.
+func isDestructiveGitAction(action string, args map[string]any) bool {
+	switch action {
+	case "restore":
+		// git restore can discard changes or restore from other commits
+		return true
+	case "branch":
+		branchAction, _ := args["branch_action"].(string)
+		if branchAction == "delete" {
+			return true
+		}
+	case "commit":
+		// Commit itself is not extremely dangerous, but we can make it require force
+		// in some contexts. For now we keep it lenient.
+		return false
+	}
+	return false
+}
+
+// getBoolArg safely extracts a boolean argument
+func getBoolArg(args map[string]any, key string) bool {
+	if v, ok := args[key]; ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return false
 }

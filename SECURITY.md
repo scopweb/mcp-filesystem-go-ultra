@@ -193,6 +193,17 @@ if runtime.GOOS == "windows" {
 
 ---
 
+## Git Tool Security
+
+The `git` tool executes Git commands on behalf of the AI. It includes the following protections:
+
+- **Access Control**: All operations (except `init`) first verify that the repository root is within the `--allowed-paths`.
+- **Command Injection Protection**: On Windows, Git commands are executed using proper argument passing. A previous dangerous fallback that concatenated arguments into `cmd /c` was removed in 2026.
+- **Destructive Operation Protection**: High-risk operations such as `git restore` and `git branch delete` require the explicit `force: true` parameter. The tool is marked with `destructiveHint: true`.
+- **Hook Integration**: `git init` respects `pre-create` and `post-create` hooks. Other Git operations currently have limited hook support.
+
+---
+
 ## Known Residual Risks
 
 | Risk | Severity | Status | Recommendation |
@@ -200,4 +211,8 @@ if runtime.GOOS == "windows" {
 | Indirect Prompt Injection | HIGH | By design | Use `--allowed-paths` + `pre-read` hooks to block credential files |
 | WSL path enumeration (no AllowedPaths) | MEDIUM | Accepted | Always configure `--allowed-paths` in production |
 | Hook JSON content injection (file content in HookContext.Content) | LOW | Accepted | Hook scripts should treat HookContext as untrusted input |
+| Batch operations bypass user hooks | MEDIUM | Partially mitigated (2026) | Batch now executes pre/post hooks. Full parity with normal operations is still limited during rollback. |
+| Pipeline regex_transform + large file hooks | LOW-MEDIUM | Partially mitigated (2026) | `regex_transform` now runs pre/post-edit hooks. Content is provided, but StreamingWriteFile for very large files only passes metadata. |
+| Git tool command injection on Windows | MEDIUM | **Mitigated (2026)** | Removed dangerous string concatenation in `execGitCommand` fallback. Arguments are now passed properly. |
+| Destructive Git operations without confirmation | MEDIUM | **Mitigated (2026)** | `restore` and `branch delete` now require `force=true`. Tool annotations updated to reflect destructiveness. |
 | ReDoS via regex patterns in `search_files` | LOW | Accepted | Regex compiled once per query; consider rate-limiting |

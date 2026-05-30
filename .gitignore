@@ -1,88 +1,113 @@
-# Binaries for programs and plugins
+# ============================================================
+#  MCP Filesystem Ultra - .gitignore
+# ============================================================
+
+# ------------------------------------------------------------
+# Go Binaries & Build Artifacts
+# ------------------------------------------------------------
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+*.test
+
+# Intentionally built release binaries (we commit only source)
+filesystem-ultra-v4*
+mcp-proxy*
+filesystem-ultra-v4-dashboard*
+
+# Legacy / stray binaries
 mcp-filesystem-ultra
 mcp-filesystem-ultra.exe
 filesystem-ultra.exe
+filesystem-ultra.exe___
 
-# Test binary, built with `go test -c`
-*.test
-
-# Output of the go coverage tool, specifically when used with LiteIDE
-*.out
-
-# Dependency directories (remove the comment below to include it)
+# ------------------------------------------------------------
+# Go toolchain & modules
+# ------------------------------------------------------------
+go.work
+go.work.sum
 vendor/
 
-# Go workspace file
-go.work
+# Coverage and test binaries
+*.out
+*.test
+*.coverage
+test_output/
 
-# IDE files
+# ------------------------------------------------------------
+# IDE / Editor
+# ------------------------------------------------------------
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS files
+# ------------------------------------------------------------
+# OS generated files
+# ------------------------------------------------------------
 .DS_Store
 Thumbs.db
+ehthumbs.db
 
-# Logs and temp files
+# ------------------------------------------------------------
+# Logs, temp & cache
+# ------------------------------------------------------------
 *.log
 *.tmp
 *.temp
+*.bak
+*.backup
 
-# Cache directories
 cache/data/
 cache/metadata/
 .cache/
 
-# Benchmark results
+# ------------------------------------------------------------
+# Benchmark & profiling
+# ------------------------------------------------------------
 bench/results/
 *.bench
 
-# Build artifacts
+# ------------------------------------------------------------
+# Build output directories
+# ------------------------------------------------------------
 build/
 dist/
+bin/
 
-# Development environment
+# ------------------------------------------------------------
+# Environment & secrets
+# ------------------------------------------------------------
 .env
 .env.local
+.env.*.local
+*.pem
+*.key
 
-# Backup files
-*.backup
-*.bak
-*~
-
-# Personal notes and scratch files
-TODO.md
-NOTES.md
-COMPETITIVE_ANALYSIS.md
-scratch/
-private/
-
-# Test output
-test_output/
-*.coverage
-
-# Test artifacts
-test_*.txt
-before.txt
-
-# MCP test data
-test_files/
-filesdelete/
-Revisar_implantar_o_borrar/
-
-# Compiled hooks
+# ------------------------------------------------------------
+# Project-specific artifacts
+# ------------------------------------------------------------
+# Hooks (compiled / local overrides)
 hooks.json
 hooks.local.json
 
-# Claude Code agent artifacts
+# Local hooks test file (the example lives in examples/hooks-test.json)
+hooks-test.json
+
+# Test data & temporary test artifacts
+test_files/
+filesdelete/
+Revisar_implantar_o_borrar/
+temp_test/
+test_*.txt
+before.txt
+
+# ------------------------------------------------------------
+# Claude / AI agent artifacts (keep only the custom skill)
+# ------------------------------------------------------------
 .agent/
 .agents/
 .claude/settings.json
@@ -93,27 +118,29 @@ hooks.local.json
 .claude/worktrees/
 .mcp.json
 
-# Junk drawer (unused/legacy files)
+# ------------------------------------------------------------
+# Legacy / junk that should never be committed
+# ------------------------------------------------------------
 morralla/
+borrar/
+scratch/
+private/
 
-# Temporary project docs (not for repo)
+# Temporary planning / internal docs (moved to morralla historically)
 BUILD_SUCCESS.md
 IMPLEMENTATION_VERIFICATION.md
 PIPELINE_IMPLEMENTATION_SUMMARY.md
 PipelinePlan.md
+COMPETITIVE_ANALYSIS.md
 ROADMAP.md
 
-# Scratch / temp directories
-borrar/
-
-# Stray binary files
-*.swf
-*.png
-*.jpg
-*.gif
-*.ico
-filesystem-ultra.exe___
-
-# docs-website (separate git repo with its own .git)
+# ------------------------------------------------------------
+# docs-website (has its own git history / is a separate concern)
+# ------------------------------------------------------------
 docs-website/
-docs-website/.claude/commands/
+docs-website/.claude/
+
+# ------------------------------------------------------------
+# Note: No legacy media files are kept at project root anymore.
+# All Scopweb logos used in documentation live inside docs-website/src/assets/
+# (scopweb.png and scopweb3.png)

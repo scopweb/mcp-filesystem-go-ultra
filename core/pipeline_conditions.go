@@ -115,7 +115,7 @@ func ValidateCondition(cond *StepCondition, stepID string, priorStepIDs map[stri
 
 // EvaluateCondition evaluates whether a step should run based on its condition
 // Returns (shouldRun, reason)
-func EvaluateCondition(cond *StepCondition, pCtx *PipelineContext) (bool, string) {
+func EvaluateCondition(cond *StepCondition, pCtx *PipelineContext, engine *UltraFastEngine) (bool, string) {
 	if cond == nil {
 		return true, ""
 	}
@@ -152,6 +152,12 @@ func EvaluateCondition(cond *StepCondition, pCtx *PipelineContext) (bool, string
 
 	case CondFileExists:
 		path := NormalizePath(cond.Path)
+		// Security: respect --allowed-paths
+		if engine != nil && len(engine.config.AllowedPaths) > 0 {
+			if !engine.IsPathAllowed(path) {
+				return false, fmt.Sprintf("access denied checking existence of '%s'", cond.Path)
+			}
+		}
 		if _, err := os.Stat(path); err == nil {
 			return true, ""
 		}
@@ -159,6 +165,12 @@ func EvaluateCondition(cond *StepCondition, pCtx *PipelineContext) (bool, string
 
 	case CondFileNotExists:
 		path := NormalizePath(cond.Path)
+		// Security: respect --allowed-paths
+		if engine != nil && len(engine.config.AllowedPaths) > 0 {
+			if !engine.IsPathAllowed(path) {
+				return false, fmt.Sprintf("access denied checking existence of '%s'", cond.Path)
+			}
+		}
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			return true, ""
 		}

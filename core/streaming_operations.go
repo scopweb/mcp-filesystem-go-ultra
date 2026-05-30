@@ -97,6 +97,23 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
+	// Execute pre-write hooks (without full content for large files to avoid memory blowup)
+	if e.hookManager != nil && e.hookManager.IsEnabled() {
+		workingDir, _ := os.Getwd()
+		hookCtx := &HookContext{
+			Event:      HookPreWrite,
+			ToolName:   "streaming_write_file",
+			FilePath:   path,
+			Operation:  "streaming_write",
+			Timestamp:  time.Now(),
+			WorkingDir: workingDir,
+			Metadata:   map[string]interface{}{"size": totalSize, "is_large": true},
+		}
+		if _, err := e.hookManager.ExecuteHooks(ctx, HookPreWrite, hookCtx); err != nil {
+			return fmt.Errorf("pre-write hook denied streaming write: %w", err)
+		}
+	}
+
 	// Create temp file for atomic operation with secure random suffix
 	tmpPath := path + ".streaming." + secureRandomSuffix()
 
@@ -180,6 +197,21 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 	// Auto-sync to Windows if enabled (async, non-blocking)
 	if e.autoSyncManager != nil {
 		_ = e.autoSyncManager.AfterWrite(path)
+	}
+
+	// Post-write hook (best effort, no content for large files)
+	if e.hookManager != nil && e.hookManager.IsEnabled() {
+		workingDir, _ := os.Getwd()
+		hookCtx := &HookContext{
+			Event:      HookPostWrite,
+			ToolName:   "streaming_write_file",
+			FilePath:   path,
+			Operation:  "streaming_write",
+			Timestamp:  time.Now(),
+			WorkingDir: workingDir,
+			Metadata:   map[string]interface{}{"size": totalSize, "is_large": true},
+		}
+		_, _ = e.hookManager.ExecuteHooks(ctx, HookPostWrite, hookCtx)
 	}
 
 	return nil

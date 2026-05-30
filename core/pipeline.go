@@ -229,7 +229,7 @@ func (pe *PipelineExecutor) executeStep(ctx context.Context, step PipelineStep, 
 
 	// Evaluate condition (skip if false)
 	if step.Condition != nil {
-		shouldRun, reason := EvaluateCondition(step.Condition, pipelineCtx)
+		shouldRun, reason := EvaluateCondition(step.Condition, pipelineCtx, pe.engine)
 		if !shouldRun {
 			result.Success = true
 			result.Skipped = true
@@ -752,6 +752,41 @@ func (pe *PipelineExecutor) executeRegexTransform(ctx context.Context, step Pipe
 	for _, filePath := range files {
 		normalizedPath := NormalizePath(filePath)
 
+		// Read original content so pre/post edit hooks can see full content for regex_transform
+		originalContentBytes, _ := os.ReadFile(normalizedPath)
+		originalContent := string(originalContentBytes)
+
+		// Pre-edit hook (full content support for regex_transform)
+		if !dryRun && pe.engine != nil && pe.engine.hookManager != nil && pe.engine.hookManager.IsEnabled() {
+			workingDir, _ := os.Getwd()
+			hookCtx := &HookContext{
+				Event:      HookPreEdit,
+				ToolName:   "regex_transform",
+				FilePath:   normalizedPath,
+				Operation:  "regex_transform",
+				OldContent: originalContent,
+				Timestamp:  time.Now(),
+				WorkingDir: workingDir,
+				Metadata: map[string]interface{}{
+					"patterns": len(patterns),
+				},
+			}
+			hookResult, hookErr := pe.engine.hookManager.ExecuteHooks(ctx, HookPreEdit, hookCtx)
+			if hookErr != nil {
+				return &PipelineStepError{
+					StepID:  step.ID,
+					Action:  "regex_transform",
+					Message: fmt.Sprintf("pre-edit hook denied regex transform for %s", filePath),
+					Err:     hookErr,
+				}
+			}
+			if hookResult.ModifiedContent != "" {
+				originalContent = hookResult.ModifiedContent
+				// Write the hook-modified content so the transformer will see it
+				_ = pe.engine.WriteFileContent(ctx, normalizedPath, originalContent)
+			}
+		}
+
 		config := RegexTransformConfig{
 			FilePath: normalizedPath,
 			Patterns: patterns,
@@ -762,7 +797,7 @@ func (pe *PipelineExecutor) executeRegexTransform(ctx context.Context, step Pipe
 		transformResult, err := transformer.Transform(ctx, config)
 		if err != nil {
 			if dryRun {
-				continue // Skip errors in dry-run
+				continue
 			}
 			return &PipelineStepError{
 				StepID:  step.ID,
@@ -771,8 +806,36 @@ func (pe *PipelineExecutor) executeRegexTransform(ctx context.Context, step Pipe
 				Err:     err,
 			}
 		}
+
+		if !dryRun {
+			if err := pe.engine.WriteFileContent(ctx, normalizedPath, transformResult.TransformedContent); err != nil {
+				return &PipelineStepError{
+					StepID:  step.ID,
+					Action:  "regex_transform",
+					Message: fmt.Sprintf("failed to write transformed file: %s", filePath),
+					Err:     err,
+				}
+			}
+		}
+
 		result.Counts[filePath] = transformResult.TotalReplacements
 		totalEdits += transformResult.TotalReplacements
+
+		// Post-edit hook with resulting content
+		if !dryRun && pe.engine != nil && pe.engine.hookManager != nil && pe.engine.hookManager.IsEnabled() {
+			workingDir, _ := os.Getwd()
+			hookCtx := &HookContext{
+				Event:      HookPostEdit,
+				ToolName:   "regex_transform",
+				FilePath:   normalizedPath,
+				Operation:  "regex_transform",
+				OldContent: originalContent,
+				NewContent: transformResult.TransformedContent,
+				Timestamp:  time.Now(),
+				WorkingDir: workingDir,
+			}
+			_, _ = pe.engine.hookManager.ExecuteHooks(ctx, HookPostEdit, hookCtx)
+		}
 	}
 
 	result.EditsApplied = totalEdits
@@ -996,12 +1059,41 @@ func (pe *PipelineExecutor) assessPipelineRisk(filesAffected []string, totalEdit
 }
 
 // rollback restores files from backup
+//
+// Note on hooks: We now attempt to fire post-edit / post-write hooks on the
+// restored files so that user hooks (formatting, logging, etc.) have a chance
+// to react to the rollback. This is best-effort.
 func (pe *PipelineExecutor) rollback(ctx context.Context, backupID string) error {
 	if backupID == "" {
 		return fmt.Errorf("no backup ID provided")
 	}
-	_, _, err := pe.engine.backupManager.RestoreBackup(backupID, "", false)
-	return err
+
+	restoredFiles, _, err := pe.engine.backupManager.RestoreBackup(backupID, "", false)
+	if err != nil {
+		return err
+	}
+
+	// Best-effort: fire post-hooks for restored files so user policies can react
+	if pe.engine.hookManager != nil && pe.engine.hookManager.IsEnabled() {
+		workingDir, _ := os.Getwd()
+		for _, f := range restoredFiles {
+			hookCtx := &HookContext{
+				Event:      HookPostEdit, // treat restore as a post-edit for hook purposes
+				ToolName:   "pipeline_rollback",
+				FilePath:   f,
+				Operation:  "rollback",
+				Timestamp:  time.Now(),
+				WorkingDir: workingDir,
+				Metadata: map[string]interface{}{
+					"backup_id": backupID,
+					"via":       "pipeline_rollback",
+				},
+			}
+			_, _ = pe.engine.hookManager.ExecuteHooks(ctx, HookPostEdit, hookCtx)
+		}
+	}
+
+	return nil
 }
 
 // performSmartSearchInternal performs search and returns structured matches
