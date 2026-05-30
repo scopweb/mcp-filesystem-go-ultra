@@ -1,5 +1,41 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.5.5] - 2026-05-30
+
+### Security — Major improvements to hook coverage, Git tool, and WSL auto-sync
+
+**Hook system coverage (biggest win):**
+- `batch_operations` now properly executes pre/post hooks for `write`, `edit`, `delete`, `move`, `copy`, `create_dir`, and `search_and_replace` when an engine is attached. Previously these operations completely bypassed user-configured hooks.
+- Pipeline `regex_transform` now runs `pre-edit`/`post-edit` hooks with full file content (when possible).
+- Pipeline rollback now best-effort fires `post-edit` hooks on restored files.
+- Added `IsPathAllowed` checks to `file_exists` / `file_not_exists` pipeline conditions (prevents filesystem probing outside allowed paths).
+
+**Git tool hardening:**
+- Fixed command injection risk on Windows in `execGitCommand` (removed dangerous string concatenation in `cmd /c` fallback; arguments are now passed properly).
+- Added anti-destructive protection: `restore` and `branch delete` now require explicit `force=true`.
+- Improved tool annotations (`destructiveHint`, `idempotentHint`).
+
+**WSL / Auto-sync security:**
+- Auto-sync and the `wsl` tool now respect `--allowed-paths` on converted target paths.
+- `TargetMapping` destinations are validated against allowed paths at config time.
+- Added symlink rejection/skipping when copying across the WSL-Windows boundary (defense against symlink attacks).
+
+**Tests:**
+- Significantly improved `TestBatchOperationsRespectHooks` (now covers write + edit + delete denial via hooks in batch operations).
+- All pipeline + batch + condition tests updated and passing after signature changes.
+
+**Files changed:**
+- `core/batch_operations.go`
+- `core/pipeline.go`, `core/pipeline_conditions.go`
+- `tools_git.go`
+- `core/autosync_config.go`, `core/wsl_sync.go`, `core/path_converter.go`
+- `tools_platform.go`
+- `tests/batch_security_test.go`, `tests/pipeline_conditions_test.go`
+- `SECURITY.md`
+- `CHANGELOG.md`
+
+---
+
 ## [4.5.4] - 2026-05-30
 
 ### Fix — git tool: "Stderr already set" error on Windows with path

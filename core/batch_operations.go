@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -91,6 +92,31 @@ func (m *BatchOperationManager) SetBackupManager(manager *BackupManager) {
 // SetEngine sets the engine reference for intelligent edit support in batch operations.
 func (m *BatchOperationManager) SetEngine(engine *UltraFastEngine) {
 	m.engine = engine
+}
+
+// executeHooksForOperation runs pre/post hooks for batch operations when an engine is available.
+// This ensures hooks are respected even when using the batch manager's low-level execution path.
+// Returns error only if a hook denied the operation.
+func (m *BatchOperationManager) executeHooksForOperation(ctx context.Context, event HookEvent, op FileOperation) error {
+	if m.engine == nil || m.engine.hookManager == nil || !m.engine.hookManager.IsEnabled() {
+		return nil
+	}
+
+	workingDir, _ := os.Getwd()
+	hookCtx := &HookContext{
+		Event:      event,
+		ToolName:   "batch_" + string(op.Type), // e.g. "batch_write", "batch_edit"
+		FilePath:   op.Path,
+		Operation:  string(op.Type),
+		SourcePath: op.Source,
+		DestPath:   op.Destination,
+		Content:    op.Content,
+		Timestamp:  time.Now(),
+		WorkingDir: workingDir,
+	}
+
+	_, err := m.engine.hookManager.ExecuteHooks(ctx, event, hookCtx)
+	return err
 }
 
 // ExecuteBatch ejecuta un batch de operaciones
@@ -509,14 +535,35 @@ func (m *BatchOperationManager) executeOperation(op FileOperation, result *Opera
 }
 
 func (m *BatchOperationManager) executeWrite(op FileOperation, result *OperationResult) error {
-	err := os.WriteFile(op.Path, []byte(op.Content), 0644)
-	if err == nil {
-		result.BytesAffected = int64(len(op.Content))
+	ctx := context.Background()
+
+	// Pre-write hook (respects user hooks even in batch mode)
+	if err := m.executeHooksForOperation(ctx, HookPreWrite, op); err != nil {
+		return fmt.Errorf("pre-write hook denied batch write: %w", err)
 	}
-	return err
+
+	err := os.WriteFile(op.Path, []byte(op.Content), 0644)
+	if err != nil {
+		return err
+	}
+
+	result.BytesAffected = int64(len(op.Content))
+
+	// Post-write hook (best effort)
+	postOp := op
+	_ = m.executeHooksForOperation(ctx, HookPostWrite, postOp)
+
+	return nil
 }
 
 func (m *BatchOperationManager) executeEdit(op FileOperation, result *OperationResult) error {
+	ctx := context.Background()
+
+	// Pre-edit hook
+	if err := m.executeHooksForOperation(ctx, HookPreEdit, op); err != nil {
+		return fmt.Errorf("pre-edit hook denied batch edit: %w", err)
+	}
+
 	content, err := os.ReadFile(op.Path)
 	if err != nil {
 		return err
@@ -524,8 +571,9 @@ func (m *BatchOperationManager) executeEdit(op FileOperation, result *OperationR
 
 	original := string(content)
 
-	// Use performIntelligentEdit when engine is available (Bug #18: literal escapes,
-	// line endings, TrimSpace, flexible regex matching)
+	var finalContent string
+
+	// Use performIntelligentEdit when engine is available
 	if m.engine != nil {
 		editResult, editErr := m.engine.performIntelligentEdit(original, op.OldText, op.NewText)
 		if editErr != nil || editResult.ReplacementCount == 0 {
@@ -533,29 +581,40 @@ func (m *BatchOperationManager) executeEdit(op FileOperation, result *OperationR
 				"ALWAYS read the file with read_file BEFORE editing. "+
 				"Copy the exact text from the read result as old_text", op.Path)
 		}
-		err = os.WriteFile(op.Path, []byte(editResult.ModifiedContent), 0644)
-		if err == nil {
-			result.BytesAffected = int64(len(editResult.ModifiedContent) - len(original))
+		finalContent = editResult.ModifiedContent
+	} else {
+		// Fallback
+		finalContent = strings.Replace(original, op.OldText, op.NewText, 1)
+		if finalContent == original {
+			return fmt.Errorf("old_text not found in file: %s. "+
+				"ALWAYS read the file with read_file BEFORE editing. "+
+				"Copy the exact text from the read result as old_text", op.Path)
 		}
+	}
+
+	err = os.WriteFile(op.Path, []byte(finalContent), 0644)
+	if err != nil {
 		return err
 	}
 
-	// Fallback: simple string replace when engine is not set
-	newContent := strings.Replace(original, op.OldText, op.NewText, 1)
-	if newContent == original {
-		return fmt.Errorf("old_text not found in file: %s. "+
-			"ALWAYS read the file with read_file BEFORE editing. "+
-			"Copy the exact text from the read result as old_text", op.Path)
-	}
+	result.BytesAffected = int64(len(finalContent) - len(original))
 
-	err = os.WriteFile(op.Path, []byte(newContent), 0644)
-	if err == nil {
-		result.BytesAffected = int64(len(newContent) - len(original))
-	}
-	return err
+	// Post-edit hook (best effort)
+	postOp := op
+	postOp.Content = finalContent
+	_ = m.executeHooksForOperation(ctx, HookPostEdit, postOp)
+
+	return nil
 }
 
 func (m *BatchOperationManager) executeSearchAndReplace(op FileOperation, result *OperationResult) error {
+	ctx := context.Background()
+
+	// Pre-write style hook for search_and_replace (treated as edit/write)
+	if err := m.executeHooksForOperation(ctx, HookPreWrite, op); err != nil {
+		return fmt.Errorf("pre-write hook denied batch search_and_replace: %w", err)
+	}
+
 	if m.engine == nil {
 		return fmt.Errorf("search_and_replace requires engine (not available in standalone batch mode)")
 	}
@@ -567,50 +626,99 @@ func (m *BatchOperationManager) executeSearchAndReplace(op FileOperation, result
 		return fmt.Errorf("pattern '%s' not found in %s", op.OldText, op.Path)
 	}
 	result.BytesAffected = int64(replacements)
+
+	// Post-write hook (best effort)
+	_ = m.executeHooksForOperation(ctx, HookPostWrite, op)
+
 	return nil
 }
 
 func (m *BatchOperationManager) executeMove(op FileOperation, result *OperationResult) error {
+	ctx := context.Background()
+
+	if err := m.executeHooksForOperation(ctx, HookPreMove, op); err != nil {
+		return fmt.Errorf("pre-move hook denied batch move: %w", err)
+	}
+
 	info, err := os.Stat(op.Source)
 	if err != nil {
 		return err
 	}
 
 	err = os.Rename(op.Source, op.Destination)
-	if err == nil {
-		result.BytesAffected = info.Size()
+	if err != nil {
+		return err
 	}
-	return err
+
+	result.BytesAffected = info.Size()
+
+	_ = m.executeHooksForOperation(ctx, HookPostMove, op)
+	return nil
 }
 
 func (m *BatchOperationManager) executeCopy(op FileOperation, result *OperationResult) error {
+	ctx := context.Background()
+
+	if err := m.executeHooksForOperation(ctx, HookPreCopy, op); err != nil {
+		return fmt.Errorf("pre-copy hook denied batch copy: %w", err)
+	}
+
 	info, err := os.Stat(op.Source)
 	if err != nil {
 		return err
 	}
 
 	err = copyFile(op.Source, op.Destination)
-	if err == nil {
-		result.BytesAffected = info.Size()
+	if err != nil {
+		return err
 	}
-	return err
+
+	result.BytesAffected = info.Size()
+
+	_ = m.executeHooksForOperation(ctx, HookPostCopy, op)
+	return nil
 }
 
 func (m *BatchOperationManager) executeDelete(op FileOperation, result *OperationResult) error {
+	ctx := context.Background()
+
+	// Pre-delete hook
+	if err := m.executeHooksForOperation(ctx, HookPreDelete, op); err != nil {
+		return fmt.Errorf("pre-delete hook denied batch delete: %w", err)
+	}
+
 	info, err := os.Stat(op.Path)
 	if err != nil {
 		return err
 	}
 
 	err = os.Remove(op.Path)
-	if err == nil {
-		result.BytesAffected = info.Size()
+	if err != nil {
+		return err
 	}
-	return err
+
+	result.BytesAffected = info.Size()
+
+	// Post-delete hook (best effort)
+	_ = m.executeHooksForOperation(ctx, HookPostDelete, op)
+
+	return nil
 }
 
 func (m *BatchOperationManager) executeCreateDir(op FileOperation, result *OperationResult) error {
-	return os.MkdirAll(op.Path, 0755)
+	ctx := context.Background()
+
+	if err := m.executeHooksForOperation(ctx, HookPreCreate, op); err != nil {
+		return fmt.Errorf("pre-create hook denied batch create_dir: %w", err)
+	}
+
+	err := os.MkdirAll(op.Path, 0755)
+	if err != nil {
+		return err
+	}
+
+	_ = m.executeHooksForOperation(ctx, HookPostCreate, op)
+	return nil
 }
 
 // collectPaths returns all filesystem paths referenced by a single operation.

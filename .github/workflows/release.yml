@@ -1,0 +1,157 @@
+name: Release
+
+# Creates a GitHub Release with pre-built binaries when a new tag is pushed.
+#
+# Usage:
+#   git tag v4.5.0
+#   git push origin v4.5.0
+#
+# This workflow will:
+# - Build for Windows and Linux using the project's build scripts
+# - Create a **Draft Release** (you must manually publish it)
+# - Attach .zip / .tar.gz packages + individual binaries
+# - Generate SHA256 checksums (checksums.txt)
+#
+# Trigger: Push a tag starting with "v" (e.g. v4.5.0)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  GO_VERSION: '1.26.3'
+
+jobs:
+  # ============================================================
+  # Build binaries for Windows
+  # ============================================================
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build all Windows binaries
+        run: .\build-windows.bat
+
+      - name: Package Windows release
+        run: |
+          # Include release instructions
+          Copy-Item ..\release\README.txt bin\README.txt -Force
+          cd bin
+          Compress-Archive -Path * -DestinationPath ..\filesystem-ultra-${{ github.ref_name }}-windows-amd64.zip -Force
+        shell: pwsh
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries-${{ github.ref_name }}
+          path: |
+            bin/
+            filesystem-ultra-${{ github.ref_name }}-windows-amd64.zip
+          retention-days: 30
+
+  # ============================================================
+  # Build binaries for Linux (and cross-compile Windows if needed)
+  # ============================================================
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build all Linux binaries
+        run: |
+          chmod +x build-windows.sh
+          ./build-windows.sh
+
+      - name: Package Linux release
+        run: |
+          # Include release instructions
+          cp ../release/README.txt bin/README.txt
+          cd bin
+          tar -czvf ../filesystem-ultra-${{ github.ref_name }}-linux-amd64.tar.gz .
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries-${{ github.ref_name }}
+          path: |
+            bin/
+            filesystem-ultra-${{ github.ref_name }}-linux-amd64.tar.gz
+          retention-days: 30
+
+  # ============================================================
+  # Create GitHub Release and attach all binaries
+  # ============================================================
+  create-release:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # Required to create releases
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List downloaded artifacts
+        run: find artifacts -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.exe" \) | sort
+
+      # Generate SHA256 checksums for all release assets
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          find . -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.exe" \) -exec sha256sum {} + | sort > checksums.txt
+          cat checksums.txt
+
+      - name: Create GitHub Release (Draft)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: true                    # Created as draft so you can review before publishing
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+          generate_release_notes: true
+          body: |
+            ## Binaries
+
+            This release includes pre-built binaries for:
+
+            - **Windows** (`amd64`)
+            - **Linux** (`amd64`)
+
+            All binaries are built from the official build scripts (`build-windows.bat` / `build-windows.sh`).
+
+            **Recommended downloads:**
+            - `filesystem-ultra-*-windows-amd64.zip`
+            - `filesystem-ultra-*-linux-amd64.tar.gz`
+
+            Each archive contains a `README.txt` with quick start instructions for Claude Desktop.
+
+            See `checksums.txt` for SHA256 hashes of all files.
+          files: |
+            artifacts/**/*.zip
+            artifacts/**/*.tar.gz
+            artifacts/**/*.exe
+            artifacts/checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "✅ Draft release ${{ github.ref_name }} created successfully."
+          echo "Review and publish it manually from the GitHub Releases page."

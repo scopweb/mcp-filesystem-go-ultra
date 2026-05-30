@@ -291,12 +291,17 @@ func registerPlatformTools(reg *toolRegistry) {
 
 			// Single file copy mode
 			if wslPath != "" {
+				// Security: validate both sides after conversion
+				if windowsPath == "" {
+					windowsPath, _ = core.WSLToWindows(wslPath)
+				}
+				if !engine.IsPathAllowed(wslPath) || (windowsPath != "" && !engine.IsPathAllowed(windowsPath)) {
+					return mcp.NewToolResultError("access denied: one or both paths are outside allowed directories"), nil
+				}
+
 				err := engine.WSLWindowsCopy(ctx, wslPath, windowsPath, createDirs)
 				if err != nil {
 					return mcp.NewToolResultError(fmt.Sprintf("Copy failed: %v", err)), nil
-				}
-				if windowsPath == "" {
-					windowsPath, _ = core.WSLToWindows(wslPath)
 				}
 				if engine.IsCompactMode() {
 					return mcp.NewToolResultText(fmt.Sprintf("OK: Copied to %s", windowsPath)), nil
@@ -311,12 +316,18 @@ func registerPlatformTools(reg *toolRegistry) {
 						wslDest = wp
 					}
 				}
+				if wslDest == "" {
+					wslDest, _ = core.WindowsToWSL(windowsPath)
+				}
+
+				// Security: validate both sides
+				if !engine.IsPathAllowed(windowsPath) || (wslDest != "" && !engine.IsPathAllowed(wslDest)) {
+					return mcp.NewToolResultError("access denied: one or both paths are outside allowed directories"), nil
+				}
+
 				err := engine.WSLWindowsCopy(ctx, windowsPath, wslDest, createDirs)
 				if err != nil {
 					return mcp.NewToolResultError(fmt.Sprintf("Copy failed: %v", err)), nil
-				}
-				if wslDest == "" {
-					wslDest, _ = core.WindowsToWSL(windowsPath)
 				}
 				if engine.IsCompactMode() {
 					return mcp.NewToolResultText(fmt.Sprintf("OK: Copied to %s", wslDest)), nil

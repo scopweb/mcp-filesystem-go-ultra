@@ -70,6 +70,7 @@ func (e *UltraFastEngine) WSLWindowsCopy(ctx context.Context, srcPath, dstPath s
 	}
 
 	// Copy single file
+	// Note: Symlink check for single files is done inside CopyFileWithConversion when called from WSL paths
 	return CopyFileWithConversion(accessPath, dstPath, createDirs)
 }
 
@@ -99,6 +100,11 @@ func (e *UltraFastEngine) copyDirectoryRecursive(srcDir, dstDir string, createDi
 		if d.IsDir() {
 			// Create directory
 			return os.MkdirAll(dstPath, 0755)
+		}
+
+		// Skip symlinks in WSL cross-boundary copies (security + TOCTOU defense)
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
 		}
 
 		// Copy file using io.CopyBuffer with pooled buffer for memory efficiency

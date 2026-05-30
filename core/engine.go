@@ -249,6 +249,8 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 
 	// Initialize auto-sync manager
 	engine.autoSyncManager = NewAutoSyncManager()
+	engine.autoSyncManager.SetAllowedPaths(config.AllowedPaths)
+
 	if engine.autoSyncManager.IsEnabled() {
 		slog.Info("WSL auto-sync enabled")
 	} else {

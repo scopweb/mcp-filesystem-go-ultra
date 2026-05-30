@@ -232,8 +232,17 @@ func CopyFileWithConversion(srcPath, dstPath string, createDirs bool) error {
 	dstPath = NormalizePath(dstPath)
 
 	// Check if source exists
-	if _, err := os.Stat(srcPath); os.IsNotExist(err) {
+	info, err := os.Stat(srcPath)
+	if os.IsNotExist(err) {
 		return fmt.Errorf("source file does not exist: %s", srcPath)
+	}
+	if err != nil {
+		return err
+	}
+
+	// Skip symlinks in cross-boundary copies (defense against symlink attacks)
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to copy symlink across WSL/Windows boundary: %s", srcPath)
 	}
 
 	// Create destination directory if requested
