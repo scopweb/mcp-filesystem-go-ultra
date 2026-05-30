@@ -1,5 +1,19 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.4] - 2026-05-30
+
+### Fix — git tool: "Stderr already set" error on Windows with path
+
+**Bug:** `git(action:"status", path:"...")` returned `"git status failed: exec: Stderr already set"` when a path was provided. Worked fine without path (auto-detect repo root). Affected all actions that accept a path.
+
+**Root cause:** In `execGitCommand()`, when the first `git` call failed and retried via `cmd3` (cmd /c fallback), the same `stderr` buffer was reused across two distinct `exec.Cmd` objects. Go's exec package rejects sharing a `*bytes.Buffer` between `Stderr` fields of different commands.
+
+**Fix:** Remove `stderr` assignment from `cmd2` (CombinedOutput captures it internally), give `cmd3` its own local `stderr` buffer and proper error formatting.
+
+**Files:** `tools_git.go`
+
+---
+
 ## [4.5.3] - 2026-05-27
 
 ### Fix — return_lines parameter accepts bool (closes #29)
