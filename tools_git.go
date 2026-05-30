@@ -733,26 +733,27 @@ func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 
 // execGitCommand executes a git command in the given directory
 func execGitCommand(dir, command string, args ...string) (string, error) {
-	cmd := exec.Command(command, args...)
-	cmd.Dir = dir
-
 	if runtime.GOOS == "windows" {
-		cmd2 := exec.Command("git", args...)
-		cmd2.Dir = dir
-		var stderr bytes.Buffer
-		cmd2.Stderr = &stderr
-		output, err := cmd2.CombinedOutput()
-		if err != nil {
-			fullCmd := "git " + strings.Join(args, " ")
-			cmd3 := exec.Command("cmd", "/c", fullCmd)
-			cmd3.Dir = dir
-			cmd3.Stderr = &stderr
-			output, err = cmd3.CombinedOutput()
-			return string(output), err
+		// Try git directly first
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		output, err := cmd.CombinedOutput()
+		if err == nil {
+			return string(output), nil
 		}
-		return string(output), nil
+		// Fallback through cmd /c — escape args properly for shell
+		var stderr bytes.Buffer
+		fullCmd := "git " + strings.Join(args, " ")
+		cmd2 := exec.Command("cmd", "/c", fullCmd)
+		cmd2.Dir = dir
+		cmd2.Stderr = &stderr
+		output, err = cmd2.CombinedOutput()
+		return string(output), fmt.Errorf("%v: %s", err, stderr.String())
 	}
 
+	// Unix
+	cmd := exec.Command(command, args...)
+	cmd.Dir = dir
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	output, err := cmd.CombinedOutput()
