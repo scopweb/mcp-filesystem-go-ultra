@@ -359,22 +359,53 @@ func registerCoreTools(reg *toolRegistry) {
 			content = c
 		}
 
-		// Feedback: check for truncation/inflation/full-rewrite patterns
+		// Feedback: check for truncation/inflation/full-rewrite patterns.
+		// Normalize path once so os.Stat, CreateBackup, and WriteFileContent
+		// all see the same target (consistent on Windows/WSL).
+		normPath := core.NormalizePath(path)
 		var existingSize int64
-		if info, statErr := os.Stat(core.NormalizePath(path)); statErr == nil {
+		if info, statErr := os.Stat(normPath); statErr == nil {
 			existingSize = info.Size()
 		}
-		if signal := core.CheckWriteOp(path, content, existingSize); signal.BlockOp {
+		signal := core.CheckWriteOp(path, content, existingSize)
+
+		// Adaptive downgrade: if CheckWriteOp wants to block AND a backup
+		// manager is configured, create a safety backup and proceed with
+		// warn instead. If no backup manager or backup creation fails, keep
+		// the original block as a safety net. See core/feedback_adaptive.go.
+		var newBackupID string
+		if signal.BlockOp && engine.GetBackupManager() != nil {
+			prevBackupID := engine.GetCurrentBackupID(normPath)
+			createBackup := func(p, op, userCtx string) (string, error) {
+				return engine.GetBackupManager().CreateBackupWithContextAndParent(
+					p, op, userCtx, prevBackupID,
+				)
+			}
+			signal, newBackupID = core.ApplyAdaptiveWriteBlock(
+				signal, true, normPath,
+				int64(len(content)), existingSize, createBackup,
+			)
+			// On successful downgrade, link the new backup into the undo chain
+			// so backup(action:"undo_last", file_path:"...") can step back.
+			if newBackupID != "" {
+				engine.SetCurrentBackupID(normPath, newBackupID)
+			}
+		}
+
+		if signal.BlockOp {
 			core.SetFeedback(ctx, signal)
 			return mcp.NewToolResultError(signal.Message + "\n→ " + signal.Suggestion), nil
 		} else if signal.Status != core.FeedbackOK {
-			// Non-blocking warn — proceed but append feedback to response
+			// Non-blocking warn — proceed but append feedback to response.
+			// Always use verbose format (FormatFeedback, not FormatFeedbackCompact)
+			// when the warn came from an adaptive downgrade so the backup ID
+			// and restore command remain literal and visible to the AI/operator.
 			err = engine.WriteFileContent(ctx, path, content)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
 			core.SetFeedback(ctx, signal)
-			if engine.IsCompactMode() {
+			if engine.IsCompactMode() && !signal.Downgraded {
 				return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s %s | %dB | %s", diskPrefix(absPath), absPath, len(content), core.FormatFeedbackCompact(signal))), nil
 			}
 			return mcp.NewToolResultText(core.FormatFeedback(signal, fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, len(content)))), nil

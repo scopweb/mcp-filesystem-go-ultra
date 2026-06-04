@@ -1,6 +1,36 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
-## [Unreleased / 4.5.5] - 2026-05-30
+## [Unreleased / 4.5.5] - 2026-06-04
+
+### Improvement — Adaptive write_file behavior when backup is available
+
+`write_file` previously hard-blocked when new content was < 50% or > 3× the existing file size (`truncation` and `inflation_loop` patterns in `core/feedback.go`), forcing a `delete_file` + `write_file` cycle that wasted tokens on long sessions.
+
+Now, when the engine has a `BackupManager` configured (default: `--backup-dir` → `temp/mcp-batch-backups`), these patterns instead:
+1. Create a safety backup of the existing file (linked to the undo chain via `CreateBackupWithContextAndParent`)
+2. Proceed with the write
+3. Return a non-blocking `WARN` (status `warn` in the audit log) that includes the backup ID and the literal `backup(action:"restore", backup_id:"...")` undo command. Response format is forced to verbose so the restore command is visible, even in `--compact-mode`.
+
+When the backup manager is unavailable (rare — only if `NewBackupManager` failed at startup, e.g. permissions), the original hard-block behavior is preserved as a safety net.
+
+**Response format (downgraded case):**
+```
+WRITTEN C:\foo\bar.go | 8055B
+⚠️ [TRUNCATION] WARNING: new content (8055 B) is less than 50% of existing file (62749 B). Looks like accidental truncation.
+   → Backup created: 20260604-130xxx. To undo: backup(action:"restore", backup_id:"20260604-130xxx"). Read the full file first, then use edit_file for partial changes. To force overwrite: delete_file first, then write_file.
+```
+
+**Files:**
+- `core/feedback_adaptive.go` (new) — `ApplyAdaptiveWriteBlock` pure helper
+- `core/feedback_adaptive_test.go` (new) — 9 table-driven cases + restore-command format pin
+- `core/feedback.go` — added `Downgraded bool` field to `FeedbackSignal` (with `omitempty` for JSON back-compat)
+- `tools_core.go` — handler of `write_file` now calls the helper; normalizes path once; forces verbose response on downgraded warns
+- `core/claude_optimizer.go` — added `// NOTE:` documenting the intentional divergence with the legacy `IntelliGentWrite` guard
+
+**Not changed:** the legacy truncation guard in `core/claude_optimizer.go:IntelliGentWrite` — hard-blocks even when backup is available. The divergence is intentional for this release; unification planned for 4.5.6+.
+
+**Build artifacts:**
+- `bin/filesystem-ultra-v4-embed_rg.exe` (12 MB, with ripgrep embedded) — rebuilt 2026-06-04
 
 ### Security — Major improvements to hook coverage, Git tool, and WSL auto-sync
 

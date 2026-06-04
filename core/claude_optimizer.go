@@ -51,6 +51,14 @@ func NewClaudeDesktopOptimizer(engine *UltraFastEngine) *ClaudeDesktopOptimizer 
 }
 
 // IntelligentWrite automatically chooses the best write strategy
+//
+// NOTE: This is the legacy mcp_write entry point. Its truncation guard
+// (further down, around line 67) and inflation guard (line 87) hard-block
+// even when a backup manager is available — these are intentionally
+// different from the write_file tool's CheckWriteOp-based guards in
+// tools_core.go, which now downgrade to warn+backup when a backup is
+// available (see core/feedback_adaptive.go). The divergence is intentional
+// for this release; unification is tracked for a future 4.5.6+ release.
 func (o *ClaudeDesktopOptimizer) IntelligentWrite(ctx context.Context, path, content string) error {
 	// Normalize path first (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
