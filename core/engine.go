@@ -53,6 +53,11 @@ type Config struct {
 
 	// Normalizer
 	NormalizerRulesPath string // Path to external normalizer rules JSON file (optional)
+
+	// SearchFiles output cap (improvement M1+M2). 0 = use DefaultMaxSearchOutputBytes.
+	// When search_files produces output larger than this, it is truncated with
+	// a marker telling the model to use count_only:true or a narrower path.
+	MaxSearchOutputBytes int
 }
 
 // UltraFastEngine implements all filesystem operations with maximum performance
@@ -607,6 +612,8 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 		}
 		// Track access for predictive prefetching
 		e.cache.TrackAccess(path)
+		// Record cache hit for audit log (improvement M3)
+		SetCacheHit(ctx, true)
 		return string(cached), nil
 	}
 
@@ -640,6 +647,8 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 	// Cache the content and track access
 	e.cache.SetFile(path, result.content)
 	e.cache.TrackAccess(path)
+	// Record cache miss for audit log (improvement M3)
+	SetCacheHit(ctx, false)
 
 	// Execute post-read hook (best-effort)
 	hookCtx.Event = HookPostRead
@@ -1403,6 +1412,12 @@ func (e *UltraFastEngine) ListDirectoryTree(ctx context.Context, path string, ma
 // GetMaxResponseSize returns max response size
 func (e *UltraFastEngine) GetMaxResponseSize() int64 {
 	return e.config.MaxResponseSize
+}
+
+// GetConfig returns a pointer to the engine's configuration.
+// Callers must NOT mutate the returned *Config; it's shared with the engine.
+func (e *UltraFastEngine) GetConfig() *Config {
+	return e.config
 }
 
 // GetMaxSearchResults returns max search results

@@ -72,6 +72,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"create_backup":  {ParamBoolean, false},
 		"dry_run":        {ParamBoolean, false},
 		"whole_word":     {ParamBoolean, false},
+		"expected_hash":  {ParamString, false}, // B3: stale-edit protection
 	},
 	"list_directory": {
 		"path": {ParamString, true},
@@ -209,6 +210,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"create_backup":  {ParamBoolean, false},
 		"dry_run":        {ParamBoolean, false},
 		"whole_word":     {ParamBoolean, false},
+		"expected_hash":  {ParamString, false}, // B3 alias
 	},
 	"write": {
 		"path":           {ParamString, true},

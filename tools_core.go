@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"os"
 	"path/filepath"
@@ -255,6 +256,17 @@ func registerCoreTools(reg *toolRegistry) {
 		// Record read for stale-read detection in feedback system
 		core.RecordRead(core.NormalizePath(path))
 
+		// Compute FNV-1a content hash (8 hex chars) and append as a comment
+		// footer. The model can echo it back via edit_file(expected_hash:"...")
+		// to detect stale reads (improvement B3: prevents 6 stale-edit cycles
+		// observed in 12 days of log analysis).
+		// The `#` makes it look like a comment in many file formats so it
+		// doesn't pollute the user's view of the actual content.
+		h := fnv.New32a()
+		h.Write([]byte(content))
+		contentHash := fmt.Sprintf("%08x", h.Sum32())
+		content = content + "\n# content_hash: " + contentHash
+
 		// Apply truncation if explicitly requested
 		if maxLines > 0 || mode != "all" {
 			content = truncateContent(content, maxLines, mode)
@@ -451,6 +463,10 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithBoolean("create_backup", mcp.Description("Create backup before transformation (default: true, for regex mode)")),
 		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Supported in modes: replace (default), search_replace, regex. Default: false.")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false, for occurrence mode)")),
+		// Stale-edit protection: hash returned by the prior read_file call. If the
+		// file's actual hash doesn't match, the edit is rejected with a clear error.
+		// Improvement B3 (see log analysis: 6 stale-edit cycles in 12 days).
+		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash from the last read_file. If the file's current hash doesn't match, the edit is rejected so the model can re-read first.")),
 	)
 	regexTransform := reg.regexTransform
 	reg.editFileHandler = auditWrap(engine, "edit_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -710,6 +726,26 @@ func registerCoreTools(reg *toolRegistry) {
 		// Read old content before edit to compute diff
 		oldContentRaw, _ := os.ReadFile(normPath)
 		oldContentStr := string(oldContentRaw)
+
+		// Improvement B3: stale-edit protection. If the caller passed
+		// expected_hash (the hash returned by the prior read_file), verify
+		// the file hasn't changed. Mismatch → return clear error so the
+		// model can re-read instead of silently overwriting.
+		if args != nil {
+			if expectedHash, ok := args["expected_hash"].(string); ok && expectedHash != "" {
+				h := fnv.New32a()
+				h.Write(oldContentRaw)
+				actualHash := fmt.Sprintf("%08x", h.Sum32())
+				if actualHash != expectedHash {
+					core.SetError(ctx, fmt.Sprintf(
+						"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file before editing.",
+						expectedHash, actualHash))
+					return mcp.NewToolResultError(fmt.Sprintf(
+						"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file with read_file to get the current content_hash, then retry.",
+						expectedHash, actualHash)), nil
+				}
+			}
+		}
 
 		result, err := engine.EditFile(ctx, path, oldText, newText, force, dryRun)
 		if err != nil {

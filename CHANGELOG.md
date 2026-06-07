@@ -1,5 +1,92 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.5.6] - 2026-06-07
+
+### Improvement — Log-driven optimizations (analysis of 12 days, 16,742 operations)
+
+After analyzing `C:\temp\mcp-proxy-logs\proxy.jsonl` (27-may → 07-jun, 2053 ops, 76 errors), four low-risk, backwards-compatible improvements landed:
+
+**A. `search_files` output cap (M1+M2) — token-cost fix**
+
+44% of all output tokens came from `search_files`. Worst case observed: a single 2.28 MB response (~570k tokens). Now the handler truncates responses larger than the configured cap (default 500 KB) and appends a marker so the model knows to retry with `count_only:true` or a narrower path.
+
+```
+⚠️ truncated: response exceeded 500 KB. Use count_only:true or narrow the path/pattern.
+```
+
+- New constant: `core.DefaultMaxSearchOutputBytes = 500 * 1024` (`core/config.go`)
+- New field: `Config.MaxSearchOutputBytes` (0 = use default)
+- New helper: `capSearchOutput(text, engine)` in `tools_search.go`
+- New accessor: `(*UltraFastEngine).GetConfig()` (`core/engine.go`)
+- Behavior below the cap is unchanged; only over-cap responses are truncated.
+- Tests: 4 cases in `search_output_cap_test.go` (below, above, default, exact boundary).
+
+**B. `content_hash` + `expected_hash` (B3) — stale-edit protection**
+
+Log analysis found 6 stale-edit cycles in 12 days (read → edit fail → re-read → edit ok). The model uses an `old_text` that was modified by a prior edit. Now `read_file` appends an 8-hex-char FNV-1a hash to its response, and `edit_file` accepts an optional `expected_hash` to refuse the edit if the file changed.
+
+```
+# read_file response footer:
+hello world
+# content_hash: 1a2b3c4d
+
+# edit_file with wrong hash:
+ERROR: stale edit: file content changed since read (expected hash: 00000000, actual: 1a2b3c4d).
+Re-read the file with read_file to get the current content_hash, then retry.
+```
+
+- `hash/fnv` (stdlib) — no new dependency
+- `expected_hash` is **optional**; behavior without it is identical to before
+- Schema registered in `core/param_validator.go` for both `edit_file` and `edit` alias
+- Tests: 5 cases in `content_hash_test.go` (appears-in-read, stable, accepted, rejected, omitted).
+
+**C. `cache_hit` in audit log (M3) — observability fix**
+
+The `AuditEntry.CacheHit *bool` field has existed since the audit logger was added, but no code was setting it. Now `ReadFileContent` records `true` on cache hit and `false` on disk read. Operations log (`operations.jsonl`) will show real cache effectiveness.
+
+- New API: `core.SetCacheHit(ctx, hit bool)` (`core/audit_logger.go`)
+- Wire-up: 2 lines in `core/engine.go:ReadFileContent` (hit branch + after disk read)
+- Tests: 2 cases in `core/cache_hit_audit_test.go` (records correctly, no-op without entry).
+
+**D. `SetError` + proxy error extraction (M6) — diagnostic completeness**
+
+The audit log's `Error` field was only populated when the JSON-RPC envelope had a top-level `error` member — but most tool errors come back as `result.isError: true` with the message in `result.content[0].text`. Now both layers handle it.
+
+- New API: `core.SetError(ctx, msg string)` (`core/audit_logger.go`) — handlers can override the auto-extracted error with a custom reason
+- Proxy: `cmd/proxy/main.go` now extracts `result.content[0].text` when `isError: true`, populating `proxy.jsonl` `error` field (was empty for ~95% of MCP-level errors)
+- Tests: 3 cases in `tests/audit_set_error_test.go` (sets-field-and-forces-error, empty-noop, no-entry-noop).
+
+**Files changed (11 total, +118 / -2 lines):**
+
+| File | Change |
+|------|--------|
+| `core/audit_logger.go` | +`SetCacheHit`, +`SetError` |
+| `core/config.go` | +`DefaultMaxSearchOutputBytes` |
+| `core/engine.go` | +`GetConfig()`, +wire `SetCacheHit` in `ReadFileContent` |
+| `core/param_validator.go` | +`expected_hash` in `edit_file` and `edit` schemas |
+| `core/cache_hit_audit_test.go` | NEW |
+| `tools_core.go` | +`hash/fnv` import, +content_hash footer, +expected_hash check, +schema field |
+| `tools_search.go` | +`capSearchOutput` helper, +cap at 2 call sites |
+| `content_hash_test.go` | NEW |
+| `search_output_cap_test.go` | NEW |
+| `tests/audit_set_error_test.go` | NEW |
+| `cmd/proxy/main.go` | +extract error text from `result.content[0].text` |
+
+**Test results:** all existing tests still pass. 14 new tests added, all green.
+
+```
+ok  core         0.678s
+ok  tests        15.820s
+ok  tests/security 0.873s
+ok  .            0.498s
+```
+
+**Out of scope (deferred):**
+- `git` tool 38.9% error rate — comes from another binary (`filesystem-rust-ultra.exe` or `filesystem-ultra-v4-embed_rg.exe`), not this Go server.
+- `get_file_info` 23% error rate — needs running server + Windows lock investigation.
+- `mcp_search`/`mcp_read`/etc. prefix duplication — already resolved by user (12-day log shows 15 unique tool names vs 41 in 3-month history).
+- `ReadFileRange` doesn't use cache — separate PR.
+
 ## [Unreleased / 4.5.5] - 2026-06-04
 
 ### Improvement — Adaptive write_file behavior when backup is available
