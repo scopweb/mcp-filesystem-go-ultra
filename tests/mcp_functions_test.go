@@ -236,7 +236,7 @@ func WriteFile() {
 		oldText := "return nil"
 		newText := "return content"
 
-		result, err := engine.EditFile(context.Background(), testFile, oldText, newText, true, false)
+		result, err := engine.EditFile(context.Background(), testFile, oldText, newText, true, false, false)
 		if err != nil {
 			t.Fatalf("EditFile should succeed with valid context, got error: %v", err)
 		}
@@ -254,7 +254,7 @@ func WriteFile() {
 		oldText := "this_text_does_not_exist"
 		newText := "something"
 
-		result, err := engine.EditFile(context.Background(), testFile, oldText, newText, false, false)
+		result, err := engine.EditFile(context.Background(), testFile, oldText, newText, false, false, false)
 		if err == nil {
 			t.Error("EditFile should fail with invalid context")
 		}

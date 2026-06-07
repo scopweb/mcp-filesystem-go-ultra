@@ -87,6 +87,95 @@ ok  .            0.498s
 - `mcp_search`/`mcp_read`/etc. prefix duplication — already resolved by user (12-day log shows 15 unique tool names vs 41 in 3-month history).
 - `ReadFileRange` doesn't use cache — separate PR.
 
+## [Unreleased / 4.5.7] - 2026-06-07
+
+### Bug fix — `edit_file`/`multi_edit` find 0 matches on files with mixed whitespace
+
+Reported reproduction: a 87 KB JS file edited with VSCode/Windows editors ends up with mixed tabs and spaces. `edit_file` and `project_replace` (in `search_replace` mode) return **0 matches** even for patterns that clearly exist, because the existing byte-exact matcher can't reconcile tabs with 4-space runs. Same problem with CRLF vs LF: a file with Windows line endings and a pattern typed with LF never matches. The previous workaround was for the user to manually reformat and re-save the file before editing.
+
+**Fix — `tolerant_whitespace: true` flag (opt-in)**
+
+Both `edit_file` and `multi_edit` now accept an explicit `tolerant_whitespace` boolean. When `true`, the matcher treats one tab as 4 spaces and CRLF/CR as LF, while preserving the file's original bytes verbatim outside the match region. Pure stdlib, no new dependency.
+
+```js
+// Before (fails on mixed-indent files):
+edit_file({path: "_events.js", old_text: "    taula_llistat(", new_text: "    taula_llistat_new("})
+
+// After (works regardless of tabs/spaces in the file):
+edit_file({path: "_events.js", old_text: "    taula_llistat(", new_text: "    taula_llistat_new(", tolerant_whitespace: true})
+```
+
+- New file: [`core/whitespace_matcher.go`](core/whitespace_matcher.go) — `normalizeForTolerantMatch` (whitespace normalization + byteMap for position translation), `findAllTolerantMatches`, `applyTolerantMatches`. Conservative: only tabs and line endings are normalized, not runs of multiple spaces.
+- [`core/edit_operations.go`](core/edit_operations.go) — `EditFile`, `MultiEdit`, `performIntelligentEdit` accept `tolerantWhitespace bool` and run as `OPTIMIZATION 0` (before the exact-match fast path) when enabled. If tolerant matching finds nothing, the existing cascade (literal escapes, leading-whitespace fallback, flexible regex) still runs.
+- Existing `OPTIMIZATION 7` (leading-whitespace fallback) and `OPTIMIZATION 8` (flexible regex) remain in place as further fallbacks — so behavior with `tolerant_whitespace: false` is byte-identical to before for every file we tested.
+- API change: `EditFile` and `MultiEdit` now take 6 args (added `tolerantWhitespace bool`). All ~20 internal/test call sites updated; the default value `false` preserves existing behavior.
+- Schema: `tolerant_whitespace` registered in `core/param_validator.go` for `edit_file`, `multi_edit`, and the `edit` alias.
+- Wire-up: `tools_core.go` and `tools_batch.go` extract the param and pass it through.
+
+### Feature — `minify_js` tool (pure Go, no Node, no external deps)
+
+A new tool to minify JavaScript files in place. Pure-stdlib state machine that handles `//` and `/* */` comments, single/double/template strings (with `${expr}` interpolation), regex literals (`/.../[flags]`) with character classes, and the regex-vs-division disambiguation that real JS tokenizers do. Auto-creates a backup before overwriting, recoverable with `backup(action:"undo_last")`.
+
+```js
+// Dry run first:
+minify_js({path: "app.js", dry_run: true})
+// → "MINIFY (dry-run) app.js | 87342→31045B (-56297, 64.4%) | comments:42"
+
+// Live run:
+minify_js({path: "app.js", remove_comments: true, single_line: true})
+// → file overwritten; UNDO:20260607-xxxxx is the backup ID
+```
+
+- New file: [`core/minifier.go`](core/minifier.go) — `MinifyJS(src, MinifyOptions) (string, MinifyStats)`, plus `MinifyStats{InputBytes, OutputBytes, BytesSaved, ReductionPercent, CommentsStripped, Truncated}`. Best-effort: the 95% of real-world JS works perfectly; exotic regex-with-`/`-in-char-class and tagged-template edge cases are handled with conservative heuristics (the minifier never modifies the contents of strings, regexes, or template substitutions).
+- New file: [`tools_minify.go`](tools_minify.go) — registers the `minify_js` MCP tool with parameters `path`, `output_path` (optional, write elsewhere instead of overwriting), `remove_comments`, `collapse_whitespace`, `single_line`, `dry_run`, `create_backup`.
+- New public API: `(*UltraFastEngine).InvalidateCache(path)` and `core.SecureRandomSuffix()` — thin wrappers over the existing private helpers so the new tool keeps the cache consistent and uses unpredictable temp-file names.
+- Tool count: **20 tools** (18 core + git + help + **minify_js**).
+
+### Tests
+
+- [`core/whitespace_matcher_test.go`](core/whitespace_matcher_test.go) — 13 cases: tabs↔spaces (both directions), CRLF↔LF, lone CR, multiple matches, byte-range preservation, UTF-8 byte positions preserved, end-to-end via `performIntelligentEdit` with a tab in the middle of a line (a case the existing `OPTIMIZATION 7` cannot handle).
+- [`core/minifier_test.go`](core/minifier_test.go) — 25+ cases covering strings, regex, templates, division, shebang, comment removal modes, single-line toggle, truncation on malformed input, and a real-world DataTable snippet.
+- All existing tests still pass: `go test ./...` green (`core 0.68s`, `tests 14.4s`, `tests/security 0.82s`).
+
+**Files changed (26 total):**
+
+| File | Change |
+|------|--------|
+| `core/whitespace_matcher.go` | NEW — tolerant matcher + byteMap |
+| `core/whitespace_matcher_test.go` | NEW |
+| `core/minifier.go` | NEW — JS state-machine minifier |
+| `core/minifier_test.go` | NEW |
+| `core/edit_operations.go` | +`tolerantWhitespace` param on `EditFile`/`MultiEdit`/`performIntelligentEdit`; new OPTIMIZATION 0 |
+| `core/engine.go` | +`InvalidateCache(path)`, +`SecureRandomSuffix()` |
+| `core/param_validator.go` | +`tolerant_whitespace` in edit_file, multi_edit, edit schemas |
+| `core/streaming_operations.go` | update EditFile caller |
+| `core/claude_optimizer.go` | update EditFile caller |
+| `core/pipeline.go` | update EditFile + MultiEdit callers |
+| `core/batch_operations.go` | update performIntelligentEdit caller |
+| `core/truncation_test.go` | update MultiEdit callers |
+| `core/engine_bench_test.go` | update EditFile caller |
+| `tools_core.go` | +extract `tolerant_whitespace`; +register minify tools; +`20 tools` log |
+| `tools_batch.go` | +extract `tolerant_whitespace` for multi_edit |
+| `tools_minify.go` | NEW — `minify_js` tool registration |
+| `tests/bug16_test.go` | update EditFile + MultiEdit callers |
+| `tests/bug17_test.go` | update MultiEdit callers |
+| `tests/bug18_literal_escapes_test.go` | update EditFile callers |
+| `tests/bug22_multi_edit_test.go` | update MultiEdit callers |
+| `tests/bug23_test.go` | update EditFile + MultiEdit callers |
+| `tests/bug27_multi_edit_atomic_test.go` | update MultiEdit callers |
+| `tests/bug28_html_edit_test.go` | update EditFile callers |
+| `tests/mcp_functions_test.go` | update EditFile callers |
+| `tests/undo_step_through_test.go` | update EditFile + MultiEdit callers |
+
+**Test results:** all existing tests still pass. 38 new tests added, all green.
+
+```
+ok  core         0.680s
+ok  tests        14.372s
+ok  tests/security 0.824s
+ok  .            0.654s
+```
+
 ## [Unreleased / 4.5.5] - 2026-06-04
 
 ### Improvement — Adaptive write_file behavior when backup is available

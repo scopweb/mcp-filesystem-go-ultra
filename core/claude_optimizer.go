@@ -171,7 +171,7 @@ func (o *ClaudeDesktopOptimizer) IntelligentEdit(ctx context.Context, path, oldT
 	// Auto-select strategy
 	if size <= o.config.MaxDirectFileSize {
 		AppendSubOp(ctx, "direct_edit")
-		return o.engine.EditFile(ctx, path, oldText, newText, force, false)
+		return o.engine.EditFile(ctx, path, oldText, newText, force, false, false)
 	} else {
 		AppendSubOp(ctx, "smart_edit_large")
 		return o.engine.SmartEditFile(ctx, path, oldText, newText, force, o.config.MaxDirectFileSize)

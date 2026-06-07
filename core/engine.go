@@ -1589,6 +1589,24 @@ func (e *UltraFastEngine) GetBackupManager() *BackupManager {
 	return e.backupManager
 }
 
+// InvalidateCache drops any cached file content for the given path.
+// Safe to call when no cache is configured (no-op). Exposed so external
+// callers (e.g., tool handlers) can keep the cache consistent after
+// writing a file outside the engine's standard write APIs.
+func (e *UltraFastEngine) InvalidateCache(path string) {
+	if e == nil || e.cache == nil || path == "" {
+		return
+	}
+	e.cache.InvalidateFile(path)
+}
+
+// SecureRandomSuffix exposes the internal helper for callers that need
+// a temp file name guaranteed to be unpredictable (atomic write pattern).
+// Uses crypto/rand — never derives from clock or PID.
+func SecureRandomSuffix() string {
+	return secureRandomSuffix()
+}
+
 // GetCurrentBackupID returns the current backup ID in the undo chain for a file
 func (e *UltraFastEngine) GetCurrentBackupID(path string) string {
 	e.backupChainMu.RLock()

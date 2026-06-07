@@ -57,22 +57,23 @@ var toolSchemas = map[string]ToolParamSchema{
 		"encoding":       {ParamString, false},
 	},
 	"edit_file": {
-		"path":           {ParamString, true},
-		"old_text":       {ParamString, false},
-		"new_text":       {ParamString, false},
-		"old_str":        {ParamString, false}, // alias → old_text (normalizer)
-		"new_str":        {ParamString, false}, // alias → new_text (normalizer)
-		"force":          {ParamBoolean, false},
-		"mode":           {ParamString, false},
-		"occurrence":     {ParamNumber, false},
-		"pattern":        {ParamString, false},
-		"replacement":    {ParamString, false},
-		"patterns_json":  {ParamString, false},
-		"case_sensitive": {ParamBoolean, false},
-		"create_backup":  {ParamBoolean, false},
-		"dry_run":        {ParamBoolean, false},
-		"whole_word":     {ParamBoolean, false},
-		"expected_hash":  {ParamString, false}, // B3: stale-edit protection
+		"path":                {ParamString, true},
+		"old_text":            {ParamString, false},
+		"new_text":            {ParamString, false},
+		"old_str":             {ParamString, false}, // alias → old_text (normalizer)
+		"new_str":             {ParamString, false}, // alias → new_text (normalizer)
+		"force":               {ParamBoolean, false},
+		"mode":                {ParamString, false},
+		"occurrence":          {ParamNumber, false},
+		"pattern":             {ParamString, false},
+		"replacement":         {ParamString, false},
+		"patterns_json":       {ParamString, false},
+		"case_sensitive":      {ParamBoolean, false},
+		"create_backup":       {ParamBoolean, false},
+		"dry_run":             {ParamBoolean, false},
+		"whole_word":          {ParamBoolean, false},
+		"expected_hash":       {ParamString, false}, // B3: stale-edit protection
+		"tolerant_whitespace": {ParamBoolean, false}, // treat tabs↔4sp, CRLF↔LF as equivalent
 	},
 	"list_directory": {
 		"path": {ParamString, true},
@@ -95,9 +96,10 @@ var toolSchemas = map[string]ToolParamSchema{
 
 	// ---- EDIT+ (1) ----
 	"multi_edit": {
-		"path":       {ParamString, true},
-		"edits_json": {ParamString, true},
-		"force":      {ParamBoolean, false},
+		"path":                {ParamString, true},
+		"edits_json":          {ParamString, true},
+		"force":               {ParamBoolean, false},
+		"tolerant_whitespace": {ParamBoolean, false},
 	},
 
 	// ---- FILES (4) ----
@@ -195,22 +197,23 @@ var toolSchemas = map[string]ToolParamSchema{
 		"output":          {ParamString, false},
 	},
 	"edit": {
-		"path":           {ParamString, true},
-		"old_text":       {ParamString, false},
-		"new_text":       {ParamString, false},
-		"old_str":        {ParamString, false},
-		"new_str":        {ParamString, false},
-		"force":          {ParamBoolean, false},
-		"mode":           {ParamString, false},
-		"occurrence":     {ParamNumber, false},
-		"pattern":        {ParamString, false},
-		"replacement":    {ParamString, false},
-		"patterns_json":  {ParamString, false},
-		"case_sensitive": {ParamBoolean, false},
-		"create_backup":  {ParamBoolean, false},
-		"dry_run":        {ParamBoolean, false},
-		"whole_word":     {ParamBoolean, false},
-		"expected_hash":  {ParamString, false}, // B3 alias
+		"path":                {ParamString, true},
+		"old_text":            {ParamString, false},
+		"new_text":            {ParamString, false},
+		"old_str":             {ParamString, false},
+		"new_str":             {ParamString, false},
+		"force":               {ParamBoolean, false},
+		"mode":                {ParamString, false},
+		"occurrence":          {ParamNumber, false},
+		"pattern":             {ParamString, false},
+		"replacement":         {ParamString, false},
+		"patterns_json":       {ParamString, false},
+		"case_sensitive":      {ParamBoolean, false},
+		"create_backup":       {ParamBoolean, false},
+		"dry_run":             {ParamBoolean, false},
+		"whole_word":          {ParamBoolean, false},
+		"expected_hash":       {ParamString, false}, // B3 alias
+		"tolerant_whitespace": {ParamBoolean, false}, // mirror of edit_file
 	},
 	"write": {
 		"path":           {ParamString, true},

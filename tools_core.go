@@ -97,13 +97,14 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	registerBatchTools(reg)
 	registerPlatformTools(reg)
 	registerGitTools(reg)
+	registerMinifyTools(reg)
 	// Aliases disabled: duplicates add noise to discovery, hurt token budget.
 	// registerAliases(reg)
 	// registerClaudeCodeAliases(reg)
 	// registerSuperTool(reg)
 	registerHelpTool(reg)
 
-	log.Printf("Registered 19 tools (17 core + git + help) for v4.5.2 — aliases disabled")
+	log.Printf("Registered 20 tools (18 core + git + help + minify_js) for v4.5.3 — aliases disabled")
 	return nil
 }
 
@@ -467,6 +468,7 @@ func registerCoreTools(reg *toolRegistry) {
 		// file's actual hash doesn't match, the edit is rejected with a clear error.
 		// Improvement B3 (see log analysis: 6 stale-edit cycles in 12 days).
 		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash from the last read_file. If the file's current hash doesn't match, the edit is rejected so the model can re-read first.")),
+		mcp.WithBoolean("tolerant_whitespace", mcp.Description("Treat tabs and 4-space runs as equivalent (1 tab = 4 spaces) and CRLF/LF as equivalent when matching old_text. Use when the file has mixed indentation (e.g., tabs in some lines, spaces in others). Original file bytes are preserved — only the matching is tolerant. Default: false.")),
 	)
 	regexTransform := reg.regexTransform
 	reg.editFileHandler = auditWrap(engine, "edit_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -483,6 +485,7 @@ func registerCoreTools(reg *toolRegistry) {
 		force := false
 		dryRun := false
 		occurrence := 0
+		tolerantWhitespace := false
 
 		if args != nil {
 			if m, ok := args["mode"].(string); ok {
@@ -490,6 +493,9 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			if f, ok := args["force"].(bool); ok {
 				force = f
+			}
+			if tw, ok := args["tolerant_whitespace"].(bool); ok {
+				tolerantWhitespace = tw
 			}
 			if dr, ok := args["dry_run"].(bool); ok {
 				dryRun = dr
@@ -747,7 +753,7 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 		}
 
-		result, err := engine.EditFile(ctx, path, oldText, newText, force, dryRun)
+		result, err := engine.EditFile(ctx, path, oldText, newText, force, dryRun, tolerantWhitespace)
 		if err != nil {
 			// Record failed old_text for reinforcement detection
 			core.RecordFailedOldText(path, oldText)

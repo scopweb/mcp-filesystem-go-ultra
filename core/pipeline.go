@@ -512,7 +512,7 @@ func (pe *PipelineExecutor) executeEdit(ctx context.Context, step PipelineStep, 
 		} else {
 			// Perform actual edit
 			// Force=true because pipeline already assessed risk at batch level
-			editResult, err := pe.engine.EditFile(ctx, normalizedPath, oldText, newText, true, dryRun)
+			editResult, err := pe.engine.EditFile(ctx, normalizedPath, oldText, newText, true, dryRun, false)
 			if err != nil {
 				return &PipelineStepError{
 					StepID:  step.ID,
@@ -625,7 +625,7 @@ func (pe *PipelineExecutor) executeMultiEdit(ctx context.Context, step PipelineS
 			totalEdits += count
 		} else {
 			// Perform actual multi-edit
-			editResult, err := pe.engine.MultiEdit(ctx, normalizedPath, edits, force, dryRun)
+			editResult, err := pe.engine.MultiEdit(ctx, normalizedPath, edits, force, dryRun, false)
 			if err != nil {
 				return &PipelineStepError{
 					StepID:  step.ID,
