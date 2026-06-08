@@ -13,7 +13,7 @@ echo   MCP Filesystem Ultra - Windows Build
 echo ==============================================
 echo.
 
-set GO_LDFLAGS=-ldflags="-s -w"
+set GO_LDFLAGS=-ldflags=-s -w
 set GO_FLAGS=-trimpath
 
 REM Output directory - keeps the project root clean
