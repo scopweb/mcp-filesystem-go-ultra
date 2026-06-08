@@ -15,24 +15,24 @@ DEST_DIR="$(dirname "$0")"
 
 # Map a Go (os, arch) pair to:
 #   - the ripgrep release asset name fragment (uses kernel arch convention)
+#   - the ripgrep target triple suffix used in the GitHub release asset name
 #   - the embedded filename expected by embed.go (uses Go convention)
 # embed.go expects:  rg-windows-amd64.exe, rg-linux-amd64, rg-linux-arm64,
 #                    rg-darwin-amd64, rg-darwin-arm64
+#
+# Note on Linux variants: ripgrep 15.1.0 ships:
+#   - x86_64   -> x86_64-unknown-linux-musl
+#   - aarch64  -> aarch64-unknown-linux-gnu  (no musl build for arm64)
+# So we pass the target-triple suffix per (os, arch) pair.
 download_one() {
-    local goos="$1"       # windows | linux | darwin
-    local goarch="$2"     # amd64 | arm64
-    local rg_arch="$3"    # x86_64 | aarch64
-    local rg_ext="$4"     # zip | tar.gz
-    local out_name="$5"   # e.g. rg-linux-amd64
+    local goos="$1"            # windows | linux | darwin
+    local goarch="$2"          # amd64 | arm64
+    local rg_arch="$3"         # x86_64 | aarch64
+    local target_suffix="$4"   # e.g. x86_64-unknown-linux-musl
+    local rg_ext="$5"          # zip | tar.gz
+    local out_name="$6"        # e.g. rg-linux-amd64
 
-    local os_name
-    case "$goos" in
-        linux)  os_name="unknown-linux-musl" ;;
-        darwin) os_name="apple-darwin" ;;
-        windows) os_name="pc-windows-msvc" ;;
-    esac
-
-    local base="ripgrep-${VERSION}-${rg_arch}-${os_name}"
+    local base="ripgrep-${VERSION}-${target_suffix}"
     local url="https://github.com/BurntSushi/ripgrep/releases/download/${VERSION}/${base}.${rg_ext}"
     local tmp="${DEST_DIR}/.rg-${goos}-${goarch}.${rg_ext}"
 
@@ -77,11 +77,11 @@ mkdir -p "$DEST_DIR"
 
 # Download every supported platform (CI builds all, so it needs them all).
 # Comment out any platform you don't need locally to save bandwidth.
-download_one windows amd64 x86_64 zip      "rg-windows-amd64.exe"
-download_one linux   amd64 x86_64 tar.gz   "rg-linux-amd64"
-download_one linux   arm64 aarch64 tar.gz  "rg-linux-arm64"
-download_one darwin  amd64 x86_64 tar.gz   "rg-darwin-amd64"
-download_one darwin  arm64 aarch64 tar.gz  "rg-darwin-arm64"
+download_one windows amd64 x86_64 x86_64-pc-windows-msvc      zip      "rg-windows-amd64.exe"
+download_one linux   amd64 x86_64 x86_64-unknown-linux-musl   tar.gz   "rg-linux-amd64"
+download_one linux   arm64 aarch64 aarch64-unknown-linux-gnu  tar.gz   "rg-linux-arm64"
+download_one darwin  amd64 x86_64 x86_64-apple-darwin         tar.gz   "rg-darwin-amd64"
+download_one darwin  arm64 aarch64 aarch64-apple-darwin       tar.gz   "rg-darwin-arm64"
 
 # Metadata
 echo "VERSION=$VERSION" > "${DEST_DIR}/.version"
