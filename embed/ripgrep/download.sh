@@ -2,7 +2,10 @@
 # Download script for ripgrep binaries
 # Run from project root: ./embed/ripgrep/download.sh
 #
-# This downloads the official ripgrep binaries from GitHub releases.
+# This downloads the official ripgrep binaries from GitHub releases and
+# places them with the exact filenames expected by embed.go so that
+# `//go:embed` can pick them up at build time.
+#
 # MIT licensed - ripgrep is © BurntSushi
 
 set -e
@@ -10,88 +13,80 @@ set -e
 VERSION="15.1.0"
 DEST_DIR="$(dirname "$0")"
 
-# Determine current platform
-OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-ARCH="$(uname -m)"
+# Map a Go (os, arch) pair to:
+#   - the ripgrep release asset name fragment (uses kernel arch convention)
+#   - the embedded filename expected by embed.go (uses Go convention)
+# embed.go expects:  rg-windows-amd64.exe, rg-linux-amd64, rg-linux-arm64,
+#                    rg-darwin-amd64, rg-darwin-arm64
+download_one() {
+    local goos="$1"       # windows | linux | darwin
+    local goarch="$2"     # amd64 | arm64
+    local rg_arch="$3"    # x86_64 | aarch64
+    local rg_ext="$4"     # zip | tar.gz
+    local out_name="$5"   # e.g. rg-linux-amd64
 
-# Map architectures
-case "$ARCH" in
-    x86_64) ARCH_SUFFIX="x86_64" ;;
-    aarch64|arm64) ARCH_SUFFIX="aarch64" ;;
-    armv7l) ARCH_SUFFIX="armv7" ;;
-    i386|i686) ARCH_SUFFIX="i686" ;;
-    *)
-        echo "Unsupported architecture: $ARCH"
-        exit 1
-        ;;
-esac
+    local os_name
+    case "$goos" in
+        linux)  os_name="unknown-linux-musleabi" ;;
+        darwin) os_name="apple-darwin" ;;
+        windows) os_name="pc-windows-msvc" ;;
+    esac
 
-# Map OS names
-case "$OS" in
-    linux) OS_NAME="unknown-linux-gnu" ;;
-    darwin) OS_NAME="apple-darwin" ;;
-    mingw*|cygwin*|windows*) OS_NAME="pc-windows-msvc" ;;
-    *)
-        echo "Unsupported OS: $OS"
-        exit 1
-        ;;
-esac
+    local base="ripgrep-${VERSION}-${rg_arch}-${os_name}"
+    local url="https://github.com/BurntSushi/ripgrep/releases/download/${VERSION}/${base}.${rg_ext}"
+    local tmp="${DEST_DIR}/.rg-${goos}-${goarch}.${rg_ext}"
 
-# Download URL
-if [ "$OS" = "windows" ] || [ "$OS_NAME" = "pc-windows-msvc" ]; then
-    EXT="zip"
-    BASE_NAME="ripgrep-${VERSION}-${ARCH_SUFFIX}-${OS_NAME}"
-    URL="https://github.com/BurntSushi/ripgrep/releases/download/${VERSION}/${BASE_NAME}.${EXT}"
-    echo "Downloading Windows binary..."
-else
-    EXT="tar.gz"
-    BASE_NAME="ripgrep-${VERSION}-${ARCH_SUFFIX}-${OS_NAME}"
-    # For musl, use musleabi variant
-    if [ "$OS" = "linux" ]; then
-        BASE_NAME="ripgrep-${VERSION}-${ARCH_SUFFIX}-unknown-linux-musleabi"
-        # armv7 uses musleabihf
-        if [ "$ARCH" = "armv7l" ]; then
-            BASE_NAME="ripgrep-${VERSION}-${ARCH_SUFFIX}-unknown-linux-musleabihf"
+    echo ">>> ${goos}/${goarch} ← ${url}"
+    for i in 1 2 3; do
+        if curl -L --fail --progress-bar -o "$tmp" "$url"; then
+            break
         fi
-    fi
-    URL="https://github.com/BurntSushi/ripgrep/releases/download/${VERSION}/${BASE_NAME}.tar.gz"
-    echo "Downloading Linux binary..."
-fi
+        echo "    retry $i..."
+        sleep 2
+    done
 
-echo "URL: $URL"
-echo "Destination: $DEST_DIR"
+    case "$rg_ext" in
+        zip)
+            # Windows zip layout: ripgrep-VER-x86_64-pc-windows-msvc/rg.exe
+            local extract_dir="${DEST_DIR}/.rg-extract-${goos}-${goarch}"
+            mkdir -p "$extract_dir"
+            unzip -o -q "$tmp" -d "$extract_dir"
+            find "$extract_dir" -type f -name "rg.exe" -exec mv -f {} "${DEST_DIR}/${out_name}" \;
+            rm -rf "$extract_dir" "$tmp"
+            ;;
+        tar.gz)
+            # Linux/Darwin tarball layout: ripgrep-VER-.../rg
+            tar -xzf "$tmp" -C "$DEST_DIR"
+            local found
+            found="$(find "$DEST_DIR" -maxdepth 3 -type f -name "rg" -path "*/${base}/*" | head -n 1 || true)"
+            if [ -z "$found" ]; then
+                echo "ERROR: could not find 'rg' inside ${base}" >&2
+                exit 1
+            fi
+            mv -f "$found" "${DEST_DIR}/${out_name}"
+            chmod 0755 "${DEST_DIR}/${out_name}"
+            rm -f "$tmp"
+            # Clean up the extracted directory tree
+            find "$DEST_DIR" -maxdepth 1 -type d -name "${base}" -exec rm -rf {} +
+            ;;
+    esac
+}
 
-# Create destination directory if needed
+# Create destination directory
 mkdir -p "$DEST_DIR"
 
-# Download with retry
-for i in 1 2 3; do
-    if curl -L --fail --progress-bar -o "${DEST_DIR}/rg.bin" "$URL"; then
-        echo "Downloaded successfully"
-        break
-    fi
-    echo "Retry $i..."
-done
+# Download every supported platform (CI builds all, so it needs them all).
+# Comment out any platform you don't need locally to save bandwidth.
+download_one windows amd64 x86_64 zip      "rg-windows-amd64.exe"
+download_one linux   amd64 x86_64 tar.gz   "rg-linux-amd64"
+download_one linux   arm64 aarch64 tar.gz  "rg-linux-arm64"
+download_one darwin  amd64 x86_64 tar.gz   "rg-darwin-amd64"
+download_one darwin  arm64 aarch64 tar.gz  "rg-darwin-arm64"
 
-# Extract if tar.gz
-if [ "$EXT" = "tar.gz" ]; then
-    echo "Extracting..."
-    tar -xzf "${DEST_DIR}/rg.bin" -C "$DEST_DIR"
-    mv "${DEST_DIR}/rg" "${DEST_DIR}/rg-${OS}-${ARCH_SUFFIX}" 2>/dev/null || true
-    rm -f "${DEST_DIR}/rg.bin"
-fi
-
-# Rename for Windows
-if [ "$EXT" = "zip" ]; then
-    echo "Extracting..."
-    unzip -o "${DEST_DIR}/rg.bin" -d "$DEST_DIR"
-    rm -f "${DEST_DIR}/rg.bin"
-fi
-
-# Create metadata file
+# Metadata
 echo "VERSION=$VERSION" > "${DEST_DIR}/.version"
-echo "PLATFORM=${OS}-${ARCH}" >> "${DEST_DIR}/.version"
 echo "DOWNLOAD_DATE=$(date -Iseconds)" >> "${DEST_DIR}/.version"
 
-echo "Done! Binaries in $DEST_DIR"
+echo
+echo "Done. Embedded ripgrep binaries in ${DEST_DIR}:"
 ls -la "$DEST_DIR"

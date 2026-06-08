@@ -14,7 +14,9 @@ on:
     branches: [ main ]
 
 env:
-  GO_VERSION: '1.26.3'
+  # Bump to 1.26.4+ for stdlib security fixes (GO-2026-5039, GO-2026-5037
+  # in net/textproto and crypto/x509 — both fixed in 1.26.4).
+  GO_VERSION: '1.26.4'
 
 jobs:
   # ============================================================
@@ -90,6 +92,14 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
+
+      # The `embed_rg` build embeds ripgrep binaries via //go:embed. Those
+      # binaries are git-ignored (the project ignores *.exe) and are NOT
+      # checked in, so we have to fetch them before the build runs.
+      # download.sh writes files with the exact names embed.go expects.
+      - name: Download ripgrep binaries for embed_rg
+        shell: bash
+        run: bash embed/ripgrep/download.sh
 
       - name: Build all binaries (Linux/macOS)
         if: runner.os != 'Windows'
