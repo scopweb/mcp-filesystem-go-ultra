@@ -113,10 +113,13 @@ jobs:
 
       - name: Verify binaries (Windows)
         if: runner.os == 'Windows'
+        # GitHub Actions on Windows runs shell steps in PowerShell 7, not
+        # cmd.exe, so the cmd-style `if not exist` syntax doesn't work.
+        # Use Test-Path instead.
         run: |
           dir bin\
-          if not exist bin\filesystem-ultra-v4.exe exit /b 1
-          if not exist bin\mcp-proxy.exe exit /b 1
+          if (-not (Test-Path bin\filesystem-ultra-v4.exe)) { exit 1 }
+          if (-not (Test-Path bin\mcp-proxy.exe)) { exit 1 }
 
       - name: Verify binaries (Linux/macOS)
         if: runner.os != 'Windows'
