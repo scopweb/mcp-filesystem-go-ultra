@@ -44,8 +44,8 @@ var binaries embed.FS
 
 var (
 	extractedPath string
-	extractOnce  sync.Once
-	extractErr   error
+	extractOnce   sync.Once
+	extractErr    error
 )
 
 // GetExtractedPath returns the path to the extracted ripgrep binary.

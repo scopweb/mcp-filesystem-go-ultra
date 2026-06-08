@@ -27,7 +27,7 @@ download_one() {
 
     local os_name
     case "$goos" in
-        linux)  os_name="unknown-linux-musleabi" ;;
+        linux)  os_name="unknown-linux-musl" ;;
         darwin) os_name="apple-darwin" ;;
         windows) os_name="pc-windows-msvc" ;;
     esac

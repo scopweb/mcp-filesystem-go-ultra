@@ -17,24 +17,24 @@ type RuleType string
 
 const (
 	RuleParamAlias     RuleType = "param_alias"      // Rename top-level param: From → To
-	RuleParamDefault   RuleType = "param_default"     // Set default if param missing
-	RuleTypeCoerce     RuleType = "type_coerce"       // Coerce type (string "true" → bool true)
-	RuleNestedAlias    RuleType = "nested_alias"      // Rename field inside JSON payload
-	RuleNestedDefault  RuleType = "nested_default"    // Set default inside JSON payload array items
-	RuleJSONAcceptBoth RuleType = "json_accept_both"  // Accept param as string OR raw JSON value
+	RuleParamDefault   RuleType = "param_default"    // Set default if param missing
+	RuleTypeCoerce     RuleType = "type_coerce"      // Coerce type (string "true" → bool true)
+	RuleNestedAlias    RuleType = "nested_alias"     // Rename field inside JSON payload
+	RuleNestedDefault  RuleType = "nested_default"   // Set default inside JSON payload array items
+	RuleJSONAcceptBoth RuleType = "json_accept_both" // Accept param as string OR raw JSON value
 )
 
 // NormalizationRule defines a single data-driven normalization rule
 type NormalizationRule struct {
-	ID        string   `json:"id"`                    // Unique rule identifier
-	Tools     []string `json:"tools"`                 // Tool names ("*" = all tools)
-	Type      RuleType `json:"type"`                  // Rule type
-	From      string   `json:"from"`                  // Source param or field name
-	To        string   `json:"to,omitempty"`          // Target param or field name (alias types)
-	CoerceTo  string   `json:"coerce_to,omitempty"`   // Target type: "bool", "int", "float"
-	InPayload string   `json:"in_payload,omitempty"`  // JSON payload param name (nested_* types)
-	ArrayPath string   `json:"array_path,omitempty"`  // Array path: "[]", "steps[]"
-	Value     string   `json:"value,omitempty"`       // Default value template: "step-{{index}}"
+	ID        string   `json:"id"`                   // Unique rule identifier
+	Tools     []string `json:"tools"`                // Tool names ("*" = all tools)
+	Type      RuleType `json:"type"`                 // Rule type
+	From      string   `json:"from"`                 // Source param or field name
+	To        string   `json:"to,omitempty"`         // Target param or field name (alias types)
+	CoerceTo  string   `json:"coerce_to,omitempty"`  // Target type: "bool", "int", "float"
+	InPayload string   `json:"in_payload,omitempty"` // JSON payload param name (nested_* types)
+	ArrayPath string   `json:"array_path,omitempty"` // Array path: "[]", "steps[]"
+	Value     string   `json:"value,omitempty"`      // Default value template: "step-{{index}}"
 }
 
 // NormalizationApplied records a single normalization that was applied
