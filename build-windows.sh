@@ -32,22 +32,22 @@ build_native() {
     # Main server
     echo "[1/4] Building bin/filesystem-ultra-v4 ..."
     rm -f bin/filesystem-ultra-v4
-    go build $GO_LDFLAGS $GO_FLAGS -o bin/filesystem-ultra-v4 .
+    go build "$GO_LDFLAGS" $GO_FLAGS -o bin/filesystem-ultra-v4 .
 
     # Main server + embedded ripgrep (recommended)
     echo "[2/4] Building bin/filesystem-ultra-v4-embed_rg ..."
     rm -f bin/filesystem-ultra-v4-embed_rg
-    go build $GO_LDFLAGS $GO_FLAGS -tags embed_rg -o bin/filesystem-ultra-v4-embed_rg .
+    go build "$GO_LDFLAGS" $GO_FLAGS -tags embed_rg -o bin/filesystem-ultra-v4-embed_rg .
 
     # Proxy (important: built from ./cmd/proxy)
     echo "[3/4] Building bin/mcp-proxy ..."
     rm -f bin/mcp-proxy
-    go build $GO_LDFLAGS $GO_FLAGS -o bin/mcp-proxy ./cmd/proxy
+    go build "$GO_LDFLAGS" $GO_FLAGS -o bin/mcp-proxy ./cmd/proxy
 
     # Dashboard
     echo "[4/4] Building bin/filesystem-ultra-v4-dashboard ..."
     rm -f bin/filesystem-ultra-v4-dashboard
-    go build $GO_LDFLAGS $GO_FLAGS -o bin/filesystem-ultra-v4-dashboard ./cmd/dashboard/
+    go build "$GO_LDFLAGS" $GO_FLAGS -o bin/filesystem-ultra-v4-dashboard ./cmd/dashboard/
 
     echo ""
     echo "✅ Native build successful!"

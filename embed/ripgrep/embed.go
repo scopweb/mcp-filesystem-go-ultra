@@ -17,13 +17,35 @@ import (
 	"sync"
 )
 
-//go:embed *.exe
+// Embed ripgrep binaries for every supported platform.
+//
+// The `all:` prefix tells the embed package to include files that would
+// otherwise be excluded by .gitignore (the project ignores `*.exe` to keep
+// build artifacts out of the tree, but the ripgrep binaries are intentional
+// and must be embedded when the build tag is set).
+//
+// Expected filenames (looked up by GetExtractedPath at runtime):
+//   - rg-windows-amd64.exe
+//   - rg-linux-amd64
+//   - rg-linux-arm64
+//   - rg-darwin-amd64
+//   - rg-darwin-arm64
+//
+// To (re)generate these files locally or in CI, run:
+//
+//	./embed/ripgrep/download.sh
+//
+// which writes the binaries with the exact names above. A single glob is
+// used so the embed succeeds even when only a subset of platforms is
+// downloaded (e.g. on a developer machine that only needs its host OS).
+//
+//go:embed all:rg-*
 var binaries embed.FS
 
 var (
 	extractedPath string
-	extractOnce  sync.Once
-	extractErr   error
+	extractOnce   sync.Once
+	extractErr    error
 )
 
 // GetExtractedPath returns the path to the extracted ripgrep binary.
