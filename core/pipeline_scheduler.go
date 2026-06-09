@@ -28,8 +28,8 @@ func (s *PipelineScheduler) BuildExecutionPlan(steps []PipelineStep) ([][]int, e
 	}
 
 	// Build adjacency list (dependencies: who does each step depend on?)
-	deps := make([][]int, n)     // deps[i] = list of step indices that step i depends on
-	depCount := make([]int, n)   // in-degree for topological sort
+	deps := make([][]int, n)       // deps[i] = list of step indices that step i depends on
+	depCount := make([]int, n)     // in-degree for topological sort
 	dependents := make([][]int, n) // dependents[i] = steps that depend on step i
 
 	for i, step := range steps {

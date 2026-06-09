@@ -37,10 +37,10 @@ type RegexTransformConfig struct {
 
 // PatternResult holds results for a single pattern
 type PatternResult struct {
-	Pattern       string // Pattern used
-	Replacements  int    // Number of replacements made
-	Lines         []int  // Line numbers affected (if tracked)
-	Error         string // Error if pattern failed
+	Pattern      string // Pattern used
+	Replacements int    // Number of replacements made
+	Lines        []int  // Line numbers affected (if tracked)
+	Error        string // Error if pattern failed
 }
 
 // RegexTransformResult holds transformation results

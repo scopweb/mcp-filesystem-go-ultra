@@ -20,15 +20,15 @@ type EditResult struct {
 	ReplacementCount int
 	MatchConfidence  string
 	LinesAffected    int
-	LinesAdded       int    // Lines added (+N in diff format)
-	LinesRemoved     int    // Lines removed (-M in diff format)
-	TotalLines       int    // Total lines in file after edit
-	StartLine        int    // 1-based line number where first edit was applied (for clickable links)
-	EndLine          int    // 1-based line number where last edit ends (for clickable links)
-	BackupID         string // ID of backup created before edit
-	RiskWarning      string // Non-blocking risk warning for MEDIUM/HIGH (empty if LOW/none)
-	EfficiencyHint   string // Token-saving hint when full-file rewrite detected (e.g., "Consider search_files + edit_file for surgical edits")
-	Analysis         *ChangeAnalysis // Full change analysis for AI visibility (plan mode style)
+	LinesAdded       int                  // Lines added (+N in diff format)
+	LinesRemoved     int                  // Lines removed (-M in diff format)
+	TotalLines       int                  // Total lines in file after edit
+	StartLine        int                  // 1-based line number where first edit was applied (for clickable links)
+	EndLine          int                  // 1-based line number where last edit ends (for clickable links)
+	BackupID         string               // ID of backup created before edit
+	RiskWarning      string               // Non-blocking risk warning for MEDIUM/HIGH (empty if LOW/none)
+	EfficiencyHint   string               // Token-saving hint when full-file rewrite detected (e.g., "Consider search_files + edit_file for surgical edits")
+	Analysis         *ChangeAnalysis      // Full change analysis for AI visibility (plan mode style)
 	Integrity        *FileIntegrityResult // Auto-verification result for HIGH/CRITICAL edits
 }
 
@@ -1123,22 +1123,22 @@ type EditDetail struct {
 
 // MultiEditResult represents the result of a multi-edit operation
 type MultiEditResult struct {
-	TotalEdits      int          `json:"total_edits"`
-	SuccessfulEdits int          `json:"successful_edits"`
-	FailedEdits     int          `json:"failed_edits"`
-	SkippedEdits    int          `json:"skipped_edits"`
-	LinesAffected   int          `json:"lines_affected"`
-	LinesAdded      int          `json:"lines_added"`   // Lines added (+N in diff format)
-	LinesRemoved    int          `json:"lines_removed"` // Lines removed (-M in diff format)
-	TotalLines      int          `json:"total_lines"`   // Total lines in file after edits
-	StartLine       int          `json:"start_line"`    // 1-based line of first edit (for clickable links)
-	EndLine         int          `json:"end_line"`      // 1-based end line of last edit (for clickable links)
-	MatchConfidence string       `json:"match_confidence"`
-	Errors          []string     `json:"errors,omitempty"`
-	BackupID        string       `json:"backup_id,omitempty"`
-	RiskWarning     string       `json:"risk_warning,omitempty"`
-	EditDetails     []EditDetail `json:"edit_details,omitempty"`
-	Analysis        *ChangeAnalysis `json:"analysis,omitempty"` // Full change analysis for AI visibility
+	TotalEdits      int                  `json:"total_edits"`
+	SuccessfulEdits int                  `json:"successful_edits"`
+	FailedEdits     int                  `json:"failed_edits"`
+	SkippedEdits    int                  `json:"skipped_edits"`
+	LinesAffected   int                  `json:"lines_affected"`
+	LinesAdded      int                  `json:"lines_added"`   // Lines added (+N in diff format)
+	LinesRemoved    int                  `json:"lines_removed"` // Lines removed (-M in diff format)
+	TotalLines      int                  `json:"total_lines"`   // Total lines in file after edits
+	StartLine       int                  `json:"start_line"`    // 1-based line of first edit (for clickable links)
+	EndLine         int                  `json:"end_line"`      // 1-based end line of last edit (for clickable links)
+	MatchConfidence string               `json:"match_confidence"`
+	Errors          []string             `json:"errors,omitempty"`
+	BackupID        string               `json:"backup_id,omitempty"`
+	RiskWarning     string               `json:"risk_warning,omitempty"`
+	EditDetails     []EditDetail         `json:"edit_details,omitempty"`
+	Analysis        *ChangeAnalysis      `json:"analysis,omitempty"`  // Full change analysis for AI visibility
 	Integrity       *FileIntegrityResult `json:"integrity,omitempty"` // Auto-verification for HIGH/CRITICAL edits
 }
 
@@ -1486,14 +1486,14 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 
 	// Generate aggregate change analysis for AI visibility
 	result.Analysis = &ChangeAnalysis{
-		FilePath:      path,
-		OperationType: "multi_edit",
-		FileExists:     true,
-		RiskLevel:     aggregateImpact.RiskLevel,
-		RiskFactors:    aggregateImpact.RiskFactors,
-		LinesAdded:     result.LinesAdded,
-		LinesRemoved:   result.LinesRemoved,
-		LinesModified:  result.LinesAffected,
+		FilePath:          path,
+		OperationType:     "multi_edit",
+		FileExists:        true,
+		RiskLevel:         aggregateImpact.RiskLevel,
+		RiskFactors:       aggregateImpact.RiskFactors,
+		LinesAdded:        result.LinesAdded,
+		LinesRemoved:      result.LinesRemoved,
+		LinesModified:     result.LinesAffected,
 		CharactersChanged: int(aggregateImpact.CharactersChanged),
 		Impact: fmt.Sprintf("MultiEdit: %d/%d edits succeeded. Lines: +%d -%d",
 			result.SuccessfulEdits, result.TotalEdits, result.LinesAdded, result.LinesRemoved),

@@ -4,12 +4,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"testing"
 	"strings"
+	"testing"
 
-	localmcp "github.com/mcp/filesystem-ultra/mcp"
 	"github.com/mcp/filesystem-ultra/cache"
 	"github.com/mcp/filesystem-ultra/core"
+	localmcp "github.com/mcp/filesystem-ultra/mcp"
 )
 
 // TestSmartSearchWithCoordinates tests that SmartSearch populates coordinate fields
@@ -43,10 +43,10 @@ func main() {
 	// Test SmartSearch with include_content=true to search file contents
 	req := localmcp.CallToolRequest{
 		Arguments: map[string]interface{}{
-			"path":             tmpDir,
-			"pattern":          "pattern",
-			"include_content":  true,
-			"file_types":       []interface{}{".go"},
+			"path":            tmpDir,
+			"pattern":         "pattern",
+			"include_content": true,
+			"file_types":      []interface{}{".go"},
 		},
 	}
 

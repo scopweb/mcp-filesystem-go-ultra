@@ -11,26 +11,26 @@ import (
 
 // PipelineRequest represents a multi-step file transformation pipeline
 type PipelineRequest struct {
-	Name         string         `json:"name"`          // Required: pipeline name
-	StopOnError  bool           `json:"stop_on_error"` // Default: true - stop on first error
-	DryRun       bool           `json:"dry_run"`       // Default: false - preview changes without applying
-	CreateBackup bool           `json:"create_backup"` // Default: true if destructive steps present
-	Force        bool           `json:"force"`         // Bypass risk warnings
-	Verbose      bool           `json:"verbose"`       // Return intermediate data (contents, per-file counts)
+	Name         string         `json:"name"`               // Required: pipeline name
+	StopOnError  bool           `json:"stop_on_error"`      // Default: true - stop on first error
+	DryRun       bool           `json:"dry_run"`            // Default: false - preview changes without applying
+	CreateBackup bool           `json:"create_backup"`      // Default: true if destructive steps present
+	Force        bool           `json:"force"`              // Bypass risk warnings
+	Verbose      bool           `json:"verbose"`            // Return intermediate data (contents, per-file counts)
 	Parallel     bool           `json:"parallel,omitempty"` // Enable parallel execution via DAG scheduling
-	Steps        []PipelineStep `json:"steps"`         // Pipeline steps to execute
+	Steps        []PipelineStep `json:"steps"`              // Pipeline steps to execute
 	validated    bool           // Internal: validation cache
 }
 
 // PipelineStep represents a single operation in the pipeline.
 // Accepts both "action" and "type" field names (Claude Desktop sometimes uses "type").
 type PipelineStep struct {
-	ID           string                 `json:"id"`                      // Unique identifier (alphanumeric + - _)
-	Action       string                 `json:"action"`                  // Action type: search, edit, etc.
-	InputFrom    string                 `json:"input_from,omitempty"`    // ID of previous step to get input from
+	ID           string                 `json:"id"`                       // Unique identifier (alphanumeric + - _)
+	Action       string                 `json:"action"`                   // Action type: search, edit, etc.
+	InputFrom    string                 `json:"input_from,omitempty"`     // ID of previous step to get input from
 	InputFromAll []string               `json:"input_from_all,omitempty"` // IDs of multiple steps (for aggregate/merge)
-	Params       map[string]interface{} `json:"params"`                  // Action-specific parameters
-	Condition    *StepCondition         `json:"condition,omitempty"`     // Optional condition for conditional execution
+	Params       map[string]interface{} `json:"params"`                   // Action-specific parameters
+	Condition    *StepCondition         `json:"condition,omitempty"`      // Optional condition for conditional execution
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling to accept "type" as alias for "action"
@@ -63,20 +63,20 @@ func (ps *PipelineStep) UnmarshalJSON(data []byte) error {
 
 // StepResult represents the result of a single pipeline step
 type StepResult struct {
-	StepID       string            `json:"step_id"`
-	Action       string            `json:"action"`
-	Success      bool              `json:"success"`
-	Skipped      bool              `json:"skipped,omitempty"`         // True if condition evaluated to false
-	SkipReason   string            `json:"skip_reason,omitempty"`     // Why the step was skipped
-	FilesMatched []string          `json:"files_matched,omitempty"`   // Files found/affected
-	Content      map[string]string `json:"content,omitempty"`         // path -> content
-	EditsApplied int               `json:"edits_applied,omitempty"`   // Number of edits made
-	Counts       map[string]int    `json:"counts,omitempty"`          // path -> occurrence count
-	Error        string            `json:"error,omitempty"`           // Error message if failed
-	Duration     time.Duration     `json:"duration"`                  // Step execution time
-	RiskLevel          string            `json:"risk_level,omitempty"`          // LOW/MEDIUM/HIGH/CRITICAL
-	AggregatedContent  string            `json:"aggregated_content,omitempty"`  // Combined content from aggregate/merge
-	internalData       interface{}       `json:"-"`                             // Internal data not serialized
+	StepID            string            `json:"step_id"`
+	Action            string            `json:"action"`
+	Success           bool              `json:"success"`
+	Skipped           bool              `json:"skipped,omitempty"`            // True if condition evaluated to false
+	SkipReason        string            `json:"skip_reason,omitempty"`        // Why the step was skipped
+	FilesMatched      []string          `json:"files_matched,omitempty"`      // Files found/affected
+	Content           map[string]string `json:"content,omitempty"`            // path -> content
+	EditsApplied      int               `json:"edits_applied,omitempty"`      // Number of edits made
+	Counts            map[string]int    `json:"counts,omitempty"`             // path -> occurrence count
+	Error             string            `json:"error,omitempty"`              // Error message if failed
+	Duration          time.Duration     `json:"duration"`                     // Step execution time
+	RiskLevel         string            `json:"risk_level,omitempty"`         // LOW/MEDIUM/HIGH/CRITICAL
+	AggregatedContent string            `json:"aggregated_content,omitempty"` // Combined content from aggregate/merge
+	internalData      interface{}       `json:"-"`                            // Internal data not serialized
 }
 
 // PipelineResult represents the final result of pipeline execution
@@ -165,18 +165,18 @@ func (pc *PipelineContext) GetBackupID() string {
 
 // Supported pipeline actions
 var supportedActions = map[string]bool{
-	"search":             true,
-	"read_ranges":        true,
-	"edit":               true,
-	"multi_edit":         true,
-	"count_occurrences":  true,
-	"regex_transform":    true,
-	"copy":               true,
-	"rename":             true,
-	"delete":             true,
-	"aggregate":          true,
-	"diff":               true,
-	"merge":              true,
+	"search":            true,
+	"read_ranges":       true,
+	"edit":              true,
+	"multi_edit":        true,
+	"count_occurrences": true,
+	"regex_transform":   true,
+	"copy":              true,
+	"rename":            true,
+	"delete":            true,
+	"aggregate":         true,
+	"diff":              true,
+	"merge":             true,
 }
 
 // Validate validates the entire pipeline request

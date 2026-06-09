@@ -261,8 +261,8 @@ func ValidateRegex(pattern string) error {
 	// context timeouts at the operation level.
 
 	dangerousPatterns := []string{
-		"(a+)+",  "(a*)+",  "(a{1,})+",
-		"(.*)+",  "(..)+",  "(.+)+",
+		"(a+)+", "(a*)+", "(a{1,})+",
+		"(.*)+", "(..)+", "(.+)+",
 		"(\\w+)+", "(\\d+)+",
 	}
 

@@ -10,8 +10,8 @@ import (
 type ParamType int
 
 const (
-	ParamString  ParamType = iota
-	ParamNumber            // JSON numbers arrive as float64
+	ParamString ParamType = iota
+	ParamNumber           // JSON numbers arrive as float64
 	ParamBoolean
 )
 
@@ -72,7 +72,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"create_backup":       {ParamBoolean, false},
 		"dry_run":             {ParamBoolean, false},
 		"whole_word":          {ParamBoolean, false},
-		"expected_hash":       {ParamString, false}, // B3: stale-edit protection
+		"expected_hash":       {ParamString, false},  // B3: stale-edit protection
 		"tolerant_whitespace": {ParamBoolean, false}, // treat tabs↔4sp, CRLF↔LF as equivalent
 	},
 	"list_directory": {
@@ -89,9 +89,9 @@ var toolSchemas = map[string]ToolParamSchema{
 		"context_lines":   {ParamNumber, false},
 		"count_only":      {ParamBoolean, false},
 		"return_lines":    {ParamBoolean, false}, // bool or string "true"/"false"
-		"include":         {ParamString, false},   // glob pattern (alias for file_types)
-		"output_format":   {ParamString, false},   // "text" or "json"
-		"output":          {ParamString, false},   // alias for output_format
+		"include":         {ParamString, false},  // glob pattern (alias for file_types)
+		"output_format":   {ParamString, false},  // "text" or "json"
+		"output":          {ParamString, false},  // alias for output_format
 	},
 
 	// ---- EDIT+ (1) ----
@@ -212,7 +212,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"create_backup":       {ParamBoolean, false},
 		"dry_run":             {ParamBoolean, false},
 		"whole_word":          {ParamBoolean, false},
-		"expected_hash":       {ParamString, false}, // B3 alias
+		"expected_hash":       {ParamString, false},  // B3 alias
 		"tolerant_whitespace": {ParamBoolean, false}, // mirror of edit_file
 	},
 	"write": {

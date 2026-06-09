@@ -92,7 +92,7 @@ type UltraFastEngine struct {
 	backupManager *BackupManager
 
 	// Backup chain for step-through undo (path → current backupID in chain)
-	backupChain map[string]string
+	backupChain   map[string]string
 	backupChainMu sync.RWMutex
 
 	// Risk thresholds for impact analysis
@@ -127,9 +127,9 @@ type UltraFastEngine struct {
 	// Session tracking: groups consecutive operations into conversation sessions.
 	// A new session starts when > sessionInactivityTimeout elapses between operations.
 	session struct {
-		mu        sync.Mutex
-		id        string
-		lastOpAt  time.Time
+		mu       sync.Mutex
+		id       string
+		lastOpAt time.Time
 	}
 
 	// Ripgrep support: detected once at startup for high-performance search
@@ -190,10 +190,10 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 	}
 
 	engine := &UltraFastEngine{
-		config:    config,
-		cache:     config.Cache,
-		metrics:   &PerformanceMetrics{},
-		semaphore: make(chan struct{}, config.ParallelOps),
+		config:      config,
+		cache:       config.Cache,
+		metrics:     &PerformanceMetrics{},
+		semaphore:   make(chan struct{}, config.ParallelOps),
 		backupChain: make(map[string]string),
 	}
 

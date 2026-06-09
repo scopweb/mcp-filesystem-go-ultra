@@ -62,12 +62,12 @@ type OperationResult struct {
 
 // BatchOperationManager maneja operaciones en batch con soporte para rollback
 type BatchOperationManager struct {
-	backupDir       string          // Local backup directory (for tests or when no shared manager)
-	backupManager   *BackupManager  // Shared backup manager (统一backup系统)
-	maxBackups      int
-	mutex           sync.Mutex
-	currentBackup   string
-	engine          *UltraFastEngine // Reference to engine for intelligent edit (Bug #18)
+	backupDir     string         // Local backup directory (for tests or when no shared manager)
+	backupManager *BackupManager // Shared backup manager (统一backup系统)
+	maxBackups    int
+	mutex         sync.Mutex
+	currentBackup string
+	engine        *UltraFastEngine // Reference to engine for intelligent edit (Bug #18)
 }
 
 // NewBatchOperationManager creates a new batch operation manager
@@ -78,7 +78,7 @@ func NewBatchOperationManager(backupDir string, maxBackups int) *BatchOperationM
 	}
 	os.MkdirAll(backupDir, 0755)
 	return &BatchOperationManager{
-		backupDir:   backupDir,
+		backupDir:  backupDir,
 		maxBackups: maxBackups,
 	}
 }
@@ -293,7 +293,7 @@ func (m *BatchOperationManager) validateOperations(operations []FileOperation) [
 				errors = append(errors, fmt.Sprintf("Op %d: destination already exists: %s", i, op.Destination))
 			}
 			pendingPaths[op.Destination] = true // el archivo existirá en el destino
-			delete(pendingPaths, op.Source)      // ya no estará en el origen
+			delete(pendingPaths, op.Source)     // ya no estará en el origen
 
 		case "copy":
 			if op.Source == "" || op.Destination == "" {
