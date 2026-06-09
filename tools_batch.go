@@ -29,6 +29,7 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
 		mcp.WithString("edits_json", mcp.Required(), mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]. Also accepts old_str/new_str as aliases.")),
 		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
+		mcp.WithBoolean("tolerant_whitespace", mcp.Description("Apply tolerant_whitespace semantics to all edits in the batch (1 tab = 4 spaces, CRLF = LF). Default: false.")),
 	)
 	reg.addTool(multiEditTool, auditWrap(engine, "multi_edit", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -118,7 +119,7 @@ func registerBatchTools(reg *toolRegistry) {
 		}
 
 		// Execute multi-edit
-		result, err := engine.MultiEdit(ctx, path, edits, force, dryRun)
+		result, err := engine.MultiEdit(ctx, path, edits, force, dryRun, false)
 		if err != nil {
 			// Bug #27: If result is non-nil, this is an atomic rollback — include backup_id and details
 			if result != nil && result.BackupID != "" {

@@ -283,6 +283,19 @@ func main() {
 					var result struct{ IsError bool `json:"isError"` }
 					if json.Unmarshal(msg.Result, &result) == nil && result.IsError {
 						pc.entry.Status = "error"
+						// Extract error text from result.content[0].text
+						// (matches the same extraction done in audit.go:60-64
+						// on the server side). Without this, proxy.jsonl shows
+						// status="error" but leaves the error field empty.
+						var resultFull struct {
+							Content []struct {
+								Type string `json:"type"`
+								Text string `json:"text"`
+							} `json:"content"`
+						}
+						if json.Unmarshal(msg.Result, &resultFull) == nil && len(resultFull.Content) > 0 {
+							pc.entry.Error = resultFull.Content[0].Text
+						}
 					}
 				}
 

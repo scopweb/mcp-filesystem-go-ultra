@@ -155,7 +155,7 @@ func registerSearchTools(reg *toolRegistry) {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 			if len(resp.Content) > 0 {
-				return mcp.NewToolResultText(resp.Content[0].Text), nil
+				return mcp.NewToolResultText(capSearchOutput(resp.Content[0].Text, engine)), nil
 			}
 			return mcp.NewToolResultText("No matches"), nil
 		}
@@ -170,7 +170,7 @@ func registerSearchTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if len(resp.Content) > 0 {
-			return mcp.NewToolResultText(resp.Content[0].Text), nil
+			return mcp.NewToolResultText(capSearchOutput(resp.Content[0].Text, engine)), nil
 		}
 		return mcp.NewToolResultText("No matches"), nil
 	})
@@ -264,4 +264,24 @@ func registerSearchTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(fmt.Sprintf("Unknown operation: %s. Valid: file, optimize, write, edit, delete", operation)), nil
 		}
 	}))
+}
+
+// capSearchOutput truncates a search_files response if it exceeds the configured
+// output cap. Appends a marker so the model knows the response was truncated
+// and how to recover (count_only:true or a narrower path).
+//
+// Improvement M1+M2: prevents accidental multi-MB responses that waste tokens
+// (a single 2.28MB search response was observed in the proxy log, costing
+// ~570K output tokens).
+func capSearchOutput(text string, engine *core.UltraFastEngine) string {
+	maxBytes := core.DefaultMaxSearchOutputBytes
+	if cfg := engine.GetConfig(); cfg != nil && cfg.MaxSearchOutputBytes > 0 {
+		maxBytes = cfg.MaxSearchOutputBytes
+	}
+	if len(text) <= maxBytes {
+		return text
+	}
+	truncated := text[:maxBytes]
+	marker := fmt.Sprintf("\n\n⚠️ truncated: response exceeded %d KB. Use count_only:true or narrow the path/pattern.\n", maxBytes/1024)
+	return truncated + marker
 }

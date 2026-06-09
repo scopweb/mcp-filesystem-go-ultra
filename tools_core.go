@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"os"
 	"path/filepath"
@@ -96,13 +97,14 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	registerBatchTools(reg)
 	registerPlatformTools(reg)
 	registerGitTools(reg)
+	registerMinifyTools(reg)
 	// Aliases disabled: duplicates add noise to discovery, hurt token budget.
 	// registerAliases(reg)
 	// registerClaudeCodeAliases(reg)
 	// registerSuperTool(reg)
 	registerHelpTool(reg)
 
-	log.Printf("Registered 19 tools (17 core + git + help) for v4.5.2 — aliases disabled")
+	log.Printf("Registered 20 tools (18 core + git + help + minify_js) for v4.5.3 — aliases disabled")
 	return nil
 }
 
@@ -255,6 +257,17 @@ func registerCoreTools(reg *toolRegistry) {
 		// Record read for stale-read detection in feedback system
 		core.RecordRead(core.NormalizePath(path))
 
+		// Compute FNV-1a content hash (8 hex chars) and append as a comment
+		// footer. The model can echo it back via edit_file(expected_hash:"...")
+		// to detect stale reads (improvement B3: prevents 6 stale-edit cycles
+		// observed in 12 days of log analysis).
+		// The `#` makes it look like a comment in many file formats so it
+		// doesn't pollute the user's view of the actual content.
+		h := fnv.New32a()
+		h.Write([]byte(content))
+		contentHash := fmt.Sprintf("%08x", h.Sum32())
+		content = content + "\n# content_hash: " + contentHash
+
 		// Apply truncation if explicitly requested
 		if maxLines > 0 || mode != "all" {
 			content = truncateContent(content, maxLines, mode)
@@ -359,22 +372,53 @@ func registerCoreTools(reg *toolRegistry) {
 			content = c
 		}
 
-		// Feedback: check for truncation/inflation/full-rewrite patterns
+		// Feedback: check for truncation/inflation/full-rewrite patterns.
+		// Normalize path once so os.Stat, CreateBackup, and WriteFileContent
+		// all see the same target (consistent on Windows/WSL).
+		normPath := core.NormalizePath(path)
 		var existingSize int64
-		if info, statErr := os.Stat(core.NormalizePath(path)); statErr == nil {
+		if info, statErr := os.Stat(normPath); statErr == nil {
 			existingSize = info.Size()
 		}
-		if signal := core.CheckWriteOp(path, content, existingSize); signal.BlockOp {
+		signal := core.CheckWriteOp(path, content, existingSize)
+
+		// Adaptive downgrade: if CheckWriteOp wants to block AND a backup
+		// manager is configured, create a safety backup and proceed with
+		// warn instead. If no backup manager or backup creation fails, keep
+		// the original block as a safety net. See core/feedback_adaptive.go.
+		var newBackupID string
+		if signal.BlockOp && engine.GetBackupManager() != nil {
+			prevBackupID := engine.GetCurrentBackupID(normPath)
+			createBackup := func(p, op, userCtx string) (string, error) {
+				return engine.GetBackupManager().CreateBackupWithContextAndParent(
+					p, op, userCtx, prevBackupID,
+				)
+			}
+			signal, newBackupID = core.ApplyAdaptiveWriteBlock(
+				signal, true, normPath,
+				int64(len(content)), existingSize, createBackup,
+			)
+			// On successful downgrade, link the new backup into the undo chain
+			// so backup(action:"undo_last", file_path:"...") can step back.
+			if newBackupID != "" {
+				engine.SetCurrentBackupID(normPath, newBackupID)
+			}
+		}
+
+		if signal.BlockOp {
 			core.SetFeedback(ctx, signal)
 			return mcp.NewToolResultError(signal.Message + "\n→ " + signal.Suggestion), nil
 		} else if signal.Status != core.FeedbackOK {
-			// Non-blocking warn — proceed but append feedback to response
+			// Non-blocking warn — proceed but append feedback to response.
+			// Always use verbose format (FormatFeedback, not FormatFeedbackCompact)
+			// when the warn came from an adaptive downgrade so the backup ID
+			// and restore command remain literal and visible to the AI/operator.
 			err = engine.WriteFileContent(ctx, path, content)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
 			core.SetFeedback(ctx, signal)
-			if engine.IsCompactMode() {
+			if engine.IsCompactMode() && !signal.Downgraded {
 				return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s %s | %dB | %s", diskPrefix(absPath), absPath, len(content), core.FormatFeedbackCompact(signal))), nil
 			}
 			return mcp.NewToolResultText(core.FormatFeedback(signal, fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, len(content)))), nil
@@ -420,6 +464,11 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithBoolean("create_backup", mcp.Description("Create backup before transformation (default: true, for regex mode)")),
 		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Supported in modes: replace (default), search_replace, regex. Default: false.")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false, for occurrence mode)")),
+		// Stale-edit protection: hash returned by the prior read_file call. If the
+		// file's actual hash doesn't match, the edit is rejected with a clear error.
+		// Improvement B3 (see log analysis: 6 stale-edit cycles in 12 days).
+		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash from the last read_file. If the file's current hash doesn't match, the edit is rejected so the model can re-read first.")),
+		mcp.WithBoolean("tolerant_whitespace", mcp.Description("Treat tabs and 4-space runs as equivalent (1 tab = 4 spaces) and CRLF/LF as equivalent when matching old_text. Use when the file has mixed indentation (e.g., tabs in some lines, spaces in others). Original file bytes are preserved — only the matching is tolerant. Default: false.")),
 	)
 	regexTransform := reg.regexTransform
 	reg.editFileHandler = auditWrap(engine, "edit_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -436,6 +485,7 @@ func registerCoreTools(reg *toolRegistry) {
 		force := false
 		dryRun := false
 		occurrence := 0
+		tolerantWhitespace := false
 
 		if args != nil {
 			if m, ok := args["mode"].(string); ok {
@@ -443,6 +493,9 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			if f, ok := args["force"].(bool); ok {
 				force = f
+			}
+			if tw, ok := args["tolerant_whitespace"].(bool); ok {
+				tolerantWhitespace = tw
 			}
 			if dr, ok := args["dry_run"].(bool); ok {
 				dryRun = dr
@@ -680,7 +733,27 @@ func registerCoreTools(reg *toolRegistry) {
 		oldContentRaw, _ := os.ReadFile(normPath)
 		oldContentStr := string(oldContentRaw)
 
-		result, err := engine.EditFile(ctx, path, oldText, newText, force, dryRun)
+		// Improvement B3: stale-edit protection. If the caller passed
+		// expected_hash (the hash returned by the prior read_file), verify
+		// the file hasn't changed. Mismatch → return clear error so the
+		// model can re-read instead of silently overwriting.
+		if args != nil {
+			if expectedHash, ok := args["expected_hash"].(string); ok && expectedHash != "" {
+				h := fnv.New32a()
+				h.Write(oldContentRaw)
+				actualHash := fmt.Sprintf("%08x", h.Sum32())
+				if actualHash != expectedHash {
+					core.SetError(ctx, fmt.Sprintf(
+						"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file before editing.",
+						expectedHash, actualHash))
+					return mcp.NewToolResultError(fmt.Sprintf(
+						"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file with read_file to get the current content_hash, then retry.",
+						expectedHash, actualHash)), nil
+				}
+			}
+		}
+
+		result, err := engine.EditFile(ctx, path, oldText, newText, force, dryRun, tolerantWhitespace)
 		if err != nil {
 			// Record failed old_text for reinforcement detection
 			core.RecordFailedOldText(path, oldText)

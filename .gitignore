@@ -104,6 +104,7 @@ Revisar_implantar_o_borrar/
 temp_test/
 test_*.txt
 before.txt
+*.pptx
 
 # ------------------------------------------------------------
 # Claude / AI agent artifacts (keep only the custom skill)

@@ -142,7 +142,7 @@ func BenchmarkEditFile(b *testing.B) {
 		}
 		b.StartTimer()
 
-		_, err := engine.EditFile(ctx, path, "foo bar baz", "foo BAR baz", true, false)
+		_, err := engine.EditFile(ctx, path, "foo bar baz", "foo BAR baz", true, false, false)
 		if err != nil {
 			b.Fatal(err)
 		}

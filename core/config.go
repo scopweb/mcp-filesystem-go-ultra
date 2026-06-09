@@ -64,4 +64,9 @@ const (
 	// Regex operation timeout to prevent ReDoS (catastrophic backtracking).
 	// Patterns like (a+)+ or (.*)+ can cause exponential time complexity.
 	RegexOperationTimeout = 5 * time.Second
+
+	// DefaultMaxSearchOutputBytes is the default cap for search_files responses.
+	// Prevents accidental multi-MB output that wastes tokens (~500KB ≈ 125k tokens).
+	// Operators can override via Config.MaxSearchOutputBytes; 0 = use default.
+	DefaultMaxSearchOutputBytes = 500 * 1024
 )

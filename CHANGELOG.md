@@ -1,6 +1,212 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
-## [Unreleased / 4.5.5] - 2026-05-30
+## [Unreleased / 4.5.6] - 2026-06-07
+
+### Improvement — Log-driven optimizations (analysis of 12 days, 16,742 operations)
+
+After analyzing `C:\temp\mcp-proxy-logs\proxy.jsonl` (27-may → 07-jun, 2053 ops, 76 errors), four low-risk, backwards-compatible improvements landed:
+
+**A. `search_files` output cap (M1+M2) — token-cost fix**
+
+44% of all output tokens came from `search_files`. Worst case observed: a single 2.28 MB response (~570k tokens). Now the handler truncates responses larger than the configured cap (default 500 KB) and appends a marker so the model knows to retry with `count_only:true` or a narrower path.
+
+```
+⚠️ truncated: response exceeded 500 KB. Use count_only:true or narrow the path/pattern.
+```
+
+- New constant: `core.DefaultMaxSearchOutputBytes = 500 * 1024` (`core/config.go`)
+- New field: `Config.MaxSearchOutputBytes` (0 = use default)
+- New helper: `capSearchOutput(text, engine)` in `tools_search.go`
+- New accessor: `(*UltraFastEngine).GetConfig()` (`core/engine.go`)
+- Behavior below the cap is unchanged; only over-cap responses are truncated.
+- Tests: 4 cases in `search_output_cap_test.go` (below, above, default, exact boundary).
+
+**B. `content_hash` + `expected_hash` (B3) — stale-edit protection**
+
+Log analysis found 6 stale-edit cycles in 12 days (read → edit fail → re-read → edit ok). The model uses an `old_text` that was modified by a prior edit. Now `read_file` appends an 8-hex-char FNV-1a hash to its response, and `edit_file` accepts an optional `expected_hash` to refuse the edit if the file changed.
+
+```
+# read_file response footer:
+hello world
+# content_hash: 1a2b3c4d
+
+# edit_file with wrong hash:
+ERROR: stale edit: file content changed since read (expected hash: 00000000, actual: 1a2b3c4d).
+Re-read the file with read_file to get the current content_hash, then retry.
+```
+
+- `hash/fnv` (stdlib) — no new dependency
+- `expected_hash` is **optional**; behavior without it is identical to before
+- Schema registered in `core/param_validator.go` for both `edit_file` and `edit` alias
+- Tests: 5 cases in `content_hash_test.go` (appears-in-read, stable, accepted, rejected, omitted).
+
+**C. `cache_hit` in audit log (M3) — observability fix**
+
+The `AuditEntry.CacheHit *bool` field has existed since the audit logger was added, but no code was setting it. Now `ReadFileContent` records `true` on cache hit and `false` on disk read. Operations log (`operations.jsonl`) will show real cache effectiveness.
+
+- New API: `core.SetCacheHit(ctx, hit bool)` (`core/audit_logger.go`)
+- Wire-up: 2 lines in `core/engine.go:ReadFileContent` (hit branch + after disk read)
+- Tests: 2 cases in `core/cache_hit_audit_test.go` (records correctly, no-op without entry).
+
+**D. `SetError` + proxy error extraction (M6) — diagnostic completeness**
+
+The audit log's `Error` field was only populated when the JSON-RPC envelope had a top-level `error` member — but most tool errors come back as `result.isError: true` with the message in `result.content[0].text`. Now both layers handle it.
+
+- New API: `core.SetError(ctx, msg string)` (`core/audit_logger.go`) — handlers can override the auto-extracted error with a custom reason
+- Proxy: `cmd/proxy/main.go` now extracts `result.content[0].text` when `isError: true`, populating `proxy.jsonl` `error` field (was empty for ~95% of MCP-level errors)
+- Tests: 3 cases in `tests/audit_set_error_test.go` (sets-field-and-forces-error, empty-noop, no-entry-noop).
+
+**Files changed (11 total, +118 / -2 lines):**
+
+| File | Change |
+|------|--------|
+| `core/audit_logger.go` | +`SetCacheHit`, +`SetError` |
+| `core/config.go` | +`DefaultMaxSearchOutputBytes` |
+| `core/engine.go` | +`GetConfig()`, +wire `SetCacheHit` in `ReadFileContent` |
+| `core/param_validator.go` | +`expected_hash` in `edit_file` and `edit` schemas |
+| `core/cache_hit_audit_test.go` | NEW |
+| `tools_core.go` | +`hash/fnv` import, +content_hash footer, +expected_hash check, +schema field |
+| `tools_search.go` | +`capSearchOutput` helper, +cap at 2 call sites |
+| `content_hash_test.go` | NEW |
+| `search_output_cap_test.go` | NEW |
+| `tests/audit_set_error_test.go` | NEW |
+| `cmd/proxy/main.go` | +extract error text from `result.content[0].text` |
+
+**Test results:** all existing tests still pass. 14 new tests added, all green.
+
+```
+ok  core         0.678s
+ok  tests        15.820s
+ok  tests/security 0.873s
+ok  .            0.498s
+```
+
+**Out of scope (deferred):**
+- `git` tool 38.9% error rate — comes from another binary (`filesystem-rust-ultra.exe` or `filesystem-ultra-v4-embed_rg.exe`), not this Go server.
+- `get_file_info` 23% error rate — needs running server + Windows lock investigation.
+- `mcp_search`/`mcp_read`/etc. prefix duplication — already resolved by user (12-day log shows 15 unique tool names vs 41 in 3-month history).
+- `ReadFileRange` doesn't use cache — separate PR.
+
+## [Unreleased / 4.5.7] - 2026-06-07
+
+### Bug fix — `edit_file`/`multi_edit` find 0 matches on files with mixed whitespace
+
+Reported reproduction: a 87 KB JS file edited with VSCode/Windows editors ends up with mixed tabs and spaces. `edit_file` and `project_replace` (in `search_replace` mode) return **0 matches** even for patterns that clearly exist, because the existing byte-exact matcher can't reconcile tabs with 4-space runs. Same problem with CRLF vs LF: a file with Windows line endings and a pattern typed with LF never matches. The previous workaround was for the user to manually reformat and re-save the file before editing.
+
+**Fix — `tolerant_whitespace: true` flag (opt-in)**
+
+Both `edit_file` and `multi_edit` now accept an explicit `tolerant_whitespace` boolean. When `true`, the matcher treats one tab as 4 spaces and CRLF/CR as LF, while preserving the file's original bytes verbatim outside the match region. Pure stdlib, no new dependency.
+
+```js
+// Before (fails on mixed-indent files):
+edit_file({path: "_events.js", old_text: "    taula_llistat(", new_text: "    taula_llistat_new("})
+
+// After (works regardless of tabs/spaces in the file):
+edit_file({path: "_events.js", old_text: "    taula_llistat(", new_text: "    taula_llistat_new(", tolerant_whitespace: true})
+```
+
+- New file: [`core/whitespace_matcher.go`](core/whitespace_matcher.go) — `normalizeForTolerantMatch` (whitespace normalization + byteMap for position translation), `findAllTolerantMatches`, `applyTolerantMatches`. Conservative: only tabs and line endings are normalized, not runs of multiple spaces.
+- [`core/edit_operations.go`](core/edit_operations.go) — `EditFile`, `MultiEdit`, `performIntelligentEdit` accept `tolerantWhitespace bool` and run as `OPTIMIZATION 0` (before the exact-match fast path) when enabled. If tolerant matching finds nothing, the existing cascade (literal escapes, leading-whitespace fallback, flexible regex) still runs.
+- Existing `OPTIMIZATION 7` (leading-whitespace fallback) and `OPTIMIZATION 8` (flexible regex) remain in place as further fallbacks — so behavior with `tolerant_whitespace: false` is byte-identical to before for every file we tested.
+- API change: `EditFile` and `MultiEdit` now take 6 args (added `tolerantWhitespace bool`). All ~20 internal/test call sites updated; the default value `false` preserves existing behavior.
+- Schema: `tolerant_whitespace` registered in `core/param_validator.go` for `edit_file`, `multi_edit`, and the `edit` alias.
+- Wire-up: `tools_core.go` and `tools_batch.go` extract the param and pass it through.
+
+### Feature — `minify_js` tool (pure Go, no Node, no external deps)
+
+A new tool to minify JavaScript files in place. Pure-stdlib state machine that handles `//` and `/* */` comments, single/double/template strings (with `${expr}` interpolation), regex literals (`/.../[flags]`) with character classes, and the regex-vs-division disambiguation that real JS tokenizers do. Auto-creates a backup before overwriting, recoverable with `backup(action:"undo_last")`.
+
+```js
+// Dry run first:
+minify_js({path: "app.js", dry_run: true})
+// → "MINIFY (dry-run) app.js | 87342→31045B (-56297, 64.4%) | comments:42"
+
+// Live run:
+minify_js({path: "app.js", remove_comments: true, single_line: true})
+// → file overwritten; UNDO:20260607-xxxxx is the backup ID
+```
+
+- New file: [`core/minifier.go`](core/minifier.go) — `MinifyJS(src, MinifyOptions) (string, MinifyStats)`, plus `MinifyStats{InputBytes, OutputBytes, BytesSaved, ReductionPercent, CommentsStripped, Truncated}`. Best-effort: the 95% of real-world JS works perfectly; exotic regex-with-`/`-in-char-class and tagged-template edge cases are handled with conservative heuristics (the minifier never modifies the contents of strings, regexes, or template substitutions).
+- New file: [`tools_minify.go`](tools_minify.go) — registers the `minify_js` MCP tool with parameters `path`, `output_path` (optional, write elsewhere instead of overwriting), `remove_comments`, `collapse_whitespace`, `single_line`, `dry_run`, `create_backup`.
+- New public API: `(*UltraFastEngine).InvalidateCache(path)` and `core.SecureRandomSuffix()` — thin wrappers over the existing private helpers so the new tool keeps the cache consistent and uses unpredictable temp-file names.
+- Tool count: **20 tools** (18 core + git + help + **minify_js**).
+
+### Tests
+
+- [`core/whitespace_matcher_test.go`](core/whitespace_matcher_test.go) — 13 cases: tabs↔spaces (both directions), CRLF↔LF, lone CR, multiple matches, byte-range preservation, UTF-8 byte positions preserved, end-to-end via `performIntelligentEdit` with a tab in the middle of a line (a case the existing `OPTIMIZATION 7` cannot handle).
+- [`core/minifier_test.go`](core/minifier_test.go) — 25+ cases covering strings, regex, templates, division, shebang, comment removal modes, single-line toggle, truncation on malformed input, and a real-world DataTable snippet.
+- All existing tests still pass: `go test ./...` green (`core 0.68s`, `tests 14.4s`, `tests/security 0.82s`).
+
+**Files changed (26 total):**
+
+| File | Change |
+|------|--------|
+| `core/whitespace_matcher.go` | NEW — tolerant matcher + byteMap |
+| `core/whitespace_matcher_test.go` | NEW |
+| `core/minifier.go` | NEW — JS state-machine minifier |
+| `core/minifier_test.go` | NEW |
+| `core/edit_operations.go` | +`tolerantWhitespace` param on `EditFile`/`MultiEdit`/`performIntelligentEdit`; new OPTIMIZATION 0 |
+| `core/engine.go` | +`InvalidateCache(path)`, +`SecureRandomSuffix()` |
+| `core/param_validator.go` | +`tolerant_whitespace` in edit_file, multi_edit, edit schemas |
+| `core/streaming_operations.go` | update EditFile caller |
+| `core/claude_optimizer.go` | update EditFile caller |
+| `core/pipeline.go` | update EditFile + MultiEdit callers |
+| `core/batch_operations.go` | update performIntelligentEdit caller |
+| `core/truncation_test.go` | update MultiEdit callers |
+| `core/engine_bench_test.go` | update EditFile caller |
+| `tools_core.go` | +extract `tolerant_whitespace`; +register minify tools; +`20 tools` log |
+| `tools_batch.go` | +extract `tolerant_whitespace` for multi_edit |
+| `tools_minify.go` | NEW — `minify_js` tool registration |
+| `tests/bug16_test.go` | update EditFile + MultiEdit callers |
+| `tests/bug17_test.go` | update MultiEdit callers |
+| `tests/bug18_literal_escapes_test.go` | update EditFile callers |
+| `tests/bug22_multi_edit_test.go` | update MultiEdit callers |
+| `tests/bug23_test.go` | update EditFile + MultiEdit callers |
+| `tests/bug27_multi_edit_atomic_test.go` | update MultiEdit callers |
+| `tests/bug28_html_edit_test.go` | update EditFile callers |
+| `tests/mcp_functions_test.go` | update EditFile callers |
+| `tests/undo_step_through_test.go` | update EditFile + MultiEdit callers |
+
+**Test results:** all existing tests still pass. 38 new tests added, all green.
+
+```
+ok  core         0.680s
+ok  tests        14.372s
+ok  tests/security 0.824s
+ok  .            0.654s
+```
+
+## [Unreleased / 4.5.5] - 2026-06-04
+
+### Improvement — Adaptive write_file behavior when backup is available
+
+`write_file` previously hard-blocked when new content was < 50% or > 3× the existing file size (`truncation` and `inflation_loop` patterns in `core/feedback.go`), forcing a `delete_file` + `write_file` cycle that wasted tokens on long sessions.
+
+Now, when the engine has a `BackupManager` configured (default: `--backup-dir` → `temp/mcp-batch-backups`), these patterns instead:
+1. Create a safety backup of the existing file (linked to the undo chain via `CreateBackupWithContextAndParent`)
+2. Proceed with the write
+3. Return a non-blocking `WARN` (status `warn` in the audit log) that includes the backup ID and the literal `backup(action:"restore", backup_id:"...")` undo command. Response format is forced to verbose so the restore command is visible, even in `--compact-mode`.
+
+When the backup manager is unavailable (rare — only if `NewBackupManager` failed at startup, e.g. permissions), the original hard-block behavior is preserved as a safety net.
+
+**Response format (downgraded case):**
+```
+WRITTEN C:\foo\bar.go | 8055B
+⚠️ [TRUNCATION] WARNING: new content (8055 B) is less than 50% of existing file (62749 B). Looks like accidental truncation.
+   → Backup created: 20260604-130xxx. To undo: backup(action:"restore", backup_id:"20260604-130xxx"). Read the full file first, then use edit_file for partial changes. To force overwrite: delete_file first, then write_file.
+```
+
+**Files:**
+- `core/feedback_adaptive.go` (new) — `ApplyAdaptiveWriteBlock` pure helper
+- `core/feedback_adaptive_test.go` (new) — 9 table-driven cases + restore-command format pin
+- `core/feedback.go` — added `Downgraded bool` field to `FeedbackSignal` (with `omitempty` for JSON back-compat)
+- `tools_core.go` — handler of `write_file` now calls the helper; normalizes path once; forces verbose response on downgraded warns
+- `core/claude_optimizer.go` — added `// NOTE:` documenting the intentional divergence with the legacy `IntelliGentWrite` guard
+
+**Not changed:** the legacy truncation guard in `core/claude_optimizer.go:IntelliGentWrite` — hard-blocks even when backup is available. The divergence is intentional for this release; unification planned for 4.5.6+.
+
+**Build artifacts:**
+- `bin/filesystem-ultra-v4-embed_rg.exe` (12 MB, with ripgrep embedded) — rebuilt 2026-06-04
 
 ### Security — Major improvements to hook coverage, Git tool, and WSL auto-sync
 

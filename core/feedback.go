@@ -35,6 +35,14 @@ type FeedbackSignal struct {
 	Message    string         `json:"message"`
 	Suggestion string         `json:"suggestion,omitempty"`
 	BlockOp    bool           `json:"block_op"` // true = operation should not proceed
+
+	// Downgraded is set to true by ApplyAdaptiveWriteBlock (and any future
+	// adaptive downgraders) when a blocking signal was turned into a
+	// non-blocking warn because a safety backup was created. Tool handlers
+	// can use this to choose response formatting (e.g., force verbose mode
+	// so the restore command is literal, not compact). Omitted from JSON
+	// when false to preserve backward compatibility.
+	Downgraded bool `json:"downgraded,omitempty"`
 }
 
 // OK returns a FeedbackSignal indicating no issue.

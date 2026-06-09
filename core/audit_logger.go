@@ -91,6 +91,31 @@ func SetIntegrityStatus(ctx context.Context, status, warning string) {
 	}
 }
 
+// SetCacheHit annotates the current audit entry with whether a read was served from cache.
+// Safe to call even when no audit entry is in context (no-op).
+// Stored as *bool to distinguish "unset" from explicit false in JSON output.
+func SetCacheHit(ctx context.Context, hit bool) {
+	if entry, ok := ctx.Value(AuditEntryKey{}).(*AuditEntry); ok {
+		entry.CacheHit = &hit
+	}
+}
+
+// SetError annotates the current audit entry with a custom error message
+// and forces status to "error" if it was "ok" or empty. Used by handlers
+// that want to log a specific error reason beyond what the default
+// res.IsError text extraction would capture.
+func SetError(ctx context.Context, msg string) {
+	if msg == "" {
+		return
+	}
+	if entry, ok := ctx.Value(AuditEntryKey{}).(*AuditEntry); ok {
+		entry.Error = msg
+		if entry.Status == "ok" || entry.Status == "" {
+			entry.Status = "error"
+		}
+	}
+}
+
 // AuditEntry represents a single MCP tool operation log entry
 type AuditEntry struct {
 	Timestamp    time.Time         `json:"ts"`
