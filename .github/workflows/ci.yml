@@ -80,6 +80,7 @@ jobs:
         run: |
           go test -p 1 ./core/... -count=1
           go test -p 1 ./tests/security/... -count=1
+          go test -p 1 ./tests/... -count=1
 
       - name: Run focused core + security tests (Linux, with race)
         if: runner.os == 'Linux'
