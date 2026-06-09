@@ -341,7 +341,7 @@ func (p *LargeFileProcessor) processLineByLine(ctx context.Context, config Proce
 		}
 
 		// Invalidate cache
-		p.engine.cache.InvalidateFile(config.OutputPath)
+		p.engine.invalidateFileReadCache(config.OutputPath)
 	}
 
 	return nil
@@ -470,7 +470,7 @@ func (p *LargeFileProcessor) processChunkByChunk(ctx context.Context, config Pro
 		}
 
 		// Invalidate cache
-		p.engine.cache.InvalidateFile(config.OutputPath)
+		p.engine.invalidateFileReadCache(config.OutputPath)
 	}
 
 	return nil

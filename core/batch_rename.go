@@ -464,8 +464,8 @@ func (e *UltraFastEngine) executeRenameOperations(operations []RenameOperation, 
 				result.RenamedCount++
 
 				// Invalidate cache for old and new paths
-				e.cache.InvalidateFile(op.OldPath)
-				e.cache.InvalidateFile(op.NewPath)
+				e.invalidateFileReadCache(op.OldPath)
+				e.invalidateFileReadCache(op.NewPath)
 			}
 		})
 	}

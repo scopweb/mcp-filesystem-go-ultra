@@ -207,7 +207,7 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 	}
 
 	// Invalidate cache
-	e.cache.InvalidateFile(path)
+	e.invalidateFileReadCache(path)
 
 	// DO NOT remove backup - keep it persistent for recovery
 	// (old behavior: os.Remove(backupPath) - removed for Bug10 fix)
@@ -838,7 +838,7 @@ func (e *UltraFastEngine) searchAndReplaceInFile(filePath, pattern, replacement 
 	}
 
 	// Invalidate cache
-	e.cache.InvalidateFile(filePath)
+	e.invalidateFileReadCache(filePath)
 
 	return len(matches), nil
 }
@@ -1461,7 +1461,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	}
 
 	// Invalidate cache
-	e.cache.InvalidateFile(path)
+	e.invalidateFileReadCache(path)
 
 	// DO NOT remove backup - keep it persistent for recovery (Bug #16)
 
@@ -1759,7 +1759,7 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 	}
 
 	// Invalidate cache
-	e.cache.InvalidateFile(validPath)
+	e.invalidateFileReadCache(validPath)
 
 	// Execute post-edit hooks
 	workingDir, _ := os.Getwd()
