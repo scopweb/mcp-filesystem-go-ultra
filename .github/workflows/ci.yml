@@ -69,10 +69,17 @@ jobs:
 
       - name: Run all tests (Windows, no race)
         if: runner.os != 'Linux'
-        # The GitHub Actions Windows runner has limited RAM, so we
-        # run package tests serially (-p 1) to keep peak memory
-        # down. Without this the test process can hit VirtualAlloc
-        # errno=1455 (ERROR_NO_SYSTEM_RESOURCES) partway through.
+        # The GitHub Actions Windows runner has limited RAM, so we:
+        #   - run package tests serially (-p 1) to keep peak memory
+        #     down across packages
+        #   - cap GOMAXPROCS at 2 (default is 2 on these runners,
+        #     but the explicit cap stops Go from spawning extra
+        #     worker threads that each reserve ~1 MB of stack space)
+        #   - cap GOMEMLIMIT at 2 GiB to make the GC more aggressive
+        #     before the process hits VirtualAlloc errno=1455.
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: '2GiB'
         run: go test -p 1 ./... -count=1
 
       - name: Run focused core + security tests (Linux, with race)
@@ -83,6 +90,9 @@ jobs:
 
       - name: Run focused core + security tests (Windows, no race)
         if: runner.os != 'Linux'
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: '2GiB'
         run: |
           go test -p 1 ./core/... -count=1
           go test -p 1 ./tests/security/... -count=1
