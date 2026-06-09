@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -590,6 +591,14 @@ func TestPipeline_MultiEdit(t *testing.T) {
 
 // TestPipeline_Copy tests file copy operation
 func TestPipeline_Copy(t *testing.T) {
+	// The pipeline copy action goes through engine.CopyFile, which
+	// enforces the same TOCTOU symlink check as TestMoveFile/TestCopyFile
+	// in core/. On Windows that check rejects any path through a
+	// directory junction, and the GitHub Actions windows runner puts
+	// t.TempDir() under one. Skip on Windows for the same reason.
+	if runtime.GOOS == "windows" {
+		t.Skip("Pipeline copy uses engine.CopyFile which rejects t.TempDir() paths on Windows junctions (TOCTOU check) — see core.TestMoveFile skip comment")
+	}
 	testDir := t.TempDir()
 	engine := createTestEngineWithPath(t, testDir)
 	executor := core.NewPipelineExecutor(engine)

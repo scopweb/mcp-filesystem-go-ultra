@@ -13,7 +13,7 @@ echo   MCP Filesystem Ultra - Windows Build
 echo ==============================================
 echo.
 
-set GO_LDFLAGS=-ldflags="-s -w"
+set GO_LDFLAGS=-ldflags=-s -w
 set GO_FLAGS=-trimpath
 
 REM Output directory - keeps the project root clean
@@ -25,7 +25,7 @@ REM 1. Main server (standard, no embedded ripgrep)
 REM ------------------------------------------------------------
 echo [1/4] Building %OUT_DIR%\filesystem-ultra-v4.exe ...
 if exist %OUT_DIR%\filesystem-ultra-v4.exe del %OUT_DIR%\filesystem-ultra-v4.exe
-go build %GO_LDFLAGS% %GO_FLAGS% -o %OUT_DIR%\filesystem-ultra-v4.exe .
+go build "%GO_LDFLAGS%" %GO_FLAGS% -o %OUT_DIR%\filesystem-ultra-v4.exe .
 if %ERRORLEVEL% neq 0 goto fail
 echo   OK: %OUT_DIR%\filesystem-ultra-v4.exe
 
@@ -35,7 +35,7 @@ REM ------------------------------------------------------------
 echo.
 echo [2/4] Building %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe (with embedded ripgrep)...
 if exist %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe del %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe
-go build %GO_LDFLAGS% %GO_FLAGS% -tags embed_rg -o %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe .
+go build "%GO_LDFLAGS%" %GO_FLAGS% -tags embed_rg -o %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe .
 if %ERRORLEVEL% neq 0 goto fail
 echo   OK: %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe
 
@@ -47,7 +47,7 @@ REM ------------------------------------------------------------
 echo.
 echo [3/4] Building %OUT_DIR%\mcp-proxy.exe (logging proxy)...
 if exist %OUT_DIR%\mcp-proxy.exe del %OUT_DIR%\mcp-proxy.exe
-go build %GO_LDFLAGS% %GO_FLAGS% -o %OUT_DIR%\mcp-proxy.exe ./cmd/proxy
+go build "%GO_LDFLAGS%" %GO_FLAGS% -o %OUT_DIR%\mcp-proxy.exe ./cmd/proxy
 if %ERRORLEVEL% neq 0 goto fail
 echo   OK: %OUT_DIR%\mcp-proxy.exe
 
@@ -57,7 +57,7 @@ REM ------------------------------------------------------------
 echo.
 echo [4/4] Building %OUT_DIR%\filesystem-ultra-v4-dashboard.exe ...
 if exist %OUT_DIR%\filesystem-ultra-v4-dashboard.exe del %OUT_DIR%\filesystem-ultra-v4-dashboard.exe
-go build %GO_LDFLAGS% %GO_FLAGS% -o %OUT_DIR%\filesystem-ultra-v4-dashboard.exe ./cmd/dashboard/
+go build "%GO_LDFLAGS%" %GO_FLAGS% -o %OUT_DIR%\filesystem-ultra-v4-dashboard.exe ./cmd/dashboard/
 if %ERRORLEVEL% neq 0 goto fail
 echo   OK: %OUT_DIR%\filesystem-ultra-v4-dashboard.exe
 
