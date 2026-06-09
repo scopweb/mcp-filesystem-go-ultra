@@ -17,24 +17,24 @@ type RuleType string
 
 const (
 	RuleParamAlias     RuleType = "param_alias"      // Rename top-level param: From → To
-	RuleParamDefault   RuleType = "param_default"     // Set default if param missing
-	RuleTypeCoerce     RuleType = "type_coerce"       // Coerce type (string "true" → bool true)
-	RuleNestedAlias    RuleType = "nested_alias"      // Rename field inside JSON payload
-	RuleNestedDefault  RuleType = "nested_default"    // Set default inside JSON payload array items
-	RuleJSONAcceptBoth RuleType = "json_accept_both"  // Accept param as string OR raw JSON value
+	RuleParamDefault   RuleType = "param_default"    // Set default if param missing
+	RuleTypeCoerce     RuleType = "type_coerce"      // Coerce type (string "true" → bool true)
+	RuleNestedAlias    RuleType = "nested_alias"     // Rename field inside JSON payload
+	RuleNestedDefault  RuleType = "nested_default"   // Set default inside JSON payload array items
+	RuleJSONAcceptBoth RuleType = "json_accept_both" // Accept param as string OR raw JSON value
 )
 
 // NormalizationRule defines a single data-driven normalization rule
 type NormalizationRule struct {
-	ID        string   `json:"id"`                    // Unique rule identifier
-	Tools     []string `json:"tools"`                 // Tool names ("*" = all tools)
-	Type      RuleType `json:"type"`                  // Rule type
-	From      string   `json:"from"`                  // Source param or field name
-	To        string   `json:"to,omitempty"`          // Target param or field name (alias types)
-	CoerceTo  string   `json:"coerce_to,omitempty"`   // Target type: "bool", "int", "float"
-	InPayload string   `json:"in_payload,omitempty"`  // JSON payload param name (nested_* types)
-	ArrayPath string   `json:"array_path,omitempty"`  // Array path: "[]", "steps[]"
-	Value     string   `json:"value,omitempty"`       // Default value template: "step-{{index}}"
+	ID        string   `json:"id"`                   // Unique rule identifier
+	Tools     []string `json:"tools"`                // Tool names ("*" = all tools)
+	Type      RuleType `json:"type"`                 // Rule type
+	From      string   `json:"from"`                 // Source param or field name
+	To        string   `json:"to,omitempty"`         // Target param or field name (alias types)
+	CoerceTo  string   `json:"coerce_to,omitempty"`  // Target type: "bool", "int", "float"
+	InPayload string   `json:"in_payload,omitempty"` // JSON payload param name (nested_* types)
+	ArrayPath string   `json:"array_path,omitempty"` // Array path: "[]", "steps[]"
+	Value     string   `json:"value,omitempty"`      // Default value template: "step-{{index}}"
 }
 
 // NormalizationApplied records a single normalization that was applied
@@ -53,15 +53,25 @@ type NormalizeResult struct {
 	WasModified bool
 }
 
-// NormalizerStats tracks aggregate normalization statistics
+// NormalizerStats is the public, serializable view of the normalizer's
+// aggregate statistics. It is safe to copy and serialize because it does
+// NOT contain the synchronization mutex — that lives in normalizerStats
+// (the unexported wrapper used internally).
 type NormalizerStats struct {
-	mu              sync.RWMutex           `json:"-"`
-	TotalProcessed  int64                  `json:"total_processed"`
-	TotalNormalized int64                  `json:"total_normalized"`
-	LastUpdated     time.Time              `json:"last_updated"`
+	TotalProcessed  int64                     `json:"total_processed"`
+	TotalNormalized int64                     `json:"total_normalized"`
+	LastUpdated     time.Time                 `json:"last_updated"`
 	ByTool          map[string]*ToolNormStats `json:"by_tool"`
 	ByRule          map[string]*RuleNormStats `json:"by_rule"`
-	RecentNorms     []RecentNormalization  `json:"recent_normalizations"`
+	RecentNorms     []RecentNormalization     `json:"recent_normalizations"`
+}
+
+// normalizerStats wraps NormalizerStats with a mutex. The mutex is part of
+// this internal type and must NEVER be copied. Callers always receive a
+// NormalizerStats (data only) from GetStats().
+type normalizerStats struct {
+	mu    sync.RWMutex
+	stats NormalizerStats
 }
 
 // ToolNormStats tracks per-tool normalization counts
@@ -89,7 +99,7 @@ type RecentNormalization struct {
 type Normalizer struct {
 	rules     []NormalizationRule
 	ruleIndex map[string][]int // tool name → indices into rules; "*" for wildcard
-	stats     NormalizerStats
+	stats     normalizerStats
 	logDir    string
 }
 
@@ -100,8 +110,8 @@ func NewNormalizer(rulesPath string, logDir string) (*Normalizer, error) {
 		ruleIndex: make(map[string][]int),
 		logDir:    logDir,
 	}
-	n.stats.ByTool = make(map[string]*ToolNormStats)
-	n.stats.ByRule = make(map[string]*RuleNormStats)
+	n.stats.stats.ByTool = make(map[string]*ToolNormStats)
+	n.stats.stats.ByRule = make(map[string]*RuleNormStats)
 
 	// Load built-in rules
 	n.rules = builtinRules()
@@ -443,23 +453,23 @@ func (n *Normalizer) recordStats(tool string, applied []NormalizationApplied) {
 	n.stats.mu.Lock()
 	defer n.stats.mu.Unlock()
 
-	n.stats.TotalProcessed++
-	n.stats.LastUpdated = time.Now()
+	n.stats.stats.TotalProcessed++
+	n.stats.stats.LastUpdated = time.Now()
 
-	if _, ok := n.stats.ByTool[tool]; !ok {
-		n.stats.ByTool[tool] = &ToolNormStats{}
+	if _, ok := n.stats.stats.ByTool[tool]; !ok {
+		n.stats.stats.ByTool[tool] = &ToolNormStats{}
 	}
-	n.stats.ByTool[tool].Processed++
+	n.stats.stats.ByTool[tool].Processed++
 
 	if len(applied) > 0 {
-		n.stats.TotalNormalized++
-		n.stats.ByTool[tool].Normalized++
+		n.stats.stats.TotalNormalized++
+		n.stats.stats.ByTool[tool].Normalized++
 
 		for _, a := range applied {
-			rs, ok := n.stats.ByRule[a.RuleID]
+			rs, ok := n.stats.stats.ByRule[a.RuleID]
 			if !ok {
 				rs = &RuleNormStats{RuleID: a.RuleID, Type: a.Type}
-				n.stats.ByRule[a.RuleID] = rs
+				n.stats.stats.ByRule[a.RuleID] = rs
 			}
 			rs.Hits++
 			// Track which tools triggered this rule
@@ -476,13 +486,13 @@ func (n *Normalizer) recordStats(tool string, applied []NormalizationApplied) {
 		}
 
 		// Ring buffer of recent normalizations (keep last 50)
-		n.stats.RecentNorms = append(n.stats.RecentNorms, RecentNormalization{
+		n.stats.stats.RecentNorms = append(n.stats.stats.RecentNorms, RecentNormalization{
 			Timestamp: time.Now(),
 			Tool:      tool,
 			Applied:   applied,
 		})
-		if len(n.stats.RecentNorms) > 50 {
-			n.stats.RecentNorms = n.stats.RecentNorms[len(n.stats.RecentNorms)-50:]
+		if len(n.stats.stats.RecentNorms) > 50 {
+			n.stats.stats.RecentNorms = n.stats.stats.RecentNorms[len(n.stats.stats.RecentNorms)-50:]
 		}
 	}
 }
@@ -493,25 +503,25 @@ func (n *Normalizer) GetStats() NormalizerStats {
 	defer n.stats.mu.RUnlock()
 
 	snapshot := NormalizerStats{
-		TotalProcessed:  n.stats.TotalProcessed,
-		TotalNormalized: n.stats.TotalNormalized,
-		LastUpdated:     n.stats.LastUpdated,
-		ByTool:          make(map[string]*ToolNormStats, len(n.stats.ByTool)),
-		ByRule:          make(map[string]*RuleNormStats, len(n.stats.ByRule)),
-		RecentNorms:     make([]RecentNormalization, len(n.stats.RecentNorms)),
+		TotalProcessed:  n.stats.stats.TotalProcessed,
+		TotalNormalized: n.stats.stats.TotalNormalized,
+		LastUpdated:     n.stats.stats.LastUpdated,
+		ByTool:          make(map[string]*ToolNormStats, len(n.stats.stats.ByTool)),
+		ByRule:          make(map[string]*RuleNormStats, len(n.stats.stats.ByRule)),
+		RecentNorms:     make([]RecentNormalization, len(n.stats.stats.RecentNorms)),
 	}
-	for k, v := range n.stats.ByTool {
+	for k, v := range n.stats.stats.ByTool {
 		c := *v
 		snapshot.ByTool[k] = &c
 	}
-	for k, v := range n.stats.ByRule {
+	for k, v := range n.stats.stats.ByRule {
 		c := *v
 		toolsCopy := make([]string, len(v.Tools))
 		copy(toolsCopy, v.Tools)
 		c.Tools = toolsCopy
 		snapshot.ByRule[k] = &c
 	}
-	copy(snapshot.RecentNorms, n.stats.RecentNorms)
+	copy(snapshot.RecentNorms, n.stats.stats.RecentNorms)
 	return snapshot
 }
 

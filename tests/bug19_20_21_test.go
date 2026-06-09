@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -55,6 +56,14 @@ func responseText(r *localmcp.CallToolResponse) string {
 // TestBug19_NormalizePath_WindowsPathUnchanged verifies a Windows path
 // keeps its drive letter and is not mangled.
 func TestBug19_NormalizePath_WindowsPathUnchanged(t *testing.T) {
+	// These two tests assert Windows-host semantics (a Windows path stays a
+	// Windows path, an /mnt/c/ path is converted to C:\). On a non-Windows
+	// host those expectations are inverted by design — see
+	// core.NormalizePath which on Linux/WSL converts C:\ → /mnt/c/.
+	// Run only on Windows where the assertions are meaningful.
+	if runtime.GOOS != "windows" {
+		t.Skipf("NormalizePath host-dependent assertions only valid on Windows (have %s)", runtime.GOOS)
+	}
 	input := `C:\Users\foo\bar\file.go`
 	got := core.NormalizePath(input)
 	if !strings.HasPrefix(got, "C:") {
@@ -68,6 +77,11 @@ func TestBug19_NormalizePath_WindowsPathUnchanged(t *testing.T) {
 // TestBug19_NormalizePath_WSLConverted verifies /mnt/c/ → C:\ conversion
 // and ensures the result does NOT contain "mnt\c" (the pre-fix bug).
 func TestBug19_NormalizePath_WSLConverted(t *testing.T) {
+	// See TestBug19_NormalizePath_WindowsPathUnchanged — these are
+	// Windows-host assertions and are skipped elsewhere.
+	if runtime.GOOS != "windows" {
+		t.Skipf("NormalizePath host-dependent assertions only valid on Windows (have %s)", runtime.GOOS)
+	}
 	input := "/mnt/c/Users/foo/bar"
 	got := core.NormalizePath(input)
 
@@ -114,8 +128,8 @@ func TestBug19_CountOccurrences_DirectoryMode(t *testing.T) {
 
 	files := map[string]string{
 		"a.go": "foo foo bar\nfoo\n", // 3 occurrences
-		"b.go": "foo baz\n",         // 1 occurrence
-		"c.go": "bar baz\n",         // 0 occurrences
+		"b.go": "foo baz\n",          // 1 occurrence
+		"c.go": "bar baz\n",          // 0 occurrences
 	}
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(tempDir, name), []byte(body), 0644); err != nil {
