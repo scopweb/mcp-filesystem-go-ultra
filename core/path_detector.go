@@ -108,7 +108,7 @@ func getWindowsUsername() string {
 			name := entry.Name()
 			// Skip system directories
 			if name != "Public" && name != "Default" && name != "All Users" &&
-			   name != "Default User" && !strings.HasPrefix(name, ".") {
+				name != "Default User" && !strings.HasPrefix(name, ".") {
 				// Return first valid-looking username
 				if entry.IsDir() {
 					return name

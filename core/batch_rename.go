@@ -13,46 +13,46 @@ import (
 
 // BatchRenameRequest defines parameters for batch rename operations
 type BatchRenameRequest struct {
-	Path        string   `json:"path"`         // Base directory path
-	Mode        string   `json:"mode"`         // Rename mode: find_replace, add_prefix, add_suffix, number_files, regex_rename, change_extension, to_lowercase, to_uppercase
-	Find        string   `json:"find"`         // Text to find (for find_replace mode)
-	Replace     string   `json:"replace"`      // Replacement text
-	Prefix      string   `json:"prefix"`       // Prefix to add
-	Suffix      string   `json:"suffix"`       // Suffix to add
-	Pattern     string   `json:"pattern"`      // Regex pattern (for regex_rename mode)
-	Extension   string   `json:"extension"`    // New extension (for change_extension mode)
-	StartNumber int      `json:"start_number"` // Starting number (for number_files mode)
-	Padding     int      `json:"padding"`      // Zero padding width (for number_files mode)
-	Recursive   bool     `json:"recursive"`    // Process subdirectories
-	FilePattern string   `json:"file_pattern"` // File filter pattern (e.g., "*.txt")
-	Preview     bool     `json:"preview"`      // Preview mode (dry-run)
+	Path          string `json:"path"`           // Base directory path
+	Mode          string `json:"mode"`           // Rename mode: find_replace, add_prefix, add_suffix, number_files, regex_rename, change_extension, to_lowercase, to_uppercase
+	Find          string `json:"find"`           // Text to find (for find_replace mode)
+	Replace       string `json:"replace"`        // Replacement text
+	Prefix        string `json:"prefix"`         // Prefix to add
+	Suffix        string `json:"suffix"`         // Suffix to add
+	Pattern       string `json:"pattern"`        // Regex pattern (for regex_rename mode)
+	Extension     string `json:"extension"`      // New extension (for change_extension mode)
+	StartNumber   int    `json:"start_number"`   // Starting number (for number_files mode)
+	Padding       int    `json:"padding"`        // Zero padding width (for number_files mode)
+	Recursive     bool   `json:"recursive"`      // Process subdirectories
+	FilePattern   string `json:"file_pattern"`   // File filter pattern (e.g., "*.txt")
+	Preview       bool   `json:"preview"`        // Preview mode (dry-run)
 	CaseSensitive bool   `json:"case_sensitive"` // Case-sensitive matching
 }
 
 // BatchRenameResult holds the results of a batch rename operation
 type BatchRenameResult struct {
-	Success       bool                  `json:"success"`
-	TotalFiles    int                   `json:"total_files"`
-	RenamedCount  int                   `json:"renamed_count"`
-	SkippedCount  int                   `json:"skipped_count"`
-	ErrorCount    int                   `json:"error_count"`
-	Preview       bool                  `json:"preview"`
-	Operations    []RenameOperation     `json:"operations"`
-	Conflicts     []string              `json:"conflicts"`
-	Errors        []string              `json:"errors"`
-	ExecutionTime string                `json:"execution_time"`
+	Success       bool              `json:"success"`
+	TotalFiles    int               `json:"total_files"`
+	RenamedCount  int               `json:"renamed_count"`
+	SkippedCount  int               `json:"skipped_count"`
+	ErrorCount    int               `json:"error_count"`
+	Preview       bool              `json:"preview"`
+	Operations    []RenameOperation `json:"operations"`
+	Conflicts     []string          `json:"conflicts"`
+	Errors        []string          `json:"errors"`
+	ExecutionTime string            `json:"execution_time"`
 }
 
 // RenameOperation represents a single rename operation
 type RenameOperation struct {
-	Index       int    `json:"index"`
-	OldPath     string `json:"old_path"`
-	NewPath     string `json:"new_path"`
-	OldName     string `json:"old_name"`
-	NewName     string `json:"new_name"`
-	Success     bool   `json:"success"`
-	Skipped     bool   `json:"skipped"`
-	Error       string `json:"error"`
+	Index        int    `json:"index"`
+	OldPath      string `json:"old_path"`
+	NewPath      string `json:"new_path"`
+	OldName      string `json:"old_name"`
+	NewName      string `json:"new_name"`
+	Success      bool   `json:"success"`
+	Skipped      bool   `json:"skipped"`
+	Error        string `json:"error"`
 	ConflictWith string `json:"conflict_with,omitempty"`
 }
 
@@ -95,11 +95,11 @@ func (e *UltraFastEngine) BatchRenameFiles(ctx context.Context, request BatchRen
 
 	if len(files) == 0 {
 		return &BatchRenameResult{
-			Success:      true,
-			TotalFiles:   0,
-			RenamedCount: 0,
-			Preview:      request.Preview,
-			Operations:   []RenameOperation{},
+			Success:       true,
+			TotalFiles:    0,
+			RenamedCount:  0,
+			Preview:       request.Preview,
+			Operations:    []RenameOperation{},
 			ExecutionTime: time.Since(start).String(),
 		}, nil
 	}
@@ -111,12 +111,12 @@ func (e *UltraFastEngine) BatchRenameFiles(ctx context.Context, request BatchRen
 	}
 
 	result := &BatchRenameResult{
-		Success:      true,
-		TotalFiles:   len(files),
-		Preview:      request.Preview,
-		Operations:   operations,
-		Conflicts:    conflicts,
-		Errors:       []string{},
+		Success:    true,
+		TotalFiles: len(files),
+		Preview:    request.Preview,
+		Operations: operations,
+		Conflicts:  conflicts,
+		Errors:     []string{},
 	}
 
 	// If preview mode, return without executing

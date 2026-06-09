@@ -38,16 +38,16 @@ func TestApplyAdaptiveWriteBlock(t *testing.T) {
 	})
 
 	cases := []struct {
-		name             string
-		signal           *FeedbackSignal
-		backupAvailable  bool
-		existingSize     int64
-		newSize          int64
-		creator          AdaptiveWriteBackupCreator
-		wantBlocked      bool
-		wantStatus       FeedbackStatus
-		wantDowngraded   bool
-		wantBackupID     string
+		name              string
+		signal            *FeedbackSignal
+		backupAvailable   bool
+		existingSize      int64
+		newSize           int64
+		creator           AdaptiveWriteBackupCreator
+		wantBlocked       bool
+		wantStatus        FeedbackStatus
+		wantDowngraded    bool
+		wantBackupID      string
 		wantSuggestionHas string
 	}{
 		{
@@ -55,33 +55,33 @@ func TestApplyAdaptiveWriteBlock(t *testing.T) {
 			signal:          truncationSignal(),
 			backupAvailable: false,
 			existingSize:    1000, newSize: 400,
-			creator:         okBackup("irrelevant"),
-			wantBlocked:     true,
-			wantStatus:      FeedbackKO,
-			wantDowngraded:  false,
-			wantBackupID:    "",
+			creator:        okBackup("irrelevant"),
+			wantBlocked:    true,
+			wantStatus:     FeedbackKO,
+			wantDowngraded: false,
+			wantBackupID:   "",
 		},
 		{
 			name:            "truncation + backup but creator fails → keep block",
 			signal:          truncationSignal(),
 			backupAvailable: true,
 			existingSize:    1000, newSize: 400,
-			creator:         failingBackup,
-			wantBlocked:     true,
-			wantStatus:      FeedbackKO,
-			wantDowngraded:  false,
-			wantBackupID:    "",
+			creator:        failingBackup,
+			wantBlocked:    true,
+			wantStatus:     FeedbackKO,
+			wantDowngraded: false,
+			wantBackupID:   "",
 		},
 		{
-			name:             "truncation + backup + creator OK → downgrade with restore cmd",
-			signal:           truncationSignal(),
-			backupAvailable:  true,
-			existingSize:     1000, newSize: 400,
-			creator:          okBackup("20260604-130xxx"),
-			wantBlocked:      false,
-			wantStatus:       FeedbackWarn,
-			wantDowngraded:   true,
-			wantBackupID:     "20260604-130xxx",
+			name:            "truncation + backup + creator OK → downgrade with restore cmd",
+			signal:          truncationSignal(),
+			backupAvailable: true,
+			existingSize:    1000, newSize: 400,
+			creator:           okBackup("20260604-130xxx"),
+			wantBlocked:       false,
+			wantStatus:        FeedbackWarn,
+			wantDowngraded:    true,
+			wantBackupID:      "20260604-130xxx",
 			wantSuggestionHas: "20260604-130xxx",
 		},
 		{
@@ -89,25 +89,25 @@ func TestApplyAdaptiveWriteBlock(t *testing.T) {
 			signal:          inflationSignal(),
 			backupAvailable: false,
 			existingSize:    20000, newSize: 70000,
-			creator:         okBackup("irrelevant"),
-			wantBlocked:     true,
-			wantStatus:      FeedbackKO,
-			wantDowngraded:  false,
+			creator:        okBackup("irrelevant"),
+			wantBlocked:    true,
+			wantStatus:     FeedbackKO,
+			wantDowngraded: false,
 		},
 		{
-			name:             "inflation + backup + creator OK → downgrade",
-			signal:           inflationSignal(),
-			backupAvailable:  true,
-			existingSize:     20000, newSize: 70000,
-			creator:          okBackup("backup-456"),
-			wantBlocked:      false,
-			wantStatus:       FeedbackWarn,
-			wantDowngraded:   true,
-			wantBackupID:     "backup-456",
+			name:            "inflation + backup + creator OK → downgrade",
+			signal:          inflationSignal(),
+			backupAvailable: true,
+			existingSize:    20000, newSize: 70000,
+			creator:           okBackup("backup-456"),
+			wantBlocked:       false,
+			wantStatus:        FeedbackWarn,
+			wantDowngraded:    true,
+			wantBackupID:      "backup-456",
 			wantSuggestionHas: "backup-456",
 		},
 		{
-			name:            "full_rewrite signal (not block) → no-op regardless of backup",
+			name: "full_rewrite signal (not block) → no-op regardless of backup",
 			signal: &FeedbackSignal{
 				Status:     FeedbackWarn,
 				Pattern:    PatternFullRewrite,
@@ -117,33 +117,33 @@ func TestApplyAdaptiveWriteBlock(t *testing.T) {
 			},
 			backupAvailable: true,
 			existingSize:    20000, newSize: 15000,
-			creator:         okBackup("should-not-be-called"),
-			wantBlocked:     false,
-			wantStatus:      FeedbackWarn,
-			wantDowngraded:  false,
-			wantBackupID:    "",
+			creator:        okBackup("should-not-be-called"),
+			wantBlocked:    false,
+			wantStatus:     FeedbackWarn,
+			wantDowngraded: false,
+			wantBackupID:   "",
 		},
 		{
 			name:            "OK signal (no pattern) → no-op",
 			signal:          OK(),
 			backupAvailable: true,
 			existingSize:    5000, newSize: 5000,
-			creator:         okBackup("should-not-be-called"),
-			wantBlocked:     false,
-			wantStatus:      FeedbackOK,
-			wantDowngraded:  false,
-			wantBackupID:    "",
+			creator:        okBackup("should-not-be-called"),
+			wantBlocked:    false,
+			wantStatus:     FeedbackOK,
+			wantDowngraded: false,
+			wantBackupID:   "",
 		},
 		{
 			name:            "nil signal → no-op (defensive)",
 			signal:          nil,
 			backupAvailable: true,
 			existingSize:    1000, newSize: 500,
-			creator:         okBackup("irrelevant"),
-			wantBlocked:     false,
-			wantStatus:      "",
-			wantDowngraded:  false,
-			wantBackupID:    "",
+			creator:        okBackup("irrelevant"),
+			wantBlocked:    false,
+			wantStatus:     "",
+			wantDowngraded: false,
+			wantBackupID:   "",
 		},
 	}
 

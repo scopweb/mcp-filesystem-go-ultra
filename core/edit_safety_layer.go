@@ -59,7 +59,7 @@ func (esv *EditSafetyValidator) ValidateEditSafety(filePath, oldText, newText st
 		IsValid:    false,
 		CanProceed: false,
 		Diagnostics: ValidationDiagnostics{
-			FuzzyMatches:     0,
+			FuzzyMatches:      0,
 			NormalizedMatches: 0,
 		},
 	}

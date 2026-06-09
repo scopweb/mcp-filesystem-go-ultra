@@ -21,8 +21,8 @@ type ChangeAnalysis struct {
 	RiskFactors       []string               `json:"risk_factors"`
 	Suggestions       []string               `json:"suggestions"`
 	EfficiencyTip     string                 `json:"efficiency_tip,omitempty"` // Token-saving tip when full-file rewrite detected
-	Preview           string                 `json:"preview"`                 // Diff preview
-	Impact            string                 `json:"impact"`                  // Human-readable impact description
+	Preview           string                 `json:"preview"`                  // Diff preview
+	Impact            string                 `json:"impact"`                   // Human-readable impact description
 	FileExists        bool                   `json:"file_exists"`
 	FileSize          int64                  `json:"file_size"`
 	WouldCreateBackup bool                   `json:"would_create_backup"`

@@ -21,12 +21,12 @@ const (
 
 // ProcessMetadata provides context during processing
 type ProcessMetadata struct {
-	LineNumber   int    // Current line number (for line mode)
-	ChunkIndex   int    // Current chunk index (for chunk mode)
-	TotalLines   int    // Total lines (if known)
-	TotalChunks  int    // Total chunks (if known)
-	FilePath     string // File being processed
-	TotalSize    int    // Total file size in bytes
+	LineNumber  int    // Current line number (for line mode)
+	ChunkIndex  int    // Current chunk index (for chunk mode)
+	TotalLines  int    // Total lines (if known)
+	TotalChunks int    // Total chunks (if known)
+	FilePath    string // File being processed
+	TotalSize   int    // Total file size in bytes
 }
 
 // ProcessorFunc is a function that processes content
@@ -34,29 +34,29 @@ type ProcessorFunc func(content string, metadata ProcessMetadata) (string, error
 
 // ProcessingConfig holds configuration for large file processing
 type ProcessingConfig struct {
-	InputPath    string        // Source file path
-	OutputPath   string        // Destination file path (empty = overwrite)
+	InputPath    string         // Source file path
+	OutputPath   string         // Destination file path (empty = overwrite)
 	Mode         ProcessingMode // Processing mode
-	ChunkSize    int           // Size of each chunk in bytes (0 = default)
-	ProcessFunc  ProcessorFunc // Function to process content
-	CreateBackup bool          // Create backup before processing
-	DryRun       bool          // Validate without applying changes
+	ChunkSize    int            // Size of each chunk in bytes (0 = default)
+	ProcessFunc  ProcessorFunc  // Function to process content
+	CreateBackup bool           // Create backup before processing
+	DryRun       bool           // Validate without applying changes
 }
 
 // ProcessingResult holds results of file processing
 type ProcessingResult struct {
-	Success           bool          // Whether processing succeeded
-	InputPath         string        // Input file path
-	OutputPath        string        // Output file path
-	BytesProcessed    int64         // Total bytes processed
-	LinesProcessed    int           // Total lines processed
-	ChunksProcessed   int           // Total chunks processed
-	TransformedLines  int           // Lines that were transformed
-	Duration          time.Duration // Processing duration
-	BackupID          string        // Backup ID if created
-	Errors            []string      // Any errors encountered
-	Mode              string        // Mode used (in-memory, streaming)
-	TransformedContent string       // Transformed content (only in DryRun mode)
+	Success            bool          // Whether processing succeeded
+	InputPath          string        // Input file path
+	OutputPath         string        // Output file path
+	BytesProcessed     int64         // Total bytes processed
+	LinesProcessed     int           // Total lines processed
+	ChunksProcessed    int           // Total chunks processed
+	TransformedLines   int           // Lines that were transformed
+	Duration           time.Duration // Processing duration
+	BackupID           string        // Backup ID if created
+	Errors             []string      // Any errors encountered
+	Mode               string        // Mode used (in-memory, streaming)
+	TransformedContent string        // Transformed content (only in DryRun mode)
 }
 
 // LargeFileProcessor handles processing of large files
@@ -253,7 +253,7 @@ func (p *LargeFileProcessor) processLineByLine(ctx context.Context, config Proce
 	// Create buffered reader and writer
 	scanner := bufio.NewScanner(inputFile)
 	// Increase buffer size for very long lines
-	buf := make([]byte, 1024*1024)         // 1MB buffer
+	buf := make([]byte, 1024*1024)    // 1MB buffer
 	scanner.Buffer(buf, 64*1024*1024) // Max 64MB for very long lines
 
 	writer := bufio.NewWriter(outputFile)

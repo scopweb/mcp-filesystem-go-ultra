@@ -17,7 +17,7 @@ type ProjectReplaceResult struct {
 	TotalReplaced  int                        `json:"total_replacements"`
 	BackupID       string                     `json:"backup_id,omitempty"`
 	ChainID        string                     `json:"chain_id,omitempty"`
-	PerFileResults []ProjectReplaceFileResult  `json:"per_file,omitempty"`
+	PerFileResults []ProjectReplaceFileResult `json:"per_file,omitempty"`
 	RiskLevel      string                     `json:"risk_level,omitempty"`
 	RiskWarning    string                     `json:"risk_warning,omitempty"`
 	DryRun         bool                       `json:"dry_run"`
@@ -25,10 +25,10 @@ type ProjectReplaceResult struct {
 
 // ProjectReplaceFileResult contains results for a single file
 type ProjectReplaceFileResult struct {
-	Path      string `json:"path"`
-	Replaced  int    `json:"replacements"`
-	OldSize   int64  `json:"old_size"`
-	NewSize   int64  `json:"new_size"`
+	Path     string `json:"path"`
+	Replaced int    `json:"replacements"`
+	OldSize  int64  `json:"old_size"`
+	NewSize  int64  `json:"new_size"`
 }
 
 // ProjectReplace performs a find/replace across an entire project tree.
@@ -208,9 +208,9 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 	}
 
 	result := &ProjectReplaceResult{
-		FilesChanged:  len(matchedFiles),
-		DryRun:        preview,
-		RiskLevel:     riskLevel,
+		FilesChanged: len(matchedFiles),
+		DryRun:       preview,
+		RiskLevel:    riskLevel,
 	}
 
 	if preview {

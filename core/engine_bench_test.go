@@ -51,9 +51,9 @@ func makeBenchFile(b *testing.B, dir, name string, size int) string {
 
 // ─── Read benchmarks ──────────────────────────────────────────────────────────
 
-func BenchmarkReadFile_Small(b *testing.B)  { benchReadFile(b, 4*1024) }          // 4 KB
-func BenchmarkReadFile_Medium(b *testing.B) { benchReadFile(b, 200*1024) }        // 200 KB
-func BenchmarkReadFile_Large(b *testing.B)  { benchReadFile(b, 2*1024*1024) }     // 2 MB
+func BenchmarkReadFile_Small(b *testing.B)  { benchReadFile(b, 4*1024) }      // 4 KB
+func BenchmarkReadFile_Medium(b *testing.B) { benchReadFile(b, 200*1024) }    // 200 KB
+func BenchmarkReadFile_Large(b *testing.B)  { benchReadFile(b, 2*1024*1024) } // 2 MB
 
 func benchReadFile(b *testing.B, size int) {
 	engine, dir := setupBenchEngine(b, 32*1024*1024)

@@ -401,53 +401,53 @@ func TestOWASPTop10_2024(t *testing.T) {
 
 	owaspVulnerabilities := map[int]map[string]string{
 		1: {
-			"Title":       "A01:2024 - Broken Access Control",
-			"Relevant":    "MEDIUM",
+			"Title":      "A01:2024 - Broken Access Control",
+			"Relevant":   "MEDIUM",
 			"Mitigation": "Path restrictions via allowed_paths configuration",
 		},
 		2: {
-			"Title":       "A02:2024 - Cryptographic Failures",
-			"Relevant":    "LOW",
+			"Title":      "A02:2024 - Cryptographic Failures",
+			"Relevant":   "LOW",
 			"Mitigation": "No sensitive crypto operations; file operations only",
 		},
 		3: {
-			"Title":       "A03:2024 - Injection",
-			"Relevant":    "HIGH",
+			"Title":      "A03:2024 - Injection",
+			"Relevant":   "HIGH",
 			"Mitigation": "Input validation + path sanitization",
 		},
 		4: {
-			"Title":       "A04:2024 - Insecure Design",
-			"Relevant":    "LOW",
+			"Title":      "A04:2024 - Insecure Design",
+			"Relevant":   "LOW",
 			"Mitigation": "Security-first architecture review completed",
 		},
 		5: {
-			"Title":       "A05:2024 - Security Misconfiguration",
-			"Relevant":    "MEDIUM",
+			"Title":      "A05:2024 - Security Misconfiguration",
+			"Relevant":   "MEDIUM",
 			"Mitigation": "Configuration validation in init phase",
 		},
 		6: {
-			"Title":       "A06:2024 - Vulnerable Components",
-			"Relevant":    "MEDIUM",
+			"Title":      "A06:2024 - Vulnerable Components",
+			"Relevant":   "MEDIUM",
 			"Mitigation": "Dependencies updated to latest versions",
 		},
 		7: {
-			"Title":       "A07:2024 - Authentication Failures",
-			"Relevant":    "N/A",
+			"Title":      "A07:2024 - Authentication Failures",
+			"Relevant":   "N/A",
 			"Mitigation": "MCP authentication handled by framework",
 		},
 		8: {
-			"Title":       "A08:2024 - Data Integrity Failures",
-			"Relevant":    "LOW",
+			"Title":      "A08:2024 - Data Integrity Failures",
+			"Relevant":   "LOW",
 			"Mitigation": "File integrity checks via backup system",
 		},
 		9: {
-			"Title":       "A09:2024 - Logging and Monitoring Failures",
-			"Relevant":    "MEDIUM",
+			"Title":      "A09:2024 - Logging and Monitoring Failures",
+			"Relevant":   "MEDIUM",
 			"Mitigation": "Structured logging implemented",
 		},
 		10: {
-			"Title":       "A10:2024 - SSRF",
-			"Relevant":    "LOW",
+			"Title":      "A10:2024 - SSRF",
+			"Relevant":   "LOW",
 			"Mitigation": "File operations only; no network calls",
 		},
 	}

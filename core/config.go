@@ -29,9 +29,9 @@ const (
 	DefaultOperationTimeout = 30 * time.Second
 
 	// Cache expiration times
-	FileCacheExpiration = 3 * time.Minute   // How long to cache file contents
-	DirCacheExpiration  = 2 * time.Minute   // How long to cache directory listings
-	MetaCacheExpiration = 10 * time.Minute  // How long to cache file metadata
+	FileCacheExpiration = 3 * time.Minute  // How long to cache file contents
+	DirCacheExpiration  = 2 * time.Minute  // How long to cache directory listings
+	MetaCacheExpiration = 10 * time.Minute // How long to cache file metadata
 
 	// Maximum entries to search before returning results
 	MaxSearchResults = 1000
@@ -47,9 +47,9 @@ const (
 	MaxPipelineFiles = 100 // Maximum number of files affected by a pipeline
 
 	// Pipeline risk assessment thresholds (based on number of files)
-	PipelineRiskMedium   = 30  // 30+ files = MEDIUM risk
-	PipelineRiskHigh     = 50  // 50+ files = HIGH risk
-	PipelineRiskCritical = 80  // 80+ files = CRITICAL risk
+	PipelineRiskMedium   = 30 // 30+ files = MEDIUM risk
+	PipelineRiskHigh     = 50 // 50+ files = HIGH risk
+	PipelineRiskCritical = 80 // 80+ files = CRITICAL risk
 
 	// Pipeline edit thresholds (based on number of edits)
 	PipelineEditsMedium   = 100  // 100+ edits = MEDIUM risk

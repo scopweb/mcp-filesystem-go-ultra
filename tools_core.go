@@ -20,6 +20,7 @@ import (
 // diskPrefix extracts a short disk/volume tag from an absolute path:
 //   - C:\, D:\... → [C], [D]
 //   - /mnt/c/... → [WSL]
+//
 // Used in success responses so the caller immediately sees which volume
 // the operation targeted, preventing cross-volume confusion.
 func diskPrefix(absPath string) string {

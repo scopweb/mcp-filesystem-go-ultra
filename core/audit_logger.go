@@ -118,20 +118,20 @@ func SetError(ctx context.Context, msg string) {
 
 // AuditEntry represents a single MCP tool operation log entry
 type AuditEntry struct {
-	Timestamp    time.Time         `json:"ts"`
-	Tool         string            `json:"tool"`
-	Path         string            `json:"path,omitempty"`
-	DurationMs   int64             `json:"duration_ms"`
-	BytesIn      int64             `json:"bytes_in,omitempty"`
-	BytesOut     int64             `json:"bytes_out,omitempty"`  // file bytes written/read — excludes diff text
-	Status       string            `json:"status"`               // "ok", "warn", or "error"
-	Error        string            `json:"error,omitempty"`
-	RiskLevel    string            `json:"risk,omitempty"`
-	FileSize     int64             `json:"file_size,omitempty"`
-	Args         map[string]string `json:"args,omitempty"`
-	SubOp        string            `json:"sub_op,omitempty"`
-	LinesChanged int               `json:"lines_changed,omitempty"`
-	Matches      int               `json:"matches,omitempty"`
+	Timestamp      time.Time              `json:"ts"`
+	Tool           string                 `json:"tool"`
+	Path           string                 `json:"path,omitempty"`
+	DurationMs     int64                  `json:"duration_ms"`
+	BytesIn        int64                  `json:"bytes_in,omitempty"`
+	BytesOut       int64                  `json:"bytes_out,omitempty"` // file bytes written/read — excludes diff text
+	Status         string                 `json:"status"`              // "ok", "warn", or "error"
+	Error          string                 `json:"error,omitempty"`
+	RiskLevel      string                 `json:"risk,omitempty"`
+	FileSize       int64                  `json:"file_size,omitempty"`
+	Args           map[string]string      `json:"args,omitempty"`
+	SubOp          string                 `json:"sub_op,omitempty"`
+	LinesChanged   int                    `json:"lines_changed,omitempty"`
+	Matches        int                    `json:"matches,omitempty"`
 	CacheHit       *bool                  `json:"cache_hit,omitempty"`
 	Normalizations []NormalizationApplied `json:"norms,omitempty"`
 	// Feedback / reinforcement fields
@@ -140,7 +140,7 @@ type AuditEntry struct {
 	DiffLines       int    `json:"diff_lines,omitempty"`       // number of lines in the unified diff
 
 	// ROI / savings analysis fields
-	SessionID      string `json:"session_id,omitempty"`      // groups ops belonging to the same conversation (reset after 5min gap)
+	SessionID      string `json:"session_id,omitempty"`       // groups ops belonging to the same conversation (reset after 5min gap)
 	FileLinesTotal int    `json:"file_lines_total,omitempty"` // total lines in the target file (for range-read efficiency)
 	LinesRead      int    `json:"lines_read,omitempty"`       // lines actually read/affected (range ops)
 	TokensConsumed int64  `json:"tokens_consumed,omitempty"`  // estimated tokens used by this op (bytes/4)
@@ -148,12 +148,12 @@ type AuditEntry struct {
 	TokensSaved    int64  `json:"tokens_saved,omitempty"`     // max(0, tokens_baseline - tokens_consumed)
 
 	// Backup chain tracking (undo step-through)
-	BackupID        string `json:"backup_id,omitempty"`          // backup created for this edit
+	BackupID         string `json:"backup_id,omitempty"`          // backup created for this edit
 	PreviousBackupID string `json:"previous_backup_id,omitempty"` // parent in undo chain
 
 	// File integrity verification (for HIGH/CRITICAL edits)
 	IntegrityStatus string `json:"integrity_status,omitempty"` // "OK", "WARNING", "ERROR"
-	IntegrityWarn   string `json:"integrity_warn,omitempty"`    // warning message if verification had issues
+	IntegrityWarn   string `json:"integrity_warn,omitempty"`   // warning message if verification had issues
 }
 
 // MetricsSnapshot is the periodic metrics dump written to metrics.json
@@ -179,8 +179,8 @@ type MetricsEditSummary struct {
 }
 
 const (
-	maxLogFileSize   = 10 * 1024 * 1024    // 10MB rotation threshold
-	maxLogRetention  = 10 * 24 * time.Hour // keep rotated files for 10 days
+	maxLogFileSize  = 10 * 1024 * 1024    // 10MB rotation threshold
+	maxLogRetention = 10 * 24 * time.Hour // keep rotated files for 10 days
 )
 
 // AuditLogger writes structured JSON Lines to an operations log file

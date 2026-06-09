@@ -46,12 +46,12 @@ type RestoreFileResult struct {
 
 // RestoreResult contains the overall result of a restore operation
 type RestoreResult struct {
-	BackupID      string             `json:"backup_id"`
-	TotalFiles    int                `json:"total_files"`
-	RestoredFiles int                `json:"restored_files"`
-	FailedFiles   int                `json:"failed_files"`
+	BackupID      string              `json:"backup_id"`
+	TotalFiles    int                 `json:"total_files"`
+	RestoredFiles int                 `json:"restored_files"`
+	FailedFiles   int                 `json:"failed_files"`
 	FileResults   []RestoreFileResult `json:"file_results"`
-	PreRestoreID  string             `json:"pre_restore_id,omitempty"`
+	PreRestoreID  string              `json:"pre_restore_id,omitempty"`
 }
 
 // BackupManager gestiona todos los backups del sistema
@@ -142,13 +142,13 @@ func (bm *BackupManager) CreateBackupWithContextAndParent(path string, operation
 	}
 
 	backupInfo := BackupInfo{
-		BackupID:        backupID,
+		BackupID:         backupID,
 		PreviousBackupID: previousBackupID,
-		Timestamp:       time.Now(),
-		Operation:       operation,
-		UserContext:     userContext,
-		Files:           []BackupMetadata{metadata},
-		TotalSize:       fileInfo.Size(),
+		Timestamp:        time.Now(),
+		Operation:        operation,
+		UserContext:      userContext,
+		Files:            []BackupMetadata{metadata},
+		TotalSize:        fileInfo.Size(),
 	}
 
 	// Guardar metadata

@@ -295,7 +295,6 @@ func TestBatchOperationsRespectHooks(t *testing.T) {
 	}
 }
 
-
 func assertContains(t *testing.T, items []string, substr string) {
 	t.Helper()
 	for _, item := range items {
