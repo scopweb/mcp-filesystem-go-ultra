@@ -76,10 +76,13 @@ jobs:
         #     but the explicit cap stops Go from spawning extra
         #     worker threads that each reserve ~1 MB of stack space)
         #   - cap GOMEMLIMIT at 2 GiB to make the GC more aggressive
-        #     before the process hits VirtualAlloc errno=1455.
+        #     before the process hits VirtualAlloc errno=1455
+        #   - GOGC=50 makes the GC run more often so memory doesn't
+        #     accumulate across tests in the same package.
         env:
           GOMAXPROCS: '2'
           GOMEMLIMIT: '2GiB'
+          GOGC: '50'
         run: go test -p 1 ./... -count=1
 
       - name: Run focused core + security tests (Linux, with race)
