@@ -1,5 +1,41 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.5.9] - 2026-06-09
+
+### Improvement — Read deduplication (`singleflight`) + `ReadFileRange` cache path
+
+Concurrent cold reads of the same path no longer stampede the disk. `ReadFileContent` and `ReadFileRange` (files ≤ 5 MB) share a deduplicated load via `golang.org/x/sync/singleflight`, with results stored in BigCache. Cache invalidation on edits/moves/streaming also calls `readFlight.Forget` so waiters cannot attach to a stale in-flight read.
+
+**Behavior:**
+
+| Path | Before | After |
+|------|--------|-------|
+| 12 goroutines, same file, cold cache | 12× `os.ReadFile` | 1× `os.ReadFile` |
+| `ReadFileRange` after warm cache | Always scanned disk | Served from cache bytes |
+| `InvalidateCache` + re-read | Cache miss only | Cache miss + flight forget |
+
+**Line-count parity:** `extractLineRangeFromBytes` uses a `bytesLineScanner` that matches `bufio.Scanner` semantics (no extra empty line when the file ends with `\n`), so range footers still report the real total line count (`truncation_test.go` regression preserved).
+
+**Files changed:**
+
+| File | Change |
+|------|--------|
+| `core/read_dedup.go` | NEW — `readFileBytesDeduped`, `invalidateFileReadCache`, `extractLineRangeFromBytes` |
+| `core/read_dedup_test.go` | NEW — concurrency, cache-hit range, invalidate, bufio parity |
+| `core/engine.go` | `ReadFileContent` uses dedup; `InvalidateCache` forgets flight |
+| `core/file_operations.go` | `ReadFileRange` fast path via cache/dedup |
+| `core/edit_operations.go`, `batch_rename.go`, `large_file_processor.go`, `streaming_operations.go` | `invalidateFileReadCache` on writes |
+| `docs/plans/READ_DEDUP_PLAN.md` | NEW — implementation plan + checkpoint |
+| `go.mod` | `golang.org/x/sync` promoted to direct require |
+
+**Test results:**
+
+```
+ok  core              1.167s
+ok  tests            16.121s
+ok  tests/security    0.920s
+```
+
 ## [Unreleased / 4.5.6] - 2026-06-07
 
 ### Improvement — Log-driven optimizations (analysis of 12 days, 16,742 operations)

@@ -622,40 +622,21 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 		return "", &ContextError{Op: "read_file", Details: "operation cancelled before disk read"}
 	}
 
-	// Read from disk with context awareness
-	type readResult struct {
-		content []byte
-		err     error
+	// Load from disk with singleflight dedup on concurrent cache misses.
+	content, err := e.readFileBytesDeduped(ctx, path)
+	if err != nil {
+		return "", err
 	}
 
-	resultChan := make(chan readResult, 1)
-	go func() {
-		content, err := os.ReadFile(path)
-		resultChan <- readResult{content, err}
-	}()
-
-	var result readResult
-	select {
-	case <-ctx.Done():
-		return "", &ContextError{Op: "read_file", Details: "operation cancelled during disk read"}
-	case result = <-resultChan:
-		if result.err != nil {
-			return "", &PathError{Op: "read", Path: path, Err: result.err}
-		}
-	}
-
-	// Cache the content and track access
-	e.cache.SetFile(path, result.content)
-	e.cache.TrackAccess(path)
 	// Record cache miss for audit log (improvement M3)
 	SetCacheHit(ctx, false)
 
 	// Execute post-read hook (best-effort)
 	hookCtx.Event = HookPostRead
-	hookCtx.Metadata = map[string]interface{}{"bytes": len(result.content)}
+	hookCtx.Metadata = map[string]interface{}{"bytes": len(content)}
 	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostRead, hookCtx)
 
-	return string(result.content), nil
+	return string(content), nil
 }
 
 // WriteFileContent implements atomic file writing
@@ -750,7 +731,7 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 	}
 
 	// Invalidate cache
-	e.cache.InvalidateFile(path)
+	e.invalidateFileReadCache(path)
 
 	// Execute post-write hooks
 	hookCtx.Event = HookPostWrite
@@ -822,7 +803,7 @@ func (e *UltraFastEngine) WriteFileBytes(ctx context.Context, path string, data 
 	}
 
 	// Invalidate cache
-	e.cache.InvalidateFile(path)
+	e.invalidateFileReadCache(path)
 
 	// Auto-sync to Windows if enabled (async, non-blocking)
 	if e.autoSyncManager != nil {
@@ -1594,10 +1575,11 @@ func (e *UltraFastEngine) GetBackupManager() *BackupManager {
 // callers (e.g., tool handlers) can keep the cache consistent after
 // writing a file outside the engine's standard write APIs.
 func (e *UltraFastEngine) InvalidateCache(path string) {
-	if e == nil || e.cache == nil || path == "" {
+	if e == nil || path == "" {
 		return
 	}
-	e.cache.InvalidateFile(path)
+	path = NormalizePath(path)
+	e.invalidateFileReadCache(path)
 }
 
 // SecureRandomSuffix exposes the internal helper for callers that need
