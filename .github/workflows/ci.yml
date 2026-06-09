@@ -55,13 +55,31 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
-      - name: Run all tests (with race detector)
+      # Go's ThreadSanitizer on Windows requires a large shadow-memory
+      # region that the GitHub Actions windows runner can't always
+      # allocate (error 1455 = ERROR_NO_SYSTEM_RESOURCES). The race
+      # detector is the most useful on Linux anyway, so we only enable
+      # it there. Windows still runs the full test suite, just without
+      # the race instrumentation.
+      - name: Run all tests (with race detector on Linux)
+        if: runner.os == 'Linux'
         run: go test -race ./... -count=1
 
-      - name: Run focused core + security tests
+      - name: Run all tests (Windows, no race)
+        if: runner.os != 'Linux'
+        run: go test ./... -count=1
+
+      - name: Run focused core + security tests (Linux, with race)
+        if: runner.os == 'Linux'
         run: |
           go test -race ./core/... -count=1
           go test -race ./tests/security/... -count=1
+
+      - name: Run focused core + security tests (Windows, no race)
+        if: runner.os != 'Linux'
+        run: |
+          go test ./core/... -count=1
+          go test ./tests/security/... -count=1
 
   # ============================================================
   # BUILD JOB
