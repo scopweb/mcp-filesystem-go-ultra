@@ -63,23 +63,29 @@ jobs:
       # the race instrumentation.
       - name: Run all tests (with race detector on Linux)
         if: runner.os == 'Linux'
-        run: go test -race ./... -count=1
+        # -p 1 runs each package's test binary serially (instead of
+        # in parallel), which keeps peak memory lower.
+        run: go test -race -p 1 ./... -count=1
 
       - name: Run all tests (Windows, no race)
         if: runner.os != 'Linux'
-        run: go test ./... -count=1
+        # The GitHub Actions Windows runner has limited RAM, so we
+        # run package tests serially (-p 1) to keep peak memory
+        # down. Without this the test process can hit VirtualAlloc
+        # errno=1455 (ERROR_NO_SYSTEM_RESOURCES) partway through.
+        run: go test -p 1 ./... -count=1
 
       - name: Run focused core + security tests (Linux, with race)
         if: runner.os == 'Linux'
         run: |
-          go test -race ./core/... -count=1
-          go test -race ./tests/security/... -count=1
+          go test -race -p 1 ./core/... -count=1
+          go test -race -p 1 ./tests/security/... -count=1
 
       - name: Run focused core + security tests (Windows, no race)
         if: runner.os != 'Linux'
         run: |
-          go test ./core/... -count=1
-          go test ./tests/security/... -count=1
+          go test -p 1 ./core/... -count=1
+          go test -p 1 ./tests/security/... -count=1
 
   # ============================================================
   # BUILD JOB
