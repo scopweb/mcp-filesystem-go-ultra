@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -204,17 +205,45 @@ var windowsReservedNames = map[string]struct{}{
 // that has already passed IsPathAllowed() but where a symlink could have been
 // inserted in the intervening time.
 //
-// Returns the resolved path, or the original path if resolution fails.
-// The bool indicates whether the path resolves to something different (symlink detected).
+// Returns the resolved path, the original path on resolution failure, and a bool
+// that is true ONLY if the path actually traverses a symlink (i.e., a real
+// attacker-controlled reparse point). The bool is false for:
+//
+//   - regular files and directories
+//   - Windows directory junctions (e.g. %LOCALAPPDATA%\Temp, which on the
+//     GitHub Actions runner is a junction to %USERPROFILE%\AppData\Local\Temp).
+//     Junctions are created by the OS itself and are not a TOCTOU vector.
+//   - drive-letter / case / separator differences that filepath.EvalSymlinks
+//     may report on Windows.
+//
+// The previous implementation used filepath.EvalSymlinks and treated ANY
+// difference between the resolved and original paths as a symlink — which
+// incorrectly rejected legitimate Windows paths that go through a junction.
+// See: https://github.com/scopweb/mcp-filesystem-go-ultra/pull/10#discussion
+// for context.
 func ResolveSymlinks(path string) (string, bool, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return path, false, err
 	}
 
+	// The actual TOCTOU check: walk the path components from deepest to
+	// shallowest, Lstat-ing each one. Lstat does not follow links, so it
+	// reports ModeSymlink for symlinks. On Windows, directory junctions
+	// are NOT reported as ModeSymlink by Lstat (they're reported as
+	// ModeDir + a reparse point attribute that Lstat does not surface).
+	// So a path that only traverses junctions comes back as "no symlink".
+	hasSymlink, err := pathContainsSymlink(absPath)
+	if err != nil {
+		return path, false, err
+	}
+
+	// Also produce the canonical form for the return value. If the path
+	// doesn't exist yet (e.g. we're about to create a new file inside a
+	// still-existing directory), EvalSymlinks fails — fall back to the
+	// deepest existing ancestor so callers still get a usable path.
 	resolved, err := filepath.EvalSymlinks(absPath)
 	if err != nil {
-		// Walk up to find the deepest existing ancestor (for new/writable paths)
 		current := absPath
 		var suffix []string
 		for {
@@ -233,14 +262,37 @@ func ResolveSymlinks(path string) (string, bool, error) {
 			current = parent
 		}
 		if resolved == "" {
-			return path, false, fmt.Errorf("could not resolve any ancestor of %s", path)
+			return path, hasSymlink, fmt.Errorf("could not resolve any ancestor of %s", path)
 		}
 	}
 
-	if resolved != absPath {
-		return resolved, true, nil
+	return resolved, hasSymlink, nil
+}
+
+// pathContainsSymlink returns true if any component of p (or any of its
+// existing ancestors) is a symbolic link. It is the actual TOCTOU defense:
+// an attacker who plants a symlink anywhere along the path will be caught,
+// even if the final target is a regular file. Junctions, which Lstat reports
+// as plain directories, are not flagged.
+func pathContainsSymlink(p string) (bool, error) {
+	current := p
+	for {
+		info, err := os.Lstat(current)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				return true, nil
+			}
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+		// Either the path doesn't exist (yet) or it's not a symlink.
+		// Walk up to the parent. Stop when we reach the root.
+		parent := filepath.Dir(current)
+		if parent == current {
+			return false, nil
+		}
+		current = parent
 	}
-	return path, false, nil
 }
 
 // ValidateRegex checks a regex pattern for potential ReDoS (Regular Expression
@@ -261,8 +313,8 @@ func ValidateRegex(pattern string) error {
 	// context timeouts at the operation level.
 
 	dangerousPatterns := []string{
-		"(a+)+",  "(a*)+",  "(a{1,})+",
-		"(.*)+",  "(..)+",  "(.+)+",
+		"(a+)+", "(a*)+", "(a{1,})+",
+		"(.*)+", "(..)+", "(.+)+",
 		"(\\w+)+", "(\\d+)+",
 	}
 
