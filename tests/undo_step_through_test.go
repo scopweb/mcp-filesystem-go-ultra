@@ -45,7 +45,7 @@ func TestUndoChain_BasicStepThrough(t *testing.T) {
 	}
 
 	// First edit
-	r1, err := engine.EditFile(context.Background(), testFile, "line1", "EDITED1", false, false)
+	r1, err := engine.EditFile(context.Background(), testFile, "line1", "EDITED1", false, false, false)
 	if err != nil {
 		t.Fatalf("First edit failed: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestUndoChain_BasicStepThrough(t *testing.T) {
 	}
 
 	// Second edit
-	r2, err := engine.EditFile(context.Background(), testFile, "line2", "EDITED2", false, false)
+	r2, err := engine.EditFile(context.Background(), testFile, "line2", "EDITED2", false, false, false)
 	if err != nil {
 		t.Fatalf("Second edit failed: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestUndoChain_RestorePreviousInChain(t *testing.T) {
 	}
 
 	// Edit 1: AAA -> AAA1
-	r1, _ := engine.EditFile(context.Background(), testFile, "AAA", "AAA1", false, false)
+	r1, _ := engine.EditFile(context.Background(), testFile, "AAA", "AAA1", false, false, false)
 	b1 := r1.BackupID
 
 	// Verify file now has AAA1
@@ -107,7 +107,7 @@ func TestUndoChain_RestorePreviousInChain(t *testing.T) {
 	}
 
 	// Edit 2: BBB -> BBB2
-	r2, _ := engine.EditFile(context.Background(), testFile, "BBB", "BBB2", false, false)
+	r2, _ := engine.EditFile(context.Background(), testFile, "BBB", "BBB2", false, false, false)
 	b2 := r2.BackupID
 
 	// Verify file now has BBB2
@@ -170,7 +170,7 @@ func TestUndoChain_ClearOnEnd(t *testing.T) {
 	}
 
 	// One edit
-	r1, _ := engine.EditFile(context.Background(), testFile, "ORIGINAL", "MODIFIED", false, false)
+	r1, _ := engine.EditFile(context.Background(), testFile, "ORIGINAL", "MODIFIED", false, false, false)
 	b1 := r1.BackupID
 
 	// Verify chain points to b1
@@ -236,7 +236,7 @@ func TestUndoChain_MultiEditChain(t *testing.T) {
 		{OldText: "line1", NewText: "M1A"},
 		{OldText: "line2", NewText: "M1B"},
 	}
-	r1, err := engine.MultiEdit(context.Background(), testFile, edits1, false, false)
+	r1, err := engine.MultiEdit(context.Background(), testFile, edits1, false, false, false)
 	if err != nil {
 		t.Fatalf("First MultiEdit failed: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestUndoChain_MultiEditChain(t *testing.T) {
 		{OldText: "line3", NewText: "M2A"},
 		{OldText: "line4", NewText: "M2B"},
 	}
-	r2, err := engine.MultiEdit(context.Background(), testFile, edits2, false, false)
+	r2, err := engine.MultiEdit(context.Background(), testFile, edits2, false, false, false)
 	if err != nil {
 		t.Fatalf("Second MultiEdit failed: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestVerifyIntegrity_HighRisk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 300), strings.Repeat("D", 300), false, false)
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 300), strings.Repeat("D", 300), false, false, false)
 	if err != nil {
 		t.Fatalf("HIGH risk edit failed: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestVerifyIntegrity_CriticalRisk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(context.Background(), testFile, content, "NEW_CONTENT_COMPLETELY_DIFFERENT", false, false)
+	result, err := engine.EditFile(context.Background(), testFile, content, "NEW_CONTENT_COMPLETELY_DIFFERENT", false, false, false)
 	if err != nil {
 		t.Fatalf("CRITICAL risk edit failed: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestVerifyIntegrity_LowRiskNoVerify(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(context.Background(), testFile, "TARGET", "CHANGED", false, false)
+	result, err := engine.EditFile(context.Background(), testFile, "TARGET", "CHANGED", false, false, false)
 	if err != nil {
 		t.Fatalf("LOW risk edit failed: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestVerifyIntegrity_ResultFields(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, _ := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 300), strings.Repeat("D", 300), false, false)
+	result, _ := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 300), strings.Repeat("D", 300), false, false, false)
 	inv := result.Integrity
 
 	if inv == nil {

@@ -49,7 +49,14 @@ type SearchMatch struct {
 //
 // Context Validation: Validates surrounding context (3-5 lines) to prevent
 // editing stale content that may have been modified since the file was read.
-func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText string, force bool, dryRun bool) (*EditResult, error) {
+//
+// tolerantWhitespace: when true, treats tabs and 4-space runs as equivalent
+// (one tab = 4 spaces) and CRLF/LF as equivalent when matching oldText.
+// The original file bytes are preserved exactly — only the matching is
+// tolerant. Useful when files have been edited with mixed indentation
+// (e.g., a mix of tabs and spaces from different editors), where a literal
+// byte-exact match against a pattern typed with spaces will fail.
+func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText string, force bool, dryRun bool, tolerantWhitespace bool) (*EditResult, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
@@ -155,7 +162,7 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 	}
 
 	// Perform intelligent edit
-	result, err := e.performIntelligentEdit(string(content), oldText, newText)
+	result, err := e.performIntelligentEdit(string(content), oldText, newText, tolerantWhitespace)
 	if err != nil {
 		if contextWarning != "" {
 			return nil, fmt.Errorf("edit failed: %w (context hint: %s)", err, contextWarning)
@@ -413,7 +420,14 @@ func (e *UltraFastEngine) createBackup(path string) (string, error) {
 
 // performIntelligentEdit performs intelligent text replacement with optimizations
 // ULTRA-FAST: Uses pre-allocated buffers and minimal allocations
-func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText string) (*EditResult, error) {
+//
+// tolerantWhitespace: when true, treats tabs and 4-space runs as equivalent
+// (one tab = 4 spaces) and CRLF/LF as equivalent when matching oldText.
+// The original file bytes are preserved exactly — only the matching is tolerant.
+// Useful when files have mixed indentation (e.g., tabs and spaces from
+// different editors) and a literal byte-exact match against a pattern typed
+// with spaces would otherwise fail.
+func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText string, tolerantWhitespace bool) (*EditResult, error) {
 	if oldText == "" {
 		return nil, fmt.Errorf("old_text cannot be empty")
 	}
@@ -422,6 +436,48 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 	content = normalizeLineEndings(content)
 	oldText = normalizeLineEndings(oldText)
 	newText = normalizeLineEndings(newText)
+
+	// OPTIMIZATION 0: Whitespace-tolerant match (explicit, opt-in).
+	// Runs FIRST when the caller passed tolerantWhitespace=true. We skip
+	// strategies 1-6 (they expect byte-exact matches and would burn cycles
+	// for no reason on a file with mixed tabs/spaces) and try the tolerant
+	// matcher directly. If tolerant matching finds nothing, we fall through
+	// to the rest of the cascade so the caller still gets the best fallback
+	// (literal-escape, regex, etc.) the rest of the code can offer.
+	//
+	// The tolerant match is conservative: it only collapses tabs to 4 spaces
+	// and CRLF/CR to LF. It does NOT collapse runs of multiple spaces, so a
+	// 2-space indent still differs from a 4-space indent (caller can do that
+	// explicitly with normalize_file if needed).
+	if tolerantWhitespace {
+		matches := findAllTolerantMatches(content, oldText)
+		if len(matches) > 0 {
+			newContent, applied := applyTolerantMatches(content, matches, newText)
+			if applied > 0 {
+				startOrig := matches[0].StartOrig
+				endOrig := matches[len(matches)-1].EndOrig
+				startLine := strings.Count(content[:startOrig], "\n") + 1
+				endLine := strings.Count(content[:endOrig], "\n") + 1
+				linesAffected := strings.Count(newContent, "\n") - strings.Count(content, "\n")
+				if linesAffected < 0 {
+					linesAffected = -linesAffected
+				}
+				if !strings.Contains(newText, "\n") && !strings.Contains(content[startOrig:endOrig], "\n") {
+					linesAffected = 1
+				}
+				return &EditResult{
+					ModifiedContent:  newContent,
+					ReplacementCount: applied,
+					MatchConfidence:  "high",
+					LinesAffected:    linesAffected,
+					StartLine:        startLine,
+					EndLine:          endLine,
+				}, nil
+			}
+		}
+		// Tolerant matching found nothing — fall through to the rest of the
+		// fallbacks (regex, literal escapes, flexible pattern, etc.).
+	}
 
 	// OPTIMIZATION 1: Fast path for exact match (most common case - ~80% of edits)
 	// Uses strings.Index which is highly optimized with SIMD on modern CPUs
@@ -1094,7 +1150,7 @@ type MultiEditResult struct {
 // 4. Only one backup is created
 // ULTRA-FAST: Designed for Claude Desktop batch editing
 // Bug #17: Added risk assessment, context validation, hooks, per-edit detail, and "already_present" detection
-func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []MultiEditOperation, force bool, dryRun bool) (*MultiEditResult, error) {
+func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []MultiEditOperation, force bool, dryRun bool, tolerantWhitespace bool) (*MultiEditResult, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
@@ -1157,7 +1213,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		if edit.OldText == "" {
 			continue
 		}
-		simResult, simErr := e.performIntelligentEdit(simContent, edit.OldText, edit.NewText)
+		simResult, simErr := e.performIntelligentEdit(simContent, edit.OldText, edit.NewText, false)
 		if simErr == nil && simResult.ReplacementCount > 0 {
 			simContent = simResult.ModifiedContent
 		}
@@ -1246,7 +1302,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		}
 
 		// Apply this edit
-		editResult, editErr := e.performIntelligentEdit(currentContent, edit.OldText, edit.NewText)
+		editResult, editErr := e.performIntelligentEdit(currentContent, edit.OldText, edit.NewText, false)
 		if editErr != nil || editResult.ReplacementCount == 0 {
 			// Check "already_present" / "ambiguous" (Bug #27 fix)
 			// Compare against originalContent to determine if old_text was actually in the file.

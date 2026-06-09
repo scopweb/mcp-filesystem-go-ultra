@@ -46,7 +46,7 @@ func TestBug23_EditFile_CRLFMatchesLF(t *testing.T) {
 	os.WriteFile(filePath, []byte(content), 0644)
 
 	// Edit with LF-only old_text (as Claude Desktop would send)
-	result, err := engine.EditFile(context.Background(), filePath, "line2\n", "REPLACED\n", true, false)
+	result, err := engine.EditFile(context.Background(), filePath, "line2\n", "REPLACED\n", true, false, false)
 	if err != nil {
 		t.Fatalf("EditFile failed: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestBug23_EditFile_CRLFRiskNotCritical(t *testing.T) {
 	os.WriteFile(filePath, []byte(sb.String()), 0644)
 
 	// Edit one line with LF old_text (no \r)
-	result, err := engine.EditFile(context.Background(), filePath, "TARGET_LINE_TO_REPLACE\n", "REPLACED_SUCCESSFULLY\n", false, false)
+	result, err := engine.EditFile(context.Background(), filePath, "TARGET_LINE_TO_REPLACE\n", "REPLACED_SUCCESSFULLY\n", false, false, false)
 	if err != nil {
 		t.Fatalf("EditFile failed: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestBug23_MultiEdit_CRLFMatchesLF(t *testing.T) {
 		{OldText: "gamma\n", NewText: "GAMMA\n"},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), filePath, edits, true, false)
+	result, err := engine.MultiEdit(context.Background(), filePath, edits, true, false, false)
 	if err != nil {
 		t.Fatalf("MultiEdit failed: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestBug23_PureLF_StillWorks(t *testing.T) {
 	os.WriteFile(filePath, []byte(content), 0644)
 
 	// Edit with LF old_text
-	result, err := engine.EditFile(context.Background(), filePath, "line2\n", "REPLACED\n", false, false)
+	result, err := engine.EditFile(context.Background(), filePath, "line2\n", "REPLACED\n", false, false, false)
 	if err != nil {
 		t.Fatalf("EditFile failed on LF file: %v", err)
 	}
