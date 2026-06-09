@@ -176,6 +176,35 @@ ok  tests/security 0.824s
 ok  .            0.654s
 ```
 
+## [Unreleased / 4.5.8] - 2026-06-09
+
+### Security — Go 1.26.3 → 1.26.4 stdlib CVE fixes
+
+`govulncheck` flagged two vulnerabilities in the Go standard library, both fixed in 1.26.4. Anyone building or running the server on 1.26.3 is affected.
+
+- **GO-2026-5039** — "Arbitrary inputs are included in errors without any escaping" in `net/textproto` (triggered by `io.CopyBuffer` → `textproto.Reader.ReadMIMEHeader`, reachable from `core.CopyFileWithBuffer`).
+- **GO-2026-5037** — "Inefficient candidate hostname parsing in `crypto/x509`" (triggered by `http.ListenAndServe` → `x509.Certificate.Verify`, reachable from `cmd/dashboard/main.go`).
+
+`GO_VERSION` bumped from `1.26.3` → `1.26.4` in `.github/workflows/ci.yml`. Users running the prebuilt binaries inherit the fix; users building from source should `go version` ≥ 1.26.4.
+
+### Bug fix — TOCTOU defense now distinguishes Windows directory junctions from real symlinks
+
+`core.ResolveSymlinks` (the TOCTOU defense called before `MoveFile`, `CopyFile`, and pipeline `copy` actions) used `filepath.EvalSymlinks` and treated ANY difference between the resolved and original paths as a symlink. On Windows, OS-created directory junctions (`%LOCALAPPDATA%\Temp` → `%USERPROFILE%\AppData\Local\Temp`, `Recent`, `Cookies`, etc.) caused the resolved form to always differ, so the defense incorrectly rejected every file operation whose path traversed one — including `t.TempDir()` paths in the standard test suite. Junctions are not attacker-controlled reparse points, so flagging them was a false positive that would have blocked legitimate paths in any Windows deployment that happened to walk through `Temp`, `LocalAppData`, etc.
+
+**Fix** — replaced the resolution-based check with an Lstat-based walk. `os.Lstat` does not follow links, and on Windows it reports junctions as plain directories (their reparse-point attribute is not surfaced through Lstat's mode bits), so junctions are correctly treated as legitimate while real symlinks are still caught. The canonical resolved path is still returned for callers that need it; only the `wasSymlink` bool changes meaning (now true ONLY if a real symlink was traversed).
+
+The test-skip band-aids added in 4.5.7 (which gated `TestMoveFile`, `TestCopyFile`, `TestPipeline_Copy` on Windows) are removed — they are no longer needed and `core/engine_test.go`'s `skipIfWindowsJunctionTempDir` helper is deleted entirely. Verified locally on Windows: all three tests now pass without the skip.
+
+### Build — `embed_rg` binaries are now downloaded in CI
+
+The `filesystem-ultra-v4-embed_rg.exe` binary embeds ripgrep via `//go:embed all:rg-*`. The `.exe` files are gitignored (build artifacts) and were never committed, so the CI build of the embed_rg variant failed on Windows with `pattern *.exe: no matching files found`. Fixed in three places:
+
+- `embed/ripgrep/embed.go` — uses the `all:` prefix on the `rg-*` glob to override `.gitignore`, with a single pattern that matches whichever platforms have downloaded binaries (host builds don't need every platform).
+- `embed/ripgrep/download.sh` — rewritten to fetch every supported platform from the official ripgrep 15.1.0 GitHub release (windows/amd64, linux/amd64, linux/arm64, darwin/amd64, darwin/arm64) and place them at the exact names `embed.go` expects (`rg-windows-amd64.exe`, `rg-linux-amd64`, etc.). The old script used `musleabi` for Linux, which is not a published ripgrep asset — corrected to `musl` for amd64 and `gnu` for arm64.
+- `.github/workflows/ci.yml` — new `Download ripgrep binaries for embed_rg` step runs `bash embed/ripgrep/download.sh` before the build script, on both ubuntu and windows runners.
+
+The `embed_rg` binary now builds cleanly in CI; the resulting `bin/filesystem-ultra-v4-embed_rg.exe` is ~12.6 MB (up from 8.4 MB) — the extra ~4.2 MB are the embedded ripgrep binaries for all 5 platforms.
+
 ## [Unreleased / 4.5.5] - 2026-06-04
 
 ### Improvement — Adaptive write_file behavior when backup is available
