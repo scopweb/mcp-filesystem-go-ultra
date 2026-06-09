@@ -22,8 +22,8 @@ func registerGitTools(reg *toolRegistry) {
 		mcp.WithDescription("git — Git operations: status, diff, log, add, commit, branch, restore, init. "+
 			"Must be run from within a git repository. Related: analyze_operation, edit_file."),
 		mcp.WithReadOnlyHintAnnotation(false),
-		mcp.WithDestructiveHintAnnotation(true),   // Some actions (restore, branch delete, etc.) are destructive
-		mcp.WithIdempotentHintAnnotation(false),   // commit, restore, branch delete are not idempotent
+		mcp.WithDestructiveHintAnnotation(true), // Some actions (restore, branch delete, etc.) are destructive
+		mcp.WithIdempotentHintAnnotation(false), // commit, restore, branch delete are not idempotent
 
 		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, diff, log, add, commit, branch, restore, init")),
 		mcp.WithString("path", mcp.Description("Working directory or file path (default: auto-detect repo root)")),
@@ -620,7 +620,12 @@ func gitRestore(ctx context.Context, engine *core.UltraFastEngine, repoRoot stri
 		return mcp.NewToolResultText(fmt.Sprintf("OK: restored %d file(s) from %s", len(paths), source)), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Restored %d file(s)%s\n%s",
-		len(paths), func() string { if source != "" { return " from " + source }; return "" }(), output)), nil
+		len(paths), func() string {
+			if source != "" {
+				return " from " + source
+			}
+			return ""
+		}(), output)), nil
 }
 
 // extractCommitHash extracts the commit hash from git commit output

@@ -11,15 +11,15 @@ import (
 
 // AutoSyncConfig holds the configuration for automatic WSL<->Windows syncing
 type AutoSyncConfig struct {
-	Enabled          bool              `json:"enabled"`
-	SyncOnWrite      bool              `json:"sync_on_write"`
-	SyncOnEdit       bool              `json:"sync_on_edit"`
-	SyncOnDelete     bool              `json:"sync_on_delete"`
-	TargetMapping    map[string]string `json:"target_mapping,omitempty"` // Custom path mappings
-	ExcludePatterns  []string          `json:"exclude_patterns,omitempty"` // Patterns to exclude from auto-sync
-	Silent           bool              `json:"silent"` // If true, don't log sync operations
-	OnlySubdirs      []string          `json:"only_subdirs,omitempty"` // Only sync files under these subdirectories
-	ConfigVersion    string            `json:"config_version"` // Config file version
+	Enabled         bool              `json:"enabled"`
+	SyncOnWrite     bool              `json:"sync_on_write"`
+	SyncOnEdit      bool              `json:"sync_on_edit"`
+	SyncOnDelete    bool              `json:"sync_on_delete"`
+	TargetMapping   map[string]string `json:"target_mapping,omitempty"`   // Custom path mappings
+	ExcludePatterns []string          `json:"exclude_patterns,omitempty"` // Patterns to exclude from auto-sync
+	Silent          bool              `json:"silent"`                     // If true, don't log sync operations
+	OnlySubdirs     []string          `json:"only_subdirs,omitempty"`     // Only sync files under these subdirectories
+	ConfigVersion   string            `json:"config_version"`             // Config file version
 }
 
 // DefaultAutoSyncConfig returns the default auto-sync configuration
@@ -51,7 +51,7 @@ type AutoSyncManager struct {
 // NewAutoSyncManager creates a new AutoSyncManager
 func NewAutoSyncManager() *AutoSyncManager {
 	manager := &AutoSyncManager{
-		config: DefaultAutoSyncConfig(),
+		config:  DefaultAutoSyncConfig(),
 		enabled: false,
 	}
 
@@ -383,16 +383,16 @@ func (m *AutoSyncManager) GetStatus() map[string]interface{} {
 	defer m.configMu.RUnlock()
 
 	return map[string]interface{}{
-		"enabled":            m.enabled,
-		"is_wsl":             m.isWSL,
-		"windows_user":       m.winUser,
-		"sync_on_write":      m.config.SyncOnWrite,
-		"sync_on_edit":       m.config.SyncOnEdit,
-		"sync_on_delete":     m.config.SyncOnDelete,
-		"config_path":        m.getConfigPath(),
-		"exclude_patterns":   m.config.ExcludePatterns,
-		"only_subdirs":       m.config.OnlySubdirs,
-		"custom_mappings":    m.config.TargetMapping,
-		"config_version":     m.config.ConfigVersion,
+		"enabled":          m.enabled,
+		"is_wsl":           m.isWSL,
+		"windows_user":     m.winUser,
+		"sync_on_write":    m.config.SyncOnWrite,
+		"sync_on_edit":     m.config.SyncOnEdit,
+		"sync_on_delete":   m.config.SyncOnDelete,
+		"config_path":      m.getConfigPath(),
+		"exclude_patterns": m.config.ExcludePatterns,
+		"only_subdirs":     m.config.OnlySubdirs,
+		"custom_mappings":  m.config.TargetMapping,
+		"config_version":   m.config.ConfigVersion,
 	}
 }

@@ -273,14 +273,18 @@ func main() {
 				if len(msg.Error) > 0 && string(msg.Error) != "null" {
 					pc.entry.Status = "error"
 					// Extract error message
-					var errObj struct{ Message string `json:"message"` }
+					var errObj struct {
+						Message string `json:"message"`
+					}
 					if json.Unmarshal(msg.Error, &errObj) == nil {
 						pc.entry.Error = errObj.Message
 					}
 				} else {
 					pc.entry.Status = "ok"
 					// Check if result contains isError
-					var result struct{ IsError bool `json:"isError"` }
+					var result struct {
+						IsError bool `json:"isError"`
+					}
 					if json.Unmarshal(msg.Result, &result) == nil && result.IsError {
 						pc.entry.Status = "error"
 						// Extract error text from result.content[0].text

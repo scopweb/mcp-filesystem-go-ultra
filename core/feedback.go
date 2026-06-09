@@ -20,12 +20,12 @@ const (
 type PatternID string
 
 const (
-	PatternTruncation       PatternID = "truncation"        // write < 50% of existing content
-	PatternInflationLoop    PatternID = "inflation_loop"     // write > 3x of existing content
-	PatternStaleRead        PatternID = "stale_read"         // edit without prior read in session
-	PatternFullRewrite      PatternID = "full_rewrite"       // write_file on large existing file
-	PatternRepeatedOldText  PatternID = "repeated_old_text"  // same old_text fails 2+ times
-	PatternLargeNewText     PatternID = "large_new_text"     // new_text > 80% of file size (use write_file instead)
+	PatternTruncation      PatternID = "truncation"        // write < 50% of existing content
+	PatternInflationLoop   PatternID = "inflation_loop"    // write > 3x of existing content
+	PatternStaleRead       PatternID = "stale_read"        // edit without prior read in session
+	PatternFullRewrite     PatternID = "full_rewrite"      // write_file on large existing file
+	PatternRepeatedOldText PatternID = "repeated_old_text" // same old_text fails 2+ times
+	PatternLargeNewText    PatternID = "large_new_text"    // new_text > 80% of file size (use write_file instead)
 )
 
 // FeedbackSignal is returned by the detector to the tool handler.

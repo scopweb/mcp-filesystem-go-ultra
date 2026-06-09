@@ -121,7 +121,7 @@ func registerMinifyTools(reg *toolRegistry) {
 
 		// Dry-run: return the preview without writing
 		if dryRun {
-			return formatMinifyResult(normPath, target, stats, minified, /*wroteFile=*/ false, /*backupID=*/ "", engine.IsCompactMode()), nil
+			return formatMinifyResult(normPath, target, stats, minified /*wroteFile=*/, false /*backupID=*/, "", engine.IsCompactMode()), nil
 		}
 
 		// Create backup (unless explicitly disabled) — only when overwriting
@@ -174,7 +174,7 @@ func registerMinifyTools(reg *toolRegistry) {
 			engine.SetCurrentBackupID(normPath, backupID)
 		}
 
-		return formatMinifyResult(normPath, target, stats, minified, /*wroteFile=*/ true, backupID, engine.IsCompactMode()), nil
+		return formatMinifyResult(normPath, target, stats, minified /*wroteFile=*/, true, backupID, engine.IsCompactMode()), nil
 	}))
 }
 

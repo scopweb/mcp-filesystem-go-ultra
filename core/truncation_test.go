@@ -283,8 +283,8 @@ func TestReadFileWithPathAndPathsBothSet(t *testing.T) {
 
 	// Create a file with unique content
 	var b strings.Builder
-	b.WriteString("namespace App\n{\n")  // line 1
-	b.WriteString("    public class Test\n    {\n")  // line 2
+	b.WriteString("namespace App\n{\n")             // line 1
+	b.WriteString("    public class Test\n    {\n") // line 2
 	for i := 1; i <= 100; i++ {
 		b.WriteString(fmt.Sprintf("        public void M%d_UNIQUE_%d() {{ }}\n", i, i*1000+i))
 	}
@@ -333,7 +333,7 @@ func TestReadFileWithPathAndPathsBothSet(t *testing.T) {
 	}
 
 	_ = pathStr   // unused but documents the params
-	_ = pathsJSON  // unused but documents the params
+	_ = pathsJSON // unused but documents the params
 }
 
 // TestReadFileWithStartEndLineDoesNotTruncate tests the full read_file tool flow
@@ -390,7 +390,9 @@ func TestReadFileWithStartEndLineDoesNotTruncate(t *testing.T) {
 // when the real file was orders of magnitude larger.
 //
 // Symptom for the user: reading lines 15-50 of a 685-line file returned
-//   "[Lines 15-50 of 51 total lines in foo.go]"
+//
+//	"[Lines 15-50 of 51 total lines in foo.go]"
+//
 // Both humans and AI agents reading that footer concluded the file had
 // been truncated to 51 lines and triggered emergency rollbacks against
 // files that were never damaged.

@@ -740,23 +740,23 @@ type NormalizationApplied struct {
 
 // AuditEntry mirrors the core audit entry for parsing operations.jsonl
 type AuditEntry struct {
-	Timestamp      time.Time              `json:"ts"`
-	Tool           string                 `json:"tool"`
-	Path           string                 `json:"path,omitempty"`
-	DurationMs     int64                  `json:"duration_ms"`
-	BytesIn        int64                  `json:"bytes_in,omitempty"`
-	BytesOut       int64                  `json:"bytes_out,omitempty"`
-	Status         string                 `json:"status"`
-	Error          string                 `json:"error,omitempty"`
-	RiskLevel      string                 `json:"risk,omitempty"`
-	FileSize       int64                  `json:"file_size,omitempty"`
-	Args           map[string]string      `json:"args,omitempty"`
-	LinesChanged   int                    `json:"lines_changed,omitempty"`
-	Matches        int                    `json:"matches,omitempty"`
-	CacheHit       *bool                  `json:"cache_hit,omitempty"`
-	Normalizations []NormalizationApplied `json:"norms,omitempty"`
-	FeedbackPattern string `json:"feedback_pattern,omitempty"`
-	FeedbackStatus  string `json:"feedback_status,omitempty"`
+	Timestamp       time.Time              `json:"ts"`
+	Tool            string                 `json:"tool"`
+	Path            string                 `json:"path,omitempty"`
+	DurationMs      int64                  `json:"duration_ms"`
+	BytesIn         int64                  `json:"bytes_in,omitempty"`
+	BytesOut        int64                  `json:"bytes_out,omitempty"`
+	Status          string                 `json:"status"`
+	Error           string                 `json:"error,omitempty"`
+	RiskLevel       string                 `json:"risk,omitempty"`
+	FileSize        int64                  `json:"file_size,omitempty"`
+	Args            map[string]string      `json:"args,omitempty"`
+	LinesChanged    int                    `json:"lines_changed,omitempty"`
+	Matches         int                    `json:"matches,omitempty"`
+	CacheHit        *bool                  `json:"cache_hit,omitempty"`
+	Normalizations  []NormalizationApplied `json:"norms,omitempty"`
+	FeedbackPattern string                 `json:"feedback_pattern,omitempty"`
+	FeedbackStatus  string                 `json:"feedback_status,omitempty"`
 	// ROI / savings fields (v4.3.3+)
 	SessionID      string `json:"session_id,omitempty"`
 	FileLinesTotal int    `json:"file_lines_total,omitempty"`
@@ -792,21 +792,21 @@ type TopFile struct {
 }
 
 type StatsResponse struct {
-	TotalOps        int64                 `json:"total_ops"`
-	TotalErrors     int64                 `json:"total_errors"`
-	ErrorRate       float64               `json:"error_rate"`
-	AvgDurationMs   float64               `json:"avg_duration_ms"`
-	TotalBytesOut   int64                 `json:"total_bytes_out"`
-	TotalBytesIn    int64                 `json:"total_bytes_in"`
-	TokensEstimate  int64                 `json:"tokens_estimate"`
-	TimeSpan        string                `json:"time_span"`
-	ByTool          map[string]*ToolStats `json:"by_tool"`
-	ByHour          []HourBucket          `json:"by_hour"`
-	TopFiles        []TopFile             `json:"top_files"`
-	ByRisk          map[string]int64      `json:"by_risk"`
-	SlowestOps      []AuditEntry          `json:"slowest_ops"`
-	TotalLines      int64                 `json:"total_lines_changed"`
-	TotalMatches    int64                 `json:"total_matches"`
+	TotalOps       int64                 `json:"total_ops"`
+	TotalErrors    int64                 `json:"total_errors"`
+	ErrorRate      float64               `json:"error_rate"`
+	AvgDurationMs  float64               `json:"avg_duration_ms"`
+	TotalBytesOut  int64                 `json:"total_bytes_out"`
+	TotalBytesIn   int64                 `json:"total_bytes_in"`
+	TokensEstimate int64                 `json:"tokens_estimate"`
+	TimeSpan       string                `json:"time_span"`
+	ByTool         map[string]*ToolStats `json:"by_tool"`
+	ByHour         []HourBucket          `json:"by_hour"`
+	TopFiles       []TopFile             `json:"top_files"`
+	ByRisk         map[string]int64      `json:"by_risk"`
+	SlowestOps     []AuditEntry          `json:"slowest_ops"`
+	TotalLines     int64                 `json:"total_lines_changed"`
+	TotalMatches   int64                 `json:"total_matches"`
 }
 
 func statsHandler(logDir string) http.HandlerFunc {
@@ -991,9 +991,14 @@ func statsHandler(logDir string) http.HandlerFunc {
 		}
 
 		resp := StatsResponse{
-			TotalOps:       totalOps,
-			TotalErrors:    totalErrors,
-			ErrorRate:      func() float64 { if totalOps > 0 { return float64(totalErrors) / float64(totalOps) * 100 }; return 0 }(),
+			TotalOps:    totalOps,
+			TotalErrors: totalErrors,
+			ErrorRate: func() float64 {
+				if totalOps > 0 {
+					return float64(totalErrors) / float64(totalOps) * 100
+				}
+				return 0
+			}(),
 			AvgDurationMs:  avgDuration,
 			TotalBytesOut:  totalBytesOut,
 			TotalBytesIn:   totalBytesIn,
@@ -1268,13 +1273,13 @@ func normalizerHandler(logDir string) http.HandlerFunc {
 
 // ErrorPattern represents a recurring error pattern detected in audit logs
 type ErrorPattern struct {
-	Pattern       string        `json:"pattern"`
-	Tool          string        `json:"tool"`
-	Count         int64         `json:"count"`
-	FirstSeen     time.Time     `json:"first_seen"`
-	LastSeen      time.Time     `json:"last_seen"`
-	Trend         string        `json:"trend"`
-	SampleErrors  []string      `json:"sample_errors"`
+	Pattern       string         `json:"pattern"`
+	Tool          string         `json:"tool"`
+	Count         int64          `json:"count"`
+	FirstSeen     time.Time      `json:"first_seen"`
+	LastSeen      time.Time      `json:"last_seen"`
+	Trend         string         `json:"trend"`
+	SampleErrors  []string       `json:"sample_errors"`
 	SuggestedRule *SuggestedRule `json:"suggested_rule,omitempty"`
 }
 
@@ -1288,10 +1293,10 @@ type SuggestedRule struct {
 
 // errorPatternNormalizers replace variable parts of error messages with placeholders
 var errorPatternNormalizers = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)(?:\/[\w.\-]+)+(?:\.\w+)?`),         // file paths
-	regexp.MustCompile(`\b\d+\b`),                                // numbers
-	regexp.MustCompile(`"[^"]{20,}"`),                             // long quoted strings
-	regexp.MustCompile(`'[^']{20,}'`),                             // long single-quoted strings
+	regexp.MustCompile(`(?i)(?:\/[\w.\-]+)+(?:\.\w+)?`), // file paths
+	regexp.MustCompile(`\b\d+\b`),                       // numbers
+	regexp.MustCompile(`"[^"]{20,}"`),                   // long quoted strings
+	regexp.MustCompile(`'[^']{20,}'`),                   // long single-quoted strings
 }
 
 func normalizeErrorMessage(msg string) string {
@@ -1342,9 +1347,9 @@ func errorPatternsHandler(logDir string) http.HandlerFunc {
 		f, err := os.Open(opsPath)
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"patterns":        []interface{}{},
-				"total_errors":    0,
-				"unique_patterns": 0,
+				"patterns":         []interface{}{},
+				"total_errors":     0,
+				"unique_patterns":  0,
 				"with_suggestions": 0,
 			})
 			return
@@ -1352,12 +1357,12 @@ func errorPatternsHandler(logDir string) http.HandlerFunc {
 		defer f.Close()
 
 		type patternData struct {
-			count    int64
-			first    time.Time
-			last     time.Time
-			tool     string
-			samples  []string
-			recent   []time.Time // last 20 timestamps for trend
+			count   int64
+			first   time.Time
+			last    time.Time
+			tool    string
+			samples []string
+			recent  []time.Time // last 20 timestamps for trend
 		}
 
 		patterns := make(map[string]*patternData) // key: "tool:pattern"
@@ -1513,19 +1518,19 @@ type ROIResponse struct {
 	TokensSaved    int64   `json:"tokens_saved"`
 	SavingsPct     float64 `json:"savings_pct"`
 	// Range efficiency (read_file range vs full file)
-	RangeReadOps   int64   `json:"range_read_ops"`
-	RangeReadPct   float64 `json:"range_read_pct"` // % of reads that used range
-	AvgReadPct     float64 `json:"avg_read_pct"`   // avg % of file actually read
+	RangeReadOps int64   `json:"range_read_ops"`
+	RangeReadPct float64 `json:"range_read_pct"` // % of reads that used range
+	AvgReadPct   float64 `json:"avg_read_pct"`   // avg % of file actually read
 	// Sessions
-	SessionCount   int64        `json:"session_count"`
-	Sessions       []SessionROI `json:"sessions"`
+	SessionCount int64        `json:"session_count"`
+	Sessions     []SessionROI `json:"sessions"`
 	// By tool
-	ByTool         []ToolROI    `json:"by_tool"`
+	ByTool []ToolROI `json:"by_tool"`
 	// Top savings operations
-	TopSavings     []TopSavingOp `json:"top_savings"`
+	TopSavings []TopSavingOp `json:"top_savings"`
 	// Anti-patterns detected
-	AntiPatterns   map[string]int64 `json:"anti_patterns"`
-	TimeSpan       string           `json:"time_span"`
+	AntiPatterns map[string]int64 `json:"anti_patterns"`
+	TimeSpan     string           `json:"time_span"`
 }
 
 func roiHandler(logDir string) http.HandlerFunc {

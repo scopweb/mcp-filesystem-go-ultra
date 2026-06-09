@@ -18,9 +18,9 @@ func newEngineWithCap(t *testing.T, capBytes int) *core.UltraFastEngine {
 		t.Fatalf("cache init: %v", err)
 	}
 	engine, err := core.NewUltraFastEngine(&core.Config{
-		Cache:               c,
+		Cache:                c,
 		MaxSearchOutputBytes: capBytes,
-		ParallelOps:         2,
+		ParallelOps:          2,
 	})
 	if err != nil {
 		t.Fatalf("engine init: %v", err)
@@ -60,7 +60,7 @@ func TestCapSearchOutput_AboveCap(t *testing.T) {
 
 // TestCapSearchOutput_DefaultCap: 0 cap → uses DefaultMaxSearchOutputBytes (500KB).
 func TestCapSearchOutput_DefaultCap(t *testing.T) {
-	engine := newEngineWithCap(t, 0) // 0 → default
+	engine := newEngineWithCap(t, 0)     // 0 → default
 	big := strings.Repeat("y", 600*1024) // 600KB > 500KB default
 	got := capSearchOutput(big, engine)
 	if !strings.Contains(got, "truncated") {
