@@ -26,6 +26,10 @@ import (
 //go:embed static/*
 var staticFiles embed.FS
 
+// maxSearchQueryLen caps the length of the user-supplied "q" search parameter
+// to bound per-request CPU/allocation work (defense against trivial DoS).
+const maxSearchQueryLen = 256
+
 // BackupInfo mirrors core.BackupInfo for reading metadata files
 type BackupInfo struct {
 	BackupID    string           `json:"backup_id"`
@@ -390,6 +394,10 @@ func backupSearchHandler(backupDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
+		if len(r.URL.Query().Get("q")) > maxSearchQueryLen {
+			http.Error(w, "q parameter too long", http.StatusBadRequest)
+			return
+		}
 		q := strings.ToLower(r.URL.Query().Get("q"))
 		operation := r.URL.Query().Get("operation")
 		preset := r.URL.Query().Get("preset")
@@ -523,6 +531,10 @@ func backupContentSearchHandler(backupDir string) http.HandlerFunc {
 		q := r.URL.Query().Get("q")
 		if q == "" {
 			json.NewEncoder(w).Encode(map[string]interface{}{"error": "q parameter required", "matches": []interface{}{}})
+			return
+		}
+		if len(q) > maxSearchQueryLen {
+			http.Error(w, "q parameter too long", http.StatusBadRequest)
 			return
 		}
 

@@ -207,6 +207,11 @@ func gitStatusCompact(repoRoot, output string) (*mcp.CallToolResult, error) {
 func gitDiff(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	staged, _ := args["staged"].(bool)
 	commitRange, _ := args["commit_range"].(string)
+	if commitRange != "" {
+		if errRes := rejectOptionLike("commit_range", commitRange); errRes != nil {
+			return errRes, nil
+		}
+	}
 
 	var cmdArgs []string
 	if commitRange != "" {
@@ -558,6 +563,12 @@ func gitRestore(ctx context.Context, engine *core.UltraFastEngine, repoRoot stri
 	source, _ := args["source"].(string)
 	dryRun, _ := args["dry_run"].(bool)
 
+	if source != "" {
+		if errRes := rejectOptionLike("source", source); errRes != nil {
+			return errRes, nil
+		}
+	}
+
 	// Pre-delete hook for restore (it's destructive to working tree)
 	hookCtx := &core.HookContext{
 		Event:     core.HookPreDelete,
@@ -649,6 +660,12 @@ func extractCommitHash(output string) string {
 func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	branchAction, _ := args["branch_action"].(string)
 	branchName, _ := args["branch_name"].(string)
+
+	if branchName != "" {
+		if errRes := rejectOptionLike("branch_name", branchName); errRes != nil {
+			return errRes, nil
+		}
+	}
 
 	// List branches
 	if branchAction == "" || branchAction == "list" {
@@ -796,6 +813,19 @@ func isDestructiveGitAction(action string, args map[string]any) bool {
 		return false
 	}
 	return false
+}
+
+// rejectOptionLike guards against git argument injection. User-supplied
+// revisions, ranges and branch names are passed to git as positional
+// arguments; a value beginning with "-" could be reinterpreted by git as an
+// option (e.g. --output=<file>) instead of data. git itself forbids branch
+// names and refs starting with "-", so rejecting them costs no legitimate use.
+// Returns a non-nil error result if the value is option-like.
+func rejectOptionLike(field, value string) *mcp.CallToolResult {
+	if strings.HasPrefix(value, "-") {
+		return mcp.NewToolResultError(fmt.Sprintf("invalid %s %q: value must not start with '-'", field, value))
+	}
+	return nil
 }
 
 // getBoolArg safely extracts a boolean argument
