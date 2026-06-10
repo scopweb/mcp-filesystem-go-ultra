@@ -65,8 +65,8 @@ func (e *UltraFastEngine) RenameFile(ctx context.Context, oldPath, newPath strin
 	}
 
 	// Invalidate cache entries for both paths
-	e.cache.InvalidateFile(oldPath)
-	e.cache.InvalidateFile(newPath)
+	e.invalidateFileReadCache(oldPath)
+	e.invalidateFileReadCache(newPath)
 
 	// Also invalidate parent directories
 	e.cache.InvalidateDirectory(filepath.Dir(oldPath))
@@ -183,7 +183,7 @@ func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) error
 	}
 
 	// Invalidate cache entries
-	e.cache.InvalidateFile(path)
+	e.invalidateFileReadCache(path)
 	e.cache.InvalidateDirectory(filepath.Dir(path))
 
 	// Execute post-delete hook (best-effort)
@@ -321,7 +321,7 @@ func (e *UltraFastEngine) DeleteFile(ctx context.Context, path string) error {
 	}
 
 	// Invalidate cache entries
-	e.cache.InvalidateFile(path)
+	e.invalidateFileReadCache(path)
 	e.cache.InvalidateDirectory(path)
 	e.cache.InvalidateDirectory(filepath.Dir(path))
 
@@ -413,8 +413,8 @@ func (e *UltraFastEngine) MoveFile(ctx context.Context, sourcePath, destPath str
 	}
 
 	// Invalidate cache entries
-	e.cache.InvalidateFile(sourcePath)
-	e.cache.InvalidateFile(destPath)
+	e.invalidateFileReadCache(sourcePath)
+	e.invalidateFileReadCache(destPath)
 	e.cache.InvalidateDirectory(sourcePath)
 	e.cache.InvalidateDirectory(destPath)
 	e.cache.InvalidateDirectory(filepath.Dir(sourcePath))
@@ -562,7 +562,7 @@ func (e *UltraFastEngine) copyFile(src, dst string) error {
 	}
 
 	// Invalidate cache for destination
-	e.cache.InvalidateFile(dst)
+	e.invalidateFileReadCache(dst)
 	e.cache.InvalidateDirectory(filepath.Dir(dst))
 
 	return nil
@@ -653,6 +653,18 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 	}
 	if endLine < startLine {
 		return "", fmt.Errorf("end_line (%d) must be >= start_line (%d)", endLine, startLine)
+	}
+
+	// Fast path: serve range from cache or deduped full read (files ≤ LargeFileThreshold).
+	if info.Size() <= LargeFileThreshold {
+		if cached, hit := e.cache.GetFile(path); hit {
+			return extractLineRangeFromBytes(cached, path, startLine, endLine)
+		}
+		content, readErr := e.readFileBytesDeduped(ctx, path)
+		if readErr != nil {
+			return "", readErr
+		}
+		return extractLineRangeFromBytes(content, path, startLine, endLine)
 	}
 
 	// Open file for efficient line-by-line reading
