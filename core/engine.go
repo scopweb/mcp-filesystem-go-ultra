@@ -591,6 +591,16 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 		return "", &PathError{Op: "read", Path: path, Err: fmt.Errorf("access denied")}
 	}
 
+	// TOCTOU defense: re-resolve symlinks and re-authorize the canonical target
+	// immediately before any disk I/O. Operate on the resolved path so the read
+	// cannot be redirected outside the sandbox by a symlink swapped in after the
+	// IsPathAllowed check above.
+	if resolved, err := e.ResolveAndAuthorize("read", path); err != nil {
+		return "", err
+	} else {
+		path = resolved
+	}
+
 	// Execute pre-read hook
 	workingDir, _ := os.Getwd()
 	hookCtx := &HookContext{
@@ -679,6 +689,17 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 	// Check if path is allowed (security + access control)
 	if !e.IsPathAllowed(path) {
 		return &PathError{Op: "write", Path: path, Err: fmt.Errorf("access denied")}
+	}
+
+	// TOCTOU defense: re-resolve symlinks and re-authorize the canonical target
+	// immediately before the write. Operate on the resolved path so the atomic
+	// write/rename cannot be redirected outside the sandbox by a symlink swapped
+	// in after the IsPathAllowed check above. For new files this resolves the
+	// (existing) parent directory and re-validates it.
+	if resolved, err := e.ResolveAndAuthorize("write", path); err != nil {
+		return err
+	} else {
+		path = resolved
 	}
 
 	// Check context before proceeding with write
@@ -1182,6 +1203,29 @@ func (e *UltraFastEngine) IsAllowedPathRoot(path string) bool {
 		}
 	}
 	return false
+}
+
+// ResolveAndAuthorize re-resolves symlinks immediately before a file I/O
+// syscall and re-validates the canonical target against the access-control
+// policy. It closes the TOCTOU (time-of-check-time-of-use) window between the
+// initial IsPathAllowed() check and the actual syscall: an attacker who swaps
+// the path for a symlink pointing outside the sandbox after the first check is
+// caught here, because the *resolved* target is re-authorized.
+//
+// Unlike ResolveSymlinks (used by rename/copy, which reject any symlink),
+// this permits legitimate symlinks that resolve to a location still inside the
+// allowed paths — common in real projects (e.g. node_modules, vendored deps).
+// Callers should operate on the returned canonical path so the syscall acts on
+// the verified target rather than re-traversing the (swappable) symlink name.
+func (e *UltraFastEngine) ResolveAndAuthorize(op, path string) (string, error) {
+	resolved, _, err := ResolveSymlinks(path)
+	if err != nil {
+		return "", &PathError{Op: op, Path: path, Err: fmt.Errorf("failed to resolve path: %w", err)}
+	}
+	if !e.IsPathAllowed(resolved) {
+		return "", &PathError{Op: op, Path: path, Err: fmt.Errorf("access denied")}
+	}
+	return resolved, nil
 }
 
 // NormalizePath converts between WSL and Windows paths automatically

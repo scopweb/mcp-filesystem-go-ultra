@@ -248,6 +248,9 @@ func ResolveSymlinks(path string) (string, bool, error) {
 		var suffix []string
 		for {
 			parent := filepath.Dir(current)
+			// Record the current component BEFORE testing its parent, so the
+			// deepest (non-existent) component is not dropped from the result.
+			suffix = append([]string{filepath.Base(current)}, suffix...)
 			if parent == current {
 				break
 			}
@@ -258,7 +261,6 @@ func ResolveSymlinks(path string) (string, bool, error) {
 				}
 				break
 			}
-			suffix = append([]string{filepath.Base(current)}, suffix...)
 			current = parent
 		}
 		if resolved == "" {
