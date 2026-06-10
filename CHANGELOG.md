@@ -28,6 +28,15 @@ Concurrent cold reads of the same path no longer stampede the disk. `ReadFileCon
 | `docs/plans/READ_DEDUP_PLAN.md` | NEW — implementation plan + checkpoint |
 | `go.mod` | `golang.org/x/sync` promoted to direct require |
 
+**Code removed (now lives inside `readFileBytesDeduped`)** — restore from `git show 3ac6959^:core/engine.go` if rollback is needed:
+
+- Inline `readResult` struct + buffered `resultChan` + `go func()` in `UltraFastEngine.ReadFileContent` (the manual goroutine/channel/select pattern used to honour `ctx.Done()` for `os.ReadFile`).
+- Direct calls to `e.cache.SetFile(...)` and `e.cache.TrackAccess(...)` after a successful read — both moved inside the dedup helper so the flight result is the single source of truth.
+- Direct `e.cache.InvalidateFile(path)` calls from `ReadFileContent`/`WriteFileContent`/`WriteFileBytes`/Edit/MultiEdit/`searchAndReplaceInFile`/Rename/Move/Copy/SoftDelete/Delete/`executeRenameOperations` — all replaced by `e.invalidateFileReadCache(path)`, which additionally calls `readFlight.Forget(path)` so any in-flight singleflight waiters are released before the next read.
+- `if e == nil || e.cache == nil` guard inside `InvalidateCache` — `invalidateFileReadCache` already no-ops on nil, so the outer guard is redundant; the method now also `NormalizePath`s the argument.
+
+**Why the refactor is safe:** all deleted logic is preserved inside `core/read_dedup.go` — context cancellation still returns a `ContextError` from inside the flight, error wrapping still produces a `PathError`, cache write/track still happens exactly once per cold path, and every write-side caller that previously called `InvalidateFile` now calls `invalidateFileReadCache` (which still does that, plus forgets the flight).
+
 **Test results:**
 
 ```
