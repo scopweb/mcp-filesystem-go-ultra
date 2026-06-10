@@ -189,6 +189,7 @@ func main() {
 	proxyLogDir := flag.String("proxy-log-dir", "", "Directory containing proxy logs (proxy.jsonl)")
 	backupDir := flag.String("backup-dir", "", "Directory containing MCP server backups")
 	port := flag.Int("port", 9100, "HTTP port to listen on")
+	host := flag.String("host", "127.0.0.1", "Host/interface to bind to (default: localhost only). Use 0.0.0.0 to expose on the network — NOT recommended: the dashboard has no authentication and serves audit logs and backup file contents.")
 	flag.Parse()
 
 	if *logDir == "" {
@@ -219,8 +220,13 @@ func main() {
 	staticFS, _ := fs.Sub(staticFiles, "static")
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
 
-	addr := fmt.Sprintf(":%d", *port)
-	log.Printf("Dashboard starting on http://localhost%s", addr)
+	addr := fmt.Sprintf("%s:%d", *host, *port)
+	displayHost := *host
+	if displayHost == "0.0.0.0" || displayHost == "" {
+		displayHost = "localhost"
+		log.Printf("WARNING: binding to 0.0.0.0 exposes the dashboard (audit logs + backup contents) on the network with NO authentication.")
+	}
+	log.Printf("Dashboard starting on http://%s:%d", displayHost, *port)
 	log.Printf("  Log dir:    %s", *logDir)
 	if *backupDir != "" {
 		log.Printf("  Backup dir: %s", *backupDir)
@@ -310,7 +316,9 @@ func operationsSSEHandler(logDir string) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		// No CORS header: the web UI is served same-origin from this server.
+		// A wildcard Access-Control-Allow-Origin would let any website the user
+		// visits read this live operations stream cross-origin.
 
 		logPath := filepath.Join(logDir, "operations.jsonl")
 
@@ -549,12 +557,14 @@ func backupContentSearchHandler(backupDir string) http.HandlerFunc {
 				default:
 				}
 
-				// Determine file path on disk
-				var filePath string
-				if b.Operation == "batch" {
-					filePath = filepath.Join(backupDir, b.BackupID, f.BackupPath)
-				} else {
-					filePath = filepath.Join(backupDir, b.BackupID, f.BackupPath)
+				// Determine file path on disk. f.BackupPath comes from backup
+				// metadata; guard against it escaping the backup directory
+				// (e.g. "../../etc/passwd" or an absolute path) before reading.
+				base := filepath.Join(backupDir, b.BackupID)
+				filePath := filepath.Join(base, f.BackupPath)
+				if rel, relErr := filepath.Rel(base, filePath); relErr != nil ||
+					rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+					continue
 				}
 
 				info, err := os.Stat(filePath)

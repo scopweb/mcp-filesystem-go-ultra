@@ -54,6 +54,15 @@ func registerMinifyTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: access denied: %s", normPath)), nil
 		}
 
+		// TOCTOU defense: re-resolve symlinks and re-authorize the canonical
+		// target before reading/writing, so the operation can't be redirected
+		// outside the sandbox by a symlink swapped in after the check above.
+		if resolved, rErr := engine.ResolveAndAuthorize("minify_js", normPath); rErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", rErr)), nil
+		} else {
+			normPath = resolved
+		}
+
 		// Validate file exists and is a file
 		info, err := os.Stat(normPath)
 		if err != nil {
@@ -116,6 +125,12 @@ func registerMinifyTools(reg *toolRegistry) {
 			// Validate the output path is also allowed
 			if !engine.IsPathAllowed(target) {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: output_path %s is not in allowed paths", target)), nil
+			}
+			// TOCTOU defense: re-resolve + re-authorize the canonical output target
+			if resolved, rErr := engine.ResolveAndAuthorize("minify_js", target); rErr != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", rErr)), nil
+			} else {
+				target = resolved
 			}
 		}
 
