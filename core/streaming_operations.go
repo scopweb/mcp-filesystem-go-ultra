@@ -183,7 +183,7 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 	}
 
 	// Invalidate cache
-	e.cache.InvalidateFile(path)
+	e.invalidateFileReadCache(path)
 
 	operation.Status = "completed"
 

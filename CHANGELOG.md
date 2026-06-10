@@ -1,5 +1,50 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.5.9] - 2026-06-09
+
+### Improvement — Read deduplication (`singleflight`) + `ReadFileRange` cache path
+
+Concurrent cold reads of the same path no longer stampede the disk. `ReadFileContent` and `ReadFileRange` (files ≤ 5 MB) share a deduplicated load via `golang.org/x/sync/singleflight`, with results stored in BigCache. Cache invalidation on edits/moves/streaming also calls `readFlight.Forget` so waiters cannot attach to a stale in-flight read.
+
+**Behavior:**
+
+| Path | Before | After |
+|------|--------|-------|
+| 12 goroutines, same file, cold cache | 12× `os.ReadFile` | 1× `os.ReadFile` |
+| `ReadFileRange` after warm cache | Always scanned disk | Served from cache bytes |
+| `InvalidateCache` + re-read | Cache miss only | Cache miss + flight forget |
+
+**Line-count parity:** `extractLineRangeFromBytes` uses a `bytesLineScanner` that matches `bufio.Scanner` semantics (no extra empty line when the file ends with `\n`), so range footers still report the real total line count (`truncation_test.go` regression preserved).
+
+**Files changed:**
+
+| File | Change |
+|------|--------|
+| `core/read_dedup.go` | NEW — `readFileBytesDeduped`, `invalidateFileReadCache`, `extractLineRangeFromBytes` |
+| `core/read_dedup_test.go` | NEW — concurrency, cache-hit range, invalidate, bufio parity |
+| `core/engine.go` | `ReadFileContent` uses dedup; `InvalidateCache` forgets flight |
+| `core/file_operations.go` | `ReadFileRange` fast path via cache/dedup |
+| `core/edit_operations.go`, `batch_rename.go`, `large_file_processor.go`, `streaming_operations.go` | `invalidateFileReadCache` on writes |
+| `docs/plans/READ_DEDUP_PLAN.md` | NEW — implementation plan + checkpoint |
+| `go.mod` | `golang.org/x/sync` promoted to direct require |
+
+**Code removed (now lives inside `readFileBytesDeduped`)** — restore from `git show 3ac6959^:core/engine.go` if rollback is needed:
+
+- Inline `readResult` struct + buffered `resultChan` + `go func()` in `UltraFastEngine.ReadFileContent` (the manual goroutine/channel/select pattern used to honour `ctx.Done()` for `os.ReadFile`).
+- Direct calls to `e.cache.SetFile(...)` and `e.cache.TrackAccess(...)` after a successful read — both moved inside the dedup helper so the flight result is the single source of truth.
+- Direct `e.cache.InvalidateFile(path)` calls from `ReadFileContent`/`WriteFileContent`/`WriteFileBytes`/Edit/MultiEdit/`searchAndReplaceInFile`/Rename/Move/Copy/SoftDelete/Delete/`executeRenameOperations` — all replaced by `e.invalidateFileReadCache(path)`, which additionally calls `readFlight.Forget(path)` so any in-flight singleflight waiters are released before the next read.
+- `if e == nil || e.cache == nil` guard inside `InvalidateCache` — `invalidateFileReadCache` already no-ops on nil, so the outer guard is redundant; the method now also `NormalizePath`s the argument.
+
+**Why the refactor is safe:** all deleted logic is preserved inside `core/read_dedup.go` — context cancellation still returns a `ContextError` from inside the flight, error wrapping still produces a `PathError`, cache write/track still happens exactly once per cold path, and every write-side caller that previously called `InvalidateFile` now calls `invalidateFileReadCache` (which still does that, plus forgets the flight).
+
+**Test results:**
+
+```
+ok  core              1.167s
+ok  tests            16.121s
+ok  tests/security    0.920s
+```
+
 ## [Unreleased / 4.5.6] - 2026-06-07
 
 ### Improvement — Log-driven optimizations (analysis of 12 days, 16,742 operations)
