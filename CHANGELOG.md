@@ -1,5 +1,57 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.5.12] - 2026-06-11
+
+### Dashboard — Trash tab (UI for soft-deleted files)
+
+The dashboard now has a **Trash** tab (between Backups and Statistics) that lets the user discover, view, restore, and purge soft-deleted files managed by the MCP server's `BackupManager` (added in v4.5.11, issue #16).
+
+**Features:**
+- 4 summary cards: trash entry count, total size, oldest entry, newest entry
+- Search by SD-ID, original path, or file name (substring, case-insensitive, 300ms debounce)
+- Filter by age (older than 1/7/30/90 days)
+- Per-row status: `Ready` (file exists in trash + original path is free), `Path Exists` (would need to overwrite to restore), `Missing` (file is gone from trash)
+- Per-row actions: **View** (in-browser), **Download**, **Restore** (moves file back to original path), **Purge** (permanently deletes)
+- Bulk "Purge Old (>7d)" button in the search bar
+- Server-side pagination (50 per page, 7-page window)
+- Polled every 30s like the Backups tab
+
+**Safety:** the UI respects the server's safety rules — Restore is disabled when the file is missing from trash or the original path is occupied; Purge requires a `confirm()` dialog; SD-IDs are validated server-side against `safeIDRegex` (`^[a-zA-Z0-9_-]+$`); the `dest_path` in metadata is confirmed to be under `<backup-dir>/filesdelete/` before any RemoveAll.
+
+**Graceful degradation:** if the dashboard was started without `--backup-dir`, the Trash tab shows a clear "Trash is only available when the dashboard was started with --backup-dir" message instead of an error.
+
+**Files changed:**
+
+| File | Change |
+|------|--------|
+| `cmd/dashboard/main.go` | +`TrashEntry` and `TrashSearchResponse` types; +`trashCache` (10s TTL); +`loadAllTrash` +`enrichTrashEntry` helpers; +`trashListHandler`/`trashSearchHandler`/`trashDetailHandler`/`trashFileHandler`/`trashRestoreHandler`/`trashPurgeHandler`; +7 mux routes; restores & purges invalidate the cache |
+| `cmd/dashboard/static/index.html` | +Trash tab button in nav; +`#page-trash` with 4 cards, search bar, table container, pagination, "Purge Old" button |
+| `cmd/dashboard/static/app.js` | +`trashPage` state, +`searchTrash`/`renderTrashPagination`/`goTrashPage`/`trashRestore`/`trashPurge`/`trashPurgeOlderThan`; +event listeners; +initial fetch + 30s poll |
+| `cmd/dashboard/static/style.css` | +`.btn-danger` (red-tinted, mirrors `.btn-action`); +`.trash-search-bar`; +`.trash-row` |
+| `cmd/dashboard/main_test.go` | NEW — 14 test cases covering list/search/pagination/filter/restore/purge/detail/file-serve + invalid SD-ID rejection, missing-trash graceful degradation, refuse-to-overwrite, dry-run, bulk-by-age |
+| `CHANGELOG.md` | this entry |
+
+**Endpoints added:**
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/trash` | GET | All entries (no pagination) |
+| `/api/trash/search` | GET | Paginated + filterable (q, older_than_days, limit, offset) |
+| `/api/trash/detail/{sd-id}` | GET | Single entry with enriched details |
+| `/api/trash/file/{sd-id}/{filename}` | GET | Stream file content (supports `?download=true`) |
+| `/api/trash/restore` | POST | JSON body `{sd_id:"..."}` → moves file back |
+| `/api/trash/purge` | POST | JSON body `{sd_id:"..."}` or `{older_than_days:N, dry_run:bool}` → deletes |
+
+**Verification:**
+
+```bash
+go build ./cmd/dashboard/                                        # builds clean
+go test -timeout 60s -run TestTrash ./cmd/dashboard/             # 0.10s, 14 cases green
+go test -timeout 180s ./...                                       # full suite green
+```
+
+**Depends on:** PR #17 (issue #16) — the soft-delete infrastructure must exist on disk for the UI to be useful. This PR is stacked on top of `fix/issue-16-soft-delete-backup-integration`; merge order matters.
+
 ## [Unreleased / 4.5.11] - 2026-06-11
 
 ### Reliability — `delete_file` (soft-delete) backup integration (bug 2026-06-11, issue #16)

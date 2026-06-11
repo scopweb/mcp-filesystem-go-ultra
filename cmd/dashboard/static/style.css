@@ -212,6 +212,38 @@ tr:hover td { background: rgba(108, 138, 255, 0.05); }
   background: rgba(74, 222, 128, 0.3);
 }
 
+/* Danger button — red-tinted, used for permanent destructive actions like
+   Purge. Reuses the .btn-* family layout but with --red as the accent. */
+.btn-danger {
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--red);
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn-danger:hover {
+  background: rgba(248, 113, 113, 0.3);
+}
+
+/* Trash page — mirror of the backups search bar layout. */
+.trash-search-bar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 16px 0;
+}
+
+.trash-row td {
+  vertical-align: middle;
+}
+
 .backup-detail {
   background: var(--bg);
   border: 1px solid var(--border);
