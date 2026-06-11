@@ -521,17 +521,19 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("backup — Manage backups, restore, and undo. Actions: list, info, compare, cleanup, restore, undo_last. "+
-			"Auto-created before every edit_file/multi_edit. Related: edit_file, batch_operations, analyze_operation."),
-		mcp.WithString("action", mcp.Description("Action: list (default), info, compare, cleanup, restore, undo_last")),
+		mcp.WithDescription("backup — Manage backups, restore, and undo. Actions: list, info, compare, cleanup, restore, undo_last, undo_chain, list_trash, restore_trash, purge_trash. "+
+			"Auto-created before every edit_file/multi_edit. Soft-deleted files (delete_file) are managed via list_trash/restore_trash/purge_trash when --backup-dir is set. "+
+			"Related: edit_file, batch_operations, analyze_operation, delete_file."),
+		mcp.WithString("action", mcp.Description("Action: list (default), info, compare, cleanup, restore, undo_last, undo_chain, list_trash, restore_trash, purge_trash")),
 		mcp.WithString("backup_id", mcp.Description("Backup ID (required for info, compare, restore)")),
+		mcp.WithString("sd_id", mcp.Description("Soft-delete ID (required for restore_trash)")),
 		mcp.WithString("file_path", mcp.Description("File path for compare or selective restore")),
 		mcp.WithNumber("limit", mcp.Description("Max backups to return for list (default: 20)")),
 		mcp.WithString("filter_operation", mcp.Description("Filter by operation: edit, delete, batch, all")),
 		mcp.WithString("filter_path", mcp.Description("Filter by file path (substring match)")),
 		mcp.WithNumber("newer_than_hours", mcp.Description("Only backups newer than N hours")),
-		mcp.WithNumber("older_than_days", mcp.Description("For cleanup: delete backups older than N days (default: 7)")),
-		mcp.WithBoolean("dry_run", mcp.Description("For cleanup/restore: preview without executing (default: true for cleanup, false for restore)")),
+		mcp.WithNumber("older_than_days", mcp.Description("For cleanup/purge_trash: delete entries older than N days (default: 7)")),
+		mcp.WithBoolean("dry_run", mcp.Description("For cleanup/restore/purge_trash: preview without executing (default: true for cleanup/purge_trash, false for restore)")),
 		mcp.WithBoolean("preview", mcp.Description("For restore: show diff without restoring (default: false)")),
 	)
 	reg.addTool(backupTool, auditWrap(engine, "backup", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -925,8 +927,105 @@ func registerBatchTools(reg *toolRegistry) {
 			output.WriteString("\nUse backup(action:\"undo_last\", file_path:\"...\") to step backward\n")
 			return mcp.NewToolResultText(output.String()), nil
 
+		case "list_trash":
+			// Enumerate soft-deleted files in the trash (only works when
+			// --backup-dir is configured; otherwise returns empty).
+			limit := 50
+			filterPath := ""
+			olderThanDays := 0
+			if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+				if l, ok := args["limit"].(float64); ok {
+					limit = int(l)
+				}
+				if fp, ok := args["filter_path"].(string); ok {
+					filterPath = fp
+				}
+				if od, ok := args["older_than_days"].(float64); ok {
+					olderThanDays = int(od)
+				}
+			}
+
+			entries, err := engine.GetBackupManager().ListTrash(limit, filterPath, olderThanDays)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Failed to list trash: %v", err)), nil
+			}
+
+			var output strings.Builder
+			output.WriteString(fmt.Sprintf("Trash entries (%d)\n", len(entries)))
+			output.WriteString("---\n\n")
+			for _, entry := range entries {
+				output.WriteString(fmt.Sprintf("# %s\n", entry.SDID))
+				output.WriteString(fmt.Sprintf("   Time: %s (%s)\n", entry.Timestamp.Format("2006-01-02 15:04:05"), core.FormatAge(entry.Timestamp)))
+				output.WriteString(fmt.Sprintf("   Original: %s\n", entry.OriginalPath))
+				output.WriteString(fmt.Sprintf("   Size: %s\n", core.FormatSize(entry.Size)))
+				if entry.Hash != "" {
+					output.WriteString(fmt.Sprintf("   Hash: %s\n", entry.Hash[:12]))
+				}
+				output.WriteString("\n")
+			}
+			if len(entries) == 0 {
+				output.WriteString("No trash entries found.\n")
+				if engine.GetBackupManager().GetBackupDir() == "" {
+					output.WriteString("(Trash is only populated when --backup-dir is configured.)\n")
+				}
+			} else {
+				output.WriteString("Use backup(action:\"restore_trash\", sd_id:\"...\") to restore\n")
+				output.WriteString("Use backup(action:\"purge_trash\", older_than_days:N) to permanently delete old entries\n")
+			}
+			return mcp.NewToolResultText(output.String()), nil
+
+		case "restore_trash":
+			// Restore a soft-deleted file by its SD-ID. Validates the SD-ID
+			// against path-traversal inside the BackupManager.
+			sdID, err := request.RequireString("sd_id")
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("sd_id is required: %v", err)), nil
+			}
+
+			restoredPath, err := engine.GetBackupManager().RestoreTrash(sdID)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Failed to restore: %v", err)), nil
+			}
+
+			var output strings.Builder
+			output.WriteString("Trash restore completed successfully\n\n")
+			output.WriteString(fmt.Sprintf("Restored from trash: %s\n", sdID))
+			output.WriteString(fmt.Sprintf("File: %s\n", restoredPath))
+			return mcp.NewToolResultText(output.String()), nil
+
+		case "purge_trash":
+			// Permanently delete trash entries older than olderThanDays.
+			olderThanDays := 7
+			dryRun := true
+			if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+				if od, ok := args["older_than_days"].(float64); ok {
+					olderThanDays = int(od)
+				}
+				if dr, ok := args["dry_run"].(bool); ok {
+					dryRun = dr
+				}
+			}
+
+			deletedCount, freedSpace, err := engine.GetBackupManager().PurgeTrash(olderThanDays, dryRun)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Purge trash failed: %v", err)), nil
+			}
+
+			var output strings.Builder
+			if dryRun {
+				output.WriteString("Dry Run - Preview of trash purge\n\n")
+				output.WriteString(fmt.Sprintf("Would delete: %d trash entry/entries\n", deletedCount))
+				output.WriteString(fmt.Sprintf("Would free: %s\n\n", core.FormatSize(freedSpace)))
+				output.WriteString("Run with dry_run: false to actually purge trash\n")
+			} else {
+				output.WriteString("Trash purge completed\n\n")
+				output.WriteString(fmt.Sprintf("Deleted: %d trash entry/entries\n", deletedCount))
+				output.WriteString(fmt.Sprintf("Freed: %s\n", core.FormatSize(freedSpace)))
+			}
+			return mcp.NewToolResultText(output.String()), nil
+
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("Unknown action: %s. Valid: list, info, compare, cleanup, restore, undo_last", action)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Unknown action: %s. Valid: list, info, compare, cleanup, restore, undo_last, undo_chain, list_trash, restore_trash, purge_trash", action)), nil
 		}
 	}))
 }

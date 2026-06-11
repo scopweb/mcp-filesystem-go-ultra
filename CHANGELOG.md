@@ -1,5 +1,45 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.5.11] - 2026-06-11
+
+### Reliability — `delete_file` (soft-delete) backup integration (bug 2026-06-11, issue #16)
+
+`delete_file` in soft-delete mode (the default) used a parallel `filesdelete/` mechanism that was **not integrated with the main `BackupManager`**. The response gave no path, no ID, and no restore command, and `backup action:list/restore` did not see soft-deletes. This caused a real data-loss scare on 2026-06-11 where two files from a .NET project were soft-deleted and ended up at `C:\temp\__REPOS\...` (the `hasProjectIndicators()` walk-up does not include `.csproj`/`.sln`, so it walked all the way to `C:\temp\`). The user could not find the files because the response gave no path.
+
+**Fix (issue #16):**
+- When `--backup-dir` is configured, soft-deletes go to `<backup-dir>/filesdelete/<sd-id>/<basename>` with a `metadata.json` sidecar (discoverable, owner-only `0700` permissions, SHA-256 hash for integrity).
+- The response now includes the SD-ID, the trash path, and a one-line restore command.
+- AI can restore via `backup(action:"restore_trash", sd_id:"sd-...")` even when the trash directory is outside the allowed paths.
+- AI can enumerate via `backup(action:"list_trash", filter_path:"...", older_than_days:N)`.
+- AI can permanently clean up via `backup(action:"purge_trash", older_than_days:N)`.
+- Without `--backup-dir`, the legacy walk-up behavior is preserved (with a deprecation warning) so users who don't pass `--backup-dir` are not broken.
+
+**Audit:** the audit log now records `sd_id` for each soft-delete so the dashboard can show them in a future UI iteration.
+
+**Files changed:**
+
+| File | Change |
+|------|--------|
+| `core/backup_manager.go` | +`SoftDeleteInfo` struct, +`SoftDeleteFile`/`ListTrash`/`RestoreTrash`/`PurgeTrash` methods, +`generateSoftDeleteID`/`sanitizeSoftDeleteID`/`hashFile` helpers; `sanitizeBackupID` refactored to delegate to shared `sanitizeID(id, kindLabel)` |
+| `core/file_operations.go` | `SoftDeleteFile` signature changed to `(*SoftDeleteInfo, error)`; delegates to `BackupManager` when `--backup-dir` is set; falls back to legacy walk-up (with `slog.Warn` deprecation warning) otherwise |
+| `core/pipeline.go` | pipeline `delete` action updated to the new signature |
+| `core/audit_logger.go` | +`SDID` field on `AuditEntry` (json `sd_id,omitempty`); +`SetSoftDeleteID` helper |
+| `tools_files.go` | `delete_file` response now includes SD-ID, dest path, and restore command (compact + verbose formats; batch path emits per-file SD-IDs); new `formatSoftDeleteLine`/`formatSoftDeleteCompact`/`formatSoftDeleteVerbose` helpers |
+| `tools_batch.go` | `backup` tool gains 3 actions: `list_trash`, `restore_trash`, `purge_trash`; tool description updated; new `sd_id` parameter; error message updated |
+| `cmd/dashboard/main.go` | mirror `AuditEntry` struct gains `SDID` field (no UI change in this PR) |
+| `tests/softdelete_backupdir_test.go` | NEW — `TestSoftDeleteUsesBackupDir` (verifies new path layout + metadata.json) |
+| `tests/softdelete_response_test.go` | NEW — `TestSoftDeleteReturnsSoftDeleteInfo`, `TestSoftDeleteLegacyReturnsInfoWithEmptySDID` |
+| `tests/trash_restore_test.go` | NEW — `TestBackupRestoreTrash`, `TestRestoreTrashRejectsPathTraversal`, `TestRestoreTrashRefusesIfOriginalPathExists` |
+| `tests/trash_list_test.go` | NEW — `TestBackupListTrash` (all/filter/limit) |
+| `tests/trash_purge_test.go` | NEW — `TestBackupPurgeTrash` (dry-run + real), `TestBackupPurgeTrashRespectsCutoff` |
+| `tests/root_delete_test.go` | extended with `TestSoftDeleteFallsBackWhenNoBackupDir` (legacy path preserved) |
+
+**Out of scope (follow-ups):**
+- Dashboard UI for the trash tab (with search, restore, purge buttons)
+- Cross-volume rename fallback (`io.Copy` + `os.Remove` when `os.Rename` returns `EXDEV`)
+- Auto-migration of legacy `filesdelete/` data left over from before this fix (the user's incident data at `C:\temp\__REPOS\...` is left in place — they have the path)
+- `hasProjectIndicators()` `.csproj`/`.sln`/`.cs` additions (no longer needed because `--backup-dir` controls the location)
+
 ## [Unreleased / 4.5.10] - 2026-06-11
 
 ### Security / Safety — `edit_file` rewrite guard (bug 2026-06-11)

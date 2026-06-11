@@ -82,21 +82,27 @@ func registerFileTools(reg *toolRegistry) {
 				successCount := 0
 				for _, p := range paths {
 					p = core.NormalizePath(p)
-					var err error
 					if permanent {
-						err = engine.DeleteFile(ctx, p)
-					} else {
-						err = engine.SoftDeleteFile(ctx, p)
-					}
-					if err != nil {
-						results.WriteString(fmt.Sprintf("FAIL: %s — %v\n", p, err))
-					} else {
-						successCount++
-						if permanent {
-							results.WriteString(fmt.Sprintf("OK: %s deleted\n", p))
-						} else {
-							results.WriteString(fmt.Sprintf("OK: %s soft-deleted\n", p))
+						err := engine.DeleteFile(ctx, p)
+						if err != nil {
+							results.WriteString(fmt.Sprintf("FAIL: %s — %v\n", p, err))
+							continue
 						}
+						successCount++
+						results.WriteString(fmt.Sprintf("OK: %s deleted\n", p))
+					} else {
+						info, err := engine.SoftDeleteFile(ctx, p)
+						if err != nil {
+							results.WriteString(fmt.Sprintf("FAIL: %s — %v\n", p, err))
+							continue
+						}
+						successCount++
+						// Annotate audit with the SD-ID (last one wins for batch — the
+						// tool-level audit entry will only carry the final SD-ID, but
+						// the per-line output preserves all of them for the user).
+						core.SetSoftDeleteID(ctx, info.SDID)
+						results.WriteString(formatSoftDeleteLine(p, info, engine.IsCompactMode()))
+						results.WriteString("\n")
 					}
 				}
 				results.WriteString(fmt.Sprintf("\n%d/%d succeeded", successCount, len(paths)))
@@ -121,14 +127,16 @@ func registerFileTools(reg *toolRegistry) {
 		}
 
 		// Default: soft delete
-		err = engine.SoftDeleteFile(ctx, path)
+		info, err := engine.SoftDeleteFile(ctx, path)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
+		core.SetSoftDeleteID(ctx, info.SDID)
+
 		if engine.IsCompactMode() {
-			return mcp.NewToolResultText(fmt.Sprintf("OK: %s soft-deleted", path)), nil
+			return mcp.NewToolResultText(formatSoftDeleteCompact(path, info)), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("Successfully moved '%s' to filesdelete folder", path)), nil
+		return mcp.NewToolResultText(formatSoftDeleteVerbose(path, info)), nil
 	}))
 
 	// ============================================================================
@@ -258,4 +266,48 @@ func registerFileTools(reg *toolRegistry) {
 		}
 		return mcp.NewToolResultText(info), nil
 	}))
+}
+
+// formatSoftDeleteLine formats a single line of a batch soft-delete result.
+// Used inside the `paths` JSON batch handler (one line per file).
+func formatSoftDeleteLine(path string, info *core.SoftDeleteInfo, compact bool) string {
+	if info.SDID != "" {
+		return fmt.Sprintf("OK: %s soft-deleted (SD:%s)", path, info.SDID)
+	}
+	return fmt.Sprintf("OK: %s soft-deleted (legacy)", path)
+}
+
+// formatSoftDeleteCompact returns a single-line response for the single-path
+// delete_file tool in compact mode. Includes the SD-ID (or "legacy" marker)
+// and a one-line restore command.
+func formatSoftDeleteCompact(path string, info *core.SoftDeleteInfo) string {
+	if info.SDID != "" {
+		return fmt.Sprintf("D %s | SD:%s | restore: backup(action:\"restore_trash\", sd_id:\"%s\")",
+			path, info.SDID, info.SDID)
+	}
+	return fmt.Sprintf("D %s | legacy | manual: move_file(%s → %s) | hint: set --backup-dir",
+		path, info.DestPath, path)
+}
+
+// formatSoftDeleteVerbose returns a multi-line response for the single-path
+// delete_file tool in verbose mode. Includes the SD-ID (or "legacy" marker),
+// the dest path, and a restore command. When the entry is recoverable via the
+// backup tool, the restore command uses backup(action:"restore_trash"). When
+// it's a legacy entry, the response points to a manual move_file.
+func formatSoftDeleteVerbose(path string, info *core.SoftDeleteInfo) string {
+	if info.SDID != "" {
+		return fmt.Sprintf(
+			"OK: %s soft-deleted\n"+
+				"   SD-ID: %s\n"+
+				"   Trash: %s\n"+
+				"   Restore: backup(action:\"restore_trash\", sd_id:\"%s\")\n"+
+				"   Or manually: move_file(%s → %s)\n",
+			path, info.SDID, info.DestPath, info.SDID, info.DestPath, path)
+	}
+	return fmt.Sprintf(
+		"OK: %s soft-deleted (legacy mode — no discoverable trash)\n"+
+			"   Trash: %s\n"+
+			"   Manual restore: move_file(%s → %s)\n"+
+			"   Hint: set --backup-dir to get a discoverable trash + restore_trash action\n",
+		path, info.DestPath, info.DestPath, path)
 }

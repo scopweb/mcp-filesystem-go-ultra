@@ -50,7 +50,7 @@ func TestDeleteAllowedPathRootBlocked(t *testing.T) {
 	}
 
 	// Test 2: soft delete of allowed-path root must fail
-	err = engine.SoftDeleteFile(ctx, allowedDir)
+	_, err = engine.SoftDeleteFile(ctx, allowedDir)
 	if err == nil {
 		t.Fatal("SoftDeleteFile should reject allowed-path root, but it succeeded")
 	}
@@ -125,5 +125,60 @@ func TestDeleteAllowedPathRootVariations(t *testing.T) {
 	// Root must still exist
 	if _, statErr := os.Stat(allowedDir); os.IsNotExist(statErr) {
 		t.Fatal("allowed-path root was deleted via path variation")
+	}
+}
+
+// TestSoftDeleteFallsBackWhenNoBackupDir verifies the legacy walk-up fallback
+// is preserved when --backup-dir is not configured. The behavior change (issue
+// #16) added BackupManager integration as the PREFERRED path; users without
+// --backup-dir should still get the old behavior so they aren't broken.
+func TestSoftDeleteFallsBackWhenNoBackupDir(t *testing.T) {
+	allowedDir := t.TempDir()
+	srcFile := filepath.Join(allowedDir, "no-backup-dir.txt")
+	if err := os.WriteFile(srcFile, []byte("legacy content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cacheSystem, err := cache.NewIntelligentCache(10 * 1024 * 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cacheSystem.Close()
+
+	engine, err := core.NewUltraFastEngine(&core.Config{
+		Cache:        cacheSystem,
+		ParallelOps:  2,
+		AllowedPaths: []string{allowedDir},
+		// BackupDir intentionally empty → legacy walk-up
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+
+	ctx := context.Background()
+	info, err := engine.SoftDeleteFile(ctx, srcFile)
+	if err != nil {
+		t.Fatalf("SoftDeleteFile failed: %v", err)
+	}
+
+	// Legacy mode: SDID is empty (not discoverable via backup action)
+	if info.SDID != "" {
+		t.Errorf("legacy mode SDID = %q; want empty", info.SDID)
+	}
+	if info.Kind != "soft_delete_legacy" {
+		t.Errorf("legacy mode Kind = %q; want \"soft_delete_legacy\"", info.Kind)
+	}
+	if info.DestPath == "" {
+		t.Error("legacy mode DestPath is empty; expected a filesdelete/ path")
+	}
+
+	// File is gone from original
+	if _, err := os.Stat(srcFile); !os.IsNotExist(err) {
+		t.Fatal("source file still exists after legacy soft-delete")
+	}
+	// File is in some filesdelete/ folder
+	if _, err := os.Stat(info.DestPath); err != nil {
+		t.Errorf("legacy dest file missing at %s: %v", info.DestPath, err)
 	}
 }

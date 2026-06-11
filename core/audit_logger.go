@@ -80,6 +80,18 @@ func SetBackupID(ctx context.Context, backupID, previousBackupID string) {
 	}
 }
 
+// SetSoftDeleteID annotates the audit entry with the soft-delete ID created by
+// this operation. Used by delete_file (soft mode) to make the operation
+// discoverable in the audit log + dashboard (see issue #16, 2026-06-11).
+func SetSoftDeleteID(ctx context.Context, sdID string) {
+	if sdID == "" {
+		return
+	}
+	if entry, ok := ctx.Value(AuditEntryKey{}).(*AuditEntry); ok {
+		entry.SDID = sdID
+	}
+}
+
 // SetIntegrityStatus annotates the audit entry with file integrity verification result.
 func SetIntegrityStatus(ctx context.Context, status, warning string) {
 	if entry, ok := ctx.Value(AuditEntryKey{}).(*AuditEntry); ok {
@@ -150,6 +162,9 @@ type AuditEntry struct {
 	// Backup chain tracking (undo step-through)
 	BackupID         string `json:"backup_id,omitempty"`          // backup created for this edit
 	PreviousBackupID string `json:"previous_backup_id,omitempty"` // parent in undo chain
+
+	// Soft-delete ID (trash tracking) — added in v4.5.2+ (issue #16)
+	SDID string `json:"sd_id,omitempty"` // soft-delete ID created by delete_file
 
 	// File integrity verification (for HIGH/CRITICAL edits)
 	IntegrityStatus string `json:"integrity_status,omitempty"` // "OK", "WARNING", "ERROR"

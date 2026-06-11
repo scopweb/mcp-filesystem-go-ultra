@@ -786,6 +786,8 @@ type AuditEntry struct {
 	TokensConsumed int64  `json:"tokens_consumed,omitempty"`
 	TokensBaseline int64  `json:"tokens_baseline,omitempty"`
 	TokensSaved    int64  `json:"tokens_saved,omitempty"`
+	// Soft-delete ID (v4.5.2+, issue #16) — populated by delete_file soft mode
+	SDID string `json:"sd_id,omitempty"`
 }
 
 type ToolStats struct {
