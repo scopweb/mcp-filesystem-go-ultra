@@ -54,6 +54,19 @@ type RestoreResult struct {
 	PreRestoreID  string              `json:"pre_restore_id,omitempty"`
 }
 
+// SoftDeleteInfo contains information about a soft-deleted file in the trash.
+// Files live at <BackupDir>/filesdelete/<sd-id>/<basename> with a metadata.json
+// sidecar describing the original location and contents.
+type SoftDeleteInfo struct {
+	SDID         string    `json:"sd_id"`         // soft-delete ID (e.g. "sd-20260611-150455-a1b2c3d4")
+	OriginalPath string    `json:"original_path"` // where the file used to live
+	DestPath     string    `json:"dest_path"`     // full path inside the trash
+	Size         int64     `json:"size"`          // bytes
+	Hash         string    `json:"hash"`          // SHA-256 hex of the moved file
+	Timestamp    time.Time `json:"timestamp"`     // when the soft-delete happened
+	Kind         string    `json:"kind"`          // always "soft_delete" (parallels BackupInfo.Operation)
+}
+
 // BackupManager gestiona todos los backups del sistema
 type BackupManager struct {
 	backupDir     string
@@ -293,23 +306,36 @@ func (bm *BackupManager) ListBackups(limit int, filterOperation string, filterPa
 	return results, nil
 }
 
-// sanitizeBackupID validates that a backup ID contains only safe characters
-// to prevent path traversal attacks via malicious backup IDs.
-func sanitizeBackupID(backupID string) error {
-	if backupID == "" {
-		return fmt.Errorf("backup ID cannot be empty")
+// sanitizeID validates that an identifier (backup ID or soft-delete ID) contains
+// only safe characters to prevent path traversal attacks via malicious IDs.
+// kindLabel is used in error messages (e.g. "backup ID", "soft-delete ID").
+func sanitizeID(id, kindLabel string) error {
+	if id == "" {
+		return fmt.Errorf("%s cannot be empty", kindLabel)
 	}
-	// Backup IDs should only contain alphanumeric chars, hyphens, and underscores
-	for _, c := range backupID {
+	// IDs should only contain alphanumeric chars, hyphens, and underscores
+	for _, c := range id {
 		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
-			return fmt.Errorf("invalid backup ID: contains illegal character '%c'", c)
+			return fmt.Errorf("invalid %s: contains illegal character '%c'", kindLabel, c)
 		}
 	}
 	// Also reject if it contains path separators or traversal patterns
-	if strings.Contains(backupID, "..") || strings.ContainsAny(backupID, `/\`) {
-		return fmt.Errorf("invalid backup ID: contains path traversal characters")
+	if strings.Contains(id, "..") || strings.ContainsAny(id, `/\`) {
+		return fmt.Errorf("invalid %s: contains path traversal characters", kindLabel)
 	}
 	return nil
+}
+
+// sanitizeBackupID validates that a backup ID contains only safe characters
+// to prevent path traversal attacks via malicious backup IDs.
+func sanitizeBackupID(backupID string) error {
+	return sanitizeID(backupID, "backup ID")
+}
+
+// sanitizeSoftDeleteID validates a soft-delete ID against the same character set
+// as backup IDs. See sanitizeID for the rules.
+func sanitizeSoftDeleteID(id string) error {
+	return sanitizeID(id, "soft-delete ID")
 }
 
 // GetBackupInfo obtiene información de un backup específico
@@ -867,4 +893,343 @@ func FormatAge(t time.Time) string {
 		return "1 day ago"
 	}
 	return fmt.Sprintf("%d days ago", days)
+}
+
+// ============================================================================
+// Soft-delete (trash) subsystem
+// ============================================================================
+//
+// Soft-deletes are stored at <BackupDir>/filesdelete/<sd-id>/<basename> with a
+// metadata.json sidecar. They are NOT added to BackupManager.metadataCache so
+// the maxBackups cap and cleanupIfNeeded do not touch them. Use PurgeTrash for
+// manual cleanup, or restore via RestoreTrash.
+//
+// This subsystem was added in v4.5.2+ to fix a real bug (2026-06-11) where
+// soft-deletes went to a parallel filesdelete/ folder with no discoverability
+// and no way to restore via MCP tools.
+
+// softDeleteTrashSubdir is the trash subdirectory name under BackupDir.
+const softDeleteTrashSubdir = "filesdelete"
+
+// SoftDeleteFile moves a file to the trash under <BackupDir>/filesdelete/<sd-id>/<basename>
+// and writes a metadata.json sidecar with the original path, size, and hash.
+// Returns a SoftDeleteInfo that the caller (engine) can use to format a
+// response with a restore command.
+//
+// The path is expected to have been validated by the caller (IsPathAllowed +
+// ResolveAndAuthorize). The backup manager does NOT do another full path
+// validation — it does a basic filepath.Clean check and refuses path-traversal
+// attempts in metadata fields.
+//
+// On error after the move, the file may be left in the trash with no metadata.
+// Callers should treat SoftDeleteFile failures as "delete did not happen" and
+// surface the error to the user.
+func (bm *BackupManager) SoftDeleteFile(path string) (*SoftDeleteInfo, error) {
+	bm.mutex.Lock()
+	defer bm.mutex.Unlock()
+
+	if bm.backupDir == "" {
+		return nil, fmt.Errorf("backup directory not configured; cannot soft-delete")
+	}
+
+	// Reject any path-traversal attempt in the input even though the engine
+	// already validated. Defense in depth.
+	cleanPath := filepath.Clean(path)
+	if strings.Contains(cleanPath, "..") {
+		return nil, fmt.Errorf("invalid path: contains '..'")
+	}
+
+	// Stat the source so we can record size + mtime.
+	fileInfo, err := os.Stat(cleanPath)
+	if err != nil {
+		return nil, fmt.Errorf("source file not found: %w", err)
+	}
+	if fileInfo.IsDir() {
+		return nil, fmt.Errorf("cannot soft-delete a directory: %s", cleanPath)
+	}
+
+	// Generate SD-ID and prepare the per-deletion directory.
+	sdID := generateSoftDeleteID()
+	trashRoot := filepath.Join(bm.backupDir, softDeleteTrashSubdir)
+	sdDir := filepath.Join(trashRoot, sdID)
+	if err := os.MkdirAll(sdDir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create trash directory: %w", err)
+	}
+
+	destPath := filepath.Join(sdDir, filepath.Base(cleanPath))
+
+	// If destPath already exists (extremely rare — same basename in same second
+	// from two soft-deletes), suffix the basename with a short hash of the source
+	// path. Avoids collision without needing a retry loop.
+	if _, err := os.Stat(destPath); err == nil {
+		ext := filepath.Ext(destPath)
+		name := destPath[:len(destPath)-len(ext)]
+		shortHash := fmt.Sprintf("%x", sha256.Sum256([]byte(cleanPath+sdID)))[:8]
+		destPath = fmt.Sprintf("%s_%s%s", name, shortHash, ext)
+	}
+
+	// Atomic move (same-volume); fails on cross-volume (EXDEV) — caller can
+	// fall back to copy+remove in a follow-up.
+	if err := os.Rename(cleanPath, destPath); err != nil {
+		// Clean up the empty trash subdir we just created.
+		_ = os.Remove(sdDir)
+		return nil, fmt.Errorf("failed to move file to trash: %w", err)
+	}
+
+	// Compute hash of the moved file for integrity verification on restore.
+	hash, err := hashFile(destPath)
+	if err != nil {
+		// Move succeeded but hash failed — file is in trash, metadata is partial.
+		// Log loudly; the metadata write below will still record what we have.
+		slog.Warn("Failed to hash soft-deleted file", "path", destPath, "error", err)
+	}
+
+	info := &SoftDeleteInfo{
+		SDID:         sdID,
+		OriginalPath: cleanPath,
+		DestPath:     destPath,
+		Size:         fileInfo.Size(),
+		Hash:         hash,
+		Timestamp:    time.Now(),
+		Kind:         "soft_delete",
+	}
+
+	// Write metadata sidecar. If this fails, the file is in the trash but
+	// undiscoverable. Log + return error so the caller knows restore is blocked.
+	if err := bm.saveSoftDeleteMetadata(sdDir, info); err != nil {
+		return info, fmt.Errorf("file moved to trash but metadata write failed: %w", err)
+	}
+
+	return info, nil
+}
+
+// ListTrash enumerates soft-deleted files in the trash, optionally filtered by
+// substring match against OriginalPath and minimum age in days. limit <= 0
+// means no limit.
+func (bm *BackupManager) ListTrash(limit int, filterPath string, olderThanDays int) ([]SoftDeleteInfo, error) {
+	bm.mutex.RLock()
+	defer bm.mutex.RUnlock()
+
+	if bm.backupDir == "" {
+		return nil, nil
+	}
+
+	trashRoot := filepath.Join(bm.backupDir, softDeleteTrashSubdir)
+	entries, err := os.ReadDir(trashRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read trash directory: %w", err)
+	}
+
+	cutoff := time.Time{}
+	if olderThanDays > 0 {
+		cutoff = time.Now().AddDate(0, 0, -olderThanDays)
+	}
+
+	results := make([]SoftDeleteInfo, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		sdDir := filepath.Join(trashRoot, entry.Name())
+		metaPath := filepath.Join(sdDir, "metadata.json")
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			slog.Warn("Skipping trash entry with unreadable metadata", "sd_id", entry.Name(), "error", err)
+			continue
+		}
+		var info SoftDeleteInfo
+		if err := json.Unmarshal(data, &info); err != nil {
+			slog.Warn("Skipping trash entry with invalid metadata", "sd_id", entry.Name(), "error", err)
+			continue
+		}
+
+		// Apply filters
+		if filterPath != "" {
+			haystack := strings.ToLower(info.OriginalPath)
+			needle := strings.ToLower(filterPath)
+			if !strings.Contains(haystack, needle) {
+				continue
+			}
+		}
+		if !cutoff.IsZero() && info.Timestamp.After(cutoff) {
+			continue
+		}
+
+		results = append(results, info)
+	}
+
+	// Newest first
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Timestamp.After(results[j].Timestamp)
+	})
+
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
+}
+
+// RestoreTrash moves a soft-deleted file back to its original path. The
+// original directory is created if missing. Returns the restored original path.
+//
+// Validates the SD-ID against path traversal and confirms the recorded
+// DestPath is actually inside our known trash root (defense against metadata
+// tampering).
+func (bm *BackupManager) RestoreTrash(sdID string) (string, error) {
+	if err := sanitizeSoftDeleteID(sdID); err != nil {
+		return "", err
+	}
+
+	bm.mutex.Lock()
+	defer bm.mutex.Unlock()
+
+	if bm.backupDir == "" {
+		return "", fmt.Errorf("backup directory not configured; cannot restore from trash")
+	}
+
+	trashRoot := filepath.Join(bm.backupDir, softDeleteTrashSubdir)
+	sdDir := filepath.Join(trashRoot, sdID)
+	metaPath := filepath.Join(sdDir, "metadata.json")
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		return "", fmt.Errorf("trash entry not found: %s", sdID)
+	}
+
+	var info SoftDeleteInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return "", fmt.Errorf("invalid trash metadata: %w", err)
+	}
+
+	// Defense: confirm DestPath is inside trashRoot (defense against metadata
+	// tampering or copy-paste of an SD-ID pointing elsewhere).
+	absTrashRoot, err := filepath.Abs(trashRoot)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve trash root: %w", err)
+	}
+	absDest, err := filepath.Abs(info.DestPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve dest path: %w", err)
+	}
+	if !strings.HasPrefix(strings.ToLower(absDest), strings.ToLower(absTrashRoot)+string(os.PathSeparator)) {
+		return "", fmt.Errorf("trash metadata points outside trash root: %s", info.DestPath)
+	}
+
+	// Confirm the file still exists in the trash
+	if _, err := os.Stat(info.DestPath); err != nil {
+		return "", fmt.Errorf("trash file missing: %w", err)
+	}
+
+	// Ensure the original directory exists (it may have been removed since)
+	if err := os.MkdirAll(filepath.Dir(info.OriginalPath), 0755); err != nil {
+		return "", fmt.Errorf("failed to recreate original directory: %w", err)
+	}
+
+	// If the original path now has a file (user re-created it), refuse — do
+	// not silently overwrite.
+	if _, err := os.Stat(info.OriginalPath); err == nil {
+		return "", fmt.Errorf("original path already exists; cannot overwrite: %s", info.OriginalPath)
+	}
+
+	if err := os.Rename(info.DestPath, info.OriginalPath); err != nil {
+		return "", fmt.Errorf("failed to move file back: %w", err)
+	}
+
+	// Remove the now-empty sd-id subdir + metadata.json (best-effort).
+	_ = os.Remove(metaPath)
+	_ = os.Remove(sdDir)
+
+	return info.OriginalPath, nil
+}
+
+// PurgeTrash permanently removes trash entries older than olderThanDays.
+// Returns (deletedCount, freedBytes, error). If dryRun is true, no files are
+// removed; the returned counts reflect what WOULD be removed.
+func (bm *BackupManager) PurgeTrash(olderThanDays int, dryRun bool) (int, int64, error) {
+	bm.mutex.Lock()
+	defer bm.mutex.Unlock()
+
+	if bm.backupDir == "" {
+		return 0, 0, nil
+	}
+
+	trashRoot := filepath.Join(bm.backupDir, softDeleteTrashSubdir)
+	entries, err := os.ReadDir(trashRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, 0, nil
+		}
+		return 0, 0, fmt.Errorf("failed to read trash directory: %w", err)
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -olderThanDays)
+	deletedCount := 0
+	var freedBytes int64
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		sdDir := filepath.Join(trashRoot, entry.Name())
+		metaPath := filepath.Join(sdDir, "metadata.json")
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			continue
+		}
+		var info SoftDeleteInfo
+		if err := json.Unmarshal(data, &info); err != nil {
+			continue
+		}
+		if !info.Timestamp.Before(cutoff) {
+			continue
+		}
+
+		freedBytes += info.Size
+		deletedCount++
+
+		if !dryRun {
+			if err := os.RemoveAll(sdDir); err != nil {
+				slog.Warn("Failed to purge trash entry", "sd_id", entry.Name(), "error", err)
+				deletedCount--
+				freedBytes -= info.Size
+			}
+		}
+	}
+
+	return deletedCount, freedBytes, nil
+}
+
+// saveSoftDeleteMetadata writes a SoftDeleteInfo as JSON to <sdDir>/metadata.json
+// with 0600 permissions (owner-only read, owner-only write).
+func (bm *BackupManager) saveSoftDeleteMetadata(sdDir string, info *SoftDeleteInfo) error {
+	data, err := json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(sdDir, "metadata.json"), data, 0600)
+}
+
+// generateSoftDeleteID returns a unique soft-delete ID in the form
+// "sd-<YYYYMMDD-HHMMSS>-<16 hex chars>". Reuses the algorithm from
+// generateBackupID but with a "sd-" prefix for grep-ability and namespace
+// separation.
+func generateSoftDeleteID() string {
+	return "sd-" + generateBackupID()
+}
+
+// hashFile computes the SHA-256 hex digest of a single file's contents.
+func hashFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,13 +76,23 @@ func (e *UltraFastEngine) RenameFile(ctx context.Context, oldPath, newPath strin
 	return nil
 }
 
-// SoftDeleteFile moves a file to a "filesdelete" folder for later deletion
-func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) error {
+// SoftDeleteFile moves a file to the trash and returns a SoftDeleteInfo so the
+// caller (tool handler) can format a response with the SD-ID, dest path, and a
+// restore command.
+//
+// When --backup-dir is configured AND a BackupManager is available, the file
+// goes to <BackupDir>/filesdelete/<sd-id>/<basename> with a metadata.json
+// sidecar (the discoverable path; AI can restore via backup(action:"restore_trash")).
+//
+// When --backup-dir is NOT configured, the legacy walk-up behavior is used
+// (with a deprecation warning) so users who don't pass --backup-dir are not
+// broken. Legacy entries are NOT discoverable via backup(action:"list_trash").
+func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) (*SoftDeleteInfo, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "softdelete"); err != nil {
-		return err
+		return nil, err
 	}
 
 	start := time.Now()
@@ -89,16 +100,16 @@ func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) error
 
 	// Check if path is allowed (security + access control)
 	if !e.IsPathAllowed(path) {
-		return fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
+		return nil, fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
 	}
 	// Prevent soft-deletion of allowed-path roots (would move entire tree to trash)
 	if len(e.config.AllowedPaths) > 0 && e.IsAllowedPathRoot(path) {
-		return fmt.Errorf("access denied: cannot delete allowed-path root '%s'", path)
+		return nil, fmt.Errorf("access denied: cannot delete allowed-path root '%s'", path)
 	}
 
 	// Check if source exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return fmt.Errorf("file does not exist: %s", path)
+		return nil, fmt.Errorf("file does not exist: %s", path)
 	}
 
 	// Execute pre-delete hook
@@ -112,23 +123,66 @@ func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) error
 		WorkingDir: workingDir,
 	}
 	if _, err := e.hookManager.ExecuteHooks(ctx, HookPreDelete, hookCtx); err != nil {
-		return fmt.Errorf("pre-delete hook denied operation: %w", err)
+		return nil, fmt.Errorf("pre-delete hook denied operation: %w", err)
 	}
 
+	var info *SoftDeleteInfo
+	var err error
+	if e.config.BackupDir != "" && e.backupManager != nil {
+		// Preferred path: delegate to BackupManager for the discoverable trash layout.
+		info, err = e.backupManager.SoftDeleteFile(path)
+	} else {
+		// Legacy fallback: walk-up heuristic. Kept so users without --backup-dir
+		// are not broken by the upgrade. Emits a deprecation warning.
+		info, err = e.softDeleteLegacy(ctx, path)
+	}
+	if err != nil {
+		return info, err
+	}
+
+	// Invalidate cache entries (the source path is gone now)
+	e.invalidateFileReadCache(path)
+	e.cache.InvalidateDirectory(filepath.Dir(path))
+
+	// Execute post-delete hook (best-effort) — include sd_id and dest_path in
+	// metadata so custom hooks can match on them.
+	hookCtx.Event = HookPostDelete
+	hookCtx.Metadata = map[string]interface{}{
+		"dest_path": info.DestPath,
+		"sd_id":     info.SDID,
+	}
+	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostDelete, hookCtx)
+
+	return info, nil
+}
+
+// softDeleteLegacy is the pre-v4.5.2 soft-delete behavior: walk up the path
+// looking for project indicators, drop the file into a "filesdelete/" folder
+// near the project root, and synthesize a SoftDeleteInfo. Kept as a fallback
+// when --backup-dir is not configured so existing setups are not broken.
+//
+// Entries created by this path are NOT discoverable via BackupManager.ListTrash
+// and CANNOT be restored via BackupManager.RestoreTrash (the response hint
+// points the user to a manual move_file instead).
+func (e *UltraFastEngine) softDeleteLegacy(ctx context.Context, path string) (*SoftDeleteInfo, error) {
+	slog.Warn("soft-delete using legacy walk-up location; pass --backup-dir to control trash location and enable restore_trash",
+		"path", path,
+		"hint", "set --backup-dir=/path/to/dir to get a discoverable trash layout")
+
 	// Determine the root directory (where to create filesdelete folder)
-	// If we have allowed paths, use the first one, otherwise use the parent of the file
 	var rootDir string
 	if len(e.config.AllowedPaths) > 0 {
 		rootDir = e.config.AllowedPaths[0]
 	} else {
-		// Find a reasonable root directory - go up until we find a directory that looks like a project root
+		// Find a reasonable root directory - go up until we find a directory that
+		// looks like a project root. Note: this is known to misbehave for
+		// ecosystems not covered by hasProjectIndicators (.NET, PHP, etc.).
 		rootDir = filepath.Dir(path)
 		for {
 			parent := filepath.Dir(rootDir)
 			if parent == rootDir { // reached root
 				break
 			}
-			// Look for common project indicators
 			if hasProjectIndicators(rootDir) {
 				break
 			}
@@ -139,18 +193,18 @@ func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) error
 	// Create the filesdelete directory
 	deleteDir := filepath.Join(rootDir, "filesdelete")
 	if err := os.MkdirAll(deleteDir, 0755); err != nil {
-		return fmt.Errorf("failed to create filesdelete directory: %w", err)
+		return nil, fmt.Errorf("failed to create filesdelete directory: %w", err)
 	}
 
 	// Create destination path maintaining relative structure
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return fmt.Errorf("failed to get absolute path: %w", err)
+		return nil, fmt.Errorf("failed to get absolute path: %w", err)
 	}
 
 	absRootDir, err := filepath.Abs(rootDir)
 	if err != nil {
-		return fmt.Errorf("failed to get absolute root directory: %w", err)
+		return nil, fmt.Errorf("failed to get absolute root directory: %w", err)
 	}
 
 	relPath, err := filepath.Rel(absRootDir, absPath)
@@ -166,7 +220,7 @@ func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) error
 	// Ensure destination directory exists
 	destDir := filepath.Dir(destPath)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("failed to create destination directory in filesdelete: %w", err)
+		return nil, fmt.Errorf("failed to create destination directory in filesdelete: %w", err)
 	}
 
 	// If destination already exists, add timestamp suffix
@@ -177,21 +231,29 @@ func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) error
 		destPath = nameWithoutExt + timestamp + ext
 	}
 
-	// Move the file
-	if err := os.Rename(path, destPath); err != nil {
-		return fmt.Errorf("failed to move file to filesdelete: %w", err)
+	// Stat source for size
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("source file not found: %w", err)
 	}
 
-	// Invalidate cache entries
-	e.invalidateFileReadCache(path)
-	e.cache.InvalidateDirectory(filepath.Dir(path))
+	// Move the file
+	if err := os.Rename(path, destPath); err != nil {
+		return nil, fmt.Errorf("failed to move file to filesdelete: %w", err)
+	}
 
-	// Execute post-delete hook (best-effort)
-	hookCtx.Event = HookPostDelete
-	hookCtx.Metadata = map[string]interface{}{"dest_path": destPath}
-	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostDelete, hookCtx)
-
-	return nil
+	// Synthesize a SoftDeleteInfo. SDID is empty — legacy entries are not
+	// discoverable via BackupManager.ListTrash. Kind signals the legacy mode
+	// so the response formatter can show a different hint.
+	return &SoftDeleteInfo{
+		SDID:         "", // no discoverable ID in legacy mode
+		OriginalPath: path,
+		DestPath:     destPath,
+		Size:         fileInfo.Size(),
+		Hash:         "", // no hash in legacy mode
+		Timestamp:    time.Now(),
+		Kind:         "soft_delete_legacy",
+	}, nil
 }
 
 // hasProjectIndicators checks if a directory has common project indicators
