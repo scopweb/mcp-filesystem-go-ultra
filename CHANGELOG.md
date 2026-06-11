@@ -1,5 +1,39 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.5.10] - 2026-06-11
+
+### Security / Safety — `edit_file` rewrite guard (bug 2026-06-11)
+
+The `edit_file` tool now **blocks** calls that match the "accidental full-file rewrite" anti-pattern. This pattern was observed in production: a 15-line header was passed as `old_text` while the full 150-line file content was passed as `new_text`, producing a 298-line file with the procedure duplicated. The model intended to rewrite the file but `edit_file`'s exact-match semantics only swapped the header, leaving the rest of the old file concatenated below.
+
+**Detection (3 signals, ALL must fire):**
+1. `new_text` is disproportionately larger than `old_text` (ratio > 2×)
+2. The file has substantial content remaining after the matched block (more than 50% of fileSize is outside the match)
+3. `new_text` is substantial in absolute AND relative terms (> 500 bytes AND > 50% of fileSize)
+
+**Override:** pass `force:true` to apply the edit anyway — a safety backup is created automatically by the existing edit pipeline.
+
+**Audit:** when the guard blocks, the audit log records `feedback_pattern: "accidental_rewrite"` and `feedback_status: "ko"` for dashboard visibility.
+
+**Why the 3-signal design:** the absolute-size signal (3) prevents false positives on legitimate small edits where the ratio is high simply because `old_text` was tiny (e.g., expanding a 19-byte TODO comment to 68 bytes in a 5 KB file: ratio 3.6× but the edit is clearly not a "rewrite"). The legitimate "rewrite a 100-line function" case has both `old_text` and `new_text` similar in length, so signal 1 doesn't fire.
+
+**Files changed:**
+
+| File | Change |
+|------|--------|
+| `core/feedback.go` | +`PatternAccidentalRewrite` constant, +`CheckEditRewrite` function |
+| `tools_core.go` | `edit_file` handler calls `CheckEditRewrite` before `engine.EditFile`; blocks when `BlockOp && !force`; `force` schema description updated to mention rewrite-guard bypass |
+| `tests/bug_ai_rewrite_concat_test.go` | NEW — 7 cases: bug pattern (blocks), legitimate refactor (allows), small new_text (allows), tiny file (allows), high ratio but no remaining (allows), empty inputs (4 sub-cases), force-bypass contract |
+
+**Tests:**
+```
+ok  core              0.822s
+ok  tests            17.195s
+ok  tests/security    0.987s
+```
+
+**Why this is a security fix, not just UX:** the bug is silent — no error, no warning, the file is "valid" with content duplicated. Detection requires the server to compare the actual `old_text` length to `new_text` length, something the model cannot do reliably from context. The guard transforms a silent failure into a clear, actionable error.
+
 ## [Unreleased / 4.5.9] - 2026-06-09
 
 ### Improvement — Read deduplication (`singleflight`) + `ReadFileRange` cache path
@@ -127,7 +161,7 @@ ok  .            0.498s
 ```
 
 **Out of scope (deferred):**
-- `git` tool 38.9% error rate — comes from another binary (`filesystem-rust-ultra.exe` or `filesystem-ultra-v4-embed_rg.exe`), not this Go server.
+- ~~`git` tool 38.9% error rate~~ — investigated 2026-06-11. Root cause is **NOT a tool bug**: analysis of 18 git calls in `C:\temp\mcp-proxy-logs\proxy.jsonl` (3 months, 17,951 total ops) shows 5 of 7 errors are instant failures (duration 0-2ms = input validation / "not a git repository" before any git exec) on paths that are NOT git repos. 1 is a missing path arg. Only 1 of 7 (14%) is a real git command error (45ms duration, transient — retried successfully 3s later). The remaining errors are from the same `opus-4` model retrying the same broken call 3 times in 14 seconds without adapting — anti-pattern, not tool bug. No code change needed; CLAUDE.md now documents the 8 actions correctly and a workflow rule prevents the "calling git on a non-repo path" anti-pattern.
 - `get_file_info` 23% error rate — needs running server + Windows lock investigation.
 - `mcp_search`/`mcp_read`/etc. prefix duplication — already resolved by user (12-day log shows 15 unique tool names vs 41 in 3-month history).
 - `ReadFileRange` doesn't use cache — separate PR.

@@ -20,12 +20,13 @@ const (
 type PatternID string
 
 const (
-	PatternTruncation      PatternID = "truncation"        // write < 50% of existing content
-	PatternInflationLoop   PatternID = "inflation_loop"    // write > 3x of existing content
-	PatternStaleRead       PatternID = "stale_read"        // edit without prior read in session
-	PatternFullRewrite     PatternID = "full_rewrite"      // write_file on large existing file
-	PatternRepeatedOldText PatternID = "repeated_old_text" // same old_text fails 2+ times
-	PatternLargeNewText    PatternID = "large_new_text"    // new_text > 80% of file size (use write_file instead)
+	PatternTruncation       PatternID = "truncation"         // write < 50% of existing content
+	PatternInflationLoop    PatternID = "inflation_loop"     // write > 3x of existing content
+	PatternStaleRead        PatternID = "stale_read"         // edit without prior read in session
+	PatternFullRewrite      PatternID = "full_rewrite"       // write_file on large existing file
+	PatternRepeatedOldText  PatternID = "repeated_old_text"  // same old_text fails 2+ times
+	PatternLargeNewText     PatternID = "large_new_text"     // new_text > 80% of file size (use write_file instead)
+	PatternAccidentalRewrite PatternID = "accidental_rewrite" // edit_file: small old_text + large new_text with file content remaining (2026-06-11)
 )
 
 // FeedbackSignal is returned by the detector to the tool handler.
@@ -224,6 +225,91 @@ func CheckEditNewText(newText string, fileSize int64) *FeedbackSignal {
 		}
 	}
 	return OK()
+}
+
+// CheckEditRewrite detects the "accidental full-file rewrite" anti-pattern in
+// edit_file. It triggers when ALL THREE conditions hold:
+//  1. newText is disproportionately larger than oldText (newText > 2× oldText)
+//  2. The file has substantial content remaining after the matched oldText
+//     (fileSize - oldText > 50% of fileSize)
+//  3. newText is substantial in absolute AND relative terms
+//     (newSize > 500 bytes AND newSize > 50% of fileSize)
+//
+// This pattern was observed in production on 2026-06-11: a 15-line header
+// was replaced with the full 150-line file via edit_file, producing a
+// 298-line result with the SP duplicated. The model intended to rewrite
+// the file but the tool's exact-match semantics only swapped the header,
+// leaving the rest of the old file concatenated below new_text.
+//
+// The check is BLOCKING by default. The caller (tool handler) must pass
+// force=true to bypass — typically when the model genuinely intends a
+// targeted large edit (e.g., refactoring a multi-section function) where
+// old_text and new_text are both large.
+//
+// Signal 3 prevents false positives on legitimate small edits where the
+// ratio is high simply because old_text was tiny (e.g., expanding a
+// 19-byte TODO comment to 68 bytes in a 5 KB file: ratio 3.6x but newText
+// is just 1.4% of the file — clearly not a "rewrite").
+func CheckEditRewrite(oldText, newText string, fileSize int64) *FeedbackSignal {
+	oldSize := int64(len(oldText))
+	newSize := int64(len(newText))
+
+	// No signal if either side is empty or file is tiny (avoid noise on
+	// micro-edits and brand-new files where this check is meaningless).
+	if oldSize == 0 || newSize == 0 || fileSize < 1024 {
+		return OK()
+	}
+
+	// Signal 1: newText must be disproportionately larger than oldText.
+	// Threshold: newSize > 2 * oldSize. Legitimate large refactors tend to
+	// keep old_text and new_text similar in length (rename, restructure).
+	if newSize < oldSize*2 {
+		return OK()
+	}
+
+	// Signal 3 (run before signal 2 to short-circuit cheaply): newText
+	// must be substantial in absolute terms AND relative to the file.
+	// - Absolute: > 500 bytes (filters micro-edits where ratio is high
+	//   only because old_text was tiny, e.g., expanding a one-line comment).
+	// - Relative: > 50% of fileSize (filters "replace 300 B with 900 B
+	//   in a 2 KB file" — ratio 3x but new_text is just 45% of the file,
+	//   not a rewrite).
+	if newSize < 500 {
+		return OK()
+	}
+	if newSize < fileSize/2 {
+		return OK()
+	}
+
+	// Signal 2: file must have substantial content beyond the matched block.
+	// Threshold: more than 50% of the file is outside the match. This
+	// distinguishes "replace a header with the whole file" (remaining ≈
+	// 90% of file) from "swap two large functions" (remaining ≈ 0% once
+	// old_text is found).
+	remaining := fileSize - oldSize
+	if remaining < fileSize/2 {
+		return OK()
+	}
+
+	// All three signals fire: this looks like an accidental full-file rewrite.
+	ratio := float64(newSize) / float64(oldSize)
+	return &FeedbackSignal{
+		Status:  FeedbackKO,
+		Pattern: PatternAccidentalRewrite,
+		BlockOp: true,
+		Message: fmt.Sprintf(
+			"BLOCKED: looks like an accidental full-file rewrite. "+
+				"old_text=%d B (%d%% of file), new_text=%d B (%.1fx old_text, %d%% of file), "+
+				"file remaining after match=%d B (%d%%). "+
+				"edit_file only swaps the matched block — the rest of the file "+
+				"will be concatenated below new_text.",
+			oldSize, 100*oldSize/fileSize, newSize, ratio, 100*newSize/fileSize,
+			remaining, 100*remaining/fileSize),
+		Suggestion: "If you want to rewrite the whole file, use write_file(path, content=<full new file>). " +
+			"If you want a targeted edit, narrow old_text to a minimal unique anchor " +
+			"(e.g., a single function signature). " +
+			"Pass force:true to apply this edit anyway (a safety backup will be created).",
+	}
 }
 
 // --- Formatting ---

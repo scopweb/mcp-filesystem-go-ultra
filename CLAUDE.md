@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-MCP Filesystem Server Ultra-Fast (v4.2.1) - A high-performance MCP (Model Context Protocol) filesystem server written in Go, optimized for Claude Desktop and Claude Code. Provides **16 MCP tools** (consolidated from 59 in v3.x) for file operations, search, editing, backups, streaming, and WSL/Windows integration. All tools include MCP spec-compliant annotations (readOnlyHint, destructiveHint, idempotentHint).
+MCP Filesystem Server Ultra-Fast (v4.5.x) - A high-performance MCP (Model Context Protocol) filesystem server written in Go, optimized for Claude Desktop and Claude Code. Exposes **20 MCP tools** (17 core + `git` + `minify_js` + `help`) for file operations, search, editing, backups, streaming, WSL/Windows integration, Git version control, and JS minification. All tools include MCP spec-compliant annotations (readOnlyHint, destructiveHint, idempotentHint).
 
 ## Build & Test
 
@@ -31,7 +31,7 @@ go test ./tests/ -run TestName -v
 go build -ldflags="-s -w" -trimpath -o dashboard.exe ./cmd/dashboard/
 ```
 
-## Key Consolidations (v3 59 tools → v4 16 core tools)
+## Key Consolidations (v3 59 tools → v4 17 core tools)
 - `read_file` replaces: `read_file`, `chunked_read_file`, `intelligent_read`, `read_file_range`, `read_base64`
 - `write_file` replaces: `write_file`, `create_file`, `streaming_write_file`, `intelligent_write`, `write_base64`
 - `edit_file` replaces: `edit_file`, `smart_edit_file`, `intelligent_edit`, `recovery_edit`, `search_and_replace`, `replace_nth_occurrence`, `regex_transform_file`
@@ -49,11 +49,13 @@ go build -ldflags="-s -w" -trimpath -o dashboard.exe ./cmd/dashboard/
 ```
 main.go                    # Entry point: CLI flags, server startup
 tools_core.go             # Core 3: read_file, write_file, edit_file
-tools_search.go            # search_files
+tools_search.go            # list_directory, search_files, analyze_operation
 tools_files.go            # get_file_info, move_file, copy_file, delete_file, create_directory
-tools_batch.go            # batch_operations
-tools_platform.go         # wsl, server_info, analyze_operation
-tools_aliases.go          # 6 aliases + fs super-tool + help (discovery tool)
+tools_batch.go            # multi_edit, batch_operations, project_replace, backup
+tools_platform.go         # wsl, server_info
+tools_git.go              # git (v4.5.2+ — 8 actions: init, status, diff, log, add, commit, restore, branch)
+tools_minify.go           # minify_js (v4.5.7+ — pure Go, no Node)
+tools_aliases.go          # help (discovery tool) — 6 aliases + fs super-tool + claude-code aliases are DISABLED in registerTools() (commented out, see tools_core.go:103-105)
 core/
   engine.go                # UltraFastEngine - central struct with cache, worker pool, metrics
   edit_operations.go       # EditFile, MultiEdit with backup, risk assessment, hooks
@@ -94,17 +96,22 @@ cmd/
     main.go              # Separate binary: HTTP dashboard for logs/metrics/backups
     static/              # Embedded web UI (go:embed) - HTML + vanilla JS + CSS
 
-## Tool Inventory (v4.4.0 — 31 tools total)
+## Tool Inventory (v4.5.x — 20 tools exposed)
 
 ```
-16 CORE:   read_file, write_file, edit_file, list_directory, search_files,
-           get_file_info, move_file, copy_file, delete_file, create_directory,
-           batch_operations, backup, analyze_operation, wsl, server_info, multi_edit
-13 ALIASES: read_text_file, search, edit, write, create_file, directory_tree,
-            View, Edit, Write, Replace, LS, GlobTool, GrepTool
-1 HELP:    help         (discovery tool — call first to see all tools)
-1 SUPER:   fs           (dispatch to all 16 ops via action param)
+17 CORE:   read_file, write_file, edit_file, list_directory, search_files,
+          get_file_info, move_file, copy_file, delete_file, create_directory,
+          batch_operations, backup, analyze_operation, wsl, server_info,
+          multi_edit, project_replace
+ 1 GIT:    git             (8 actions: init, status, diff, log, add, commit, restore, branch — v4.5.2+; supports `auto_message` for conventional commits)
+ 1 MIN:    minify_js       (pure-Go JS minification, no Node — v4.5.7+)
+ 1 HELP:   help            (discovery — call first to see all 20 tools)
 ```
+
+**Disabled (code present but NOT registered — see `tools_core.go:103-105`):**
+- 6 aliases: `read_text_file`, `search`, `edit`, `write`, `create_file`, `directory_tree`
+- 7 claude-code aliases: `View`, `Edit`, `Write`, `Replace`, `LS`, `GlobTool`, `GrepTool`
+- 1 super-tool: `fs` (dispatch to all 17 core ops via `action` param)
 
 ## Key Dependencies
 
@@ -433,6 +440,7 @@ When `--log-dir` is set, each completed step emits a separate audit entry with `
 - Copy-paste paths exactly from `list_directory` or `search_files` results
 - **Never retype paths from memory** — typos cause silent failures
 - If a tool returns "file not found", double-check the path character by character
+- **Caso documentado (2026-06-11):** un path con capitalización mal (ej. `estats.razor` en vez de `Estats.razor`) se resuelve correctamente en Windows (case-insensitive) pero el archivo editado downstream registra la clase con la capitalización del path pasado → errores de compilación que aparecen 3 capas más abajo (compilador Razor: `RZ10011 class estats`). **El path SIEMPRE debe copiarse de `list_directory` o `read_file`, nunca escribirse de memoria, especialmente cuando hay capitalización, acentos, o guiones vs underscores en juego.**
 
 ### 2. Read before editing
 - **ALWAYS** read the file (or relevant range) before calling `edit_file` or `multi_edit`
@@ -520,3 +528,25 @@ Full recovery guide: `server_info(action:"help", topic:"recovery")`
 - **List directories** → `list_directory` (never `ls`, `dir`)
 
 Bash commands bypass the MCP cache, skip audit logging, and return untyped output.
+
+### 12. ⚠️ Nunca `edit_file` para rewrite completo (bug del 2026-06-11)
+
+**Síntoma observado:** `edit_file(path, old_text=<15 líneas header>, new_text=<archivo completo ~150 líneas>)` produjo un archivo de **298 líneas con el SP/procedimiento duplicado**. El header se reemplazó correctamente, pero el resto del archivo viejo quedó concatenado debajo del `new_text`.
+
+**Causa:** `edit_file` en modo default (`replace`) hace match EXACTO de `old_text` y sustituye **solo ese fragmento**. El resto del archivo permanece intacto. El "rewrite" que el modelo tenía en cabeza nunca ocurrió — solo se intercambió un bloque pequeño.
+
+**Regla:** Cuando hay que reescribir un archivo entero o la mayoría de su contenido → usar **`write_file`** directamente, nunca `edit_file`.
+
+**Heurística de decisión:**
+
+| Situación | Herramienta correcta |
+|-----------|---------------------|
+| `len(new_text) > 2 * len(old_text)` y archivo tiene contenido más allá del match | **`write_file`** |
+| Cambio pequeño y puntual (`len(new_text) ≈ len(old_text)`, mismo rango) | `edit_file` mode `replace` |
+| Reemplazo global de un patrón (todas las ocurrencias) | `edit_file` mode `search_replace` |
+| Renombrar tokens en árbol completo | `project_replace` o `batch_operations` con `search_and_replace` |
+| Múltiples cambios pequeños en el mismo archivo | `multi_edit` con varios anchors |
+
+**Truco anti-bug:** Antes de llamar `edit_file`, calcular mentalmente el ratio `len(new_text) / len(old_text)`. Si es > 2 y la operación no es un rename global, replantear con `write_file` o fragmentar en `multi_edit`.
+
+**Detección server-side (✅ activa desde v4.5.10, 2026-06-11):** `edit_file` ahora BLOQUEA automáticamente este patrón. La guarda `core.CheckEditRewrite` dispara cuando se cumplen 3 señales: (1) `new_text > 2× old_text`, (2) el archivo tiene >50% de contenido fuera del match, (3) `new_text > 500 bytes` Y `>50%` del archivo. El bloque devuelve un error claro sugiriendo `write_file`. Override: pasar `force:true` — crea un backup de seguridad y aplica. El audit log registra `feedback_pattern: "accidental_rewrite"` cuando dispara.

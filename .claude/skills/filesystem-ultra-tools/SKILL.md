@@ -44,9 +44,38 @@ description: Tool catalog for filesystem-ultra MCP server v4.5.2: 17 core tools 
 - **Project-wide find/replace** → `project_replace` (1 call instead of N)
 - **Batch ops** → `batch_operations` (atomic, with rollback)
 - **Undo** → `backup(action:"undo_last")` or `backup(action:"restore", backup_id:"...")`
-- **Git operations** → `git` tool (status, diff, log, add, commit, restore, branch, init)
+- **Git operations** → `git` tool (status, diff, log, add, commit, restore, branch, init). **The path passed must be inside a git repository** (or use `init` to create one). Calling `git` on a non-repo path is the #1 source of errors (analysis of 18 calls showed 5 of 7 errors were "not a git repository" — instant failures before any git command ran).
 - **Dry-run** → `analyze_operation` or `edit_file(dry_run:true)` / `multi_edit(dry_run:true)` / `project_replace(preview:true)`
 - **Fast search** → `search_files` with `output_format:"json"` uses ripgrep when available
+
+## Critical workflow rules (anti-bug)
+
+These two failure modes are silent at the tool level — the tool returns OK, the file is "valid", but the work is wrong. The model MUST avoid them via workflow discipline, not via the tool (the tool can't always detect intent).
+
+### ⚠️ Always copy paths from `list_directory` / `read_file` — never from memory (case-mismatch bug, 2026-06-11)
+
+The path you pass to `edit_file` / `multi_edit` / `write_file` / `move_file` / `delete_file` MUST be copied character-by-character from the output of a prior `list_directory` or `read_file` call. **Do not retype it from memory or from the conversation history.**
+
+**Why:** Windows resolves paths case-insensitively, so writing `estats.razor` when the file is `Estats.razor` succeeds at the filesystem level — but downstream tools that register classes/modules by the path (Razor compiler, webpack, MSBuild, etc.) use the wrong capitalization and fail 3 layers down with cryptic errors like `RZ10011: class estats` or `module not found`.
+
+**Symptom if you fall into this:** edit appears successful in the tool response, but compilation/build/import fails later with a "class/module not found" error that mentions a name you didn't expect. Verify the case of every path in your most recent edit.
+
+### ⚠️ Never use `edit_file` for whole-file rewrites (bug 2026-06-11)
+
+If you intend to rewrite most or all of a file's content, use `write_file` directly. `edit_file` only swaps the matched `old_text` block — everything else in the file remains. Passing a full file as `new_text` with a small `old_text` (e.g., a header) produces a **concatenated/doubled file** silently.
+
+**Heuristic:**
+- `len(new_text) > 2 × len(old_text)` AND file has content beyond the match → probably you want `write_file`
+- The server now BLOCKS this pattern by default (use `force:true` to override)
+
+**Tool guidance:**
+| Situation | Use |
+|-----------|-----|
+| Targeted small change | `edit_file` mode `replace` |
+| Replace all occurrences of a pattern | `edit_file` mode `search_replace` |
+| Whole-file rewrite | `write_file` |
+| Multiple targeted changes same file | `multi_edit` with several anchors |
+| Rename token project-wide | `project_replace` |
 
 ## project_replace — Project-wide find/replace
 

@@ -453,7 +453,7 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("new_text", mcp.Description("New text to replace with (default mode)")),
 		mcp.WithString("old_str", mcp.Description("Alias for old_text")),
 		mcp.WithString("new_str", mcp.Description("Alias for new_text")),
-		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
+		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk OR if the rewrite guard detects an accidental full-file rewrite (small old_text + large new_text with file content remaining). Pass force:true to apply anyway — a safety backup is created. Default: false.")),
 		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\"")),
 		mcp.WithNumber("occurrence", mcp.Description("Which occurrence to replace: 1=first, 2=second, -1=last, -2=second-to-last (default: all)")),
 		// search_replace mode params
@@ -704,6 +704,23 @@ func registerCoreTools(reg *toolRegistry) {
 		}
 		if newText != "" {
 			_ = core.CheckEditNewText(newText, fileSize) // result appended below
+		}
+
+		// Guard against accidental full-file rewrite (bug 2026-06-11):
+		// short old_text + large new_text with file content remaining after
+		// the match → likely the model intended write_file. BLOCK by default;
+		// override with force:true.
+		if newText != "" {
+			if rewriteSignal := core.CheckEditRewrite(oldText, newText, fileSize); rewriteSignal != nil && rewriteSignal.BlockOp {
+				core.SetFeedback(ctx, rewriteSignal)
+				if !force {
+					errMsg := core.FormatFeedback(rewriteSignal,
+						"edit_file blocked: looks like an accidental full-file rewrite")
+					return mcp.NewToolResultError(errMsg), nil
+				}
+				// force=true: proceed but the audit will record the pattern
+				_ = rewriteSignal // already attached via SetFeedback above
+			}
 		}
 
 		// If occurrence is specified, use ReplaceNthOccurrence
