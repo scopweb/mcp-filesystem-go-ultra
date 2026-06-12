@@ -950,7 +950,7 @@ func (pe *PipelineExecutor) executeDelete(ctx context.Context, step PipelineStep
 
 		if !dryRun {
 			// Perform soft delete
-			if err := pe.engine.SoftDeleteFile(ctx, normalizedPath); err != nil {
+			if _, err := pe.engine.SoftDeleteFile(ctx, normalizedPath); err != nil {
 				return &PipelineStepError{
 					StepID:  step.ID,
 					Action:  "delete",
