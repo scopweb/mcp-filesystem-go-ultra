@@ -219,7 +219,7 @@ func (hm *HookManager) ExecuteHooks(ctx context.Context, event HookEvent, hookCt
 	results := hm.executeHooksParallel(ctx, matchedHooks, hookCtx)
 
 	// Aggregate results
-	return hm.aggregateResults(results, event)
+	return hm.aggregateResults(results)
 }
 
 // matchesPattern checks if a tool name matches a pattern.
@@ -469,7 +469,7 @@ func (hm *HookManager) parseHookOutput(stdout, stderr string, exitCode int) *Hoo
 }
 
 // aggregateResults combines multiple hook results into a final decision
-func (hm *HookManager) aggregateResults(results []*HookResult, event HookEvent) (*HookResult, error) {
+func (hm *HookManager) aggregateResults(results []*HookResult) (*HookResult, error) {
 	if len(results) == 0 {
 		return &HookResult{Decision: HookAllow}, nil
 	}
