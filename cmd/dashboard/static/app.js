@@ -416,6 +416,201 @@ async function toggleBackupDetail(backupId, btn) {
   }
 }
 
+// ============================================================================
+// Trash — soft-deleted files managed by BackupManager
+// ============================================================================
+const trashPage = { offset: 0, limit: 50, total: 0 };
+let trashDebounceTimer = null;
+
+async function searchTrash() {
+  try {
+    const q = ($('#tr-search-q') || {}).value || '';
+    const olderThan = ($('#tr-older-than') || {}).value || '';
+
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (olderThan) params.set('older_than_days', olderThan);
+    params.set('limit', trashPage.limit);
+    params.set('offset', trashPage.offset);
+
+    const res = await fetch('/api/trash/search?' + params);
+    if (res.status === 503) {
+      renderTrashEmpty('Trash is only available when the dashboard was started with --backup-dir.');
+      return;
+    }
+    const data = await res.json();
+
+    trashPage.total = data.total || 0;
+    const results = data.results || [];
+
+    // Summary cards
+    let totalSize = 0;
+    let oldest = null, newest = null;
+    results.forEach(t => {
+      totalSize += t.size || 0;
+      const ts = new Date(t.timestamp);
+      if (!newest || ts > newest) newest = ts;
+      if (!oldest || ts < oldest) oldest = ts;
+    });
+    // For total, prefer the server-reported total (across pages) for the count,
+    // but for size we only have the current page. Show a note if so.
+    $('#tr-total').textContent = trashPage.total;
+    $('#tr-size').textContent = formatBytes(totalSize);
+    $('#tr-oldest').textContent = oldest ? oldest.toLocaleString() : '—';
+    $('#tr-newest').textContent = newest ? newest.toLocaleString() : '—';
+
+    // Status
+    const statusEl = $('#tr-status');
+    if (q || olderThan) {
+      statusEl.textContent = `Showing ${results.length} of ${trashPage.total} trash entries`;
+    } else {
+      statusEl.textContent = trashPage.total > 0 ? `${trashPage.total} trash entries` : '';
+    }
+
+    // Results table
+    const container = $('#trash-list');
+    if (results.length === 0) {
+      renderTrashEmpty('No trash entries found.');
+      return;
+    }
+    container.innerHTML = '<table><thead><tr>' +
+      '<th>Time</th><th>SD-ID</th><th>Original Path</th><th>File</th><th>Size</th><th>Status</th><th>Actions</th>' +
+      '</tr></thead><tbody>' +
+      results.map(t => {
+        const time = new Date(t.timestamp).toLocaleString();
+        const size = formatBytes(t.size || 0);
+        const fileName = t.file_name || '—';
+        const status = !t.exists
+          ? '<span class="badge error">Missing</span>'
+          : (t.can_restore
+            ? '<span class="badge ok">Ready</span>'
+            : '<span class="badge warn">Path Exists</span>');
+        const restoreBtn = t.can_restore && t.exists
+          ? `<button class="btn-action" onclick="trashRestore('${escapeHtml(t.sd_id)}')">Restore</button>`
+          : `<button class="btn-action" disabled style="opacity:0.4;cursor:not-allowed;" title="${t.exists ? 'Original path is occupied' : 'File missing in trash'}">Restore</button>`;
+        const purgeBtn = `<button class="btn-danger" onclick="trashPurge('${escapeHtml(t.sd_id)}')" title="Permanently delete this entry">Purge</button>`;
+        const viewLink = t.exists && t.view_url
+          ? `<a href="${t.view_url}" target="_blank" class="btn-action">View</a>`
+          : '';
+        const downloadLink = t.exists && t.download_url
+          ? `<a href="${t.download_url}" class="btn-action">Download</a>`
+          : '';
+        return `<tr class="trash-row" data-sd-id="${escapeHtml(t.sd_id)}">
+          <td>${time}</td>
+          <td class="path" style="font-size:11px;">${escapeHtml(t.sd_id)}</td>
+          <td class="path" style="font-size:11px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(t.original_path)}">${escapeHtml(t.original_path)}</td>
+          <td>${escapeHtml(fileName)}</td>
+          <td>${size}</td>
+          <td>${status}</td>
+          <td style="white-space:nowrap;">${viewLink}${downloadLink}${restoreBtn}${purgeBtn}</td>
+        </tr>`;
+      }).join('') +
+      '</tbody></table>';
+
+    renderTrashPagination();
+  } catch (e) {
+    // silent
+  }
+}
+
+function renderTrashEmpty(message) {
+  $('#trash-list').innerHTML = `<div class="empty">${escapeHtml(message)}</div>`;
+  $('#tr-total').textContent = '0';
+  $('#tr-size').textContent = '0 B';
+  $('#tr-oldest').textContent = '—';
+  $('#tr-newest').textContent = '—';
+  $('#tr-pagination').innerHTML = '';
+  trashPage.total = 0;
+}
+
+function renderTrashPagination() {
+  const el = $('#tr-pagination');
+  if (trashPage.total <= trashPage.limit) {
+    el.innerHTML = '';
+    return;
+  }
+  const totalPages = Math.ceil(trashPage.total / trashPage.limit);
+  const currentPage = Math.floor(trashPage.offset / trashPage.limit) + 1;
+  let html = '';
+  html += `<button class="page-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="goTrashPage(${currentPage - 1})">‹ Prev</button>`;
+  // Show up to 7 page buttons centered on currentPage
+  const start = Math.max(1, currentPage - 3);
+  const end = Math.min(totalPages, start + 6);
+  for (let p = start; p <= end; p++) {
+    if (p === currentPage) {
+      html += `<button class="page-btn active">${p}</button>`;
+    } else {
+      html += `<button class="page-btn" onclick="goTrashPage(${p})">${p}</button>`;
+    }
+  }
+  html += `<button class="page-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="goTrashPage(${currentPage + 1})">Next ›</button>`;
+  el.innerHTML = html;
+}
+
+function goTrashPage(page) {
+  const totalPages = Math.ceil(trashPage.total / trashPage.limit);
+  if (page < 1 || page > totalPages) return;
+  trashPage.offset = (page - 1) * trashPage.limit;
+  searchTrash();
+}
+
+async function trashRestore(sdId) {
+  if (!confirm(`Restore ${sdId}?\n\nThe file will be moved back to its original location.`)) return;
+  try {
+    const res = await fetch('/api/trash/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sd_id: sdId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) {
+      searchTrash();
+    } else {
+      alert('Restore failed: ' + (data.error || res.statusText));
+    }
+  } catch (e) {
+    alert('Restore failed: ' + e.message);
+  }
+}
+
+async function trashPurge(sdId) {
+  if (!confirm(`PERMANENTLY delete trash entry ${sdId}?\n\nThis cannot be undone.`)) return;
+  try {
+    const res = await fetch('/api/trash/purge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sd_id: sdId, dry_run: false }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) {
+      searchTrash();
+    } else {
+      alert('Purge failed: ' + (data.error || res.statusText));
+    }
+  } catch (e) {
+    alert('Purge failed: ' + e.message);
+  }
+}
+
+async function trashPurgeOlderThan(days) {
+  if (!confirm(`PERMANENTLY delete all trash entries older than ${days} days?\n\nThis cannot be undone.`)) return;
+  try {
+    const res = await fetch('/api/trash/purge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ older_than_days: days, dry_run: false }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) {
+      searchTrash();
+    } else {
+      alert('Purge failed: ' + (data.error || res.statusText));
+    }
+  } catch (e) {
+    alert('Purge failed: ' + e.message);
+  }
+}
+
 // Statistics
 async function fetchStats() {
   try {
@@ -660,6 +855,23 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   if (opSel) opSel.addEventListener('change', () => { backupPage.offset = 0; searchBackups(); });
 
+  // Trash event listeners
+  const trSearchBtn = $('#tr-search-btn');
+  const trSearchQ = $('#tr-search-q');
+  const trOlderThan = $('#tr-older-than');
+  const trPurgeOldBtn = $('#tr-purge-old-btn');
+
+  if (trSearchBtn) trSearchBtn.addEventListener('click', () => { trashPage.offset = 0; searchTrash(); });
+  if (trSearchQ) trSearchQ.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { trashPage.offset = 0; searchTrash(); }
+  });
+  if (trSearchQ) trSearchQ.addEventListener('input', () => {
+    clearTimeout(trashDebounceTimer);
+    trashDebounceTimer = setTimeout(() => { trashPage.offset = 0; searchTrash(); }, 300);
+  });
+  if (trOlderThan) trOlderThan.addEventListener('change', () => { trashPage.offset = 0; searchTrash(); });
+  if (trPurgeOldBtn) trPurgeOldBtn.addEventListener('click', () => trashPurgeOlderThan(7));
+
   // Operations page — pause/resume toggle. While paused, fetchOperations and SSE
   // stop rewriting #all-ops so the user can inspect an expanded row.
   const pauseBtn = $('#ops-pause-btn');
@@ -785,6 +997,7 @@ async function fetchErrorPatterns() {
 fetchMetrics();
 fetchOperations();
 searchBackups();
+searchTrash();
 fetchStats();
 fetchProxyStats();
 fetchNormalizer();
@@ -796,6 +1009,7 @@ connectSSE();
 setInterval(fetchMetrics, 5000);
 setInterval(fetchOperations, 10000);
 setInterval(searchBackups, 30000);
+setInterval(searchTrash, 30000);
 setInterval(fetchStats, 15000);
 setInterval(fetchProxyStats, 15000);
 setInterval(fetchNormalizer, 10000);

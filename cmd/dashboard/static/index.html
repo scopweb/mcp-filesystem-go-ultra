@@ -16,6 +16,7 @@
     <button class="active" data-page="dashboard">Dashboard</button>
     <button data-page="operations">Operations</button>
     <button data-page="backups">Backups</button>
+    <button data-page="trash">Trash</button>
     <button data-page="stats">Statistics</button>
     <button data-page="proxy">Proxy / Tokens</button>
     <button data-page="analysis">Edit Analysis</button>
@@ -151,6 +152,51 @@
       </div>
 
       <div class="pagination" id="bk-pagination"></div>
+    </div>
+
+    <!-- Trash Page — soft-deleted files managed by BackupManager -->
+    <div class="page" id="page-trash">
+      <div class="cards">
+        <div class="card">
+          <div class="label">Trash Entries</div>
+          <div class="value accent" id="tr-total">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Total Size</div>
+          <div class="value" id="tr-size">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Oldest Entry</div>
+          <div class="value" id="tr-oldest" style="font-size:16px;">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Newest Entry</div>
+          <div class="value green" id="tr-newest" style="font-size:16px;">—</div>
+        </div>
+      </div>
+
+      <div class="trash-search-bar">
+        <div class="search-row">
+          <input type="text" id="tr-search-q" class="search-input" placeholder="Search by SD-ID, original path, or file name...">
+          <select id="tr-older-than" class="search-select">
+            <option value="">Any age</option>
+            <option value="1">Older than 1 day</option>
+            <option value="7">Older than 7 days</option>
+            <option value="30">Older than 30 days</option>
+            <option value="90">Older than 90 days</option>
+          </select>
+          <button class="btn-action" id="tr-search-btn" style="padding:8px 16px;">Search</button>
+          <button class="btn-danger" id="tr-purge-old-btn" style="padding:8px 16px;" title="Permanently delete all trash entries older than 7 days">Purge Old (&gt;7d)</button>
+        </div>
+      </div>
+
+      <div class="search-status" id="tr-status"></div>
+
+      <div class="section">
+        <div id="trash-list"></div>
+      </div>
+
+      <div class="pagination" id="tr-pagination"></div>
     </div>
 
     <!-- Statistics Page -->
