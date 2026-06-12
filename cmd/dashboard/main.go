@@ -214,6 +214,12 @@ func main() {
 	mux.HandleFunc("/api/backups/search-content", backupContentSearchHandler(*backupDir))
 	mux.HandleFunc("/api/backups/detail/", backupDetailHandler(*backupDir))
 	mux.HandleFunc("/api/backups/file/", backupFileHandler(*backupDir))
+	mux.HandleFunc("/api/trash", trashListHandler(*backupDir))
+	mux.HandleFunc("/api/trash/search", trashSearchHandler(*backupDir))
+	mux.HandleFunc("/api/trash/detail/", trashDetailHandler(*backupDir))
+	mux.HandleFunc("/api/trash/file/", trashFileHandler(*backupDir))
+	mux.HandleFunc("/api/trash/restore", trashRestoreHandler(*backupDir))
+	mux.HandleFunc("/api/trash/purge", trashPurgeHandler(*backupDir))
 	mux.HandleFunc("/api/stats", statsHandler(*logDir))
 	mux.HandleFunc("/api/normalizer", normalizerHandler(*logDir))
 	mux.HandleFunc("/api/error-patterns", errorPatternsHandler(*logDir))
@@ -388,6 +394,76 @@ type BackupSearchResponse struct {
 	Limit      int          `json:"limit"`
 	Operations []string     `json:"operations"`
 	Results    []BackupInfo `json:"results"`
+}
+
+// ============================================================================
+// Trash subsystem (soft-deleted files managed by the MCP server's
+// BackupManager). Populated from <backup-dir>/filesdelete/<sd-id>/metadata.json
+// (see core/backup_manager.go: SoftDeleteInfo).
+// ============================================================================
+
+// TrashEntry mirrors core.SoftDeleteInfo for reading metadata.json files, plus
+// a few enriched fields the UI needs (existence check, file_name, view URL,
+// can_restore). Same JSON shape is sent to the browser.
+type TrashEntry struct {
+	SDID         string    `json:"sd_id"`
+	OriginalPath string    `json:"original_path"`
+	DestPath     string    `json:"dest_path"`
+	Size         int64     `json:"size"`
+	Hash         string    `json:"hash"`
+	Timestamp    time.Time `json:"timestamp"`
+	Kind         string    `json:"kind"`
+
+	// Enriched fields populated server-side:
+	Exists      bool   `json:"exists"`       // is the file still in the trash directory?
+	FileName    string `json:"file_name"`    // basename of the trashed file
+	ViewURL     string `json:"view_url"`     // /api/trash/file/<sd-id>/<basename>
+	DownloadURL string `json:"download_url"` // /api/trash/file/<sd-id>/<basename>?download=true
+	CanRestore  bool   `json:"can_restore"`  // false if original_path already has a file
+}
+
+type TrashSearchResponse struct {
+	Total   int          `json:"total"`
+	Offset  int          `json:"offset"`
+	Limit   int          `json:"limit"`
+	Results []TrashEntry `json:"results"`
+}
+
+// trashCache caches the trash list with a shorter TTL than bkCache because
+// soft-deletes happen more frequently than backups and the user expects to see
+// fresh data when clicking Restore/Purge.
+type trashCache struct {
+	mu      sync.RWMutex
+	data    []TrashEntry
+	updated time.Time
+	ttl     time.Duration
+}
+
+var trCache = &trashCache{ttl: 10 * time.Second}
+
+func (c *trashCache) get() ([]TrashEntry, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.data != nil && time.Since(c.updated) < c.ttl {
+		return c.data, true
+	}
+	return nil, false
+}
+
+func (c *trashCache) set(data []TrashEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.data = data
+	c.updated = time.Now()
+}
+
+// invalidateTrashCache drops the cached trash list. Call after a successful
+// restore or purge so the next read shows fresh data.
+func invalidateTrashCache() {
+	trCache.mu.Lock()
+	trCache.data = nil
+	trCache.updated = time.Time{}
+	trCache.mu.Unlock()
 }
 
 func backupSearchHandler(backupDir string) http.HandlerFunc {
@@ -1751,6 +1827,472 @@ func roiHandler(logDir string) http.HandlerFunc {
 			TopSavings:     topSavings,
 			AntiPatterns:   antiPatterns,
 			TimeSpan:       timeSpan,
+		})
+	}
+}
+
+// ============================================================================
+// Trash handlers — read & manage soft-deleted files from <backup-dir>/filesdelete/
+// ============================================================================
+
+// loadAllTrash scans <backupDir>/filesdelete/ for subdirs, reads each
+// metadata.json, and enriches with existence + restore feasibility. Returns an
+// empty slice (not nil) when no trash exists, so JSON marshals as `[]`.
+// Uses the trCache to avoid re-scanning on every request (10s TTL).
+func loadAllTrash(backupDir string) []TrashEntry {
+	if backupDir == "" {
+		return []TrashEntry{}
+	}
+	if cached, ok := trCache.get(); ok {
+		return cached
+	}
+
+	trashRoot := filepath.Join(backupDir, "filesdelete")
+	entries, err := os.ReadDir(trashRoot)
+	if err != nil {
+		// Directory missing or unreadable → empty trash
+		trCache.set([]TrashEntry{})
+		return []TrashEntry{}
+	}
+
+	results := make([]TrashEntry, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		sdID := entry.Name()
+		metaPath := filepath.Join(trashRoot, sdID, "metadata.json")
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			// Skip trash entries with unreadable metadata (orphan dirs, etc.)
+			continue
+		}
+		var e TrashEntry
+		if err := json.Unmarshal(data, &e); err != nil {
+			continue
+		}
+		// Enrich
+		enrichTrashEntry(&e, backupDir)
+		results = append(results, e)
+	}
+
+	// Newest first
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Timestamp.After(results[j].Timestamp)
+	})
+
+	trCache.set(results)
+	return results
+}
+
+// enrichTrashEntry populates the server-side derived fields on a TrashEntry
+// (existence check, file_name, view/download URLs, can_restore).
+func enrichTrashEntry(e *TrashEntry, backupDir string) {
+	_, err := os.Stat(e.DestPath)
+	e.Exists = err == nil
+	e.FileName = filepath.Base(e.DestPath)
+	if e.FileName == "." || e.FileName == "/" {
+		e.FileName = ""
+	}
+	if e.SDID != "" && e.FileName != "" {
+		e.ViewURL = fmt.Sprintf("/api/trash/file/%s/%s", e.SDID, e.FileName)
+		e.DownloadURL = e.ViewURL + "?download=true"
+	}
+	// can_restore: original path is writable AND not already occupied
+	if e.OriginalPath != "" {
+		if _, statErr := os.Stat(e.OriginalPath); statErr == nil {
+			e.CanRestore = false
+		} else {
+			// Check that the parent dir exists or can be created
+			parentDir := filepath.Dir(e.OriginalPath)
+			if _, parentErr := os.Stat(parentDir); parentErr == nil {
+				e.CanRestore = true
+			} else {
+				// Parent missing → restore would need to MkdirAll. We allow it
+				// (the core BackupManager does MkdirAll on restore).
+				e.CanRestore = true
+			}
+		}
+	}
+}
+
+// invalidateTrashCacheIfMatches drops the cache when a restore/purge changes
+// the trash contents. The current implementation invalidates unconditionally
+// because the list is cheap to re-scan.
+func invalidateTrashCacheIfMatches() {
+	invalidateTrashCache()
+}
+
+// trashListHandler — GET /api/trash — returns all soft-deleted entries.
+// Convenience endpoint (no pagination). Use /api/trash/search for paginated
+// access in the UI.
+func trashListHandler(backupDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if backupDir == "" {
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "dashboard started without --backup-dir; trash is not available",
+			})
+			return
+		}
+		entries := loadAllTrash(backupDir)
+		if entries == nil {
+			entries = []TrashEntry{}
+		}
+		json.NewEncoder(w).Encode(entries)
+	}
+}
+
+// trashSearchHandler — GET /api/trash/search — paginated, filterable.
+//
+// Query parameters:
+//   - q: substring match against sd_id, original_path, file_name (case-insensitive)
+//   - older_than_days: filter to entries with timestamp older than N days
+//   - limit: 1..200, default 50
+//   - offset: >= 0, default 0
+func trashSearchHandler(backupDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if backupDir == "" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(TrashSearchResponse{
+				Total:   0,
+				Offset:  0,
+				Limit:   0,
+				Results: []TrashEntry{},
+			})
+			return
+		}
+
+		if len(r.URL.Query().Get("q")) > maxSearchQueryLen {
+			http.Error(w, "q parameter too long", http.StatusBadRequest)
+			return
+		}
+		q := strings.ToLower(r.URL.Query().Get("q"))
+		olderThanStr := r.URL.Query().Get("older_than_days")
+		limitStr := r.URL.Query().Get("limit")
+		offsetStr := r.URL.Query().Get("offset")
+
+		limit := 50
+		if v, err := strconv.Atoi(limitStr); err == nil && v > 0 && v <= 200 {
+			limit = v
+		}
+		offset := 0
+		if v, err := strconv.Atoi(offsetStr); err == nil && v >= 0 {
+			offset = v
+		}
+		olderThanDays := 0
+		if v, err := strconv.Atoi(olderThanStr); err == nil && v > 0 {
+			olderThanDays = v
+		}
+
+		all := loadAllTrash(backupDir)
+
+		// Apply filters
+		cutoff := time.Time{}
+		if olderThanDays > 0 {
+			cutoff = time.Now().AddDate(0, 0, -olderThanDays)
+		}
+		filtered := make([]TrashEntry, 0, len(all))
+		for _, e := range all {
+			if q != "" {
+				hay := strings.ToLower(e.SDID + " " + e.OriginalPath + " " + e.FileName)
+				if !strings.Contains(hay, q) {
+					continue
+				}
+			}
+			if !cutoff.IsZero() && e.Timestamp.After(cutoff) {
+				continue
+			}
+			filtered = append(filtered, e)
+		}
+
+		total := len(filtered)
+		start := offset
+		if start > total {
+			start = total
+		}
+		end := start + limit
+		if end > total {
+			end = total
+		}
+		page := filtered[start:end]
+		if page == nil {
+			page = []TrashEntry{}
+		}
+
+		json.NewEncoder(w).Encode(TrashSearchResponse{
+			Total:   total,
+			Offset:  offset,
+			Limit:   limit,
+			Results: page,
+		})
+	}
+}
+
+// trashDetailHandler — GET /api/trash/detail/{sd-id} — single entry with
+// enriched details.
+func trashDetailHandler(backupDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		sdID := strings.TrimPrefix(r.URL.Path, "/api/trash/detail/")
+		if sdID == "" || !safeIDRegex.MatchString(sdID) {
+			http.Error(w, `{"error":"invalid trash id"}`, http.StatusBadRequest)
+			return
+		}
+		all := loadAllTrash(backupDir)
+		for _, e := range all {
+			if e.SDID == sdID {
+				json.NewEncoder(w).Encode(e)
+				return
+			}
+		}
+		http.Error(w, `{"error":"trash entry not found"}`, http.StatusNotFound)
+	}
+}
+
+// trashFileHandler — GET /api/trash/file/{sd-id}/{filename} — stream the
+// trashed file content. Supports ?download=true for the Content-Disposition
+// attachment header.
+func trashFileHandler(backupDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Parse: /api/trash/file/{sd-id}/{filename}
+		rest := strings.TrimPrefix(r.URL.Path, "/api/trash/file/")
+		parts := strings.SplitN(rest, "/", 2)
+		if len(parts) != 2 {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		sdID, fileName := parts[0], parts[1]
+		if !safeIDRegex.MatchString(sdID) || strings.Contains(fileName, "..") || strings.ContainsAny(fileName, `/\`) {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+
+		// Only serve from the canonical path: <backup-dir>/filesdelete/<sd-id>/<basename>
+		filePath := filepath.Join(backupDir, "filesdelete", sdID, fileName)
+		// Defense in depth: confirm the resolved path is still under the trash root
+		absTrashRoot, _ := filepath.Abs(filepath.Join(backupDir, "filesdelete"))
+		absFilePath, _ := filepath.Abs(filePath)
+		if absTrashRoot == "" || absFilePath == "" ||
+			!strings.HasPrefix(strings.ToLower(absFilePath), strings.ToLower(absTrashRoot)+string(os.PathSeparator)) {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+
+		if r.URL.Query().Get("download") == "true" {
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))
+		}
+		http.ServeFile(w, r, filePath)
+	}
+}
+
+// trashRestoreRequest is the JSON body for POST /api/trash/restore.
+type trashRestoreRequest struct {
+	SDID string `json:"sd_id"`
+}
+
+// trashRestoreResponse is the JSON body returned by POST /api/trash/restore.
+type trashRestoreResponse struct {
+	OK          bool   `json:"ok"`
+	SDID        string `json:"sd_id"`
+	RestoredTo  string `json:"restored_to,omitempty"`
+	OriginalPath string `json:"original_path,omitempty"`
+}
+
+// trashRestoreHandler — POST /api/trash/restore — move a trashed file back to
+// its recorded original_path. Reuses the same safety rules as the MCP server:
+// refuse if original_path already exists; refuse if SD-ID fails path-traversal
+// validation.
+func trashRestoreHandler(backupDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		if backupDir == "" {
+			http.Error(w, `{"error":"dashboard started without --backup-dir"}`, http.StatusServiceUnavailable)
+			return
+		}
+		var req trashRestoreRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+			return
+		}
+		if !safeIDRegex.MatchString(req.SDID) {
+			http.Error(w, `{"error":"invalid trash id"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Find the entry (so we know the dest_path and original_path)
+		var entry *TrashEntry
+		all := loadAllTrash(backupDir)
+		for i := range all {
+			if all[i].SDID == req.SDID {
+				entry = &all[i]
+				break
+			}
+		}
+		if entry == nil {
+			http.Error(w, `{"error":"trash entry not found"}`, http.StatusNotFound)
+			return
+		}
+		// Defense: confirmed dest_path is inside the trash root
+		absTrashRoot, _ := filepath.Abs(filepath.Join(backupDir, "filesdelete"))
+		absDest, _ := filepath.Abs(entry.DestPath)
+		if !strings.HasPrefix(strings.ToLower(absDest), strings.ToLower(absTrashRoot)+string(os.PathSeparator)) {
+			http.Error(w, `{"error":"trash entry dest_path is outside trash root"}`, http.StatusInternalServerError)
+			return
+		}
+
+		// Refuse if file missing in trash
+		if _, err := os.Stat(entry.DestPath); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"trash file missing: %s"}`, err.Error()), http.StatusGone)
+			return
+		}
+
+		// Refuse if original path already occupied (no silent overwrite)
+		if _, err := os.Stat(entry.OriginalPath); err == nil {
+			http.Error(w, fmt.Sprintf(`{"error":"original path already exists: %s"}`, entry.OriginalPath), http.StatusConflict)
+			return
+		}
+
+		// Ensure parent dir exists
+		if err := os.MkdirAll(filepath.Dir(entry.OriginalPath), 0755); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"failed to recreate parent dir: %s"}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+
+		// Move back
+		if err := os.Rename(entry.DestPath, entry.OriginalPath); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"move failed: %s"}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+
+		// Clean up the now-empty sd-id subdir (best-effort)
+		sdDir := filepath.Join(backupDir, "filesdelete", req.SDID)
+		_ = os.Remove(filepath.Join(sdDir, "metadata.json"))
+		_ = os.Remove(sdDir)
+
+		invalidateTrashCacheIfMatches()
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(trashRestoreResponse{
+			OK:           true,
+			SDID:         req.SDID,
+			RestoredTo:   entry.OriginalPath,
+			OriginalPath: entry.OriginalPath,
+		})
+	}
+}
+
+// trashPurgeRequest is the JSON body for POST /api/trash/purge.
+type trashPurgeRequest struct {
+	OlderThanDays int  `json:"older_than_days"` // 0 = purge all
+	SDID          string `json:"sd_id,omitempty"` // optional: purge a single entry
+	DryRun        bool  `json:"dry_run"`
+}
+
+// trashPurgeResponse is the JSON body returned by POST /api/trash/purge.
+type trashPurgeResponse struct {
+	OK          bool   `json:"ok"`
+	DryRun      bool   `json:"dry_run"`
+	DeletedCount int   `json:"deleted_count"`
+	FreedBytes  int64  `json:"freed_bytes"`
+	SDID        string `json:"sd_id,omitempty"` // present if a single-entry purge
+}
+
+// trashPurgeHandler — POST /api/trash/purge — permanently remove trash
+// entries. Supports two modes:
+//   1. Single entry: body `{"sd_id":"sd-...", "dry_run":bool}`
+//   2. Bulk by age:   body `{"older_than_days":7, "dry_run":bool}`
+// Both modes are atomic per-entry (each entry's RemoveAll is independent).
+func trashPurgeHandler(backupDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		if backupDir == "" {
+			http.Error(w, `{"error":"dashboard started without --backup-dir"}`, http.StatusServiceUnavailable)
+			return
+		}
+		var req trashPurgeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+			return
+		}
+
+		all := loadAllTrash(backupDir)
+		var deletedCount int
+		var freedBytes int64
+		var targets []TrashEntry
+
+		if req.SDID != "" {
+			// Single-entry mode
+			if !safeIDRegex.MatchString(req.SDID) {
+				http.Error(w, `{"error":"invalid trash id"}`, http.StatusBadRequest)
+				return
+			}
+			var found *TrashEntry
+			for i := range all {
+				if all[i].SDID == req.SDID {
+					found = &all[i]
+					break
+				}
+			}
+			if found == nil {
+				http.Error(w, `{"error":"trash entry not found"}`, http.StatusNotFound)
+				return
+			}
+			targets = []TrashEntry{*found}
+		} else if req.OlderThanDays > 0 {
+			// Bulk-by-age mode
+			cutoff := time.Now().AddDate(0, 0, -req.OlderThanDays)
+			for _, e := range all {
+				if e.Timestamp.Before(cutoff) {
+					targets = append(targets, e)
+				}
+			}
+		} else {
+			http.Error(w, `{"error":"must provide sd_id or older_than_days"}`, http.StatusBadRequest)
+			return
+		}
+
+		for _, t := range targets {
+			freedBytes += t.Size
+			if !req.DryRun {
+				// Defense: confirm dest_path is inside trash root before RemoveAll
+				absTrashRoot, _ := filepath.Abs(filepath.Join(backupDir, "filesdelete"))
+				absDest, _ := filepath.Abs(t.DestPath)
+				if strings.HasPrefix(strings.ToLower(absDest), strings.ToLower(absTrashRoot)+string(os.PathSeparator)) {
+					sdDir := filepath.Join(backupDir, "filesdelete", t.SDID)
+					if err := os.RemoveAll(sdDir); err != nil {
+						// Roll back the freed-bytes counter for this entry
+						freedBytes -= t.Size
+						continue
+					}
+				} else {
+					// Skip — dest_path is outside trash root (shouldn't happen with
+					// valid metadata but we don't want to RemoveAll arbitrary paths)
+					freedBytes -= t.Size
+					continue
+				}
+			}
+			deletedCount++
+		}
+
+		if !req.DryRun {
+			invalidateTrashCacheIfMatches()
+		}
+
+		json.NewEncoder(w).Encode(trashPurgeResponse{
+			OK:           true,
+			DryRun:       req.DryRun,
+			DeletedCount: deletedCount,
+			FreedBytes:   freedBytes,
+			SDID:         req.SDID,
 		})
 	}
 }
