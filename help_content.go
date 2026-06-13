@@ -11,8 +11,8 @@ func getHelpContent(topic string, compactMode bool) string {
 
 	switch topic {
 	case "overview":
-		sb.WriteString(`# MCP Filesystem Ultra v4.5.9 - Quick Start
-
+		sb.WriteString("# MCP Filesystem Ultra v" + serverVersion + " - Quick Start\n")
+		sb.WriteString(`
 ## CRITICAL RULE
 Always use MCP tools (read_file, write_file, edit_file) instead of native file tools.
 These auto-convert paths between WSL (/mnt/c/) and Windows (C:\).

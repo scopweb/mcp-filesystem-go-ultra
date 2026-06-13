@@ -11,7 +11,9 @@
 
 set -e
 
-GO_LDFLAGS="-ldflags=-s -w"
+GIT_COMMIT=$(git rev-parse --short HEAD)
+BUILD_DATE=$(date +%Y-%m-%d)
+GO_LDFLAGS="-ldflags=-s -w -X main.buildCommit=$GIT_COMMIT -X main.buildDate=$BUILD_DATE"
 GO_FLAGS="-trimpath"
 
 PLATFORM=$(uname -s | tr '[:upper:]' '[:lower:]')
