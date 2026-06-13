@@ -295,7 +295,7 @@ func TestBug16_MultiEditWithForce(t *testing.T) {
 		{OldText: "line3", NewText: "modified3"},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false, false, "")
 	if err != nil {
 		t.Fatalf("MultiEdit should succeed, got error: %v", err)
 	}

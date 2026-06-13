@@ -90,6 +90,32 @@ go test -run "TestContentHash_|TestExpectedHash_" -v   # all 5 pass
 go test ./...                                            # full suite green
 ```
 
+### multi_edit — accept `expected_hash` (OCC parity with edit_file, B3)
+
+`multi_edit` now accepts the same `expected_hash` parameter `edit_file` has had since Improvement B3 (the OCC stale-read token for detecting concurrent writes). Until this release, the protection only worked for single edits — a consumer editing a file in a concurrent scenario (file open in another editor, another agent calling `edit_file`) could opt into stale-read protection for a single edit but not for a batch, even though a single hash check before the atomic loop would cover the whole batch. See [issue #24](https://github.com/scopweb/mcp-filesystem-go-ultra/issues/24).
+
+**Fix**: `multi_edit` declares the `expected_hash` string parameter; the handler reads it and passes it to the engine. The engine computes FNV-1a of the file at call time and, on mismatch, returns the **exact same** `stale edit: file content changed since read (expected hash: X, actual: Y). Re-read the file with read_file to get the current content_hash, then retry.` error string that `edit_file` uses — so a consumer that pattern-matches on `stale edit:` retries the same way for both tools. The check happens **before** the edit loop and the backup creation, so a stale hash never creates an unnecessary backup and never applies any edits. Empty `expected_hash` disables the check (backward compatible with all existing callers).
+
+**Why byte-for-byte parity with `edit_file`'s error matters**: the user-facing error string is the consumer's only signal that a re-read is required. If the two tools diverged, every consumer would need two retry code paths for what is conceptually one condition.
+
+**Files changed:**
+
+| File | Change |
+|------|--------|
+| `core/edit_operations.go` | `MultiEdit` signature gains `expectedHash string`; new check after the file read rejects on hash mismatch with the same string `edit_file` uses |
+| `tools_batch.go` | `multi_edit` tool registration declares the parameter; handler reads it from args and threads it to the engine |
+| `core/pipeline.go` | Pipeline executor passes `""` (no OCC) — pipeline-level OCC is a separate concern |
+| 9 test files (`tests/bug{16,17,22,23,27}_test.go`, `multi_edit_occurrences_counter_test.go`, `undo_step_through_test.go`, `core/truncation_test.go`) | All existing `engine.MultiEdit(...)` call sites pass `""` for the new parameter — backward compatible |
+| `tests/multi_edit_expected_hash_test.go` | NEW — 4 regression tests: valid hash, stale hash, omitted hash, atomic rollback |
+| `CHANGELOG.md` | this entry |
+
+**Verification:**
+
+```bash
+go test ./tests/ -run "TestIssue24_" -v            # 4/4 pass
+go test ./...                                       # full suite green (no regressions in the 25+ other MultiEdit tests)
+```
+
 ## [Unreleased / 4.5.12] - 2026-06-11
 
 ### Dashboard — Trash tab (UI for soft-deleted files)
