@@ -13,7 +13,9 @@ echo   MCP Filesystem Ultra - Windows Build
 echo ==============================================
 echo.
 
-set GO_LDFLAGS=-ldflags=-s -w
+for /f "delims=" %%i in ('git rev-parse --short HEAD') do set GIT_COMMIT=%%i
+for /f "delims=" %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd"') do set BUILD_DATE=%%i
+set GO_LDFLAGS=-ldflags=-s -w -X main.buildCommit=%GIT_COMMIT% -X main.buildDate=%BUILD_DATE%
 set GO_FLAGS=-trimpath
 
 REM Output directory - keeps the project root clean

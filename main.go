@@ -7,7 +7,6 @@ import (
 	"log"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/mcp/filesystem-ultra/cache"
@@ -57,6 +56,21 @@ func DefaultConfiguration() *Configuration {
 // and returned by the help tool.
 const serverInstructions = `MCP Filesystem Ultra — File operations server. Run 'help' for tool list.`
 
+// serverVersion is the single source of truth for the version reported by
+// --version, the MCP handshake, the help header and the startup logs.
+// Keep in sync with the top CHANGELOG entry.
+const serverVersion = "4.5.13"
+
+// buildCommit and buildDate are stamped at build time via
+//
+//	-ldflags "-X main.buildCommit=<hash> -X main.buildDate=<date>"
+//
+// and default to dev/unknown for un-stamped builds (plain go build).
+var (
+	buildCommit = "dev"
+	buildDate   = "unknown"
+)
+
 func main() {
 	config := DefaultConfiguration()
 
@@ -96,9 +110,10 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("MCP Filesystem Server Ultra-Fast v4.5.9\n")
+		fmt.Printf("MCP Filesystem Server Ultra-Fast v%s\n", serverVersion)
 		fmt.Printf("Protocol: MCP 2025-11-25\n")
-		fmt.Printf("Build: %s\n", time.Now().Format("2006-01-02"))
+		fmt.Printf("Commit: %s\n", buildCommit)
+		fmt.Printf("Build: %s\n", buildDate)
 		fmt.Printf("Go: %s\n", runtime.Version())
 		fmt.Printf("Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 		return
@@ -153,7 +168,7 @@ func main() {
 	// Setup logging
 	setupLogging(config)
 
-	log.Printf("Starting MCP Filesystem Server Ultra-Fast v4.5.9")
+	log.Printf("Starting MCP Filesystem Server Ultra-Fast v%s (commit %s)", serverVersion, buildCommit)
 	log.Printf("Config: Cache=%s, Parallel=%d, Binary=%s, VSCode=%v, Compact=%v",
 		formatSize(config.CacheSize), config.ParallelOps,
 		formatSize(config.BinaryThreshold), config.VSCodeAPIEnabled, config.CompactMode)
@@ -211,7 +226,7 @@ func main() {
 	// Create MCP server using mark3labs SDK
 	s := server.NewMCPServer(
 		"filesystem-ultra",
-		"4.2.0",
+		serverVersion,
 		server.WithToolCapabilities(true), // listChanged=true enables tools/list_changed notifications
 		server.WithLogging(),
 		server.WithInstructions(serverInstructions),

@@ -394,7 +394,8 @@ func registerPlatformTools(reg *toolRegistry) {
 				backupInfo += fmt.Sprintf("\n  UNDO last edit: backup(action:\"undo_last\")")
 			}
 
-			return mcp.NewToolResultText(stats + telemetry + backupInfo), nil
+			buildLine := fmt.Sprintf("build:%s (%s)\n", buildCommit, buildDate)
+			return mcp.NewToolResultText(buildLine + stats + telemetry + backupInfo), nil
 
 		case "artifact":
 			subAction := "info"
