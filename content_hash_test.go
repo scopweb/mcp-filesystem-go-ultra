@@ -16,8 +16,11 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// TestContentHash_AppearsInRead verifies that read_file appends a
-// "# content_hash: XXXXXXXX" line at the end of its response.
+// TestContentHash_AppearsInRead verifies that read_file returns the
+// content_hash as a structured response field (Bug B1 fix: it is no longer
+// appended as a `# content_hash: XXXXXXXX` line to the file body, which
+// was visually indistinguishable from legitimate Markdown content and
+// caused consumers to anchor edits on it).
 func TestContentHash_AppearsInRead(t *testing.T) {
 	dir := t.TempDir()
 	reg := buildEditRegistry(t, dir, false)
@@ -39,22 +42,38 @@ func TestContentHash_AppearsInRead(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("read_file returned error: %v", result.Content)
 	}
-	text := resultText(t, result)
 
-	// Extract the content_hash line
-	re := regexp.MustCompile(`(?m)^# content_hash: ([0-9a-f]{8})$`)
-	m := re.FindStringSubmatch(text)
-	if m == nil {
-		t.Fatalf("expected '# content_hash: XXXXXXXX' line in response, got:\n%s", text)
+	// Bug B1 regression: the file body returned to the client must NOT
+	// contain a `# content_hash:` line. The hash lives in StructuredContent.
+	text := resultText(t, result)
+	if strings.Contains(text, "# content_hash:") {
+		t.Errorf("file body still contains '# content_hash:' trailer (B1 regression). The trailer must live in StructuredContent, not in the body text. Body:\n%s", text)
 	}
-	reportedHash := m[1]
-	// Compute what the hash should be (FNV-1a of "hello world\n" + the appended line is circular,
-	// so we just verify it's 8 hex chars — already done by regex).
-	_ = reportedHash
+
+	// The hash should be in StructuredContent under the "content_hash" key.
+	if result.StructuredContent == nil {
+		t.Fatal("read_file did not set StructuredContent (B1 fix expects the hash in a structured field)")
+	}
+	m, ok := result.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("StructuredContent is %T, expected map[string]any", result.StructuredContent)
+	}
+	hashRaw, present := m["content_hash"]
+	if !present {
+		t.Fatalf("StructuredContent is missing 'content_hash' key. Got: %#v", m)
+	}
+	hash, ok := hashRaw.(string)
+	if !ok {
+		t.Fatalf("content_hash is %T, expected string", hashRaw)
+	}
+	re := regexp.MustCompile(`^[0-9a-f]{8}$`)
+	if !re.MatchString(hash) {
+		t.Errorf("content_hash %q is not 8 lowercase hex chars", hash)
+	}
 }
 
 // TestContentHash_Stable verifies that two reads of the same unchanged file
-// return the same content_hash.
+// return the same content_hash (now read from StructuredContent).
 func TestContentHash_Stable(t *testing.T) {
 	dir := t.TempDir()
 	reg := buildEditRegistry(t, dir, false)
@@ -68,19 +87,73 @@ func TestContentHash_Stable(t *testing.T) {
 			Params: mcp.CallToolParams{Name: "read_file", Arguments: map[string]interface{}{"path": path}},
 		}
 		result, _ := reg.readFileHandler(context.Background(), req)
-		return resultText(t, result)
+		m, ok := result.StructuredContent.(map[string]any)
+		if !ok {
+			t.Fatalf("StructuredContent is %T, expected map[string]any", result.StructuredContent)
+		}
+		hash, _ := m["content_hash"].(string)
+		return hash
 	}
-	text1 := read()
-	text2 := read()
+	hash1 := read()
+	hash2 := read()
 
-	re := regexp.MustCompile(`# content_hash: ([0-9a-f]{8})`)
-	m1 := re.FindStringSubmatch(text1)
-	m2 := re.FindStringSubmatch(text2)
-	if m1 == nil || m2 == nil {
-		t.Fatal("content_hash line missing in one of the reads")
+	if hash1 == "" || hash2 == "" {
+		t.Fatal("content_hash missing from StructuredContent in one of the reads")
 	}
-	if m1[1] != m2[1] {
-		t.Errorf("content_hash should be stable for unchanged file: %q vs %q", m1[1], m2[1])
+	if hash1 != hash2 {
+		t.Errorf("content_hash should be stable for unchanged file: %q vs %q", hash1, hash2)
+	}
+}
+
+// TestContentHash_RoundTripsWithExpectedHash verifies the OCC mechanism
+// still works end-to-end after the B1 fix: read_file returns a hash in
+// StructuredContent, the consumer extracts it, and edit_file accepts it
+// as `expected_hash` to confirm the file has not been concurrently
+// modified. This is the documented usage pattern; the regression test
+// guards against any future change that breaks the round-trip.
+func TestContentHash_RoundTripsWithExpectedHash(t *testing.T) {
+	dir := t.TempDir()
+	reg := buildEditRegistry(t, dir, false)
+	path := filepath.Join(dir, "round_trip.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbeta\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// 1. read_file
+	readReq := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name:      "read_file",
+			Arguments: map[string]interface{}{"path": path},
+		},
+	}
+	readResult, err := reg.readFileHandler(context.Background(), readReq)
+	if err != nil {
+		t.Fatalf("read_file: %v", err)
+	}
+	m, ok := readResult.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("read_file StructuredContent is %T, expected map[string]any", readResult.StructuredContent)
+	}
+	hash, _ := m["content_hash"].(string)
+	if hash == "" {
+		t.Fatal("content_hash missing from StructuredContent")
+	}
+
+	// 2. edit_file with the extracted hash → must be accepted
+	editResult := callEdit(t, reg, map[string]interface{}{
+		"path":          path,
+		"old_text":      "alpha",
+		"new_text":      "ALPHA",
+		"expected_hash": hash,
+	})
+	if editResult.IsError {
+		t.Fatalf("edit_file with valid expected_hash should succeed, got error: %s", resultText(t, editResult))
+	}
+
+	// 3. Verify the file was modified
+	after, _ := os.ReadFile(path)
+	if !strings.Contains(string(after), "ALPHA") {
+		t.Errorf("edit was rejected or did not apply: %s", after)
 	}
 }
 

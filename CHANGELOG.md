@@ -67,6 +67,29 @@ go test ./core/...                                  # full suite green
 go test ./tests/...                                 # full suite green
 ```
 
+### read_file content_hash — moved to structured response field (B1 fix)
+
+`read_file` (full-file mode) used to append a trailing line `# content_hash: <8hex>` to the response body. The line is the OCC token for stale-edit protection (echoed back as `edit_file` / `multi_edit` `expected_hash` to detect concurrent writes). The bug was that the line was **visually indistinguishable from legitimate Markdown content** — same `# comment` syntax, no separator, no label. A consumer (human or AI) copying the response text as an `old_text` anchor in `edit_file` got `no matches found`; in `multi_edit` the whole atomic batch rolled back. Root-caused via a controlled experiment on 2026-06-13 (probe file with a planted `00000000` line that never appeared in the response). See [issue #23](https://github.com/scopweb/mcp-filesystem-go-ultra/issues/23).
+
+**Fix — move the hash to a structured response field.** `read_file` now returns the file body as plain text (no trailer) and the hash as `result.StructuredContent["content_hash"]`. This uses the MCP standard `structuredContent` field (MCP-Go SDK's `NewToolResultStructured`); clients that understand it read the hash from there, clients that don't see only the file body. The OCC mechanism (`edit_file(expected_hash:…)`, `multi_edit(expected_hash:…)`) is unchanged. Range reads and batch `paths` reads were already trailer-free; this fix only changes the full-file path.
+
+**Migration note for clients**: any consumer that regex-extracted the trailing `# content_hash: <hex>` line from the read_file response text must read from `StructuredContent["content_hash"]` instead. The `expected_hash` parameter on `edit_file` and `multi_edit` still accepts the same 8-hex-char value, so the only change is *where you get the value from*, not the value itself.
+
+**Files changed:**
+
+| File | Change |
+|------|--------|
+| `tools_core.go` | `read_file` full-read path returns `NewToolResultStructured({"content_hash": …}, body)` — body no longer has the `# content_hash:` trailer; hash moves to the structured field |
+| `content_hash_test.go` | `TestContentHash_AppearsInRead` and `TestContentHash_Stable` updated to read from `StructuredContent`; new `TestContentHash_RoundTripsWithExpectedHash` exercises the OCC end-to-end (read → extract hash → use as `expected_hash` → edit succeeds) |
+| `CHANGELOG.md` | this entry |
+
+**Verification:**
+
+```bash
+go test -run "TestContentHash_|TestExpectedHash_" -v   # all 5 pass
+go test ./...                                            # full suite green
+```
+
 ## [Unreleased / 4.5.12] - 2026-06-11
 
 ### Dashboard — Trash tab (UI for soft-deleted files)
