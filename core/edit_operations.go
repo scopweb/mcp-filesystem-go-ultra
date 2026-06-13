@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1150,7 +1151,7 @@ type MultiEditResult struct {
 // 4. Only one backup is created
 // ULTRA-FAST: Designed for Claude Desktop batch editing
 // Bug #17: Added risk assessment, context validation, hooks, per-edit detail, and "already_present" detection
-func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []MultiEditOperation, force bool, dryRun bool, tolerantWhitespace bool) (*MultiEditResult, error) {
+func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []MultiEditOperation, force bool, dryRun bool, tolerantWhitespace bool, expectedHash string) (*MultiEditResult, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
@@ -1170,6 +1171,23 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		return nil, fmt.Errorf("error reading file: %w", err)
 	}
 	originalContent := string(content)
+
+	// Bug #24: OCC stale-edit protection for batch edits (parity with EditFile).
+	// When expectedHash is non-empty, the consumer is asserting that the file's
+	// current FNV-1a must match the hash they captured from a prior read_file.
+	// If the file changed since (concurrent write, external editor, another
+	// agent), reject the entire batch with the same error string edit_file
+	// uses, so a consumer that retries on "stale edit:" works the same way
+	// for both tools. Empty expectedHash disables the check (backward
+	// compatible with all existing callers that don't pass it).
+	if expectedHash != "" {
+		h := fnv.New32a()
+		h.Write(content)
+		actualHash := fmt.Sprintf("%08x", h.Sum32())
+		if actualHash != expectedHash {
+			return nil, fmt.Errorf("stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file with read_file to get the current content_hash, then retry.", expectedHash, actualHash)
+		}
+	}
 
 	// Detect original EOL style to preserve it on write (Bug #33: EOL preservation)
 	originalEOL := detectEOL(originalContent)

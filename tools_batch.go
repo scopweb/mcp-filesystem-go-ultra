@@ -30,6 +30,7 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithString("edits_json", mcp.Required(), mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]. Also accepts old_str/new_str as aliases.")),
 		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 		mcp.WithBoolean("tolerant_whitespace", mcp.Description("Apply tolerant_whitespace semantics to all edits in the batch (1 tab = 4 spaces, CRLF = LF). Default: false.")),
+		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash returned by the last read_file. If the file's current hash doesn't match, the multi_edit is rejected so the model can re-read first. Same OCC token as edit_file (Improvement B3), atomic over the whole batch.")),
 	)
 	reg.addTool(multiEditTool, auditWrap(engine, "multi_edit", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -106,9 +107,10 @@ func registerBatchTools(reg *toolRegistry) {
 			return mcp.NewToolResultError("edits array cannot be empty"), nil
 		}
 
-		// Extract force and dry_run parameters
+		// Extract force, dry_run, and expected_hash parameters
 		force := false
 		dryRun := false
+		expectedHash := ""
 		if args != nil {
 			if f, ok := args["force"].(bool); ok {
 				force = f
@@ -116,10 +118,13 @@ func registerBatchTools(reg *toolRegistry) {
 			if dr, ok := args["dry_run"].(bool); ok {
 				dryRun = dr
 			}
+			if eh, ok := args["expected_hash"].(string); ok {
+				expectedHash = eh
+			}
 		}
 
 		// Execute multi-edit
-		result, err := engine.MultiEdit(ctx, path, edits, force, dryRun, false)
+		result, err := engine.MultiEdit(ctx, path, edits, force, dryRun, false, expectedHash)
 		if err != nil {
 			// Bug #27: If result is non-nil, this is an atomic rollback — include backup_id and details
 			if result != nil && result.BackupID != "" {
