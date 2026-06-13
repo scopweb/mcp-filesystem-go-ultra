@@ -16,6 +16,8 @@ The hooks system (`core/hooks.go`) has had **16 events** since the addition of `
   - `TestHooksExampleJSONIsValid` — parses the file and asserts all 16 events are present
   - `TestHooksTestJSONIsValid` — same for the testing config
   - `TestHooksExampleHasNoDuplicateStructure` — round-trips the JSON to detect trailing junk (the original bug)
+- **`docs-website/.../hooks.md`** — added the `re:` regex pattern type to the Pattern Types list (it was missing from the website copy).
+- **`docs/features/HOOKS.md`** — internal mirror of the website hooks doc, also stuck on 12 events and missing the soft-delete section. Brought in sync, then **deleted** in favor of the website as the single source of truth. `docs/README.md` index entry updated to point at the website.
 
 **Why this matters:** `hooks.example.json` is the primary copy-paste template for users setting up the hooks system. A broken reference file would silently break any new user setup. The regression tests guarantee the example stays valid as the codebase evolves.
 
@@ -25,7 +27,9 @@ The hooks system (`core/hooks.go`) has had **16 events** since the addition of `
 |---|---|
 | `examples/hooks.example.json` | rewritten clean + SD-ID example |
 | `examples/README.md` | mentions `hooks-test.json` + soft-delete snippet |
-| `docs-website/src/content/docs/features/hooks.md` | 12→16 events, new read/search sections, new soft-delete metadata subsection |
+| `docs-website/src/content/docs/features/hooks.md` | 12→16 events, new read/search sections, new soft-delete metadata subsection, regex `re:` pattern added |
+| `docs/features/HOOKS.md` | internal mirror brought in sync, then deleted (unified with website) |
+| `docs/README.md` | hooks index entry redirected to website |
 | `core/hooks.go` | remove unused `event` param in `aggregateResults` |
 | `tests/hooks_examples_test.go` | NEW — 3 regression tests |
 | `CHANGELOG.md` | this entry |
@@ -36,6 +40,31 @@ The hooks system (`core/hooks.go`) has had **16 events** since the addition of `
 go build ./...                                       # clean
 go test -run TestHooks ./tests/...                    # 0.045s, 3 cases green
 go test ./...                                        # full suite green
+```
+
+### multi_edit risk notice — real replacement count + clamped `% of file`
+
+The `multi_edit` risk notice appended to success responses showed `0 replacements` and could print `>100% of file` — both made the notice actively misleading (a caller reading `0 replacements` could conclude the operation was a no-op, when in fact the file had been modified). Reported on 2026-06-13, fixed in this release. See [issue #21](https://github.com/scopweb/mcp-filesystem-go-ultra/issues/21).
+
+**Fix 1 — real replacement count.** `calculateMultiEditImpact` in `core/edit_operations.go` built the `aggregateImpact` from a simulated content run and never assigned `Occurrences`, so `FormatRiskNotice` in `core/impact_analyzer.go` printed the Go zero value (`0`). The fix tracks the per-edit `ReplacementCount` returned by `performIntelligentEdit` and assigns the sum to `aggregateImpact.Occurrences` after the loop, so all three `FormatRiskNotice` call sites (skipped-only, dry_run, main path) see the real value. For 4 applied edits the notice now reads `4 replacements` instead of `0 replacements`.
+
+**Fix 2 — clamp displayed `% of file` at 100.** The honest-scope formula `Σ max(|oldText|,|newText|) / fileSize × 100` is a correct upper bound on bytes touched but can exceed 100% on net insertions (a 6-byte anchor replaced by 600 bytes in a 200-byte file yields 300%). The `change_percentage` JSON field and the internal `RiskLevel` are unchanged — only the *displayed* value in the notice string is clamped, so the magnitude word (`"large edit"` / `"very large edit"`) still encodes severity above the 40%/80% thresholds. The notice now reads `100% of file` in those cases.
+
+**Files changed:**
+
+| File | Change |
+|------|--------|
+| `core/edit_operations.go` | `MultiEdit` accumulates `totalReplacements` from per-edit `ReplacementCount`; assigns to `aggregateImpact.Occurrences` after the loop |
+| `core/impact_analyzer.go` | `FormatRiskNotice` clamps the printed `ChangePercentage` to 100 in the notice string (internal field untouched) |
+| `tests/multi_edit_occurrences_counter_test.go` | NEW — 2 regression tests: real count + clamped percentage |
+| `CHANGELOG.md` | this entry |
+
+**Verification:**
+
+```bash
+go test ./tests/ -run "TestIssue21_" -v            # both pass
+go test ./core/...                                  # full suite green
+go test ./tests/...                                 # full suite green
 ```
 
 ## [Unreleased / 4.5.12] - 2026-06-11

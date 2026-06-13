@@ -360,8 +360,20 @@ func (ci *ChangeImpact) FormatRiskNotice(backupID string, filePath ...string) st
 		magnitude = "large edit"
 	}
 
+	// Bug #21: cap the displayed percentage at 100%. The honest-scope formula
+	// (Σ max(|oldText|,|newText|) / fileSize × 100) is an upper bound on bytes
+	// touched and can exceed 100% when edits are net-insertions. The magnitude
+	// word ("large edit" / "very large edit") already encodes severity above
+	// the 40%/80% thresholds, so printing "137% of file" is misleading — it
+	// reads as "the file grew beyond its size" when it didn't. The
+	// change_percentage JSON field is left untouched; only the *displayed*
+	// value in the notice string is clamped.
+	displayPct := ci.ChangePercentage
+	if displayPct > 100 {
+		displayPct = 100
+	}
 	notice.WriteString(fmt.Sprintf("\nnote: %s (~%d bytes affected, %d replacements, %.0f%% of file)",
-		magnitude, ci.CharactersChanged, ci.Occurrences, ci.ChangePercentage))
+		magnitude, ci.CharactersChanged, ci.Occurrences, displayPct))
 
 	if backupID != "" {
 		notice.WriteString(fmt.Sprintf(". backup:%s", backupID))
