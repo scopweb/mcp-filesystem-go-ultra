@@ -1284,6 +1284,12 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	totalLinesRemoved := 0
 	firstStartLine := 0
 	lastEndLine := 0
+	// Bug #21: aggregateImpact built by calculateMultiEditImpact is an estimate
+	// from a simulated content run and does not assign Occurrences — that field
+	// would stay at 0 and FormatRiskNotice would print "0 replacements" even
+	// when every edit applied. Track the real per-edit ReplacementCount here
+	// and assign it to aggregateImpact.Occurrences after the loop.
+	var totalReplacements int64
 
 	for i, edit := range edits {
 		detail := EditDetail{
@@ -1365,6 +1371,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		detail.MatchConfidence = editResult.MatchConfidence
 		currentContent = editResult.ModifiedContent
 		result.SuccessfulEdits++
+		totalReplacements += int64(editResult.ReplacementCount)
 		totalLinesAffected += editResult.LinesAffected
 		// Track line range for clickable link annotation
 		if editResult.StartLine > 0 {
@@ -1393,6 +1400,12 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	result.TotalLines = strings.Count(currentContent, "\n") + 1
 	result.StartLine = firstStartLine
 	result.EndLine = lastEndLine
+
+	// Bug #21: feed the real per-edit replacement count into aggregateImpact
+	// so the risk notice doesn't read "0 replacements" when edits did apply.
+	// Three FormatRiskNotice call sites downstream (skipped-only, dry_run,
+	// main path) all read aggregateImpact.Occurrences.
+	aggregateImpact.Occurrences = int(totalReplacements)
 
 	// If no edits succeeded and none were already_present, return error
 	if result.SuccessfulEdits == 0 && result.SkippedEdits == 0 {
