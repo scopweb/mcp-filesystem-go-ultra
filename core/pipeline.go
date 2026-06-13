@@ -625,7 +625,7 @@ func (pe *PipelineExecutor) executeMultiEdit(ctx context.Context, step PipelineS
 			totalEdits += count
 		} else {
 			// Perform actual multi-edit
-			editResult, err := pe.engine.MultiEdit(ctx, normalizedPath, edits, force, dryRun, false)
+			editResult, err := pe.engine.MultiEdit(ctx, normalizedPath, edits, force, dryRun, false, "")
 			if err != nil {
 				return &PipelineStepError{
 					StepID:  step.ID,

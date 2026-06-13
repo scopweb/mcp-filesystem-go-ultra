@@ -236,7 +236,7 @@ func TestUndoChain_MultiEditChain(t *testing.T) {
 		{OldText: "line1", NewText: "M1A"},
 		{OldText: "line2", NewText: "M1B"},
 	}
-	r1, err := engine.MultiEdit(context.Background(), testFile, edits1, false, false, false)
+	r1, err := engine.MultiEdit(context.Background(), testFile, edits1, false, false, false, "")
 	if err != nil {
 		t.Fatalf("First MultiEdit failed: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestUndoChain_MultiEditChain(t *testing.T) {
 		{OldText: "line3", NewText: "M2A"},
 		{OldText: "line4", NewText: "M2B"},
 	}
-	r2, err := engine.MultiEdit(context.Background(), testFile, edits2, false, false, false)
+	r2, err := engine.MultiEdit(context.Background(), testFile, edits2, false, false, false, "")
 	if err != nil {
 		t.Fatalf("Second MultiEdit failed: %v", err)
 	}
