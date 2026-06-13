@@ -1,6 +1,7 @@
 package main
 
-// Tests for improvement B3: content_hash in read_file + expected_hash in edit_file.
+// Tests for B1 (read_file returns content_hash as a structured field) and the
+// B3 expected_hash OCC mechanism in edit_file.
 // These verify the stale-edit protection mechanism.
 
 import (

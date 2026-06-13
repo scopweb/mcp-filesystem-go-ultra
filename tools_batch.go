@@ -30,7 +30,7 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithString("edits_json", mcp.Required(), mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]. Also accepts old_str/new_str as aliases.")),
 		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 		mcp.WithBoolean("tolerant_whitespace", mcp.Description("Apply tolerant_whitespace semantics to all edits in the batch (1 tab = 4 spaces, CRLF = LF). Default: false.")),
-		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash returned by the last read_file. If the file's current hash doesn't match, the multi_edit is rejected so the model can re-read first. Same OCC token as edit_file (Improvement B3), atomic over the whole batch.")),
+		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash returned by the last full read_file (range and batch reads don't return it). If the file's current hash doesn't match, the multi_edit is rejected so the model can re-read first. Same OCC token as edit_file (Improvement B3), atomic over the whole batch.")),
 	)
 	reg.addTool(multiEditTool, auditWrap(engine, "multi_edit", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
