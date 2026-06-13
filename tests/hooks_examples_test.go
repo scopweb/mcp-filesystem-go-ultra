@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -121,6 +122,13 @@ func TestHooksExampleHasNoDuplicateStructure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
+	// Normalize both sides to LF line endings before comparing lengths.
+	// On Windows, `core.autocrlf=true` may checkout the file with CRLF, which
+	// inflates len(data) by ~1 byte per line (322 lines = +322 bytes here) and
+	// makes the round-trip comparison flaky across platforms. The re-marshaled
+	// JSON uses LF, so the only fair comparison is after normalization.
+	data = []byte(strings.ReplaceAll(string(data), "\r\n", "\n"))
+	roundTrip = []byte(strings.ReplaceAll(string(roundTrip), "\r\n", "\n"))
 	// Account for the trailing newline that Go's json.Marshal adds (the
 	// original file ends without one).
 	if len(roundTrip)+1 != len(data) && len(roundTrip) != len(data) {
