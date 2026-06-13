@@ -8,7 +8,7 @@
 
 ## Features
 
-- [HOOKS.md](features/HOOKS.md) - Pre/post operation hook system (12 event types)
+- [Hooks](../docs-website/src/content/docs/features/hooks.md) - Pre/post operation hook system (16 event types) — *single source of truth is the website version*
 - [BATCH_OPERATIONS_GUIDE.md](features/BATCH_OPERATIONS_GUIDE.md) - Batch file operations with rollback
 - [BACKUP_RECOVERY_GUIDE.md](features/BACKUP_RECOVERY_GUIDE.md) - Backup and recovery system
 
