@@ -1,5 +1,43 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.5.13] - 2026-06-12
+
+### Hooks — examples + docs brought up to date
+
+The hooks system (`core/hooks.go`) has had **16 events** since the addition of `pre-read`/`post-read`/`pre-search`/`post-search` (added after the docs were last updated), but the user-facing examples and docs were stuck at 12. Also, `examples/hooks.example.json` had **malformed JSON** (duplicate content pasted at the end after the root `}`) — copying that file as `hooks.json` and starting the server with `--hooks-enabled --hooks-config=hooks.json` would fail to parse.
+
+**Fixes:**
+- **`examples/hooks.example.json`** — rewrote clean. Was JSON-invalid (duplicate content after root `}`); now a well-formed single object with all 16 events. The `post-delete` example now mentions the v4.5.11+ `sd_id` and `dest_path` metadata fields (so audit hooks can log the recoverable copy).
+- **`examples/hooks-test.json`** — already valid; now covered by a regression test so it can't silently break again.
+- **`examples/README.md`** — now mentions `hooks-test.json` (the working all-enabled testing config) and explains when to use it vs `hooks.example.json`; adds a snippet showing the soft-delete `post-delete` audit hook with `jq`.
+- **`docs-website/src/content/docs/features/hooks.md`** — corrected "12 Hook Events" → "16 Hook Events", added the missing `pre-read`/`post-read`/`pre-search`/`post-search` sections, added a "Soft-delete Metadata (v4.5.11+)" subsection that documents the `sd_id` + `dest_path` fields in the `post-delete` hook context.
+- **`core/hooks.go`** — removed unused `event HookEvent` parameter from `aggregateResults` (private method, single caller). No behavior change.
+- **`tests/hooks_examples_test.go`** — NEW. 3 regression tests:
+  - `TestHooksExampleJSONIsValid` — parses the file and asserts all 16 events are present
+  - `TestHooksTestJSONIsValid` — same for the testing config
+  - `TestHooksExampleHasNoDuplicateStructure` — round-trips the JSON to detect trailing junk (the original bug)
+
+**Why this matters:** `hooks.example.json` is the primary copy-paste template for users setting up the hooks system. A broken reference file would silently break any new user setup. The regression tests guarantee the example stays valid as the codebase evolves.
+
+**Files changed:**
+
+| File | Change |
+|---|---|
+| `examples/hooks.example.json` | rewritten clean + SD-ID example |
+| `examples/README.md` | mentions `hooks-test.json` + soft-delete snippet |
+| `docs-website/src/content/docs/features/hooks.md` | 12→16 events, new read/search sections, new soft-delete metadata subsection |
+| `core/hooks.go` | remove unused `event` param in `aggregateResults` |
+| `tests/hooks_examples_test.go` | NEW — 3 regression tests |
+| `CHANGELOG.md` | this entry |
+
+**Verification:**
+
+```bash
+go build ./...                                       # clean
+go test -run TestHooks ./tests/...                    # 0.045s, 3 cases green
+go test ./...                                        # full suite green
+```
+
 ## [Unreleased / 4.5.12] - 2026-06-11
 
 ### Dashboard — Trash tab (UI for soft-deleted files)
