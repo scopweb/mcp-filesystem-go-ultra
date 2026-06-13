@@ -258,16 +258,27 @@ func registerCoreTools(reg *toolRegistry) {
 		// Record read for stale-read detection in feedback system
 		core.RecordRead(core.NormalizePath(path))
 
-		// Compute FNV-1a content hash (8 hex chars) and append as a comment
-		// footer. The model can echo it back via edit_file(expected_hash:"...")
-		// to detect stale reads (improvement B3: prevents 6 stale-edit cycles
-		// observed in 12 days of log analysis).
-		// The `#` makes it look like a comment in many file formats so it
-		// doesn't pollute the user's view of the actual content.
+		// Compute FNV-1a content hash (8 hex chars). The hash is the OCC token
+		// (Improvement B3) — the model can echo it back via edit_file /
+		// multi_edit expected_hash to detect stale reads and prevent lost
+		// updates under concurrent writes.
+		//
+		// Bug B1 fix (#23): the hash is no longer appended as a `# content_hash:`
+		// line at the end of the response body. That trailer was visually
+		// indistinguishable from legitimate Markdown content (same `# comment`
+		// syntax), so consumers — human or AI — copied it as an `old_text`
+		// anchor in `edit_file` / `multi_edit`, got `no matches found`, and
+		// for `multi_edit` (atomic) the whole batch rolled back. The hash is
+		// now returned as a structured response field, so it never appears
+		// as content. Clients that understand `structuredContent` read it
+		// from there; clients that don't see only the file body.
+		//
+		// Hash is computed on the ORIGINAL content (before truncation) so
+		// it remains a valid OCC token against the file on disk regardless
+		// of how much of the body we return to the consumer.
 		h := fnv.New32a()
 		h.Write([]byte(content))
 		contentHash := fmt.Sprintf("%08x", h.Sum32())
-		content = content + "\n# content_hash: " + contentHash
 
 		// Apply truncation if explicitly requested
 		if maxLines > 0 || mode != "all" {
@@ -283,7 +294,14 @@ func registerCoreTools(reg *toolRegistry) {
 		core.SetFileLinesTotal(ctx, totalLines)
 		core.SetLinesRead(ctx, totalLines)
 
-		return mcp.NewToolResultText(content), nil
+		// Return the body as plain text (NO trailer) and the hash as a
+		// structured field. Fallback text for naive clients is the file
+		// body — they never see a `# content_hash:` line, so they can't
+		// mistake it for content.
+		return mcp.NewToolResultStructured(
+			map[string]any{"content_hash": contentHash},
+			content,
+		), nil
 	})
 	reg.addTool(readFileTool, reg.readFileHandler)
 

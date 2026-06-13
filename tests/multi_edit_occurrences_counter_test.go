@@ -85,7 +85,7 @@ func TestIssue21_MultiEditNoticeReplacementsNotZero(t *testing.T) {
 		{OldText: "ANCHOR4", NewText: replacement},
 	}
 
-	result, err := engine.MultiEdit(ctx, filePath, edits, false, false, false)
+	result, err := engine.MultiEdit(ctx, filePath, edits, false, false, false, "")
 	if err != nil {
 		t.Fatalf("MultiEdit returned error: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestIssue21_RiskNoticeClampsPercentAt100(t *testing.T) {
 		},
 	}
 
-	result, err := engine.MultiEdit(ctx, filePath, edits, false, false, false)
+	result, err := engine.MultiEdit(ctx, filePath, edits, false, false, false, "")
 	if err != nil {
 		t.Fatalf("MultiEdit returned error: %v", err)
 	}

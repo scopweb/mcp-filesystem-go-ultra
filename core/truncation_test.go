@@ -50,7 +50,7 @@ func TestBugTruncation_LargeFileMultiEditWithFailure(t *testing.T) {
 		{OldText: "M5_UNIQUE_ID_5005", NewText: "FifthMethodRenamed"},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false, false, "")
 
 	t.Logf("MultiEdit returned: err=%v", err)
 	if result != nil {
@@ -123,7 +123,7 @@ func TestBugTruncation_MultiEditAllSucceed(t *testing.T) {
 		{OldText: `fmt.Println("Line 100")`, NewText: `fmt.Println("HUNDREDTH")`},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false, false, "")
 	if err != nil {
 		t.Fatalf("MultiEdit should succeed when all edits work: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestBugTruncation_HighRiskMultiEdit(t *testing.T) {
 		{OldText: "NONEXISTENT_TOKEN_XYZ", NewText: "X"},
 	}
 
-	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false, false)
+	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false, false, "")
 
 	// Should fail due to atomic rollback (edit #3 fails)
 	if err == nil {
