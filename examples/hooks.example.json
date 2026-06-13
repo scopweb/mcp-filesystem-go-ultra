@@ -1,5 +1,5 @@
 {
-  "_comment": "MCP Filesystem Ultra — Full hook configuration example (16 events). Copy to hooks.json and start server with --hooks-enabled --hooks-config=hooks.json",
+  "_comment": "MCP Filesystem Ultra — Full hook configuration example (16 events). Copy to hooks.json and start server with --hooks-enabled --hooks-config=hooks.json. Most hooks are disabled by default; set enabled:true on individual entries to activate them. See examples/hooks-test.json for a working setup with all hooks enabled and cmd /c echo (Windows-friendly).",
   "hooks": {
     "pre-write": [
       {
@@ -131,15 +131,15 @@
     ],
     "post-delete": [
       {
-        "_comment": "Cleanup companion files or update audit logs after deletion.",
+        "_comment": "v4.5.11+: when --backup-dir is configured, the hook context metadata includes `sd_id` (the soft-delete ID) and `dest_path` (where the file lives in the trash). Use these to log/audit the recoverable copy. For hard deletes (permanent:true) these fields are empty.",
         "pattern": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "echo Post-delete audit",
+            "command": "echo Post-delete audit: sd_id=%SD_ID% dest=%DEST_PATH%",
             "timeout": 5,
             "failOnError": false,
-            "description": "Audit log: record deletion completion",
+            "description": "Audit log: record soft-delete (sd_id + trash path)",
             "enabled": false
           }
         ]
@@ -313,109 +313,6 @@
             "timeout": 5,
             "failOnError": false,
             "description": "Compliance: record search queries and match counts",
-            "enabled": false
-          }
-        ]
-      }
-    ]
-  }
-}
-
-      {
-        "pattern": "*.go",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gofmt -w",
-            "timeout": 10,
-            "failOnError": false,
-            "description": "Format Go files before writing",
-            "enabled": true
-          }
-        ]
-      },
-      {
-        "pattern": "*.js",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "prettier --write",
-            "timeout": 10,
-            "failOnError": false,
-            "description": "Format JavaScript files with prettier",
-            "enabled": true
-          }
-        ]
-      },
-      {
-        "pattern": "*.py",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "black",
-            "timeout": 10,
-            "failOnError": false,
-            "description": "Format Python files with black",
-            "enabled": true
-          }
-        ]
-      }
-    ],
-    "post-write": [
-      {
-        "pattern": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo File written successfully",
-            "timeout": 5,
-            "failOnError": false,
-            "description": "Log file write",
-            "enabled": false
-          }
-        ]
-      }
-    ],
-    "pre-edit": [
-      {
-        "pattern": "*.go",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "go vet",
-            "timeout": 30,
-            "failOnError": false,
-            "description": "Validate Go syntax before editing",
-            "enabled": false
-          }
-        ]
-      }
-    ],
-    "post-edit": [
-      {
-        "pattern": "*.go",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "go build",
-            "timeout": 60,
-            "failOnError": false,
-            "description": "Verify Go files compile after edit",
-            "enabled": false
-          }
-        ]
-      }
-    ],
-    "pre-delete": [
-      {
-        "pattern": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo Deleting file",
-            "timeout": 5,
-            "failOnError": false,
-            "description": "Confirm deletion",
             "enabled": false
           }
         ]
