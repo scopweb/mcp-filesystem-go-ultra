@@ -486,7 +486,7 @@ func registerCoreTools(reg *toolRegistry) {
 		// Stale-edit protection: hash returned by the prior read_file call. If the
 		// file's actual hash doesn't match, the edit is rejected with a clear error.
 		// Improvement B3 (see log analysis: 6 stale-edit cycles in 12 days).
-		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash from the last read_file. If the file's current hash doesn't match, the edit is rejected so the model can re-read first.")),
+		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash from the last full read_file (range and batch reads don't return it). If the file's current hash doesn't match, the edit is rejected so the model can re-read first.")),
 		mcp.WithBoolean("tolerant_whitespace", mcp.Description("Treat tabs and 4-space runs as equivalent (1 tab = 4 spaces) and CRLF/LF as equivalent when matching old_text. Use when the file has mixed indentation (e.g., tabs in some lines, spaces in others). Original file bytes are preserved — only the matching is tolerant. Default: false.")),
 	)
 	regexTransform := reg.regexTransform

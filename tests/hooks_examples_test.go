@@ -110,28 +110,15 @@ func TestHooksExampleHasNoDuplicateStructure(t *testing.T) {
 	if err != nil {
 		t.Skip("hooks.example.json not found")
 	}
-	// json.Unmarshal into interface{} is lenient (accepts trailing junk), so
-	// instead check that a re-marshal of the parsed root round-trips byte-
-	// equal to the input. If duplicate content was appended, the round-trip
-	// length will differ.
+	// El bug original era JSON duplicado pegado tras el `}` raíz; json.Unmarshal
+	// lo ignora en silencio. Con un Decoder, tras decodificar un valor dec.More()
+	// delata cualquier token extra. Agnóstico a indentación, orden de claves y CRLF.
+	dec := json.NewDecoder(strings.NewReader(string(data)))
 	var parsed interface{}
-	if err := json.Unmarshal(data, &parsed); err != nil {
+	if err := dec.Decode(&parsed); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	roundTrip, err := json.MarshalIndent(parsed, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	// Normalize both sides to LF line endings before comparing lengths.
-	// On Windows, `core.autocrlf=true` may checkout the file with CRLF, which
-	// inflates len(data) by ~1 byte per line (322 lines = +322 bytes here) and
-	// makes the round-trip comparison flaky across platforms. The re-marshaled
-	// JSON uses LF, so the only fair comparison is after normalization.
-	data = []byte(strings.ReplaceAll(string(data), "\r\n", "\n"))
-	roundTrip = []byte(strings.ReplaceAll(string(roundTrip), "\r\n", "\n"))
-	// Account for the trailing newline that Go's json.Marshal adds (the
-	// original file ends without one).
-	if len(roundTrip)+1 != len(data) && len(roundTrip) != len(data) {
-		t.Errorf("round-trip length mismatch: input %d bytes, re-marshal %d bytes — likely trailing junk", len(data), len(roundTrip))
+	if dec.More() {
+		t.Errorf("hooks.example.json tiene contenido tras el objeto raíz (el bug de duplicado)")
 	}
 }
