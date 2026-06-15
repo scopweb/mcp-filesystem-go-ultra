@@ -490,7 +490,11 @@ For replacing large code blocks (>10 lines):
 - Default mode: replaces ONE exact text match — use for targeted, precise edits
 - `mode:"search_replace"`: replaces ALL occurrences of a pattern (regex or literal) — use for global refactors
 - `mode:"regex"`: advanced regex with capture groups — use for complex transformations
+- `mode:"delete_range"`: removes lines `start_line..end_line` (1-based, inclusive) — no text match needed
+- `mode:"replace_range"`: replaces lines `start_line..end_line` with `new_text` (1-based, inclusive) — the line-numbered partner to read_file's range output; no fragile `old_text` match
 - Always run `search_files` with `count_only:true` before global replace to verify impact
+
+Every successful edit (all modes) returns `content_hash` in the structured response — the post-edit hash. Feed it back as `expected_hash` on the next edit to chain edits without re-reading.
 
 ### 8. Dry Run Before Destructive Operations
 - Use `analyze_operation` to preview the impact of write, edit, or delete operations

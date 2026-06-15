@@ -1,5 +1,46 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.16] - 2026-06-15
+
+### `edit_file` mode `replace_range` (new point 2)
+
+The line-numbered partner to `delete_range` and the natural follow-up to a
+range read: read lines X..Y with `read_file`, then replace exactly those lines
+with `new_text` — no fragile `old_text` match. Reuses the byte-exact line-splice
+machinery from `delete_range` (`ComputeLineRangeReplacement`), creates a backup,
+writes atomically, runs the post-edit structural check, and returns the
+post-edit `content_hash` (so edits chain without re-reading) plus the structured
+response.
+
+**Newline handling (the careful part):**
+- If there are lines after the range and `new_text` doesn't end in `\n`, one is
+  added so the replacement doesn't glue onto the following line.
+- When replacing through the last line, a trailing `\n` is added only when the
+  original file ended with one (preserves the file's trailing-newline state).
+- An empty `new_text` is a pure deletion (equivalent to `delete_range`).
+
+Reuses existing params (`start_line`, `end_line`, `new_text`) — no new params.
+
+**Files changed:**
+
+| File | Change |
+|---|---|
+| `main.go` | version 4.5.15 → 4.5.16 |
+| `core/line_range.go` | `ComputeLineRangeReplacement` + `ReplaceLineRange` engine method |
+| `tools_core.go` | `mode:"replace_range"` handler branch + mode/param descriptions |
+| `CLAUDE.md` | edit_file modes: documents `delete_range`/`replace_range` + post-edit `content_hash` |
+| `core/replace_range_test.go` | NEW — byte-exact splice (all newline edge cases) + end-to-end engine test |
+
+**Verification:**
+
+```bash
+go vet ./...
+go test -timeout 90s ./...   # full suite green
+```
+
+**Plan status:** of `docs/PLAN-next-improvements.md`, the AST-Go validator and
+points 1, 2 and 3 are done; **point 4** (session-scoped auto-OCC) remains.
+
 ## [4.5.15] - 2026-06-15
 
 ### Editor-parity improvements: Go AST check + post-edit hash + structured edit responses
