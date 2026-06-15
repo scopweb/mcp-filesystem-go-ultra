@@ -545,10 +545,10 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("new_str", mcp.Description("Alias for new_text")),
 		mcp.WithBoolean("force", mcp.Description("Force the operation through the risk-threshold check (CRITICAL risk). A safety backup is always created. Note: force does NOT bypass the accidental-rewrite guard — use allow_rewrite for that. Default: false.")),
 		mcp.WithBoolean("allow_rewrite", mcp.Description("Bypass ONLY the accidental full-file rewrite guard (small old_text + large new_text with file content remaining). Prefer write_file for a real full-file rewrite; set allow_rewrite:true only when you genuinely want edit semantics on a near-total rewrite. A safety backup is created. Default: false.")),
-		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\", \"delete_range\" (remove lines start_line..end_line)")),
+		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\", \"delete_range\" (remove lines start_line..end_line), \"replace_range\" (replace lines start_line..end_line with new_text)")),
 		mcp.WithNumber("occurrence", mcp.Description("Which occurrence to replace: 1=first, 2=second, -1=last, -2=second-to-last (default: all)")),
-		mcp.WithNumber("start_line", mcp.Description("First line to remove (1-based, inclusive). Used by mode:\"delete_range\".")),
-		mcp.WithNumber("end_line", mcp.Description("Last line to remove (1-based, inclusive). Used by mode:\"delete_range\".")),
+		mcp.WithNumber("start_line", mcp.Description("First line of the range (1-based, inclusive). Used by mode:\"delete_range\" and mode:\"replace_range\".")),
+		mcp.WithNumber("end_line", mcp.Description("Last line of the range (1-based, inclusive). Used by mode:\"delete_range\" and mode:\"replace_range\".")),
 		// search_replace mode params
 		mcp.WithString("pattern", mcp.Description("Regex or literal pattern. In search_replace mode: literal pattern, all occurrences. In regex mode: regex pattern (synthesized into a single-pattern transformation if patterns_json is not provided).")),
 		mcp.WithString("replacement", mcp.Description("Replacement text. Used in search_replace mode, and in regex mode when pattern is provided without patterns_json.")),
@@ -783,6 +783,52 @@ func registerCoreTools(reg *toolRegistry) {
 				respText += "\nDiff:\n" + unifiedDiff
 			}
 			return mcp.NewToolResultText(respText), nil
+		}
+
+		// ---- MODE: replace_range ----
+		if mode == "replace_range" {
+			startLine, endLine := 0, 0
+			if args != nil {
+				if sl, ok := args["start_line"].(float64); ok {
+					startLine = int(sl)
+				}
+				if el, ok := args["end_line"].(float64); ok {
+					endLine = int(el)
+				}
+			}
+			if startLine == 0 || endLine == 0 {
+				return mcp.NewToolResultError("mode:\"replace_range\" requires start_line and end_line (1-based, inclusive) and new_text"), nil
+			}
+			result, rerr := engine.ReplaceLineRange(ctx, path, startLine, endLine, newText)
+			if rerr != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", rerr)), nil
+			}
+			if result.BackupID != "" {
+				engine.SetCurrentBackupID(path, result.BackupID)
+			}
+			if engine.IsCompactMode() {
+				msg := fmt.Sprintf("R %s | lines %d-%d | +%d-%d | %dL", path, startLine, endLine, result.LinesAdded, result.LinesRemoved, result.TotalLines)
+				if result.BackupID != "" {
+					short := result.BackupID
+					if len(short) > 12 {
+						short = short[:12]
+					}
+					msg += " | UNDO:" + short
+				}
+				if result.StructureWarning != "" {
+					msg += "\n" + result.StructureWarning
+				}
+				return mcp.NewToolResultStructured(editStructured(path, result), msg), nil
+			}
+			msg := fmt.Sprintf("Replaced lines %d-%d in %s\nLines: +%d -%d\nTotal lines now: %d",
+				startLine, endLine, path, result.LinesAdded, result.LinesRemoved, result.TotalLines)
+			if result.BackupID != "" {
+				msg += fmt.Sprintf("\n✓ UNDO:%s", result.BackupID)
+			}
+			if result.StructureWarning != "" {
+				msg += "\n" + result.StructureWarning
+			}
+			return mcp.NewToolResultStructured(editStructured(path, result), msg), nil
 		}
 
 		// ---- MODE: delete_range ----
