@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +11,17 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mcp/filesystem-ultra/core"
 )
+
+// newRequestID returns a short random hex id used to correlate the in-flight
+// breadcrumb with the final audit entry of the same tool call (point 6b).
+// Falls back to a nanosecond timestamp if the RNG is unavailable.
+func newRequestID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("t%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
+}
 
 // auditWrap wraps a tool handler with request normalization and audit logging.
 // Normalization: applies data-driven rules (param aliases, type coercions, nested fixes).
@@ -22,6 +35,7 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 			Timestamp: start,
 			Tool:      tool,
 			SessionID: engine.CurrentSessionID(),
+			RequestID: newRequestID(),
 		}
 		ctx = context.WithValue(ctx, core.AuditEntryKey{}, entry)
 
@@ -45,6 +59,24 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 				engine.Audit(*entry)
 				return mcp.NewToolResultError("Parameter validation failed:\n• " + strings.Join(validationErrs, "\n• ")), nil
 			}
+		}
+
+		// Point 6b: write an in-flight breadcrumb BEFORE running the handler so a
+		// call interrupted mid-flight still leaves a trace in operations.jsonl.
+		// The final entry below shares the same req_id; a reader correlates by
+		// req_id and treats an orphaned "in_progress" line (no matching
+		// ok/warn/error) as an interrupted call. Guarded by AuditEnabled() so
+		// there is zero extra work when --log-dir is not set.
+		if engine.AuditEnabled() {
+			startEntry := *entry
+			startEntry.Status = "in_progress"
+			if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+				if p, ok := args["path"].(string); ok {
+					startEntry.Path = p
+				}
+				startEntry.Args = summarizeArgs(args)
+			}
+			engine.Audit(startEntry)
 		}
 
 		// Call actual handler

@@ -834,6 +834,30 @@ func (e *UltraFastEngine) WriteFileBytes(ctx context.Context, path string, data 
 	return nil
 }
 
+// atomicWriteFile writes data to path atomically: it writes to a temp file with
+// a secure random suffix and then renames it into place. A rename on the same
+// volume is atomic, so an interrupted write (crash, killed process, or a cut
+// MCP transport) never leaves a partially-written file — the target is either
+// the old content or the new content, never a truncated mix. This mirrors the
+// write path in WriteFileContent and is shared by batch executeWrite (point 6a),
+// which previously used a non-atomic os.WriteFile. The parent directory is
+// created if missing.
+func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+	tmpPath := path + ".tmp." + secureRandomSuffix()
+	if err := os.WriteFile(tmpPath, data, mode); err != nil {
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath) // best-effort cleanup
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+	return nil
+}
+
 // ReadFileBytes reads a file and returns its raw bytes.
 // This is useful for binary files that need to be base64 encoded.
 // The path is normalized for WSL/Windows compatibility.

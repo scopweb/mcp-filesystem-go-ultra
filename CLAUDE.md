@@ -448,7 +448,9 @@ When `--log-dir` is set, each completed step emits a separate audit entry with `
 - `old_text` must match the file content exactly — it's a literal match, not a regex
 
 ### 3. batch_operations format
-Supported operation types: `write`, `edit`, `search_and_replace`, `copy`, `move`, `delete`, `create_dir`
+Supported operation types: `write`, `edit`, `search_and_replace`, `copy`, `move`, `delete`, `create_dir`, `extract`
+
+`extract` moves lines `[start_line, end_line]` from `source` to `destination` atomically — the bytes written to the destination are exactly the bytes removed from the source (no drift). Fields: `source`, `destination`, `start_line`, `end_line`, `append` (bool). Both writes are atomic (temp+rename) and revert together under `atomic:true`. Single-file equivalent: `edit_file` with `mode:"delete_range"`.
 
 ```json
 {
