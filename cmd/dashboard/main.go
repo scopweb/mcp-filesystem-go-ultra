@@ -2204,8 +2204,9 @@ type trashPurgeResponse struct {
 
 // trashPurgeHandler — POST /api/trash/purge — permanently remove trash
 // entries. Supports two modes:
-//   1. Single entry: body `{"sd_id":"sd-...", "dry_run":bool}`
-//   2. Bulk by age:   body `{"older_than_days":7, "dry_run":bool}`
+//  1. Single entry: body `{"sd_id":"sd-...", "dry_run":bool}`
+//  2. Bulk by age:   body `{"older_than_days":7, "dry_run":bool}`
+//
 // Both modes are atomic per-entry (each entry's RemoveAll is independent).
 func trashPurgeHandler(backupDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

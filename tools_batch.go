@@ -10,6 +10,35 @@ import (
 	"github.com/mcp/filesystem-ultra/core"
 )
 
+// multiEditStructured builds the structured payload for a multi_edit response
+// (new point 3), mirroring editStructured for the single-edit path.
+func multiEditStructured(path string, r *core.MultiEditResult) map[string]any {
+	m := map[string]any{
+		"path":             path,
+		"successful_edits": r.SuccessfulEdits,
+		"total_edits":      r.TotalEdits,
+		"lines_added":      r.LinesAdded,
+		"lines_removed":    r.LinesRemoved,
+		"total_lines":      r.TotalLines,
+	}
+	if r.NewHash != "" {
+		m["content_hash"] = r.NewHash
+	}
+	if r.BackupID != "" {
+		m["backup_id"] = r.BackupID
+	}
+	if r.RiskWarning != "" {
+		m["risk_warning"] = r.RiskWarning
+	}
+	if r.StructureWarning != "" {
+		m["structure_warning"] = r.StructureWarning
+	}
+	if r.Integrity != nil {
+		m["integrity"] = r.Integrity.Verification
+	}
+	return m
+}
+
 // registerBatchTools registers multi_edit, batch_operations, backup
 func registerBatchTools(reg *toolRegistry) {
 	engine := reg.engine
@@ -210,7 +239,7 @@ func registerBatchTools(reg *toolRegistry) {
 			if result.StructureWarning != "" {
 				msg += "\n" + result.StructureWarning
 			}
-			return mcp.NewToolResultText(msg), nil
+			return mcp.NewToolResultStructured(multiEditStructured(path, result), msg), nil
 		}
 
 		// Verbose format: single line summary + optional sections
@@ -287,7 +316,7 @@ func registerBatchTools(reg *toolRegistry) {
 			core.SetIntegrityStatus(ctx, result.Integrity.Verification, result.Integrity.Warning)
 		}
 
-		return mcp.NewToolResultText(sb.String()), nil
+		return mcp.NewToolResultStructured(multiEditStructured(path, result), sb.String()), nil
 	}))
 
 	// ============================================================================

@@ -15,10 +15,11 @@ import (
 // edit_file, producing a 298-line file with the procedure duplicated.
 //
 // Symptom recap:
-//   old_text  = 15 lines  (file header)
-//   new_text  = 150 lines (full file content)
-//   expected  = file unchanged (rewrite guard BLOCKS)
-//   actual    = file was doubled (BUG)
+//
+//	old_text  = 15 lines  (file header)
+//	new_text  = 150 lines (full file content)
+//	expected  = file unchanged (rewrite guard BLOCKS)
+//	actual    = file was doubled (BUG)
 //
 // After the fix, the rewrite guard must BLOCK this pattern. The file MUST
 // remain byte-for-byte identical to the original.

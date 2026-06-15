@@ -1,5 +1,46 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.15] - 2026-06-15
+
+### Editor-parity improvements: Go AST check + post-edit hash + structured edit responses
+
+Three improvements aimed at making filesystem-ultra usable as a primary editor, derived from comparing it with a state-tracking editor that never needs to re-read. See `docs/PLAN-next-improvements.md` for the full plan (items 1, 3 and the Go AST validator; items 2 and 4 are deferred).
+
+**Go AST validator (upgrades the point-2 structural check for `.go`).** The post-edit structural check now does a real Go parse for `.go` files (`go/parser`, in-process, pure stdlib) instead of only counting braces. It catches the whole class of syntax errors a lexical brace count misses (bad tokens, dangling expressions, missing keywords), at edit time rather than in the build cycle. Same **delta** discipline as the brace check: only warns when the file parsed *before* the edit and not *after*, so pre-existing breakage never produces a false alarm. Non-`.go` files keep the lexical brace-balance delta.
+- `core/structure_check.go`: `CheckGoSyntax`, `parseGoError`, and `CheckStructureDelta` (single dispatch entry: `.go` → AST, else → brace balance). `EditFile`/`MultiEdit`/`DeleteLineRange` now call `CheckStructureDelta`.
+- Not a duplicate of `go vet`/`go build`: the value is **immediacy** (caught on the edit, not the build).
+
+**New point 1 — post-edit `content_hash`.** `edit_file`, `multi_edit` and `delete_range` now return the FNV-1a `content_hash` of the file *after* the edit (`NewHash` on `EditResult`/`MultiEditResult`, computed over the bytes actually written). It equals the token `expected_hash` validates, so a caller can chain the next edit's `expected_hash` **without re-reading the file** — matching the "no re-read" loop of a state-tracking editor.
+- `core/edit_operations.go`: `NewHash` fields + `contentHashFNV` helper; set in `EditFile`/`MultiEdit`. `core/line_range.go`: set in `DeleteLineRange`.
+
+**New point 3 — structured edit responses.** `edit_file` (replace + delete_range) and `multi_edit` now return a `structuredContent` payload (`content_hash`, `replacements`, `lines_added`/`lines_removed`, `total_lines`, `backup_id`, `risk_warning`, `structure_warning`, `integrity`) **alongside** the existing text (text is unchanged — purely additive, naive clients keep the fallback). Clients (and the dashboard) can parse fields reliably instead of regex-scraping the text. `regex`/`search_replace` modes left for a follow-up (different result types).
+- `tools_core.go`: `editStructured` helper; replace + delete_range returns wrapped. `tools_batch.go`: `multiEditStructured`; multi_edit returns wrapped.
+
+**Tests added:**
+- `core/go_syntax_test.go` — AST delta + dispatch (`.go` catches non-brace errors; non-`.go` falls back to brace balance).
+- `core/newhash_test.go` — `NewHash` after `EditFile`/`DeleteLineRange` equals the on-disk hash.
+- `edit_structured_test.go` — end-to-end: the edit's structured `content_hash` equals a subsequent `read_file`'s hash (re-read-free chaining).
+
+**Verification:**
+
+```bash
+go vet ./...                 # clean
+go test -timeout 90s ./...   # full suite green (core, main, tests/, tests/security, dashboard)
+```
+
+**Files changed:**
+
+| File | Change |
+|---|---|
+| `main.go` | version 4.5.14 → 4.5.15 |
+| `core/structure_check.go` | Go AST validator + `CheckStructureDelta` dispatch |
+| `core/edit_operations.go` | `NewHash` fields + `contentHashFNV`; AST/hash hooks in `EditFile`/`MultiEdit` |
+| `core/line_range.go` | `NewHash` + `CheckStructureDelta` in `DeleteLineRange` |
+| `tools_core.go` | `editStructured`; structured returns (replace, delete_range) |
+| `tools_batch.go` | `multiEditStructured`; structured returns (multi_edit) |
+| `docs/PLAN-next-improvements.md` | NEW — plan for next improvements (items 1–4 + AST) |
+| `core/go_syntax_test.go`, `core/newhash_test.go`, `edit_structured_test.go` | NEW tests |
+
 ## [4.5.14] - 2026-06-15
 
 ### Reliability, cost & integrity improvements (6 items from a refactor post-mortem)
