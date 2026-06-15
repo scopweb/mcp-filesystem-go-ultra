@@ -20,22 +20,7 @@ func UnifiedDiffContext(oldContent, newContent, filePath string, contextLines in
 	if len(hunks) == 0 {
 		return "" // no changes
 	}
-
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("--- a/%s\n", filePath))
-	sb.WriteString(fmt.Sprintf("+++ b/%s\n", filePath))
-
-	for _, h := range hunks {
-		sb.WriteString(h.header())
-		for _, line := range h.lines {
-			sb.WriteString(line)
-			if !strings.HasSuffix(line, "\n") {
-				sb.WriteString("\n")
-			}
-		}
-	}
-
-	return sb.String()
+	return formatHunksFull(hunks, filePath)
 }
 
 // DiffStats returns a compact summary of lines added/removed (e.g. "+5 -3").
@@ -44,6 +29,117 @@ func DiffStats(oldContent, newContent string) string {
 	newLines := splitLines(newContent)
 	added, removed := countChanges(oldLines, newLines)
 	return fmt.Sprintf("+%d -%d", added, removed)
+}
+
+// diffAutoSummaryThreshold is the number of diff lines beyond which the "auto"
+// (default) diff_format collapses to a summary instead of dumping the full
+// body. Tuned so small, reviewable diffs still print in full while large block
+// deletions (the expensive case in point 1) collapse to anchors + ranges.
+const diffAutoSummaryThreshold = 200
+
+// diffSummaryAnchorLines is how many leading/trailing lines of each hunk the
+// summary keeps as anchors so the caller can confirm the right region.
+const diffSummaryAnchorLines = 3
+
+// RenderDiff formats the diff between oldContent and newContent according to
+// `format` (point 1: diff_format). Supported values:
+//
+//	"" / "auto" — full diff when small, else summary + hint (token-safe default)
+//	"full"      — complete unified diff (previous behaviour)
+//	"summary"   — per-hunk ranges + a few anchor lines, eliding large bodies
+//	"stat"      — just "+added -removed"
+//	"none"      — empty string
+//
+// The hunk computation runs once and is reused across formats so "auto" does
+// not pay for the diff twice.
+func RenderDiff(oldContent, newContent, filePath, format string) string {
+	switch format {
+	case "none":
+		return ""
+	case "stat":
+		return DiffStats(oldContent, newContent)
+	}
+
+	oldLines := splitLines(oldContent)
+	newLines := splitLines(newContent)
+	hunks := computeHunks(oldLines, newLines, 3)
+	if len(hunks) == 0 {
+		return ""
+	}
+
+	switch format {
+	case "summary":
+		return formatHunksSummary(hunks, filePath, diffSummaryAnchorLines)
+	case "full":
+		return formatHunksFull(hunks, filePath)
+	default: // "" or "auto"
+		full := formatHunksFull(hunks, filePath)
+		if strings.Count(full, "\n") > diffAutoSummaryThreshold {
+			summary := formatHunksSummary(hunks, filePath, diffSummaryAnchorLines)
+			return summary + fmt.Sprintf(
+				"(summary: %d diff lines elided — pass diff_format:\"full\" to see the complete diff)\n",
+				strings.Count(full, "\n"))
+		}
+		return full
+	}
+}
+
+// formatHunksFull renders hunks as a standard unified diff.
+func formatHunksFull(hunks []hunk, filePath string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("--- a/%s\n", filePath))
+	sb.WriteString(fmt.Sprintf("+++ b/%s\n", filePath))
+	for _, h := range hunks {
+		sb.WriteString(h.header())
+		for _, line := range h.lines {
+			writeDiffLine(&sb, line)
+		}
+	}
+	return sb.String()
+}
+
+// formatHunksSummary renders hunks compactly: each hunk header carries its
+// per-hunk +add/-del counts, and hunks longer than 2*anchor lines keep only
+// the first and last `anchor` lines with an elision marker for the middle.
+func formatHunksSummary(hunks []hunk, filePath string, anchor int) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("--- a/%s\n", filePath))
+	sb.WriteString(fmt.Sprintf("+++ b/%s\n", filePath))
+	for _, h := range hunks {
+		var add, del int
+		for _, l := range h.lines {
+			switch {
+			case strings.HasPrefix(l, "+"):
+				add++
+			case strings.HasPrefix(l, "-"):
+				del++
+			}
+		}
+		sb.WriteString(strings.TrimSuffix(h.header(), "\n"))
+		sb.WriteString(fmt.Sprintf(" (+%d -%d)\n", add, del))
+
+		if len(h.lines) <= 2*anchor {
+			for _, l := range h.lines {
+				writeDiffLine(&sb, l)
+			}
+			continue
+		}
+		for _, l := range h.lines[:anchor] {
+			writeDiffLine(&sb, l)
+		}
+		sb.WriteString(fmt.Sprintf("    … %d more line(s) …\n", len(h.lines)-2*anchor))
+		for _, l := range h.lines[len(h.lines)-anchor:] {
+			writeDiffLine(&sb, l)
+		}
+	}
+	return sb.String()
+}
+
+func writeDiffLine(sb *strings.Builder, line string) {
+	sb.WriteString(line)
+	if !strings.HasSuffix(line, "\n") {
+		sb.WriteString("\n")
+	}
 }
 
 // --- internal types ---

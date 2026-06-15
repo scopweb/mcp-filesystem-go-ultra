@@ -31,6 +31,7 @@ type EditResult struct {
 	EfficiencyHint   string               // Token-saving hint when full-file rewrite detected (e.g., "Consider search_files + edit_file for surgical edits")
 	Analysis         *ChangeAnalysis      // Full change analysis for AI visibility (plan mode style)
 	Integrity        *FileIntegrityResult // Auto-verification result for HIGH/CRITICAL edits
+	StructureWarning string               // Non-blocking warning when an edit introduces a delimiter imbalance ({}/()/[]) — point 2
 }
 
 // SearchMatch represents a text search match
@@ -265,6 +266,14 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 		if verify := e.VerifyFileIntegrity(path, impact.ChangePercentage); verify != nil {
 			result.Integrity = verify
 		}
+	}
+
+	// Point 2: post-edit structural check (delta brace balance). Auto-runs for
+	// brace-based source files; warning only, never blocks. Annotates the audit
+	// so the imbalance is visible in operations.jsonl / the dashboard.
+	if warn := CheckBalanceDelta(string(content), finalContent, path); warn != "" {
+		result.StructureWarning = warn
+		SetIntegrityStatus(ctx, "WARNING", warn)
 	}
 
 	return result, nil
@@ -1124,23 +1133,24 @@ type EditDetail struct {
 
 // MultiEditResult represents the result of a multi-edit operation
 type MultiEditResult struct {
-	TotalEdits      int                  `json:"total_edits"`
-	SuccessfulEdits int                  `json:"successful_edits"`
-	FailedEdits     int                  `json:"failed_edits"`
-	SkippedEdits    int                  `json:"skipped_edits"`
-	LinesAffected   int                  `json:"lines_affected"`
-	LinesAdded      int                  `json:"lines_added"`   // Lines added (+N in diff format)
-	LinesRemoved    int                  `json:"lines_removed"` // Lines removed (-M in diff format)
-	TotalLines      int                  `json:"total_lines"`   // Total lines in file after edits
-	StartLine       int                  `json:"start_line"`    // 1-based line of first edit (for clickable links)
-	EndLine         int                  `json:"end_line"`      // 1-based end line of last edit (for clickable links)
-	MatchConfidence string               `json:"match_confidence"`
-	Errors          []string             `json:"errors,omitempty"`
-	BackupID        string               `json:"backup_id,omitempty"`
-	RiskWarning     string               `json:"risk_warning,omitempty"`
-	EditDetails     []EditDetail         `json:"edit_details,omitempty"`
-	Analysis        *ChangeAnalysis      `json:"analysis,omitempty"`  // Full change analysis for AI visibility
-	Integrity       *FileIntegrityResult `json:"integrity,omitempty"` // Auto-verification for HIGH/CRITICAL edits
+	TotalEdits       int                  `json:"total_edits"`
+	SuccessfulEdits  int                  `json:"successful_edits"`
+	FailedEdits      int                  `json:"failed_edits"`
+	SkippedEdits     int                  `json:"skipped_edits"`
+	LinesAffected    int                  `json:"lines_affected"`
+	LinesAdded       int                  `json:"lines_added"`   // Lines added (+N in diff format)
+	LinesRemoved     int                  `json:"lines_removed"` // Lines removed (-M in diff format)
+	TotalLines       int                  `json:"total_lines"`   // Total lines in file after edits
+	StartLine        int                  `json:"start_line"`    // 1-based line of first edit (for clickable links)
+	EndLine          int                  `json:"end_line"`      // 1-based end line of last edit (for clickable links)
+	MatchConfidence  string               `json:"match_confidence"`
+	Errors           []string             `json:"errors,omitempty"`
+	BackupID         string               `json:"backup_id,omitempty"`
+	RiskWarning      string               `json:"risk_warning,omitempty"`
+	EditDetails      []EditDetail         `json:"edit_details,omitempty"`
+	Analysis         *ChangeAnalysis      `json:"analysis,omitempty"`          // Full change analysis for AI visibility
+	Integrity        *FileIntegrityResult `json:"integrity,omitempty"`         // Auto-verification for HIGH/CRITICAL edits
+	StructureWarning string               `json:"structure_warning,omitempty"` // Delimiter imbalance introduced by these edits — point 2
 }
 
 // MultiEdit performs multiple edits on a single file atomically
@@ -1535,6 +1545,12 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		if verify := e.VerifyFileIntegrity(path, aggregateImpact.ChangePercentage); verify != nil {
 			result.Integrity = verify
 		}
+	}
+
+	// Point 2: post-edit structural check (delta brace balance). Warning only.
+	if warn := CheckBalanceDelta(originalContent, finalContent, path); warn != "" {
+		result.StructureWarning = warn
+		SetIntegrityStatus(ctx, "WARNING", warn)
 	}
 
 	return result, nil

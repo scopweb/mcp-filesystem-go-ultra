@@ -63,14 +63,18 @@ var toolSchemas = map[string]ToolParamSchema{
 		"old_str":             {ParamString, false}, // alias → old_text (normalizer)
 		"new_str":             {ParamString, false}, // alias → new_text (normalizer)
 		"force":               {ParamBoolean, false},
+		"allow_rewrite":       {ParamBoolean, false}, // point 5: bypass rewrite guard only (not force)
 		"mode":                {ParamString, false},
 		"occurrence":          {ParamNumber, false},
+		"start_line":          {ParamNumber, false}, // point 4: mode delete_range
+		"end_line":            {ParamNumber, false}, // point 4: mode delete_range
 		"pattern":             {ParamString, false},
 		"replacement":         {ParamString, false},
 		"patterns_json":       {ParamString, false},
 		"case_sensitive":      {ParamBoolean, false},
 		"create_backup":       {ParamBoolean, false},
 		"dry_run":             {ParamBoolean, false},
+		"diff_format":         {ParamString, false}, // point 1: ""/auto|full|summary|stat|none
 		"whole_word":          {ParamBoolean, false},
 		"expected_hash":       {ParamString, false},  // B3: stale-edit protection
 		"tolerant_whitespace": {ParamBoolean, false}, // treat tabs↔4sp, CRLF↔LF as equivalent

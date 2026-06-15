@@ -13,13 +13,16 @@ import (
 
 // FileOperation representa una operación individual en un batch
 type FileOperation struct {
-	Type        string                 `json:"type"`        // write, edit, search_and_replace, move, delete, create_dir, copy
+	Type        string                 `json:"type"`        // write, edit, search_and_replace, move, delete, create_dir, copy, extract
 	Path        string                 `json:"path"`        // Ruta principal
-	Source      string                 `json:"source"`      // Para move/copy
-	Destination string                 `json:"destination"` // Para move/copy
+	Source      string                 `json:"source"`      // Para move/copy/extract (archivo origen)
+	Destination string                 `json:"destination"` // Para move/copy/extract (archivo destino)
 	Content     string                 `json:"content"`     // Para write
 	OldText     string                 `json:"old_text"`    // Para edit
 	NewText     string                 `json:"new_text"`    // Para edit
+	StartLine   int                    `json:"start_line"`  // Para extract: primera línea (1-based, inclusive)
+	EndLine     int                    `json:"end_line"`    // Para extract: última línea (1-based, inclusive)
+	Append      bool                   `json:"append"`      // Para extract: añadir al destino en vez de sobrescribir
 	Options     map[string]interface{} `json:"options"`     // Opciones adicionales
 }
 
@@ -323,6 +326,19 @@ func (m *BatchOperationManager) validateOperations(operations []FileOperation) [
 			}
 			pendingPaths[op.Path] = true // el directorio existirá tras la op
 
+		case "extract":
+			// extract: move lines [start_line, end_line] from source to destination (point 4)
+			if op.Source == "" || op.Destination == "" {
+				errors = append(errors, fmt.Sprintf("Op %d: source and destination required for extract", i))
+			}
+			if op.StartLine < 1 || op.EndLine < op.StartLine {
+				errors = append(errors, fmt.Sprintf("Op %d: extract requires start_line>=1 and end_line>=start_line (got %d..%d)", i, op.StartLine, op.EndLine))
+			}
+			if _, err := os.Stat(op.Source); os.IsNotExist(err) && !pendingPaths[op.Source] {
+				errors = append(errors, fmt.Sprintf("Op %d: source does not exist: %s", i, op.Source))
+			}
+			pendingPaths[op.Destination] = true // el destino existirá tras la op
+
 		default:
 			errors = append(errors, fmt.Sprintf("Op %d: unknown operation type: %s", i, op.Type))
 		}
@@ -338,6 +354,11 @@ type rollbackData struct {
 	backupPath    string
 	content       []byte
 	wasCreated    bool
+	// Segundo archivo afectado (extract: el destino). Permite revertir una
+	// operación que toca dos archivos a la vez (point 4).
+	secondPath       string
+	secondContent    []byte
+	secondWasCreated bool
 }
 
 // prepareRollback prepara la información necesaria para revertir una operación
@@ -381,6 +402,19 @@ func (m *BatchOperationManager) prepareRollback(op FileOperation) rollbackData {
 	case "create_dir":
 		rb.originalPath = op.Path
 		rb.wasCreated = true
+
+	case "extract":
+		// Capture both files so an extract can be fully reverted (point 4).
+		rb.originalPath = op.Source
+		if content, err := os.ReadFile(op.Source); err == nil {
+			rb.content = content
+		}
+		rb.secondPath = op.Destination
+		if content, err := os.ReadFile(op.Destination); err == nil {
+			rb.secondContent = content
+		} else {
+			rb.secondWasCreated = true
+		}
 	}
 
 	return rb
@@ -417,6 +451,15 @@ func (m *BatchOperationManager) rollback(rollbackInfo []rollbackData) {
 		case "create_dir":
 			// Eliminar directorio creado
 			os.Remove(rb.originalPath)
+
+		case "extract":
+			// Restaurar origen y revertir el destino (point 4).
+			os.WriteFile(rb.originalPath, rb.content, 0644)
+			if rb.secondWasCreated {
+				os.Remove(rb.secondPath)
+			} else {
+				os.WriteFile(rb.secondPath, rb.secondContent, 0644)
+			}
 		}
 	}
 }
@@ -459,7 +502,7 @@ func (m *BatchOperationManager) createBackup(operations []FileOperation) (string
 		switch op.Type {
 		case "write", "edit", "search_and_replace", "delete":
 			sourceFile = op.Path
-		case "move":
+		case "move", "extract":
 			sourceFile = op.Source
 		}
 
@@ -529,6 +572,8 @@ func (m *BatchOperationManager) executeOperation(op FileOperation, result *Opera
 		return m.executeDelete(op, result)
 	case "create_dir":
 		return m.executeCreateDir(op, result)
+	case "extract":
+		return m.executeExtract(op, result)
 	default:
 		return fmt.Errorf("unknown operation type: %s", op.Type)
 	}
@@ -542,8 +587,14 @@ func (m *BatchOperationManager) executeWrite(op FileOperation, result *Operation
 		return fmt.Errorf("pre-write hook denied batch write: %w", err)
 	}
 
-	err := os.WriteFile(op.Path, []byte(op.Content), 0644)
-	if err != nil {
+	// Point 6a: atomic write (temp file + rename) instead of a direct
+	// os.WriteFile, so a batch interrupted mid-write never leaves a partial
+	// file. Preserve the existing file mode when overwriting.
+	fileMode := os.FileMode(0644)
+	if info, statErr := os.Stat(op.Path); statErr == nil {
+		fileMode = info.Mode()
+	}
+	if err := atomicWriteFile(op.Path, []byte(op.Content), fileMode); err != nil {
 		return err
 	}
 
@@ -553,6 +604,70 @@ func (m *BatchOperationManager) executeWrite(op FileOperation, result *Operation
 	postOp := op
 	_ = m.executeHooksForOperation(ctx, HookPostWrite, postOp)
 
+	return nil
+}
+
+// executeExtract moves lines [StartLine, EndLine] from Source to Destination
+// atomically (point 4). The same computed slice is written to the destination
+// and removed from the source, so the bytes written == the bytes deleted by
+// construction — closing the drift gap of the old two-step (write dest + delete
+// source) workflow. Both writes are atomic (temp + rename); the batch's
+// prepareRollback captured both files' prior state so an enclosing atomic batch
+// can revert a partial extract.
+func (m *BatchOperationManager) executeExtract(op FileOperation, result *OperationResult) error {
+	ctx := context.Background()
+
+	if err := m.executeHooksForOperation(ctx, HookPreEdit, op); err != nil {
+		return fmt.Errorf("pre-extract hook denied batch extract: %w", err)
+	}
+
+	srcBytes, err := os.ReadFile(op.Source)
+	if err != nil {
+		return err
+	}
+
+	removed, remaining, err := ComputeLineRangeDeletion(string(srcBytes), op.StartLine, op.EndLine)
+	if err != nil {
+		return err
+	}
+
+	// Destination content: the SAME removed bytes, optionally appended.
+	var destContent []byte
+	if op.Append {
+		if existing, rerr := os.ReadFile(op.Destination); rerr == nil {
+			destContent = append(existing, []byte(removed)...)
+		} else {
+			destContent = []byte(removed)
+		}
+	} else {
+		destContent = []byte(removed)
+	}
+
+	// Write destination first, then update source. If the source update fails,
+	// the enclosing atomic batch rolls back both files.
+	destMode := os.FileMode(0644)
+	if info, statErr := os.Stat(op.Destination); statErr == nil {
+		destMode = info.Mode()
+	}
+	if err := atomicWriteFile(op.Destination, destContent, destMode); err != nil {
+		return fmt.Errorf("extract: writing destination %s: %w", op.Destination, err)
+	}
+
+	srcMode := os.FileMode(0644)
+	if info, statErr := os.Stat(op.Source); statErr == nil {
+		srcMode = info.Mode()
+	}
+	if err := atomicWriteFile(op.Source, []byte(remaining), srcMode); err != nil {
+		return fmt.Errorf("extract: updating source %s: %w", op.Source, err)
+	}
+
+	if m.engine != nil {
+		m.engine.invalidateFileReadCache(op.Source)
+		m.engine.invalidateFileReadCache(op.Destination)
+	}
+
+	result.BytesAffected = int64(len(removed))
+	_ = m.executeHooksForOperation(ctx, HookPostEdit, op)
 	return nil
 }
 
@@ -724,7 +839,7 @@ func (m *BatchOperationManager) executeCreateDir(op FileOperation, result *Opera
 // collectPaths returns all filesystem paths referenced by a single operation.
 func (m *BatchOperationManager) collectPaths(op FileOperation) []string {
 	switch op.Type {
-	case "move", "copy":
+	case "move", "copy", "extract":
 		return []string{op.Source, op.Destination}
 	default:
 		return []string{op.Path}

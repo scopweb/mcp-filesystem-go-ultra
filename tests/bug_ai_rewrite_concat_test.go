@@ -93,8 +93,8 @@ func TestBug_AI_AccidentalRewrite_BugPattern(t *testing.T) {
 // a 100-line function body). The ratio stays near 1.0, so the first signal
 // doesn't trigger.
 func TestBug_AI_AccidentalRewrite_LegitimateLargeRefactor(t *testing.T) {
-	oldText := strings.Repeat("old line\n", 100)  // 900 bytes
-	newText := strings.Repeat("new line\n", 100)  // 900 bytes (ratio 1.0)
+	oldText := strings.Repeat("old line\n", 100) // 900 bytes
+	newText := strings.Repeat("new line\n", 100) // 900 bytes (ratio 1.0)
 	fileSize := int64(len(oldText) + 500)        // file has 500 bytes more context
 
 	signal := core.CheckEditRewrite(oldText, newText, fileSize)
@@ -137,7 +137,7 @@ func TestBug_AI_AccidentalRewrite_SmallFile(t *testing.T) {
 func TestBug_AI_AccidentalRewrite_HighRatioButNoRemaining(t *testing.T) {
 	oldText := "// header\npackage main\n"
 	newText := strings.Repeat("// expanded header\n", 50) // 850 bytes
-	fileSize := int64(len(oldText))                      // file == old_text (no remaining)
+	fileSize := int64(len(oldText))                       // file == old_text (no remaining)
 
 	signal := core.CheckEditRewrite(oldText, newText, fileSize)
 	if signal == nil || signal.Status != core.FeedbackOK {
@@ -210,10 +210,11 @@ func TestBug_AI_AccidentalRewrite_EngineBlockSemantics(t *testing.T) {
 	}
 }
 
-// TestBug_AI_AccidentalRewrite_ForceBypassSemantic documents that force=true
-// would bypass the block. The actual force handling lives in the tool
-// handler (tools_core.go); this test pins the contract that the signal
-// shape supports an override path.
+// TestBug_AI_AccidentalRewrite_ForceBypassSemantic documents that the block
+// can be bypassed via the dedicated allow_rewrite flag (point 5 — NOT force,
+// which only bypasses the risk threshold). The actual override handling lives
+// in the tool handler (tools_core.go); this test pins the contract that the
+// signal shape supports an override path.
 func TestBug_AI_AccidentalRewrite_ForceBypassSemantic(t *testing.T) {
 	oldText := "header\n"
 	newText := strings.Repeat("full content\n", 100)
@@ -229,8 +230,8 @@ func TestBug_AI_AccidentalRewrite_ForceBypassSemantic(t *testing.T) {
 	if signal.Status != core.FeedbackKO {
 		t.Error("signal should be KO so audit log captures severity")
 	}
-	// Simulate handler: if force=true, the signal is attached to audit but
-	// the edit proceeds. We can't easily run the full tool handler here, but
-	// the contract is: BlockOp=true AND force=true → proceed.
+	// Simulate handler: if allow_rewrite=true, the signal is attached to audit
+	// but the edit proceeds. We can't easily run the full tool handler here, but
+	// the contract is: BlockOp=true AND allow_rewrite=true → proceed.
 	_ = context.Background() // imported for handler signature parity
 }

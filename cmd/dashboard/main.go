@@ -2094,9 +2094,9 @@ type trashRestoreRequest struct {
 
 // trashRestoreResponse is the JSON body returned by POST /api/trash/restore.
 type trashRestoreResponse struct {
-	OK          bool   `json:"ok"`
-	SDID        string `json:"sd_id"`
-	RestoredTo  string `json:"restored_to,omitempty"`
+	OK           bool   `json:"ok"`
+	SDID         string `json:"sd_id"`
+	RestoredTo   string `json:"restored_to,omitempty"`
 	OriginalPath string `json:"original_path,omitempty"`
 }
 
@@ -2188,18 +2188,18 @@ func trashRestoreHandler(backupDir string) http.HandlerFunc {
 
 // trashPurgeRequest is the JSON body for POST /api/trash/purge.
 type trashPurgeRequest struct {
-	OlderThanDays int  `json:"older_than_days"` // 0 = purge all
+	OlderThanDays int    `json:"older_than_days"` // 0 = purge all
 	SDID          string `json:"sd_id,omitempty"` // optional: purge a single entry
-	DryRun        bool  `json:"dry_run"`
+	DryRun        bool   `json:"dry_run"`
 }
 
 // trashPurgeResponse is the JSON body returned by POST /api/trash/purge.
 type trashPurgeResponse struct {
-	OK          bool   `json:"ok"`
-	DryRun      bool   `json:"dry_run"`
-	DeletedCount int   `json:"deleted_count"`
-	FreedBytes  int64  `json:"freed_bytes"`
-	SDID        string `json:"sd_id,omitempty"` // present if a single-entry purge
+	OK           bool   `json:"ok"`
+	DryRun       bool   `json:"dry_run"`
+	DeletedCount int    `json:"deleted_count"`
+	FreedBytes   int64  `json:"freed_bytes"`
+	SDID         string `json:"sd_id,omitempty"` // present if a single-entry purge
 }
 
 // trashPurgeHandler — POST /api/trash/purge — permanently remove trash

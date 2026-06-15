@@ -130,8 +130,14 @@ func SetError(ctx context.Context, msg string) {
 
 // AuditEntry represents a single MCP tool operation log entry
 type AuditEntry struct {
-	Timestamp      time.Time              `json:"ts"`
-	Tool           string                 `json:"tool"`
+	Timestamp time.Time `json:"ts"`
+	Tool      string    `json:"tool"`
+	// RequestID correlates the in-flight ("in_progress") breadcrumb with the
+	// final entry of the same tool call (point 6b). A reader groups entries by
+	// req_id; an in_progress line with no matching ok/warn/error line marks a
+	// call that was interrupted mid-flight (e.g. the MCP transport was cut when
+	// the user switched app surface), which would otherwise leave no trace.
+	RequestID      string                 `json:"req_id,omitempty"`
 	Path           string                 `json:"path,omitempty"`
 	DurationMs     int64                  `json:"duration_ms"`
 	BytesIn        int64                  `json:"bytes_in,omitempty"`

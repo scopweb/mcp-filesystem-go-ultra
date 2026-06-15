@@ -1,5 +1,67 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.14] - 2026-06-15
+
+### Reliability, cost & integrity improvements (6 items from a refactor post-mortem)
+
+Six improvements derived from real friction observed during a Blazor refactor: token cost of dry-run diffs, lack of post-edit structural checks, missing OCC token on partial reads, no atomic block-move, the `force` flag being overloaded, and no trace of interrupted tool calls.
+
+**Point 3 — `content_hash` on partial reads.** `read_file` now returns the `content_hash` (FNV-1a of the raw file bytes — the same OCC token `edit_file`/`multi_edit` validate via `expected_hash`) for **range**, **head/tail** and **base64** reads, not just full reads. The server hashes the whole file but returns only the requested slice, so a caller can use optimistic-concurrency `expected_hash` on a large file without pulling the whole file into context.
+- `tools_core.go`: `computeFileOCCHash` helper; base64 + range branches return structured `content_hash`. `expected_hash` description updated.
+
+**Point 6b — in-flight audit breadcrumb.** `auditWrap` writes an `status:"in_progress"` entry with a `req_id` **before** running the handler; the final entry shares the same `req_id`. A call interrupted mid-flight (e.g. the MCP transport is cut when the user switches app surface) leaves an orphan `in_progress` line in `operations.jsonl`, so it's possible to tell whether the request never arrived, was cut mid-execution, or completed but lost its reply. Guarded by `AuditEnabled()` — zero overhead without `--log-dir`.
+- `audit.go`: `newRequestID`, pre-handler breadcrumb. `core/audit_logger.go`: `RequestID` (`req_id`) field.
+
+**Point 1 — `diff_format` for dry-run/edit diffs.** New `diff_format` param on `edit_file`: `""`/`auto` (full when small, summary + hint when large — token-safe default), `full`, `summary` (per-hunk ranges + 3 anchor lines, eliding large bodies), `stat` (`+N -M`), `none`. Unifies behaviour across replace/regex/search_replace modes (regex previously always dumped the full diff — the original 720-line cost).
+- `core/diff.go`: `RenderDiff`, `formatHunksSummary`, refactor to shared `formatHunksFull`. `tools_core.go`: `diffFormatArg`; all three diff emission points use `RenderDiff`.
+
+**Point 6a — atomic writes in `batch_operations`.** `executeWrite` used a direct `os.WriteFile` (non-atomic); a batch cut mid-write could leave a partial file. Now uses the shared `atomicWriteFile` (temp + rename), matching `write_file`.
+- `core/engine.go`: `atomicWriteFile` helper (consolidates the duplicated temp+rename pattern). `core/batch_operations.go`: `executeWrite` uses it, preserving file mode.
+
+**Point 2 — post-edit structural check (delta brace balance).** After editing brace-based source files, the net balance of `{} () []` is compared old vs new. If it was balanced before and is **not** after, the edit introduced the imbalance → non-blocking warning (attached to the response and audit). The *delta* approach avoids false positives on fragments or already-unbalanced files; braces inside strings/comments/raw-strings are ignored by a lightweight C-like scanner.
+- `core/structure_check.go`: NEW — `delimiterBalance`, `CheckBalanceDelta`, `isBalanceCheckedExt`. `core/edit_operations.go`: `StructureWarning` on `EditResult`/`MultiEditResult` + check in `EditFile`/`MultiEdit`. Surfaced in `tools_core.go`/`tools_batch.go`.
+
+**Point 5 — decouple `force` from the rewrite guard.** `force` no longer bypasses the accidental full-file rewrite guard; a dedicated `allow_rewrite` flag does. `force` is now reserved for the risk-threshold bypass, so forcing a risky-but-intended edit no longer silently disables rewrite protection. The guard message recommends `write_file` and notes that `force` does not bypass it.
+- `tools_core.go`: parse `allow_rewrite`; guard uses `!allowRewrite`. `core/feedback.go`: doc + suggestion. `core/param_validator.go`: `allow_rewrite`.
+
+**Point 4 — `delete_range` + atomic `extract`.** New `edit_file` `mode:"delete_range"` removes lines `[start_line, end_line]` (atomic, with backup). New `batch_operations` `extract` action moves lines from `source` to `destination` using the **same computed bytes** to write the destination and remove from the source — written == deleted by construction, closing the drift gap of the old two-step (write dest + delete source) workflow. One backup covers both files; they revert together under `atomic:true`.
+- `core/line_range.go`: NEW — `ComputeLineRangeDeletion` (byte-exact), `DeleteLineRange`. `core/batch_operations.go`: `extract` type (validate/dispatch/rollback/backup), `executeExtract`; `StartLine`/`EndLine`/`Append` fields on `FileOperation`.
+
+**Tests added:**
+- `core/line_range_test.go` — byte-exact extract + error cases.
+- `core/structure_check_test.go` — balance delta + string/comment/raw-string exclusion.
+- `core/diff_render_test.go` — diff formats + auto-collapse.
+- `occ_hash_partial_read_test.go` — partial-read hash == raw-bytes FNV.
+
+**Follow-ups (not in this release):** dashboard should group `operations.jsonl` by `req_id` (now 2 lines per op); optional `verify_structure` flag (point 2 is auto-by-extension); stdio→HTTP transport (connector config, not code).
+
+**Verification:**
+
+```bash
+go vet ./...        # clean
+go test ./...       # full suite green (incl. tests/ + tests/security)
+```
+
+**Files changed:**
+
+| File | Change |
+|---|---|
+| `main.go` | version 4.5.13 → 4.5.14 |
+| `tools_core.go` | `computeFileOCCHash`, `diffFormatArg`, partial-read hash, `diff_format`, `delete_range` mode, `allow_rewrite` |
+| `tools_batch.go` | structure warning surface, `extract` in description |
+| `core/diff.go` | `RenderDiff` + summary/full hunk formatters |
+| `core/structure_check.go` | NEW — delimiter balance check |
+| `core/line_range.go` | NEW — line-range deletion + extract primitive |
+| `core/edit_operations.go` | `StructureWarning` fields + checks |
+| `core/batch_operations.go` | atomic `executeWrite`, `extract` action + rollback |
+| `core/engine.go` | `atomicWriteFile` helper |
+| `core/feedback.go` | rewrite guard → `allow_rewrite` |
+| `core/audit_logger.go` | `RequestID` field |
+| `audit.go` | in-flight breadcrumb + `newRequestID` |
+| `core/param_validator.go` | `diff_format`, `allow_rewrite`, `start_line`, `end_line` |
+| `CLAUDE.md` | `extract` type documented |
+| `tests/*`, `*_test.go` | 4 new test files; rewrite-guard test comments updated |
+
 ## [Unreleased / 4.5.13] - 2026-06-12
 
 ### Hooks — examples + docs brought up to date

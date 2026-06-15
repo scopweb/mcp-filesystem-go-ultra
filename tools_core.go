@@ -109,6 +109,35 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	return nil
 }
 
+// computeFileOCCHash returns the FNV-1a (8 hex) hash of the full file's raw
+// bytes — the same OCC token edit_file / multi_edit validate via expected_hash
+// (they hash os.ReadFile(path)). It reads the whole file from disk so that
+// PARTIAL reads (range, head/tail, base64) can still surface a valid
+// concurrency token without forcing the caller to pull the entire file into
+// its context (point 3: content_hash on range reads). The disk read is local
+// and bounded; only the partial body is returned to the consumer, so the token
+// cost stays small. Returns ("", false) if the file cannot be read.
+func computeFileOCCHash(path string) (string, bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	h := fnv.New32a()
+	h.Write(raw)
+	return fmt.Sprintf("%08x", h.Sum32()), true
+}
+
+// diffFormatArg reads the optional diff_format argument (point 1). Empty string
+// means "auto" — see core.RenderDiff for the supported values.
+func diffFormatArg(args map[string]interface{}) string {
+	if args != nil {
+		if df, ok := args["diff_format"].(string); ok {
+			return df
+		}
+	}
+	return ""
+}
+
 // registerCoreTools registers read_file, write_file, edit_file
 func registerCoreTools(reg *toolRegistry) {
 	engine := reg.engine
@@ -222,10 +251,17 @@ func registerCoreTools(reg *toolRegistry) {
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
+			var body string
 			if engine.IsCompactMode() {
-				return mcp.NewToolResultText(encoded), nil
+				body = encoded
+			} else {
+				body = fmt.Sprintf("# File: %s (%d bytes)\n# Base64 encoded:\n%s", path, originalSize, encoded)
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("# File: %s (%d bytes)\n# Base64 encoded:\n%s", path, originalSize, encoded)), nil
+			// Point 3: surface the whole-file OCC hash for base64 reads too.
+			if contentHash, ok := computeFileOCCHash(core.NormalizePath(path)); ok {
+				return mcp.NewToolResultStructured(map[string]any{"content_hash": contentHash}, body), nil
+			}
+			return mcp.NewToolResultText(body), nil
 		}
 
 		// Range read mode: read specific line range
@@ -245,6 +281,12 @@ func registerCoreTools(reg *toolRegistry) {
 			// Approximate total lines from file size (avg 50 chars/line)
 			if info, err2 := os.Stat(path); err2 == nil && info.Size() > 0 {
 				core.SetFileLinesTotal(ctx, int(info.Size()/50)+1)
+			}
+			// Point 3: surface the whole-file OCC hash for range reads so the
+			// caller can use edit_file/multi_edit expected_hash without first
+			// pulling the entire file into context.
+			if contentHash, ok := computeFileOCCHash(core.NormalizePath(path)); ok {
+				return mcp.NewToolResultStructured(map[string]any{"content_hash": contentHash}, content), nil
 			}
 			return mcp.NewToolResultText(content), nil
 		}
@@ -471,9 +513,12 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("new_text", mcp.Description("New text to replace with (default mode)")),
 		mcp.WithString("old_str", mcp.Description("Alias for old_text")),
 		mcp.WithString("new_str", mcp.Description("Alias for new_text")),
-		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk OR if the rewrite guard detects an accidental full-file rewrite (small old_text + large new_text with file content remaining). Pass force:true to apply anyway — a safety backup is created. Default: false.")),
-		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\"")),
+		mcp.WithBoolean("force", mcp.Description("Force the operation through the risk-threshold check (CRITICAL risk). A safety backup is always created. Note: force does NOT bypass the accidental-rewrite guard — use allow_rewrite for that. Default: false.")),
+		mcp.WithBoolean("allow_rewrite", mcp.Description("Bypass ONLY the accidental full-file rewrite guard (small old_text + large new_text with file content remaining). Prefer write_file for a real full-file rewrite; set allow_rewrite:true only when you genuinely want edit semantics on a near-total rewrite. A safety backup is created. Default: false.")),
+		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\", \"delete_range\" (remove lines start_line..end_line)")),
 		mcp.WithNumber("occurrence", mcp.Description("Which occurrence to replace: 1=first, 2=second, -1=last, -2=second-to-last (default: all)")),
+		mcp.WithNumber("start_line", mcp.Description("First line to remove (1-based, inclusive). Used by mode:\"delete_range\".")),
+		mcp.WithNumber("end_line", mcp.Description("Last line to remove (1-based, inclusive). Used by mode:\"delete_range\".")),
 		// search_replace mode params
 		mcp.WithString("pattern", mcp.Description("Regex or literal pattern. In search_replace mode: literal pattern, all occurrences. In regex mode: regex pattern (synthesized into a single-pattern transformation if patterns_json is not provided).")),
 		mcp.WithString("replacement", mcp.Description("Replacement text. Used in search_replace mode, and in regex mode when pattern is provided without patterns_json.")),
@@ -482,11 +527,12 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive matching (default: true, for regex mode)")),
 		mcp.WithBoolean("create_backup", mcp.Description("Create backup before transformation (default: true, for regex mode)")),
 		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Supported in modes: replace (default), search_replace, regex. Default: false.")),
+		mcp.WithString("diff_format", mcp.Description("Controls how the diff is rendered (point 1). \"\"/\"auto\" (default): full diff when small, else a summary with anchors + ranges to save tokens; \"full\": always the complete unified diff; \"summary\": per-hunk ranges + first/last anchor lines, eliding large bodies (ideal for big block deletions); \"stat\": just \"+added -removed\"; \"none\": no diff.")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false, for occurrence mode)")),
 		// Stale-edit protection: hash returned by the prior read_file call. If the
 		// file's actual hash doesn't match, the edit is rejected with a clear error.
 		// Improvement B3 (see log analysis: 6 stale-edit cycles in 12 days).
-		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash from the last full read_file (range and batch reads don't return it). If the file's current hash doesn't match, the edit is rejected so the model can re-read first.")),
+		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash from the last read_file (full, range, head/tail and base64 reads all return it). If the file's current hash doesn't match, the edit is rejected so the model can re-read first.")),
 		mcp.WithBoolean("tolerant_whitespace", mcp.Description("Treat tabs and 4-space runs as equivalent (1 tab = 4 spaces) and CRLF/LF as equivalent when matching old_text. Use when the file has mixed indentation (e.g., tabs in some lines, spaces in others). Original file bytes are preserved — only the matching is tolerant. Default: false.")),
 	)
 	regexTransform := reg.regexTransform
@@ -502,6 +548,7 @@ func registerCoreTools(reg *toolRegistry) {
 		oldText := ""
 		newText := ""
 		force := false
+		allowRewrite := false
 		dryRun := false
 		occurrence := 0
 		tolerantWhitespace := false
@@ -512,6 +559,9 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			if f, ok := args["force"].(bool); ok {
 				force = f
+			}
+			if ar, ok := args["allow_rewrite"].(bool); ok {
+				allowRewrite = ar
 			}
 			if tw, ok := args["tolerant_whitespace"].(bool); ok {
 				tolerantWhitespace = tw
@@ -613,7 +663,7 @@ func registerCoreTools(reg *toolRegistry) {
 			if dryRun && result.TransformedContent != "" {
 				newContentStr := result.TransformedContent
 				oldContentRaw, _ := os.ReadFile(normPath)
-				unifiedDiff := core.UnifiedDiff(string(oldContentRaw), newContentStr, path)
+				unifiedDiff := core.RenderDiff(string(oldContentRaw), newContentStr, path, diffFormatArg(args))
 				if unifiedDiff != "" {
 					output.WriteString("\nDiff (DRY RUN - no changes made):\n")
 					output.WriteString(unifiedDiff)
@@ -673,11 +723,11 @@ func registerCoreTools(reg *toolRegistry) {
 					// Escape $ in replacement (Go interprets $ as capture group reference)
 					safeReplacement := strings.ReplaceAll(replacement, "$", "$$")
 					previewContent := re.ReplaceAllString(string(oldContentRaw), safeReplacement)
-					unifiedDiff = core.UnifiedDiff(string(oldContentRaw), previewContent, path)
+					unifiedDiff = core.RenderDiff(string(oldContentRaw), previewContent, path, diffFormatArg(args))
 				}
 			} else {
 				newContentRaw, _ := os.ReadFile(normPath)
-				unifiedDiff = core.UnifiedDiff(string(oldContentRaw), string(newContentRaw), path)
+				unifiedDiff = core.RenderDiff(string(oldContentRaw), string(newContentRaw), path, diffFormatArg(args))
 			}
 
 			if engine.IsCompactMode() {
@@ -705,6 +755,52 @@ func registerCoreTools(reg *toolRegistry) {
 			return mcp.NewToolResultText(respText), nil
 		}
 
+		// ---- MODE: delete_range ----
+		if mode == "delete_range" {
+			startLine, endLine := 0, 0
+			if args != nil {
+				if sl, ok := args["start_line"].(float64); ok {
+					startLine = int(sl)
+				}
+				if el, ok := args["end_line"].(float64); ok {
+					endLine = int(el)
+				}
+			}
+			if startLine == 0 || endLine == 0 {
+				return mcp.NewToolResultError("mode:\"delete_range\" requires start_line and end_line (1-based, inclusive)"), nil
+			}
+			_, result, derr := engine.DeleteLineRange(ctx, path, startLine, endLine)
+			if derr != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", derr)), nil
+			}
+			if result.BackupID != "" {
+				engine.SetCurrentBackupID(path, result.BackupID)
+			}
+			if engine.IsCompactMode() {
+				msg := fmt.Sprintf("D %s | lines %d-%d (-%d) | %dL", path, startLine, endLine, result.LinesRemoved, result.TotalLines)
+				if result.BackupID != "" {
+					short := result.BackupID
+					if len(short) > 12 {
+						short = short[:12]
+					}
+					msg += " | UNDO:" + short
+				}
+				if result.StructureWarning != "" {
+					msg += "\n" + result.StructureWarning
+				}
+				return mcp.NewToolResultText(msg), nil
+			}
+			msg := fmt.Sprintf("Deleted lines %d-%d from %s\nLines removed: %d\nTotal lines now: %d",
+				startLine, endLine, path, result.LinesRemoved, result.TotalLines)
+			if result.BackupID != "" {
+				msg += fmt.Sprintf("\n✓ UNDO:%s", result.BackupID)
+			}
+			if result.StructureWarning != "" {
+				msg += "\n" + result.StructureWarning
+			}
+			return mcp.NewToolResultText(msg), nil
+		}
+
 		// ---- MODE: replace (default) with optional occurrence ----
 		if oldText == "" {
 			return mcp.NewToolResultError("old_text (or old_str) is required"), nil
@@ -726,17 +822,25 @@ func registerCoreTools(reg *toolRegistry) {
 
 		// Guard against accidental full-file rewrite (bug 2026-06-11):
 		// short old_text + large new_text with file content remaining after
-		// the match → likely the model intended write_file. BLOCK by default;
-		// override with force:true.
+		// the match → likely the model intended write_file. BLOCK by default.
+		//
+		// Point 5: the override is the DEDICATED allow_rewrite flag, NOT force.
+		// force is reserved for the risk-threshold bypass; coupling the two meant
+		// a legitimately risky edit forced through on risk would also silently
+		// disable rewrite protection. Decoupling keeps force from being the
+		// catch-all "make it work" flag. The recommended fix for a real
+		// full-file rewrite remains write_file — allow_rewrite:true is only for
+		// the rare case where edit semantics are genuinely wanted on a near-total
+		// rewrite.
 		if newText != "" {
 			if rewriteSignal := core.CheckEditRewrite(oldText, newText, fileSize); rewriteSignal != nil && rewriteSignal.BlockOp {
 				core.SetFeedback(ctx, rewriteSignal)
-				if !force {
+				if !allowRewrite {
 					errMsg := core.FormatFeedback(rewriteSignal,
 						"edit_file blocked: looks like an accidental full-file rewrite")
 					return mcp.NewToolResultError(errMsg), nil
 				}
-				// force=true: proceed but the audit will record the pattern
+				// allow_rewrite=true: proceed but the audit will record the pattern
 				_ = rewriteSignal // already attached via SetFeedback above
 			}
 		}
@@ -809,10 +913,10 @@ func registerCoreTools(reg *toolRegistry) {
 			engine.SetCurrentBackupID(path, result.BackupID)
 		}
 
-		// Compute unified diff
+		// Compute unified diff (honors diff_format — point 1)
 		newContentRaw, _ := os.ReadFile(normPath)
 		newContentStr := string(newContentRaw)
-		unifiedDiff := core.UnifiedDiff(oldContentStr, newContentStr, path)
+		unifiedDiff := core.RenderDiff(oldContentStr, newContentStr, path, diffFormatArg(args))
 
 		// Annotate audit with diff line count
 		if unifiedDiff != "" {
@@ -871,6 +975,9 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			if result.RiskWarning != "" {
 				msg += " | " + strings.TrimPrefix(result.RiskWarning, "⚠️ ")
+			}
+			if result.StructureWarning != "" {
+				msg += "\n" + result.StructureWarning
 			}
 			if unifiedDiff != "" {
 				msg += "\n" + unifiedDiff
@@ -947,6 +1054,11 @@ func registerCoreTools(reg *toolRegistry) {
 			} else {
 				msg += fmt.Sprintf("\n✗ integrity:ERROR | %s", inv.Warning)
 			}
+		}
+
+		// Point 2: structural balance warning (delimiter imbalance introduced by this edit)
+		if result.StructureWarning != "" {
+			msg += "\n" + result.StructureWarning
 		}
 
 		// Annotate audit log with backup chain and integrity info

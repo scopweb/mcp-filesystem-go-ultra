@@ -19,9 +19,9 @@ func TestBackupListTrash(t *testing.T) {
 
 	// Create three files in two different subdirs
 	files := map[string]string{
-		filepath.Join(allowedDir, "alpha", "a.txt"):   "alpha-a",
-		filepath.Join(allowedDir, "alpha", "b.txt"):   "alpha-b",
-		filepath.Join(allowedDir, "beta", "c.txt"):    "beta-c",
+		filepath.Join(allowedDir, "alpha", "a.txt"): "alpha-a",
+		filepath.Join(allowedDir, "alpha", "b.txt"): "alpha-b",
+		filepath.Join(allowedDir, "beta", "c.txt"):  "beta-c",
 	}
 	for path, content := range files {
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

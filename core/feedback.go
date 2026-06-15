@@ -20,12 +20,12 @@ const (
 type PatternID string
 
 const (
-	PatternTruncation       PatternID = "truncation"         // write < 50% of existing content
-	PatternInflationLoop    PatternID = "inflation_loop"     // write > 3x of existing content
-	PatternStaleRead        PatternID = "stale_read"         // edit without prior read in session
-	PatternFullRewrite      PatternID = "full_rewrite"       // write_file on large existing file
-	PatternRepeatedOldText  PatternID = "repeated_old_text"  // same old_text fails 2+ times
-	PatternLargeNewText     PatternID = "large_new_text"     // new_text > 80% of file size (use write_file instead)
+	PatternTruncation        PatternID = "truncation"         // write < 50% of existing content
+	PatternInflationLoop     PatternID = "inflation_loop"     // write > 3x of existing content
+	PatternStaleRead         PatternID = "stale_read"         // edit without prior read in session
+	PatternFullRewrite       PatternID = "full_rewrite"       // write_file on large existing file
+	PatternRepeatedOldText   PatternID = "repeated_old_text"  // same old_text fails 2+ times
+	PatternLargeNewText      PatternID = "large_new_text"     // new_text > 80% of file size (use write_file instead)
 	PatternAccidentalRewrite PatternID = "accidental_rewrite" // edit_file: small old_text + large new_text with file content remaining (2026-06-11)
 )
 
@@ -241,10 +241,13 @@ func CheckEditNewText(newText string, fileSize int64) *FeedbackSignal {
 // the file but the tool's exact-match semantics only swapped the header,
 // leaving the rest of the old file concatenated below new_text.
 //
-// The check is BLOCKING by default. The caller (tool handler) must pass
-// force=true to bypass — typically when the model genuinely intends a
-// targeted large edit (e.g., refactoring a multi-section function) where
-// old_text and new_text are both large.
+// The check is BLOCKING by default. The caller (tool handler) must pass the
+// DEDICATED allow_rewrite=true flag to bypass (point 5) — NOT force. force is
+// reserved for the risk-threshold bypass; keeping the two separate prevents a
+// risky-but-intended edit (forced through on risk) from also silently disabling
+// rewrite protection. The recommended fix for a genuine full-file rewrite is
+// write_file; allow_rewrite is only for the rare case where edit semantics are
+// truly wanted on a near-total rewrite.
 //
 // Signal 3 prevents false positives on legitimate small edits where the
 // ratio is high simply because old_text was tiny (e.g., expanding a
@@ -308,7 +311,8 @@ func CheckEditRewrite(oldText, newText string, fileSize int64) *FeedbackSignal {
 		Suggestion: "If you want to rewrite the whole file, use write_file(path, content=<full new file>). " +
 			"If you want a targeted edit, narrow old_text to a minimal unique anchor " +
 			"(e.g., a single function signature). " +
-			"Pass force:true to apply this edit anyway (a safety backup will be created).",
+			"Only if you genuinely intend edit semantics on a near-total rewrite, pass allow_rewrite:true " +
+			"(a safety backup will be created). Note: force:true does NOT bypass this guard.",
 	}
 }
 

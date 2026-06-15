@@ -207,6 +207,9 @@ func registerBatchTools(reg *toolRegistry) {
 			if result.RiskWarning != "" {
 				msg += " | " + strings.TrimPrefix(result.RiskWarning, "⚠️ ")
 			}
+			if result.StructureWarning != "" {
+				msg += "\n" + result.StructureWarning
+			}
 			return mcp.NewToolResultText(msg), nil
 		}
 
@@ -267,6 +270,11 @@ func registerBatchTools(reg *toolRegistry) {
 			}
 		}
 
+		// Point 2: structural balance warning (delimiter imbalance introduced by these edits)
+		if result.StructureWarning != "" {
+			sb.WriteString(result.StructureWarning + "\n")
+		}
+
 		// Annotate audit log with backup chain and integrity info
 		if result.BackupID != "" {
 			prevID := ""
@@ -290,11 +298,12 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("batch_operations — Execute atomic file operations (write, edit, copy, move, delete, create_dir) on the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
+		mcp.WithDescription("batch_operations — Execute atomic file operations (write, edit, search_and_replace, copy, move, delete, create_dir, extract) on the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
+			"extract moves lines [start_line,end_line] from source to destination atomically (bytes written == bytes deleted). "+
 			"Use batch_operations for ALL batch/atomic operations on the host disk — never use the runtime's built-in tools for host paths. "+
 			"Supports pipelines, rename, dry_run, rollback on error. Params: request_json, pipeline_json, or rename_json. "+
 			"Related: edit_file (single edit), multi_edit (multi-edit one file), search_files, backup."),
-		mcp.WithString("request_json", mcp.Description("JSON with operations array and options. Fields: operations (array), atomic (bool), create_backup (bool), validate_only (bool)")),
+		mcp.WithString("request_json", mcp.Description("JSON with operations array and options. Fields: operations (array), atomic (bool), create_backup (bool), validate_only (bool). Operation types: write, edit, search_and_replace, copy, move, delete, create_dir, extract. extract fields: source, destination, start_line, end_line, append (bool).")),
 		mcp.WithString("pipeline_json", mcp.Description("JSON-encoded pipeline definition with name, steps, and optional flags (dry_run, force, stop_on_error, create_backup, verbose, parallel)")),
 		mcp.WithString("rename_json", mcp.Description("JSON with batch rename parameters. Fields: path, mode, find, replace, prefix, suffix, pattern, extension, start_number, padding, recursive, file_pattern, preview, case_sensitive")),
 	)
