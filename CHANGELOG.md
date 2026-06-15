@@ -1,5 +1,40 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.18] - 2026-06-15
+
+### Two fixes from dogfooding the 4.5.17 build live
+
+**Fix 1 — auto-OCC warning now in the structured payload.** The external-change
+warning (new point 4) was appended only to the text fallback, not to the
+`structuredContent` of the edit response — inconsistent with `structure_warning`,
+so structured-only clients never saw it. It's now an `external_change` field in
+the structured edit response.
+- `tools_core.go`: edit_file replace path adds `external_change` to the structured map.
+
+**Fix 2 — batch writes refresh the auto-OCC baseline.** `batch_operations`
+modified files without updating the session's known hash, so a file the session
+had read and then changed via batch would falsely trip auto-OCC ("external
+change") on the next `edit_file` — or block it under `--auto-occ=block`. The
+batch now refreshes the baseline for every file it writes (and clears it for
+deleted/moved-away files), so the session's own batch changes are never flagged.
+- `core/feedback.go`: `InvalidateKnownHash`.
+- `core/batch_operations.go`: `refreshKnownHashes`, called after a successful batch.
+
+**Known remaining gap:** the `execute_pipeline` path (separate from
+`ExecuteBatch`) does not yet refresh the baseline — pipeline writes could still
+false-positive on a later edit. Tracked as follow-up.
+
+**Tests added:**
+- `core/batch_auto_occ_test.go` — batch write refreshes baseline (no false positive); batch delete clears it.
+- `edit_auto_occ_test.go` — extended to assert `external_change` is in the structured payload.
+
+**Verification:**
+
+```bash
+go vet ./...
+go test -timeout 90s ./...
+```
+
 ## [4.5.17] - 2026-06-15
 
 ### Automatic optimistic-concurrency on edits (new point 4 — completes the plan)

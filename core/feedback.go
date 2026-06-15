@@ -126,6 +126,16 @@ func RecordWriteHash(path, hash string) {
 	globalSession.lastRead[path] = time.Now()
 }
 
+// InvalidateKnownHash drops the auto-OCC baseline for a path (e.g. after a file
+// is deleted or moved away). A later edit then has no baseline and won't warn,
+// rather than comparing against a hash that no longer applies.
+func InvalidateKnownHash(path string) {
+	globalSession.mu.Lock()
+	defer globalSession.mu.Unlock()
+	delete(globalSession.knownHash, path)
+	delete(globalSession.lastRead, path)
+}
+
 // CheckAutoOCC compares the file's current on-disk hash against the hash the
 // session last saw (new point 4). It returns a signal only when ALL hold:
 //   - auto-OCC is enabled (mode != "off"),

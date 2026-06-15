@@ -1089,7 +1089,11 @@ func registerCoreTools(reg *toolRegistry) {
 			if unifiedDiff != "" {
 				msg += "\n" + unifiedDiff
 			}
-			return mcp.NewToolResultStructured(editStructured(path, result), msg), nil
+			sc := editStructured(path, result)
+			if autoOCCWarn != "" {
+				sc["external_change"] = autoOCCWarn
+			}
+			return mcp.NewToolResultStructured(sc, msg), nil
 		}
 
 		// Verbose format: single line summary + optional sections
@@ -1184,7 +1188,11 @@ func registerCoreTools(reg *toolRegistry) {
 			core.SetIntegrityStatus(ctx, result.Integrity.Verification, result.Integrity.Warning)
 		}
 
-		return mcp.NewToolResultStructured(editStructured(path, result), msg), nil
+		sc := editStructured(path, result)
+		if autoOCCWarn != "" {
+			sc["external_change"] = autoOCCWarn
+		}
+		return mcp.NewToolResultStructured(sc, msg), nil
 	})
 	reg.addTool(editFileTool, reg.editFileHandler)
 }
