@@ -59,7 +59,7 @@ const serverInstructions = `MCP Filesystem Ultra — File operations server. Run
 // serverVersion is the single source of truth for the version reported by
 // --version, the MCP handshake, the help header and the startup logs.
 // Keep in sync with the top CHANGELOG entry.
-const serverVersion = "4.5.16"
+const serverVersion = "4.5.17"
 
 // buildCommit and buildDate are stamped at build time via
 //
@@ -101,6 +101,10 @@ func main() {
 		logDir          = flag.String("log-dir", "", "Directory for audit logs and metrics snapshots (enables operation logging)")
 		normalizerRules = flag.String("normalizer-rules", "", "Path to external normalizer rules JSON file (extends built-in rules)")
 
+		// Auto-OCC (new point 4): automatic optimistic-concurrency check on edits
+		// without an explicit expected_hash. off | warn (default) | block.
+		autoOCC = flag.String("auto-occ", "warn", "Auto optimistic-concurrency on edits: off|warn|block (default warn)")
+
 		// Risk thresholds
 		riskThresholdMedium   = flag.Float64("risk-threshold-medium", 20.0, "Percentage change threshold for medium risk")
 		riskThresholdHigh     = flag.Float64("risk-threshold-high", 75.0, "Percentage change threshold for high risk")
@@ -108,6 +112,9 @@ func main() {
 		riskOccurrencesHigh   = flag.Int("risk-occurrences-high", 100, "Number of occurrences threshold for high risk")
 	)
 	flag.Parse()
+
+	// Configure auto-OCC mode (new point 4).
+	core.SetAutoOCCMode(*autoOCC)
 
 	if *version {
 		fmt.Printf("MCP Filesystem Server Ultra-Fast v%s\n", serverVersion)

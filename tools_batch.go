@@ -200,6 +200,9 @@ func registerBatchTools(reg *toolRegistry) {
 		if result.BackupID != "" {
 			engine.SetCurrentBackupID(path, result.BackupID)
 		}
+		// New point 4: track our own write so auto-OCC won't flag it as an
+		// external change on the next edit.
+		core.RecordWriteHash(core.NormalizePath(path), result.NewHash)
 
 		// Format result (Bug #17: added SkippedEdits and EditDetails)
 		if engine.IsCompactMode() {

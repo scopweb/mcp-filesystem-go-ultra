@@ -27,6 +27,7 @@ const (
 	PatternRepeatedOldText   PatternID = "repeated_old_text"  // same old_text fails 2+ times
 	PatternLargeNewText      PatternID = "large_new_text"     // new_text > 80% of file size (use write_file instead)
 	PatternAccidentalRewrite PatternID = "accidental_rewrite" // edit_file: small old_text + large new_text with file content remaining (2026-06-11)
+	PatternExternalChange    PatternID = "external_change"    // file changed on disk since the session last read/wrote it (auto-OCC, new point 4)
 )
 
 // FeedbackSignal is returned by the detector to the tool handler.
@@ -60,11 +61,34 @@ type sessionState struct {
 
 	// Map of path -> last read timestamp (to detect edits without prior read)
 	lastRead map[string]time.Time
+
+	// Map of path -> content_hash the session last saw (via read or its own
+	// write/edit). Used by auto-OCC (new point 4) to detect a file that changed
+	// on disk externally since the client last saw it, even when the caller did
+	// not pass expected_hash.
+	knownHash map[string]string
 }
 
 var globalSession = &sessionState{
 	failedOldText: make(map[string]map[string]int),
 	lastRead:      make(map[string]time.Time),
+	knownHash:     make(map[string]string),
+}
+
+// autoOCCMode controls automatic optimistic-concurrency checking (new point 4):
+// "off" disables it, "warn" (default) emits a non-blocking warning when the file
+// changed on disk since the session last saw it, "block" turns that into a hard
+// error. Set from the --auto-occ CLI flag.
+var autoOCCMode = "warn"
+
+// SetAutoOCCMode configures auto-OCC. Unknown values fall back to "warn".
+func SetAutoOCCMode(mode string) {
+	switch mode {
+	case "off", "warn", "block":
+		autoOCCMode = mode
+	default:
+		autoOCCMode = "warn"
+	}
 }
 
 // RecordRead marks a file as recently read (resets stale-read detection).
@@ -72,6 +96,71 @@ func RecordRead(path string) {
 	globalSession.mu.Lock()
 	defer globalSession.mu.Unlock()
 	globalSession.lastRead[path] = time.Now()
+}
+
+// RecordReadHash records the content_hash the session observed for a file on a
+// read, and refreshes its last-seen timestamp. Together with RecordWriteHash
+// this is the "known hash" auto-OCC compares against (new point 4).
+func RecordReadHash(path, hash string) {
+	if hash == "" {
+		return
+	}
+	globalSession.mu.Lock()
+	defer globalSession.mu.Unlock()
+	globalSession.knownHash[path] = hash
+	globalSession.lastRead[path] = time.Now()
+}
+
+// RecordWriteHash records the content_hash of a file AFTER the session wrote or
+// edited it. Critical for auto-OCC correctness: without it, the next edit would
+// see the post-edit file differ from the last *read* hash and raise a false
+// external-change warning. By tracking the session's own writes, auto-OCC only
+// fires on changes the session did not make.
+func RecordWriteHash(path, hash string) {
+	if hash == "" {
+		return
+	}
+	globalSession.mu.Lock()
+	defer globalSession.mu.Unlock()
+	globalSession.knownHash[path] = hash
+	globalSession.lastRead[path] = time.Now()
+}
+
+// CheckAutoOCC compares the file's current on-disk hash against the hash the
+// session last saw (new point 4). It returns a signal only when ALL hold:
+//   - auto-OCC is enabled (mode != "off"),
+//   - the session has a known hash for this path that is still fresh (read/written
+//     within the stale window — an old hash is not a reliable baseline),
+//   - the on-disk hash differs from the known hash (an external change).
+//
+// BlockOp follows the mode: false for "warn" (default, non-blocking), true for
+// "block". Returns OK() otherwise. This complements explicit expected_hash: it
+// catches lost updates even when the caller did not opt into OCC.
+func CheckAutoOCC(path, diskHash string) *FeedbackSignal {
+	if autoOCCMode == "off" || diskHash == "" {
+		return OK()
+	}
+	globalSession.mu.Lock()
+	known, hasKnown := globalSession.knownHash[path]
+	lastRead, hasRead := globalSession.lastRead[path]
+	globalSession.mu.Unlock()
+
+	if !hasKnown || !hasRead || time.Since(lastRead) > 10*time.Minute {
+		return OK()
+	}
+	if known == diskHash {
+		return OK()
+	}
+	return &FeedbackSignal{
+		Status:  FeedbackWarn,
+		Pattern: PatternExternalChange,
+		BlockOp: autoOCCMode == "block",
+		Message: fmt.Sprintf(
+			"file changed on disk since this session last saw it (known hash %s, on-disk %s) — another process may have modified it.",
+			known, diskHash),
+		Suggestion: "Re-read the file with read_file to get the current content (and content_hash) before editing, " +
+			"or pass expected_hash to control concurrency explicitly.",
+	}
 }
 
 // RecordFailedOldText increments the failure counter for an old_text on a path.
