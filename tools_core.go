@@ -127,6 +127,36 @@ func computeFileOCCHash(path string) (string, bool) {
 	return fmt.Sprintf("%08x", h.Sum32()), true
 }
 
+// editStructured builds the structured payload returned alongside the text
+// response of an edit op (new point 3). Clients that understand structuredContent
+// read counts, backup IDs, warnings and the post-edit content_hash from here
+// instead of regex-scraping the text; naive clients still get the text fallback.
+func editStructured(path string, r *core.EditResult) map[string]any {
+	m := map[string]any{
+		"path":          path,
+		"replacements":  r.ReplacementCount,
+		"lines_added":   r.LinesAdded,
+		"lines_removed": r.LinesRemoved,
+		"total_lines":   r.TotalLines,
+	}
+	if r.NewHash != "" {
+		m["content_hash"] = r.NewHash
+	}
+	if r.BackupID != "" {
+		m["backup_id"] = r.BackupID
+	}
+	if r.RiskWarning != "" {
+		m["risk_warning"] = r.RiskWarning
+	}
+	if r.StructureWarning != "" {
+		m["structure_warning"] = r.StructureWarning
+	}
+	if r.Integrity != nil {
+		m["integrity"] = r.Integrity.Verification
+	}
+	return m
+}
+
 // diffFormatArg reads the optional diff_format argument (point 1). Empty string
 // means "auto" — see core.RenderDiff for the supported values.
 func diffFormatArg(args map[string]interface{}) string {
@@ -788,7 +818,7 @@ func registerCoreTools(reg *toolRegistry) {
 				if result.StructureWarning != "" {
 					msg += "\n" + result.StructureWarning
 				}
-				return mcp.NewToolResultText(msg), nil
+				return mcp.NewToolResultStructured(editStructured(path, result), msg), nil
 			}
 			msg := fmt.Sprintf("Deleted lines %d-%d from %s\nLines removed: %d\nTotal lines now: %d",
 				startLine, endLine, path, result.LinesRemoved, result.TotalLines)
@@ -798,7 +828,7 @@ func registerCoreTools(reg *toolRegistry) {
 			if result.StructureWarning != "" {
 				msg += "\n" + result.StructureWarning
 			}
-			return mcp.NewToolResultText(msg), nil
+			return mcp.NewToolResultStructured(editStructured(path, result), msg), nil
 		}
 
 		// ---- MODE: replace (default) with optional occurrence ----
@@ -982,7 +1012,7 @@ func registerCoreTools(reg *toolRegistry) {
 			if unifiedDiff != "" {
 				msg += "\n" + unifiedDiff
 			}
-			return mcp.NewToolResultText(msg), nil
+			return mcp.NewToolResultStructured(editStructured(path, result), msg), nil
 		}
 
 		// Verbose format: single line summary + optional sections
@@ -1073,7 +1103,7 @@ func registerCoreTools(reg *toolRegistry) {
 			core.SetIntegrityStatus(ctx, result.Integrity.Verification, result.Integrity.Warning)
 		}
 
-		return mcp.NewToolResultText(msg), nil
+		return mcp.NewToolResultStructured(editStructured(path, result), msg), nil
 	})
 	reg.addTool(editFileTool, reg.editFileHandler)
 }

@@ -2,6 +2,8 @@ package core
 
 import (
 	"fmt"
+	"go/parser"
+	"go/token"
 	"path/filepath"
 	"strings"
 )
@@ -139,4 +141,55 @@ func CheckBalanceDelta(oldContent, newContent, path string) string {
 
 	return "⚠ possible structural imbalance after edit: " + strings.Join(issues, ", ") +
 		". The file was balanced before this edit but is not now — an anchor may have been off. Verify the file before building."
+}
+
+// CheckStructureDelta runs the best available post-edit structural check for the
+// file type and returns a non-blocking warning (or "" when clean):
+//   - .go  → a real Go parse (go/parser), which catches far more than brace
+//     balance (missing keywords, bad tokens, dangling exprs) for free in-process.
+//   - other brace languages → the lexical brace-balance delta.
+//
+// Both follow the DELTA principle: only warn when the OLD content was valid and
+// the NEW content is not, so pre-existing breakage never triggers a false alarm.
+// This is the single entry point used by EditFile / MultiEdit / DeleteLineRange.
+func CheckStructureDelta(oldContent, newContent, path string) string {
+	if strings.EqualFold(filepath.Ext(path), ".go") {
+		return CheckGoSyntax(oldContent, newContent, path)
+	}
+	return CheckBalanceDelta(oldContent, newContent, path)
+}
+
+// CheckGoSyntax parses newContent as Go and returns a warning if it fails to
+// parse while oldContent parsed (delta). Pure stdlib (go/parser + go/token), in
+// process, no external toolchain — complements `go vet`/`go build` by catching
+// the error at edit time instead of in the build cycle. Returns "" for non-.go
+// paths. Warning only; never blocks.
+func CheckGoSyntax(oldContent, newContent, path string) string {
+	if !strings.EqualFold(filepath.Ext(path), ".go") {
+		return ""
+	}
+	// Delta: if the file didn't parse before the edit, the edit didn't introduce
+	// the breakage — stay silent (e.g. a partial/generated file under repair).
+	if parseGoError(oldContent, path) != "" {
+		return ""
+	}
+	if msg := parseGoError(newContent, path); msg != "" {
+		return "⚠ Go syntax error introduced by this edit: " + msg +
+			". The file parsed before this edit but no longer does — verify before building."
+	}
+	return ""
+}
+
+// parseGoError returns the first parse error message for Go source, or "" if it
+// parses. SkipObjectResolution keeps it fast (we only care about syntax).
+func parseGoError(content, path string) string {
+	name := filepath.Base(path)
+	if name == "" || name == "." {
+		name = "src.go"
+	}
+	fset := token.NewFileSet()
+	if _, err := parser.ParseFile(fset, name, content, parser.SkipObjectResolution); err != nil {
+		return err.Error()
+	}
+	return ""
 }

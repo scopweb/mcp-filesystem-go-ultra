@@ -15,6 +15,16 @@ import (
 	"github.com/mcp/filesystem-ultra/mcp"
 )
 
+// contentHashFNV returns the FNV-1a (8 hex) hash of s — the same OCC token that
+// read_file surfaces and edit_file/multi_edit validate via expected_hash. Used
+// to stamp the post-edit hash onto results so callers can chain edits without
+// re-reading (new point 1).
+func contentHashFNV(s string) string {
+	h := fnv.New32a()
+	h.Write([]byte(s))
+	return fmt.Sprintf("%08x", h.Sum32())
+}
+
 // EditResult represents file edit operation results
 type EditResult struct {
 	ModifiedContent  string
@@ -32,6 +42,7 @@ type EditResult struct {
 	Analysis         *ChangeAnalysis      // Full change analysis for AI visibility (plan mode style)
 	Integrity        *FileIntegrityResult // Auto-verification result for HIGH/CRITICAL edits
 	StructureWarning string               // Non-blocking warning when an edit introduces a delimiter imbalance ({}/()/[]) — point 2
+	NewHash          string               // FNV-1a content_hash of the file AFTER this edit — lets callers chain expected_hash without re-reading (new point 1)
 }
 
 // SearchMatch represents a text search match
@@ -268,13 +279,17 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 		}
 	}
 
-	// Point 2: post-edit structural check (delta brace balance). Auto-runs for
-	// brace-based source files; warning only, never blocks. Annotates the audit
-	// so the imbalance is visible in operations.jsonl / the dashboard.
-	if warn := CheckBalanceDelta(string(content), finalContent, path); warn != "" {
+	// Point 2 / AST-Go: post-edit structural check. Auto-runs for source files
+	// (real Go parse for .go, brace-balance delta otherwise); warning only,
+	// never blocks. Annotates the audit so it's visible in operations.jsonl.
+	if warn := CheckStructureDelta(string(content), finalContent, path); warn != "" {
 		result.StructureWarning = warn
 		SetIntegrityStatus(ctx, "WARNING", warn)
 	}
+
+	// New point 1: stamp the post-edit content_hash so the caller can chain the
+	// next edit's expected_hash without a re-read.
+	result.NewHash = contentHashFNV(finalContent)
 
 	return result, nil
 }
@@ -1151,6 +1166,7 @@ type MultiEditResult struct {
 	Analysis         *ChangeAnalysis      `json:"analysis,omitempty"`          // Full change analysis for AI visibility
 	Integrity        *FileIntegrityResult `json:"integrity,omitempty"`         // Auto-verification for HIGH/CRITICAL edits
 	StructureWarning string               `json:"structure_warning,omitempty"` // Delimiter imbalance introduced by these edits — point 2
+	NewHash          string               `json:"new_hash,omitempty"`          // content_hash after these edits — chain expected_hash without re-reading (new point 1)
 }
 
 // MultiEdit performs multiple edits on a single file atomically
@@ -1547,11 +1563,14 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		}
 	}
 
-	// Point 2: post-edit structural check (delta brace balance). Warning only.
-	if warn := CheckBalanceDelta(originalContent, finalContent, path); warn != "" {
+	// Point 2 / AST-Go: post-edit structural check. Warning only.
+	if warn := CheckStructureDelta(originalContent, finalContent, path); warn != "" {
 		result.StructureWarning = warn
 		SetIntegrityStatus(ctx, "WARNING", warn)
 	}
+
+	// New point 1: post-edit content_hash for re-read-free chaining.
+	result.NewHash = contentHashFNV(finalContent)
 
 	return result, nil
 }

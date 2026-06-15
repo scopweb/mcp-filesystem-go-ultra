@@ -132,10 +132,12 @@ func (e *UltraFastEngine) DeleteLineRange(ctx context.Context, path string, star
 		TotalLines:       strings.Count(remaining, "\n") + 1,
 		BackupID:         backupID,
 	}
-	// Point 2: structural check on the resulting file.
-	if warn := CheckBalanceDelta(content, remaining, path); warn != "" {
+	// Point 2 / AST-Go: structural check on the resulting file.
+	if warn := CheckStructureDelta(content, remaining, path); warn != "" {
 		result.StructureWarning = warn
 		SetIntegrityStatus(ctx, "WARNING", warn)
 	}
+	// New point 1: post-edit content_hash for re-read-free chaining.
+	result.NewHash = contentHashFNV(remaining)
 	return removed, result, nil
 }
