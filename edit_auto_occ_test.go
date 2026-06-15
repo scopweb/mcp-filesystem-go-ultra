@@ -53,7 +53,17 @@ func TestEditFile_AutoOCC_WarnsOnExternalChange(t *testing.T) {
 	}
 	text := resultText(t, res)
 	if !strings.Contains(text, "changed on disk") {
-		t.Errorf("expected an external-change warning in the response, got:\n%s", text)
+		t.Errorf("expected an external-change warning in the response text, got:\n%s", text)
+	}
+
+	// Finding 1: the warning must also be in the structured payload, not just
+	// the text fallback, so structured-only clients see it.
+	m, ok := res.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("StructuredContent is %T, want map[string]any", res.StructuredContent)
+	}
+	if ec, _ := m["external_change"].(string); ec == "" || !strings.Contains(ec, "changed on disk") {
+		t.Errorf("expected 'external_change' in structured payload, got: %#v", m)
 	}
 }
 

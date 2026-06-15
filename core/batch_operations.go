@@ -217,7 +217,47 @@ func (m *BatchOperationManager) ExecuteBatch(request BatchRequest) BatchResult {
 	result.Success = result.FailedOps == 0
 	result.ExecutionTime = time.Since(startTime).String()
 
+	// New point 4 fix: refresh the auto-OCC baseline for files this batch wrote,
+	// so a later edit_file isn't falsely flagged as an external change (the batch
+	// is the session's own modification).
+	if result.Success {
+		m.refreshKnownHashes(request.Operations)
+	}
+
 	return result
+}
+
+// refreshKnownHashes updates the auto-OCC baseline for files modified by a batch.
+// Existing files get their new on-disk hash recorded; removed/moved-away files
+// have their baseline cleared. Without this, a file the session had read and
+// then modified via batch would wrongly trip auto-OCC on the next edit_file.
+func (m *BatchOperationManager) refreshKnownHashes(ops []FileOperation) {
+	record := func(p string) {
+		if p == "" {
+			return
+		}
+		if data, err := os.ReadFile(p); err == nil {
+			RecordWriteHash(NormalizePath(p), contentHashFNV(string(data)))
+		} else {
+			InvalidateKnownHash(NormalizePath(p))
+		}
+	}
+	for _, op := range ops {
+		switch op.Type {
+		case "write", "edit", "search_and_replace":
+			record(op.Path)
+		case "extract":
+			record(op.Source)
+			record(op.Destination)
+		case "copy":
+			record(op.Destination)
+		case "move":
+			InvalidateKnownHash(NormalizePath(op.Source))
+			record(op.Destination)
+		case "delete":
+			InvalidateKnownHash(NormalizePath(op.Path))
+		}
+	}
 }
 
 // validateOperations valida que todas las operaciones sean ejecutables
