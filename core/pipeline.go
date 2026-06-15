@@ -202,6 +202,13 @@ func (pe *PipelineExecutor) Execute(ctx context.Context, request PipelineRequest
 		finalSuccess = true // At least some steps succeeded
 	}
 
+	// New point 4: refresh the auto-OCC baseline for files this pipeline wrote
+	// (skip dry-run — nothing changed), so the session's own pipeline edits
+	// aren't later flagged as external changes by edit_file.
+	if !request.DryRun && finalSuccess {
+		RefreshKnownHashes(affectedFiles)
+	}
+
 	return &PipelineResult{
 		Name:             request.Name,
 		Success:          finalSuccess,
@@ -1208,6 +1215,13 @@ func (pe *PipelineExecutor) executeParallelPath(ctx context.Context, request Pip
 	finalSuccess := allSuccess
 	if !request.StopOnError && completedSteps > 0 {
 		finalSuccess = true
+	}
+
+	// New point 4: refresh the auto-OCC baseline for files this pipeline wrote
+	// (skip dry-run), so the session's own pipeline edits aren't later flagged
+	// as external changes.
+	if !request.DryRun && finalSuccess {
+		RefreshKnownHashes(affectedFiles)
 	}
 
 	pResult := &PipelineResult{

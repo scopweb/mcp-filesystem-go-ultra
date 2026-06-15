@@ -1,14 +1,14 @@
 module github.com/mcp/filesystem-ultra
 
-go 1.26.3
+go 1.26.4
 
 require (
 	github.com/allegro/bigcache/v3 v3.1.0
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/mark3labs/mcp-go v0.54.0
-	github.com/panjf2000/ants/v2 v2.12.0
+	github.com/mark3labs/mcp-go v0.54.1
+	github.com/panjf2000/ants/v2 v2.12.1
 	github.com/patrickmn/go-cache v2.1.0+incompatible
-	golang.org/x/sync v0.20.0
+	golang.org/x/sync v0.21.0
 )
 
 require (

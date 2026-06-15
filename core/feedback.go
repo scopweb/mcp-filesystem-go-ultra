@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -134,6 +135,30 @@ func InvalidateKnownHash(path string) {
 	defer globalSession.mu.Unlock()
 	delete(globalSession.knownHash, path)
 	delete(globalSession.lastRead, path)
+}
+
+// refreshKnownHashPath re-reads a single path and records its current hash as
+// the session baseline, or clears the baseline if the file is gone. Shared by
+// batch and pipeline so a session's own multi-file writes don't later trip
+// auto-OCC as external changes (new point 4).
+func refreshKnownHashPath(path string) {
+	if path == "" {
+		return
+	}
+	if data, err := os.ReadFile(path); err == nil {
+		RecordWriteHash(NormalizePath(path), contentHashFNV(string(data)))
+	} else {
+		InvalidateKnownHash(NormalizePath(path))
+	}
+}
+
+// RefreshKnownHashes refreshes the auto-OCC baseline for a set of paths a
+// session-initiated operation just wrote (batch or pipeline). Files that no
+// longer exist have their baseline cleared.
+func RefreshKnownHashes(paths []string) {
+	for _, p := range paths {
+		refreshKnownHashPath(p)
+	}
 }
 
 // CheckAutoOCC compares the file's current on-disk hash against the hash the
