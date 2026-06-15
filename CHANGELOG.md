@@ -1,5 +1,35 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.19] - 2026-06-15
+
+### Close the last auto-OCC gap: pipeline writes refresh the baseline
+
+The 4.5.18 follow-up: `execute_pipeline` (separate from `ExecuteBatch`) didn't
+refresh the auto-OCC baseline, so a file the session read and then modified via
+a pipeline could falsely trip "external change" on a later `edit_file`. The
+pipeline now refreshes the baseline for its affected files on successful,
+non-dry-run completion — same guarantee as batch.
+
+The refresh logic is consolidated into a shared `RefreshKnownHashes` helper used
+by both batch and pipeline (DRY).
+
+- `core/feedback.go`: `RefreshKnownHashes` + `refreshKnownHashPath` (shared helper).
+- `core/batch_operations.go`: `refreshKnownHashes` now delegates to the shared helper.
+- `core/pipeline.go`: sequential and parallel `Execute` call `RefreshKnownHashes(affectedFiles)` when not dry-run and successful.
+
+**Tests added:**
+- `core/pipeline_auto_occ_test.go` — a pipeline edit refreshes the baseline (no false positive on a later edit).
+
+**Verification:**
+
+```bash
+go vet ./...
+go test -timeout 90s ./...
+```
+
+**Plan fully closed:** feedback items 1–6, editor-parity points 1–4, the Go AST
+validator, and all auto-OCC follow-ups (batch + pipeline) are shipped and tested.
+
 ## [4.5.18] - 2026-06-15
 
 ### Two fixes from dogfooding the 4.5.17 build live
