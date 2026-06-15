@@ -191,6 +191,7 @@ Key flags parsed in `main.go`:
 - `--risk-threshold-medium` / `--risk-threshold-high` - Risk thresholds
 - `--debug` / `--log-level` - Logging (debug, info, warn, error — configures slog JSON handler)
 - `--log-dir` - Directory for audit logs and metrics snapshots (enables operation logging)
+- `--auto-occ` - Automatic optimistic-concurrency on edits without an explicit `expected_hash`: `off` | `warn` (default) | `block`. When the file changed on disk since the session last read/wrote it, `warn` appends a non-blocking notice, `block` rejects the edit. The session tracks the hash of each read AND its own writes, so it only flags *external* changes (never the session's own edits).
 
 ## Logging & Dashboard
 

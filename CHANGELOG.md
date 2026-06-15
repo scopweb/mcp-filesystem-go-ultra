@@ -1,5 +1,52 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.17] - 2026-06-15
+
+### Automatic optimistic-concurrency on edits (new point 4 — completes the plan)
+
+`edit_file` already supported explicit OCC via `expected_hash`. This adds an
+**automatic** layer: the session remembers the `content_hash` it last saw for
+each file (from a read OR its own write/edit), and before an edit that does not
+pass `expected_hash`, it compares the current on-disk hash against that baseline.
+If the file changed on disk since the session last saw it — i.e. another process
+modified it — it surfaces a warning (or blocks, configurable). This catches lost
+updates even when the caller never opted into OCC.
+
+**Key correctness property:** the baseline is updated on the session's **own**
+writes too (using the post-edit `content_hash` from v4.5.15), so consecutive
+edits never false-positive — only genuinely external changes do.
+
+**Mode (CLI `--auto-occ`):** `off` | `warn` (default) | `block`. `warn` appends a
+non-blocking notice to the edit response; `block` rejects the edit with a clear
+error. Only fires when the baseline is fresh (read/written within 10 min).
+
+- `core/feedback.go`: `knownHash` in the session state; `RecordReadHash`,
+  `RecordWriteHash`, `CheckAutoOCC`, `SetAutoOCCMode`; `PatternExternalChange`.
+- `tools_core.go`: `read_file` records the hash on every read path; `edit_file`
+  runs `CheckAutoOCC` when no `expected_hash` is given (reusing the on-disk hash
+  it already computes) and records its own write hash. delete_range/replace_range
+  record their write hash too.
+- `tools_batch.go`: `multi_edit` records its write hash.
+- `main.go`: `--auto-occ` flag → `core.SetAutoOCCMode`.
+
+**Tests added:**
+- `core/auto_occ_test.go` — `CheckAutoOCC` logic (external change vs own write, mode block/off, unknown-mode fallback).
+- `edit_auto_occ_test.go` — end-to-end: read → external change → edit warns (warn mode, not blocked); consecutive own edits don't false-positive.
+
+**Verification:**
+
+```bash
+go vet ./...
+go test -timeout 90s ./...   # full suite green
+```
+
+**Plan complete:** `docs/PLAN-next-improvements.md` items 1–4 and the Go AST
+validator are all shipped (v4.5.15–4.5.17).
+
+> Note: `autoOCCMode` is a package-level variable set once at startup; it is not
+> mutex-guarded. Fine in practice (set before serving), but if a future change
+> mutates it at runtime under concurrency, guard it.
+
 ## [4.5.16] - 2026-06-15
 
 ### `edit_file` mode `replace_range` (new point 2)

@@ -289,6 +289,7 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			// Point 3: surface the whole-file OCC hash for base64 reads too.
 			if contentHash, ok := computeFileOCCHash(core.NormalizePath(path)); ok {
+				core.RecordReadHash(core.NormalizePath(path), contentHash) // new point 4
 				return mcp.NewToolResultStructured(map[string]any{"content_hash": contentHash}, body), nil
 			}
 			return mcp.NewToolResultText(body), nil
@@ -316,6 +317,7 @@ func registerCoreTools(reg *toolRegistry) {
 			// caller can use edit_file/multi_edit expected_hash without first
 			// pulling the entire file into context.
 			if contentHash, ok := computeFileOCCHash(core.NormalizePath(path)); ok {
+				core.RecordReadHash(core.NormalizePath(path), contentHash) // new point 4
 				return mcp.NewToolResultStructured(map[string]any{"content_hash": contentHash}, content), nil
 			}
 			return mcp.NewToolResultText(content), nil
@@ -351,6 +353,7 @@ func registerCoreTools(reg *toolRegistry) {
 		h := fnv.New32a()
 		h.Write([]byte(content))
 		contentHash := fmt.Sprintf("%08x", h.Sum32())
+		core.RecordReadHash(core.NormalizePath(path), contentHash) // new point 4: track for auto-OCC
 
 		// Apply truncation if explicitly requested
 		if maxLines > 0 || mode != "all" {
@@ -806,6 +809,7 @@ func registerCoreTools(reg *toolRegistry) {
 			if result.BackupID != "" {
 				engine.SetCurrentBackupID(path, result.BackupID)
 			}
+			core.RecordWriteHash(core.NormalizePath(path), result.NewHash) // new point 4
 			if engine.IsCompactMode() {
 				msg := fmt.Sprintf("R %s | lines %d-%d | +%d-%d | %dL", path, startLine, endLine, result.LinesAdded, result.LinesRemoved, result.TotalLines)
 				if result.BackupID != "" {
@@ -852,6 +856,7 @@ func registerCoreTools(reg *toolRegistry) {
 			if result.BackupID != "" {
 				engine.SetCurrentBackupID(path, result.BackupID)
 			}
+			core.RecordWriteHash(core.NormalizePath(path), result.NewHash) // new point 4
 			if engine.IsCompactMode() {
 				msg := fmt.Sprintf("D %s | lines %d-%d (-%d) | %dL", path, startLine, endLine, result.LinesRemoved, result.TotalLines)
 				if result.BackupID != "" {
@@ -949,23 +954,43 @@ func registerCoreTools(reg *toolRegistry) {
 		oldContentRaw, _ := os.ReadFile(normPath)
 		oldContentStr := string(oldContentRaw)
 
-		// Improvement B3: stale-edit protection. If the caller passed
-		// expected_hash (the hash returned by the prior read_file), verify
-		// the file hasn't changed. Mismatch → return clear error so the
-		// model can re-read instead of silently overwriting.
+		// Compute the current on-disk hash once — used by both explicit OCC
+		// (expected_hash, B3) and automatic OCC (new point 4).
+		hh := fnv.New32a()
+		hh.Write(oldContentRaw)
+		actualHash := fmt.Sprintf("%08x", hh.Sum32())
+
+		expectedHash := ""
 		if args != nil {
-			if expectedHash, ok := args["expected_hash"].(string); ok && expectedHash != "" {
-				h := fnv.New32a()
-				h.Write(oldContentRaw)
-				actualHash := fmt.Sprintf("%08x", h.Sum32())
-				if actualHash != expectedHash {
-					core.SetError(ctx, fmt.Sprintf(
-						"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file before editing.",
-						expectedHash, actualHash))
-					return mcp.NewToolResultError(fmt.Sprintf(
-						"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file with read_file to get the current content_hash, then retry.",
-						expectedHash, actualHash)), nil
+			if eh, ok := args["expected_hash"].(string); ok {
+				expectedHash = eh
+			}
+		}
+
+		if expectedHash != "" {
+			// Improvement B3: explicit stale-edit protection. Mismatch → hard
+			// error so the model re-reads instead of silently overwriting.
+			if actualHash != expectedHash {
+				core.SetError(ctx, fmt.Sprintf(
+					"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file before editing.",
+					expectedHash, actualHash))
+				return mcp.NewToolResultError(fmt.Sprintf(
+					"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file with read_file to get the current content_hash, then retry.",
+					expectedHash, actualHash)), nil
+			}
+		}
+		autoOCCWarn := ""
+		if expectedHash == "" {
+			if occSignal := core.CheckAutoOCC(normPath, actualHash); occSignal.Status != core.FeedbackOK {
+				// New point 4: the caller didn't opt into expected_hash, but the
+				// file changed on disk since this session last saw it. Warn by
+				// default; block only when --auto-occ=block.
+				core.SetFeedback(ctx, occSignal)
+				if occSignal.BlockOp {
+					return mcp.NewToolResultError(core.FormatFeedback(occSignal,
+						"edit_file blocked: file changed on disk since this session last read it")), nil
 				}
+				autoOCCWarn = "⚠ " + occSignal.Message
 			}
 		}
 
@@ -983,6 +1008,9 @@ func registerCoreTools(reg *toolRegistry) {
 		// Successful edit — reset failure counter and record read
 		core.ResetFailedOldText(path, oldText)
 		core.RecordRead(normPath)
+		// New point 4: track our own write so auto-OCC won't flag it as an
+		// external change on the next edit.
+		core.RecordWriteHash(normPath, result.NewHash)
 
 		// Update backup chain for undo step-through
 		if result.BackupID != "" {
@@ -1054,6 +1082,9 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			if result.StructureWarning != "" {
 				msg += "\n" + result.StructureWarning
+			}
+			if autoOCCWarn != "" {
+				msg += "\n" + autoOCCWarn
 			}
 			if unifiedDiff != "" {
 				msg += "\n" + unifiedDiff
@@ -1135,6 +1166,10 @@ func registerCoreTools(reg *toolRegistry) {
 		// Point 2: structural balance warning (delimiter imbalance introduced by this edit)
 		if result.StructureWarning != "" {
 			msg += "\n" + result.StructureWarning
+		}
+		// New point 4: auto-OCC external-change warning (warn mode)
+		if autoOCCWarn != "" {
+			msg += "\n" + autoOCCWarn
 		}
 
 		// Annotate audit log with backup chain and integrity info
