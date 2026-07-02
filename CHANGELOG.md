@@ -1,5 +1,58 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.21] - 2026-07-02
+
+### fix(git): restore no longer fails with cryptic `exec: Stderr already set`
+
+`git(action:"restore", ...)` on Windows would surface the misleading
+`exec: Stderr already set` error — instead of the actual `git restore`
+error message — whenever the underlying `git` invocation exited non-zero.
+This made it impossible to recover from a bad call (e.g. invalid path)
+via the MCP: the user would see a Go-internal error and have no clue what
+went wrong.
+
+**Root cause:** `execGitCommand` (Windows branch) used `cmd.CombinedOutput()`
+in both the primary path (`git` direct) and the fallback path (`cmd /c git`).
+When the primary call exited non-zero, control fell through to the cmd.exe
+fallback, which assigned `cmd2.Stderr = &stderr` and then called
+`cmd2.CombinedOutput()`. `CombinedOutput` requires `Stdout`/`Stderr` to be
+**unset** because it reassigns them internally to its own buffers — but
+the pre-assignment of `Stderr` caused it to fail with the cryptic error,
+**and the real git error had already been swallowed** by then.
+
+**Fix:** Switched to `cmd.Run()` with caller-owned `Stdout`/`Stderr` buffers
+in all three branches (Windows primary, Windows fallback, Unix). This
+eliminates the `CombinedOutput` / pre-assigned-field collision entirely
+and lets the function return the real git error verbatim when the command
+fails.
+
+**Reproduction (pre-fix):**
+
+```js
+git(action:"restore", staged:true, force:true, paths:'[":/"]')
+// → "git restore failed: exec: Stderr already set:"   ← WRONG, hides real error
+```
+
+**Post-fix:**
+
+```js
+git(action:"restore", staged:true, force:true, paths:'[":/"]')
+// → "exit status 1"  (or the real git stderr, e.g. 'fatal: pathspec ...')
+```
+
+**Files changed:**
+- `tools_git.go` — `execGitCommand` rewritten with `cmd.Run()` + buffers
+  (+33 / −12 lines, single function).
+
+**Smoke tests (all green):**
+1. `git restore --staged -- :/` — no longer crashes
+2. `git status --porcelain` — ok, 3 files
+3. `git log -3 --oneline` — ok, 3 commits
+4. `git diff --cached` — ok, empty
+5. `git restore --staged -- tools_git.go` — ok, no-op
+6. Fallback path (invalid cwd) — `chdir` error, not `Stderr already set`
+7. Invalid subcommand — `exit 1` + real git message
+
 ## [4.5.20] - 2026-07-02
 
 ### fix(git): git add respects `paths` and refuses silent `-A`
