@@ -1,5 +1,48 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.20] - 2026-07-02
+
+### fix(git): git add respects `paths` and refuses silent `-A`
+
+The `git` tool's `add` action silently fell through to `git add -A` whenever
+called without an explicit scope — even when the caller passed a `paths` JSON
+array. Combined with a subsequent `git(action:"commit", ...)`, a single bad
+call could stage and commit the entire repository without warning.
+
+**Reproduction (pre-fix):**
+
+```js
+git(action:"add", path:".../Camio",
+    paths:'["Program.cs","CHANGELOG.md"]')
+// → "OK: staged 336 file(s)"   ← WRONG: paths ignored, -A applied
+```
+
+**New scope resolution (priority order, no silent fallbacks):**
+
+| Caller provides              | Command executed            |
+|------------------------------|-----------------------------|
+| `paths:'["a.go","b.go"]'`    | `git add a.go b.go`         |
+| `path:"a.go"`                | `git add a.go`              |
+| `all:true`                   | `git add -A` (explicit opt-in) |
+| none of the above            | **error**: refuses silently-defaulting to `-A` |
+
+The `paths` parameter (already declared in the schema since v4.5.2 but never
+parsed) is now read in `gitAdd` with the same JSON-array shape used by
+`gitRestore`. JSON parse errors are caught before any `git` invocation.
+
+**Files changed:**
+- `tools_git.go` — `gitAdd` rewritten with `switch` on scope priority + explicit `default` error branch.
+  (+33 / −9 lines)
+
+**Not yet fixed in this release (still open):**
+- **Bug 2:** `git(action:"restore", ...)` on Windows fails with `exec: Stderr
+  already set` when the underlying `git` exits non-zero (e.g. invalid path).
+  Reproduction confirmed; root cause is `CombinedOutput()` colliding with a
+  pre-assigned `cmd2.Stderr` in the cmd.exe fallback of `execGitCommand`.
+- **Bug 3:** validation order in `gitRestore` is incoherent — gate `force:true`
+  runs before checking required `paths`/`source`, and `restore --staged`
+  (non-destructive) still demands `force:true`.
+
 ## [4.5.19] - 2026-06-15
 
 ### Close the last auto-OCC gap: pipeline writes refresh the baseline
