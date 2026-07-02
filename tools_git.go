@@ -301,21 +301,45 @@ func gitLog(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 }
 
 // gitAdd stages files
+// Scope resolution (priority order, no silent fallbacks):
+//  1. paths (JSON array) — stage exactly those files
+//  2. path (string)      — stage that single file
+//  3. all:true           — stage entire working tree (-A)
+//  4. dry_run:true       — preview whatever scope was selected above
+//  5. none of the above  — explicit error, NEVER default to -A
 func gitAdd(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	all, _ := args["all"].(bool)
 	dryRun, _ := args["dry_run"].(bool)
+	pathsStr, _ := args["paths"].(string)
+	filePath, _ := args["path"].(string)
+
+	var paths []string
+	if pathsStr != "" {
+		if err := json.Unmarshal([]byte(pathsStr), &paths); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid paths JSON: %v", err)), nil
+		}
+	}
 
 	var cmdArgs []string
-	if all {
-		cmdArgs = []string{"add", "-A"}
-	} else {
-		// Add specific files if provided, otherwise stage all
-		filePath, _ := args["path"].(string)
-		if filePath != "" {
-			cmdArgs = []string{"add", core.NormalizePath(filePath)}
-		} else {
-			cmdArgs = []string{"add", "-A"}
+	switch {
+	case len(paths) > 0:
+		// Explicit list — highest priority, exact scope
+		normalized := make([]string, len(paths))
+		for i, p := range paths {
+			normalized[i] = core.NormalizePath(p)
 		}
+		cmdArgs = append([]string{"add"}, normalized...)
+	case filePath != "":
+		// Single path — second priority
+		cmdArgs = []string{"add", core.NormalizePath(filePath)}
+	case all:
+		// Explicit opt-in to stage entire tree
+		cmdArgs = []string{"add", "-A"}
+	default:
+		// No scope specified — refuse silently-defaulting to -A
+		return mcp.NewToolResultError(
+			"git add requires one of: paths (JSON array), path (string), or all:true. " +
+				"Refusing to stage entire repo without explicit scope."), nil
 	}
 
 	// Pre-write hook for add operation
