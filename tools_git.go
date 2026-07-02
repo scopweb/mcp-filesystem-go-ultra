@@ -785,38 +785,59 @@ func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 	return mcp.NewToolResultError(fmt.Sprintf("Unknown branch_action: %s. Valid: list, create, delete", branchAction)), nil
 }
 
-// execGitCommand executes a git command in the given directory
+// execGitCommand executes a git command in the given directory.
+//
+// Implementation note: we use cmd.Run() with explicit Stdout/Stderr buffers
+// instead of cmd.CombinedOutput(). Reason: CombinedOutput() internally
+// re-assigns cmd.Stdout and cmd.Stderr to its own buffers and returns the
+// merged stream — but it requires those fields to be unset when called.
+// On Windows, the cmd.exe fallback in particular would pre-assign Stderr
+// (and CombinedOutput would then panic with "exec: Stderr already set")
+// whenever the primary `git` invocation exited non-zero and control fell
+// through to the cmd.exe branch. Run() with caller-owned buffers avoids
+// the collision entirely and also lets us build a structured error message
+// that distinguishes stdout from stderr.
 func execGitCommand(dir, command string, args ...string) (string, error) {
 	if runtime.GOOS == "windows" {
 		// Try git directly first (safest)
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
-		output, err := cmd.CombinedOutput()
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
 		if err == nil {
-			return string(output), nil
+			return stdout.String(), nil
 		}
 
-		// Safer fallback: pass arguments properly instead of string concatenation
+		// Safer fallback: pass arguments properly instead of string concatenation.
 		// This prevents command injection even if paths contain special characters.
 		cmdArgs := append([]string{"/c", "git"}, args...)
-		var stderr bytes.Buffer
 		cmd2 := exec.Command("cmd", cmdArgs...)
 		cmd2.Dir = dir
-		cmd2.Stderr = &stderr
-		output, err = cmd2.CombinedOutput()
-		return string(output), fmt.Errorf("%v: %s", err, stderr.String())
+		var stdout2, stderr2 bytes.Buffer
+		cmd2.Stdout = &stdout2
+		cmd2.Stderr = &stderr2
+		err = cmd2.Run()
+		out := stdout2.Bytes()
+		if err != nil {
+			out = append(stdout2.Bytes(), stderr2.Bytes()...)
+		}
+		return string(out), err
 	}
 
 	// Unix
 	cmd := exec.Command(command, args...)
 	cmd.Dir = dir
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	output, err := cmd.CombinedOutput()
+	err := cmd.Run()
 	if err != nil {
-		return string(output), fmt.Errorf("%v: %s", err, stderr.String())
+		return string(append(stdout.Bytes(), stderr.Bytes()...)),
+			fmt.Errorf("%v: %s", err, stderr.String())
 	}
-	return string(output), nil
+	return stdout.String(), nil
 }
 
 // isDestructiveGitAction returns true for git operations that can cause data loss
