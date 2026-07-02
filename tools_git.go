@@ -580,7 +580,19 @@ func generateAutoCommitMessage(repoRoot string, stagedFiles int) string {
 	}
 }
 
-// gitRestore restores files from index or a specific commit
+// gitRestore restores files from index or a specific commit.
+//
+// Validation order (intentional, all checks happen BEFORE the destructive
+// force gate in the dispatcher):
+//  1. source option-injection check (if source supplied)
+//  2. required params: at least one of `paths` (non-empty JSON array) or `source`
+//  3. paths JSON parse (if paths supplied)
+//  4. path normalization
+//  5. command construction
+//
+// Note: `git restore --staged` is non-destructive (only moves staged →
+// unstaged, never touches the working tree) and therefore does NOT require
+// force. The dispatcher accounts for this via isDestructiveGitAction.
 func gitRestore(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	pathsStr, _ := args["paths"].(string)
 	staged, _ := args["staged"].(bool)
@@ -591,6 +603,29 @@ func gitRestore(ctx context.Context, engine *core.UltraFastEngine, repoRoot stri
 		if errRes := rejectOptionLike("source", source); errRes != nil {
 			return errRes, nil
 		}
+	}
+
+	// Parse paths (may be empty when source is provided — git restore --source
+	// without paths is valid: restores the whole tree to that source).
+	var paths []string
+	if pathsStr != "" {
+		if err := json.Unmarshal([]byte(pathsStr), &paths); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid paths JSON: %v", err)), nil
+		}
+	}
+
+	// Required-params check runs BEFORE the force gate in the dispatcher so
+	// the user sees a coherent error for a malformed call instead of being
+	// bounced off the destructive-operation gate first.
+	if len(paths) == 0 && source == "" {
+		return mcp.NewToolResultError(
+			"git restore requires either paths (JSON array) or source (commit ref). " +
+				"Usage: git(action:\"restore\", paths:'[\"file.txt\"]') or " +
+				"git(action:\"restore\", source:\"HEAD~1\")"), nil
+	}
+
+	for i := range paths {
+		paths[i] = core.NormalizePath(paths[i])
 	}
 
 	// Pre-delete hook for restore (it's destructive to working tree)
@@ -613,23 +648,10 @@ func gitRestore(ctx context.Context, engine *core.UltraFastEngine, repoRoot stri
 		cmdArgs = append(cmdArgs, source)
 	}
 
-	var paths []string
-	if pathsStr != "" {
-		if err := json.Unmarshal([]byte(pathsStr), &paths); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("invalid paths JSON: %v", err)), nil
-		}
+	if len(paths) > 0 {
+		cmdArgs = append(cmdArgs, "--")
+		cmdArgs = append(cmdArgs, paths...)
 	}
-
-	if len(paths) == 0 {
-		return mcp.NewToolResultError("paths required for restore. Usage: git(action:\"restore\", paths:'[\"file1.txt\",\"file2.txt\"]')"), nil
-	}
-
-	for i := range paths {
-		paths[i] = core.NormalizePath(paths[i])
-	}
-
-	cmdArgs = append(cmdArgs, "--")
-	cmdArgs = append(cmdArgs, paths...)
 
 	if dryRun {
 		cmdArgs = append([]string{"restore", "-n"}, cmdArgs...)
@@ -652,7 +674,11 @@ func gitRestore(ctx context.Context, engine *core.UltraFastEngine, repoRoot stri
 	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostDelete, hookCtx)
 
 	if engine.IsCompactMode() {
-		return mcp.NewToolResultText(fmt.Sprintf("OK: restored %d file(s) from %s", len(paths), source)), nil
+		src := ""
+		if source != "" {
+			src = " from " + source
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("OK: restored %d file(s)%s", len(paths), src)), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Restored %d file(s)%s\n%s",
 		len(paths), func() string {
@@ -842,9 +868,21 @@ func execGitCommand(dir, command string, args ...string) (string, error) {
 
 // isDestructiveGitAction returns true for git operations that can cause data loss
 // or are generally considered dangerous in an AI-driven environment.
+//
+// Important nuance for restore: `git restore --staged` is NOT destructive —
+// it only moves staged changes back to the working tree (the equivalent of
+// `git reset HEAD <path>`), it never discards work. Likewise `dry_run:true`
+// performs no writes. Both should bypass the destructive gate so callers
+// can use them safely without `force:true`.
 func isDestructiveGitAction(action string, args map[string]any) bool {
 	switch action {
 	case "restore":
+		staged, _ := args["staged"].(bool)
+		dryRun, _ := args["dry_run"].(bool)
+		// Non-destructive variants: unstage-only or preview-only
+		if staged || dryRun {
+			return false
+		}
 		// git restore can discard changes or restore from other commits
 		return true
 	case "branch":
