@@ -1,5 +1,67 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.22] - 2026-07-02
+
+### fix(git): `restore` validation order + `staged`/`dry_run` not destructive
+
+Three usability bugs in `git(action:"restore", ...)`:
+
+**Bug 3a — incoherent validation order.** A malformed call (no `paths`,
+no `source`) returned different errors depending on which flags were
+present:
+- `{}, no force`  → "Destructive git operation 'restore' requires force=true"
+- `{paths:'["x"]'}, force:true` → "paths required for restore"
+
+Same conceptual problem (call missing required scope), two different
+error messages, the second one being outright wrong.
+**Fix:** required-params check now runs first inside `gitRestore`, before
+any hook execution or command construction. The dispatcher gate is
+bypassed when the handler can return a more specific error.
+
+**Bug 3b — `restore --staged` wrongly required `force=true`.**
+`git restore --staged` is non-destructive: it only moves staged changes
+back to the working tree (the equivalent of `git reset HEAD <path>`),
+it never discards work. Forcing the user to pass `force:true` for an
+unstage operation was a false-positive safety gate.
+**Fix:** `isDestructiveGitAction` now returns `false` when `restore` is
+called with `staged:true` OR `dry_run:true`. Both bypass the force gate.
+
+**Bug 3c — `source` alone was rejected.** `git restore --source=HEAD~1`
+with no paths is legitimate: it restores the whole tree to that source.
+The old code required `paths` even when `source` was supplied.
+**Fix:** required-params check now accepts EITHER `paths` (non-empty) OR
+`source`. When both are absent, returns a single coherent error.
+
+**Reproduction matrix (all green):**
+
+| Call                                          | Pre-fix                       | Post-fix                          |
+|-----------------------------------------------|-------------------------------|-----------------------------------|
+| `{}, no force`                                | requires force                | requires paths OR source          |
+| `{paths:'["a.txt"]'}, no force`               | requires force                | requires force (still WT)         |
+| `{staged:true, paths:'["a.txt"]'}, no force`  | requires force (WRONG)        | OK                                |
+| `{dry_run:true, paths:'["a.txt"]'}, no force` | requires force (WRONG)        | OK (preview)                      |
+| `{source:"HEAD~1", force:true}`               | paths required (WRONG)        | OK                                |
+| `{paths:'["malformed'}, force:true`           | paths required                | invalid paths JSON                |
+
+**Additional cleanups:**
+- Hook execution moved after validation (no point running hooks on
+  malformed calls).
+- Path normalization happens once, after JSON parse + required check.
+- Compact-mode response no longer shows `'OK: restored 2 file(s) from '`
+  with a trailing space and empty source.
+
+**Files changed:**
+- `tools_git.go` — `gitRestore` reordered + `isDestructiveGitAction` nuanced
+  (+56 / −18 lines).
+
+**Not fixed in this release (future work):**
+- The `rejectOptionLike("source", ...)` check runs inside `gitRestore`,
+  AFTER the dispatcher gate. So a call like
+  `git(action:"restore", source:"--output=/tmp/x", force:false)` will
+  still hit the destructive-gate error first and never reach the
+  option-injection check. To fix properly, the option-injection check
+  should run before the gate — a separate refactor.
+
 ## [4.5.21] - 2026-07-02
 
 ### fix(git): restore no longer fails with cryptic `exec: Stderr already set`
