@@ -1,5 +1,59 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.23] - 2026-07-02
+
+### fix(git): security audit — restore command construction, add option-injection, branch -d/-D
+
+Security + correctness audit of `tools_git.go`. Four defects found, all fixed.
+Every resulting git invocation was validated against real git (2.34.1).
+
+**🔴 CRITICAL — `restore` never ran the `restore` subcommand (non-dry-run).**
+The `"restore"` token was only prepended inside the `dry_run` branch. A real
+restore executed `git --staged -- file` / `git <source> -- file` (no
+subcommand) which git rejects — so `git(action:"restore")` was broken for
+every non-preview call. **Fix:** `cmdArgs` now starts with `"restore"`
+unconditionally.
+
+**🟠 HIGH — `restore` passed `source` positionally.** `git restore HEAD~1 -- f`
+makes git parse `HEAD~1` as a pathspec (`fatal: pathspec 'HEAD~1' did not
+match`). **Fix:** source is now `--source=<rev>`; source-only restore targets
+the whole tree via an explicit `-- .` pathspec (git refuses source restore
+without a pathspec).
+
+**🟠 HIGH — option injection in `git add`.** File paths were appended without a
+`--` end-of-options separator, so a path like `"-A"`, `"--pathspec-from-file=
+/etc/passwd"`, or `"--renormalize"` was interpreted by git as an *option*
+rather than a filename. **Fix:** `--` separator inserted before all
+user-supplied paths in both the list and single-path branches; the dry-run
+`-n` is now inserted right after `add` (appending it would land after `--`
+and be treated as a pathspec).
+
+**🟡 MEDIUM — `branch delete` safety inversion.** The dispatcher gate required
+`force=true` to delete *any* branch, but `force=true` also escalates `-d`
+(safe: git refuses unmerged) to `-D` (force delete). Net effect: a safe
+delete was impossible — every delete was pushed into the destructive `-D`
+path. **Fix:** `isDestructiveGitAction` no longer gates `branch delete`; a
+plain delete uses `-d` (git's own unmerged guard applies), `force:true`
+opts into `-D`.
+
+**Also fixed — `restore` dry-run never worked.** `git restore` has no `-n`
+or `--dry-run` (both errored "unknown switch"). The preview is now emulated
+with an equivalent `git diff` (`--cached` for staged, `<source>` for source,
+working-tree otherwise) showing exactly what the restore would change.
+
+**Coherence — option-injection guard centralized.** The `rejectOptionLike`
+check for `source`, `branch_name`, and `commit_range` now runs in the
+dispatcher *before* the destructive gate (previously per-handler, after the
+gate). Handler-level checks remain as defense in depth.
+
+**Version:** `serverVersion` bumped 4.5.19 → 4.5.23 (string was stale — lagged
+the 4.5.20/21/22 commits).
+
+**⚠️ Pending:** `go build` + `go test ./...` must be run on Windows — the audit
+sandbox had no Go toolchain. Manual review + real-git command validation done.
+
+---
+
 ## [4.5.22] - 2026-07-02
 
 ### fix(git): `restore` validation order + `staged`/`dry_run` not destructive

@@ -448,6 +448,10 @@ When `--log-dir` is set, each completed step emits a separate audit entry with `
 - Use the exact text from the read result as `old_text`
 - `old_text` must match the file content exactly — it's a literal match, not a regex
 
+**Sobre `STALE_READ` (clarificación 2026-07-02):** `edit_file` puede emitir un aviso `[STALE_READ]` si el archivo no se leyó en esta sesión en los últimos 10 minutos (`core/feedback.go:312-322`). **No bloquea la edición** — la operación procede, simplemente se anota al final del response con prefijo `⚠️`. El propio motor llama `core.RecordRead(normPath)` tras cada `edit_file` exitoso (`tools_core.go:1010`), así que el contador se resetea y **no hace falta re-leer entre ediciones consecutivas** del mismo archivo en una sesión. `multi_edit` ni siquiera ejecuta `CheckEditOp` (`tools_batch.go:64`), así que este aviso solo aplica a `edit_file`. Para detectar cambios **externos** en disco (otro proceso modificó el archivo) usar `expected_hash` o `--auto-occ=block` — ese sí falla duro (`core/feedback.go:189`).
+
+**Sobre nombres de herramientas:** `str_replace` **no** es una tool expuesta por filesystem-ultra (sólo aparece en un comentario, `core/edit_operations.go:1105`, sobre el alias `old_str/new_str` que acepta Claude Desktop). Si `tool_search` carga `str_replace` de otro MCP (ej. `@modelcontextprotocol/server-filesystem`) sin prefijo de servidor, puede operar sobre una raíz distinta y devolver `File not found` aunque el archivo exista en tu `AllowedPaths`. Usar siempre el namespace explícito: `filesystem-ultra:edit_file` o `filesystem-ultra:multi_edit`.
+
 ### 3. batch_operations format
 Supported operation types: `write`, `edit`, `search_and_replace`, `copy`, `move`, `delete`, `create_dir`, `extract`
 
