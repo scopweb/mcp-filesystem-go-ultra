@@ -68,6 +68,19 @@ func registerGitTools(reg *toolRegistry) {
 			return mcp.NewToolResultError("access denied: path outside allowed directories"), nil
 		}
 
+		// Option-injection guard runs BEFORE the destructive gate so an
+		// option-like value (leading '-') is rejected coherently regardless of
+		// force/gate state, rather than depending on each handler checking it
+		// after the gate. Applies to every user-supplied value that reaches git
+		// as a positional argument.
+		for _, f := range []string{"source", "branch_name", "commit_range"} {
+			if v, _ := args[f].(string); v != "" {
+				if errRes := rejectOptionLike(f, v); errRes != nil {
+					return errRes, nil
+				}
+			}
+		}
+
 		// Anti-destructive protection for dangerous git operations
 		if isDestructiveGitAction(action, args) && !getBoolArg(args, "force") {
 			return mcp.NewToolResultError(
@@ -323,15 +336,18 @@ func gitAdd(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 	var cmdArgs []string
 	switch {
 	case len(paths) > 0:
-		// Explicit list — highest priority, exact scope
+		// Explicit list — highest priority, exact scope.
+		// The "--" separator is REQUIRED: without it a path like "-A" or
+		// "--pathspec-from-file=/etc/passwd" would be parsed by git as an
+		// option instead of a filename (option injection).
 		normalized := make([]string, len(paths))
 		for i, p := range paths {
 			normalized[i] = core.NormalizePath(p)
 		}
-		cmdArgs = append([]string{"add"}, normalized...)
+		cmdArgs = append([]string{"add", "--"}, normalized...)
 	case filePath != "":
-		// Single path — second priority
-		cmdArgs = []string{"add", core.NormalizePath(filePath)}
+		// Single path — second priority. "--" guards against option injection.
+		cmdArgs = []string{"add", "--", core.NormalizePath(filePath)}
 	case all:
 		// Explicit opt-in to stage entire tree
 		cmdArgs = []string{"add", "-A"}
@@ -355,7 +371,9 @@ func gitAdd(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 	}
 
 	if dryRun {
-		cmdArgs = append(cmdArgs, "-n")
+		// Insert "-n" right after "add" — appending at the end would place it
+		// after the "--" separator, where git treats it as a pathspec.
+		cmdArgs = append(cmdArgs[:1], append([]string{"-n"}, cmdArgs[1:]...)...)
 	}
 
 	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
@@ -640,29 +658,57 @@ func gitRestore(ctx context.Context, engine *core.UltraFastEngine, repoRoot stri
 		return mcp.NewToolResultError(fmt.Sprintf("git restore denied by hook: %v", err)), nil
 	}
 
-	var cmdArgs []string
+	// dry_run: `git restore` has NO native preview flag (no -n, no --dry-run;
+	// both were historic bugs that errored with "unknown switch"). Emulate the
+	// preview with an equivalent `git diff` that shows exactly what the restore
+	// would change: for --staged the cached diff, for --source the diff against
+	// that commit, otherwise the working-tree diff.
+	if dryRun {
+		var diffArgs []string
+		switch {
+		case source != "":
+			// source already validated as non-option-like by the dispatcher.
+			diffArgs = []string{"diff", "--no-ext-diff", source}
+		case staged:
+			diffArgs = []string{"diff", "--no-ext-diff", "--cached"}
+		default:
+			diffArgs = []string{"diff", "--no-ext-diff"}
+		}
+		if len(paths) > 0 {
+			diffArgs = append(diffArgs, "--")
+			diffArgs = append(diffArgs, paths...)
+		}
+		output, werr := execGitCommand(repoRoot, "git", diffArgs...)
+		if werr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("git restore dry-run failed: %v\n%s", werr, output)), nil
+		}
+		if strings.TrimSpace(output) == "" {
+			return mcp.NewToolResultText("Dry run — nothing would change (files already match the restore source)"), nil
+		}
+		return mcp.NewToolResultText("Dry run — restore would apply this reverse diff:\n" + output), nil
+	}
+
+	// Build the command with "restore" ALWAYS first. Historic bug: the
+	// subcommand was only prepended inside the dry_run branch, so a real
+	// (non-dry-run) restore executed `git --staged -- file` / `git <src> -- file`
+	// which git rejects. Source must be passed as `--source=<rev>`, not
+	// positionally (a positional rev is parsed as a pathspec → "did not match").
+	cmdArgs := []string{"restore"}
 	if staged {
 		cmdArgs = append(cmdArgs, "--staged")
 	}
 	if source != "" {
-		cmdArgs = append(cmdArgs, source)
+		cmdArgs = append(cmdArgs, "--source="+source)
 	}
 
 	if len(paths) > 0 {
 		cmdArgs = append(cmdArgs, "--")
 		cmdArgs = append(cmdArgs, paths...)
-	}
-
-	if dryRun {
-		cmdArgs = append([]string{"restore", "-n"}, cmdArgs...)
-		output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
-		if werr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("git restore dry-run failed: %v\n%s", werr, output)), nil
-		}
-		if engine.IsCompactMode() {
-			return mcp.NewToolResultText("DRY RUN: would restore:\n" + output), nil
-		}
-		return mcp.NewToolResultText("Dry run — would restore:\n" + output), nil
+	} else {
+		// source-only restore: git requires an explicit pathspec, so target the
+		// whole tree ("."). Guaranteed reachable: validation above rejects the
+		// no-paths-and-no-source case, so we only get here when source != "".
+		cmdArgs = append(cmdArgs, "--", ".")
 	}
 
 	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
@@ -673,20 +719,18 @@ func gitRestore(ctx context.Context, engine *core.UltraFastEngine, repoRoot stri
 	hookCtx.Event = core.HookPostDelete
 	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostDelete, hookCtx)
 
-	if engine.IsCompactMode() {
-		src := ""
-		if source != "" {
-			src = " from " + source
-		}
-		return mcp.NewToolResultText(fmt.Sprintf("OK: restored %d file(s)%s", len(paths), src)), nil
+	scope := fmt.Sprintf("%d file(s)", len(paths))
+	if len(paths) == 0 {
+		scope = "whole tree"
 	}
-	return mcp.NewToolResultText(fmt.Sprintf("Restored %d file(s)%s\n%s",
-		len(paths), func() string {
-			if source != "" {
-				return " from " + source
-			}
-			return ""
-		}(), output)), nil
+	src := ""
+	if source != "" {
+		src = " from " + source
+	}
+	if engine.IsCompactMode() {
+		return mcp.NewToolResultText(fmt.Sprintf("OK: restored %s%s", scope, src)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Restored %s%s\n%s", scope, src, output)), nil
 }
 
 // extractCommitHash extracts the commit hash from git commit output
@@ -886,10 +930,11 @@ func isDestructiveGitAction(action string, args map[string]any) bool {
 		// git restore can discard changes or restore from other commits
 		return true
 	case "branch":
-		branchAction, _ := args["branch_action"].(string)
-		if branchAction == "delete" {
-			return true
-		}
+		// branch delete is NOT gated here: `git branch -d` is safe by design
+		// (git refuses to delete an unmerged branch). Escalation to the unsafe
+		// `-D` is controlled by force inside gitBranch. Gating -d behind force
+		// would be backwards — it would force every delete into the -D path.
+		return false
 	case "commit":
 		// Commit itself is not extremely dangerous, but we can make it require force
 		// in some contexts. For now we keep it lenient.
