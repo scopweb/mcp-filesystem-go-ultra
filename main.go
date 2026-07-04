@@ -59,7 +59,7 @@ const serverInstructions = `MCP Filesystem Ultra — File operations server. Run
 // serverVersion is the single source of truth for the version reported by
 // --version, the MCP handshake, the help header and the startup logs.
 // Keep in sync with the top CHANGELOG entry.
-const serverVersion = "4.5.23"
+const serverVersion = "4.5.25"
 
 // buildCommit and buildDate are stamped at build time via
 //

@@ -157,6 +157,19 @@ func editStructured(path string, r *core.EditResult) map[string]any {
 	return m
 }
 
+// attachMessage injects the human-readable text response into the structured
+// payload under "message". MCP clients that surface structuredContent ignore the
+// text fallback of NewToolResultStructured; without this, such clients lose the
+// diff / summary (and, for read_file, the file body — see the read handlers).
+// Returns the same map for call-site chaining.
+func attachMessage(m map[string]any, msg string) map[string]any {
+	if m == nil {
+		m = map[string]any{}
+	}
+	m["message"] = msg
+	return m
+}
+
 // diffFormatArg reads the optional diff_format argument (point 1). Empty string
 // means "auto" — see core.RenderDiff for the supported values.
 func diffFormatArg(args map[string]interface{}) string {
@@ -290,7 +303,7 @@ func registerCoreTools(reg *toolRegistry) {
 			// Point 3: surface the whole-file OCC hash for base64 reads too.
 			if contentHash, ok := computeFileOCCHash(core.NormalizePath(path)); ok {
 				core.RecordReadHash(core.NormalizePath(path), contentHash) // new point 4
-				return mcp.NewToolResultStructured(map[string]any{"content_hash": contentHash}, body), nil
+				return mcp.NewToolResultStructured(map[string]any{"content": body, "content_hash": contentHash}, body), nil
 			}
 			return mcp.NewToolResultText(body), nil
 		}
@@ -318,7 +331,7 @@ func registerCoreTools(reg *toolRegistry) {
 			// pulling the entire file into context.
 			if contentHash, ok := computeFileOCCHash(core.NormalizePath(path)); ok {
 				core.RecordReadHash(core.NormalizePath(path), contentHash) // new point 4
-				return mcp.NewToolResultStructured(map[string]any{"content_hash": contentHash}, content), nil
+				return mcp.NewToolResultStructured(map[string]any{"content": content, "content_hash": contentHash}, content), nil
 			}
 			return mcp.NewToolResultText(content), nil
 		}
@@ -374,7 +387,7 @@ func registerCoreTools(reg *toolRegistry) {
 		// body — they never see a `# content_hash:` line, so they can't
 		// mistake it for content.
 		return mcp.NewToolResultStructured(
-			map[string]any{"content_hash": contentHash},
+			map[string]any{"content": content, "content_hash": contentHash},
 			content,
 		), nil
 	})
@@ -822,7 +835,7 @@ func registerCoreTools(reg *toolRegistry) {
 				if result.StructureWarning != "" {
 					msg += "\n" + result.StructureWarning
 				}
-				return mcp.NewToolResultStructured(editStructured(path, result), msg), nil
+				return mcp.NewToolResultStructured(attachMessage(editStructured(path, result), msg), msg), nil
 			}
 			msg := fmt.Sprintf("Replaced lines %d-%d in %s\nLines: +%d -%d\nTotal lines now: %d",
 				startLine, endLine, path, result.LinesAdded, result.LinesRemoved, result.TotalLines)
@@ -832,7 +845,7 @@ func registerCoreTools(reg *toolRegistry) {
 			if result.StructureWarning != "" {
 				msg += "\n" + result.StructureWarning
 			}
-			return mcp.NewToolResultStructured(editStructured(path, result), msg), nil
+			return mcp.NewToolResultStructured(attachMessage(editStructured(path, result), msg), msg), nil
 		}
 
 		// ---- MODE: delete_range ----
@@ -869,7 +882,7 @@ func registerCoreTools(reg *toolRegistry) {
 				if result.StructureWarning != "" {
 					msg += "\n" + result.StructureWarning
 				}
-				return mcp.NewToolResultStructured(editStructured(path, result), msg), nil
+				return mcp.NewToolResultStructured(attachMessage(editStructured(path, result), msg), msg), nil
 			}
 			msg := fmt.Sprintf("Deleted lines %d-%d from %s\nLines removed: %d\nTotal lines now: %d",
 				startLine, endLine, path, result.LinesRemoved, result.TotalLines)
@@ -879,7 +892,7 @@ func registerCoreTools(reg *toolRegistry) {
 			if result.StructureWarning != "" {
 				msg += "\n" + result.StructureWarning
 			}
-			return mcp.NewToolResultStructured(editStructured(path, result), msg), nil
+			return mcp.NewToolResultStructured(attachMessage(editStructured(path, result), msg), msg), nil
 		}
 
 		// ---- MODE: replace (default) with optional occurrence ----
@@ -1093,7 +1106,7 @@ func registerCoreTools(reg *toolRegistry) {
 			if autoOCCWarn != "" {
 				sc["external_change"] = autoOCCWarn
 			}
-			return mcp.NewToolResultStructured(sc, msg), nil
+			return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
 		}
 
 		// Verbose format: single line summary + optional sections
@@ -1192,7 +1205,7 @@ func registerCoreTools(reg *toolRegistry) {
 		if autoOCCWarn != "" {
 			sc["external_change"] = autoOCCWarn
 		}
-		return mcp.NewToolResultStructured(sc, msg), nil
+		return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
 	})
 	reg.addTool(editFileTool, reg.editFileHandler)
 }

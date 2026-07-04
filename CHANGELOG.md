@@ -1,5 +1,81 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.25] - 2026-07-04
+
+### feat(list_directory, multi_edit): structured directory output + aggregate batch diff
+
+Two ergonomics gaps reported from a real agent session: the compact
+`list_directory` one-liner is hard to parse, and `multi_edit` returned only a
+stat summary (`17@+212-208`) — reviewing a 17-edit batch required re-reading
+the file.
+
+**1. `list_directory` gains `output_format`** (`tools_search.go`,
+`core/engine.go`, `core/param_validator.go`):
+- `compact` (default) — unchanged, token-efficient one-liner.
+- `json` — new `ListDirectoryJSON`: `{path, total, truncated, entries:[{name,
+  type, size, modified}]}` with RFC3339 mtimes. Respects `MaxListItems` and is
+  cached under the synthetic key `<path>::json` (mtime-validated, no collision
+  with the text listing).
+- `tree` — exposes the previously unreachable `ListDirectoryTree` (recursive
+  JSON tree) with `max_depth` (default 2).
+
+**2. `multi_edit` gains `diff_format`** (`core/edit_operations.go`,
+`tools_batch.go`, `core/param_validator.go`) — parity with `edit_file`:
+`""/auto` (default: full diff when small, summary with anchors past 200 diff
+lines), `full`, `summary`, `stat`, `none` (previous behaviour).
+`MultiEditResult` now carries `OriginalContent`/`FinalContent` (`json:"-"`,
+never serialized) so the tool layer renders ONE aggregate diff of the whole
+batch via the existing `core.RenderDiff` — no file re-read, more compact than
+N per-edit diffs. Rendered in compact, verbose and `dry_run` responses.
+
+**3. Schema/validator housekeeping:** `dry_run` was read by the multi_edit
+handler but never declared in the tool schema — now declared. Added `dry_run`,
+`expected_hash` and `diff_format` to the `multi_edit` param validator, and
+`output_format`/`max_depth` to `list_directory`'s. `help_content.go` and
+`TOOL-REFERENCE.md` updated.
+
+`go build` verified clean on Windows (user-run). Server restart required to
+load the new binary.
+
+---
+
+## [4.5.24] - 2026-07-03
+
+### fix(search): false negatives in `search_files` — filename-only default misread as content search
+
+`search_files` without `include_content:true` only matches the pattern against
+file **names** (SmartSearch path). Callers systematically read the generic
+`No matches found for pattern 'X' in <file>` response as a content-search miss
+— e.g. searching `"tr acabado"` inside `Pda.cshtml` returned "no matches"
+without ever opening the file. Three guards added:
+
+**1. File path forces content search** (`tools_search.go`). If `path` is a
+regular file (not a directory) and `include_content` was not set, the search
+is routed to `AdvancedTextSearch` — a filename match over a single explicit
+file is meaningless. `filepath.Walk` over a file visits exactly that file.
+
+**2. Content-only params imply content intent** (`tools_search.go`). Explicit
+`output_format`, `output`, or `context_lines` were silently ignored in the
+filename-only SmartSearch path (none apply to it). They now flip
+`include_content` on, so `{path, pattern, output_format:"json"}` searches
+file contents and returns JSON as the caller intended.
+
+**3. Honest no-match message** (`core/search_operations.go`). A filename-only
+search with zero hits now reports: `No filename matches for pattern 'X' in
+<path> (filename-only search — file contents were NOT searched; pass
+include_content:true to search inside files)` so the caller self-corrects on
+the next call.
+
+**Not changed:** `case_sensitive` still defaults to `true` (Bug #32 decision).
+A case mismatch remains a possible source of content-search misses — set
+`case_sensitive:false` explicitly.
+
+**⚠️ Pending:** `go build` + `go test ./...` on Windows — the sandbox used for
+this fix had no Go toolchain. Manual review done; server restart required to
+load the new binary.
+
+---
+
 ## [4.5.23] - 2026-07-02
 
 ### fix(git): security audit — restore command construction, add option-injection, branch -d/-D

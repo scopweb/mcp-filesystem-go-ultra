@@ -24,7 +24,7 @@
 | Need | Tool | Parameters |
 |------|------|------------|
 | Replace exact text | `edit_file` | `path`, `old_text`, `new_text` |
-| Multiple edits same file | `multi_edit` | `path`, `edits_json` (array of `{old_text, new_text}`) |
+| Multiple edits same file | `multi_edit` | `path`, `edits_json` (array of `{old_text, new_text}`); optional `diff_format` (`auto`\|`full`\|`summary`\|`stat`\|`none` — aggregate diff of the whole batch), `dry_run`, `expected_hash` |
 | Regex find-replace all | `edit_file` | `path`, `mode: "search_replace"`, `pattern`, `replacement` |
 | Replace Nth match | `edit_file` | `path`, `old_text`, `new_text`, `occurrence: N` (1=first, -1=last) |
 | Regex with captures | `edit_file` | `path`, `mode: "regex"`, `patterns_json` |
@@ -42,7 +42,7 @@
 
 | Need | Tool | Parameters |
 |------|------|------------|
-| List directory | `list_directory` | `path` |
+| List directory | `list_directory` | `path`; optional `output_format` (`compact` default \| `json` structured entries \| `tree` recursive), `max_depth` (tree, default 2) |
 | File info | `get_file_info` | `path` |
 | File info (batch) | `get_file_info` | `paths` (JSON array: `'["file1.txt","dir/"]'`) |
 | Copy | `copy_file` | `source_path`, `dest_path` |

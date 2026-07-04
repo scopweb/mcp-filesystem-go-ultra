@@ -539,6 +539,11 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 	}
 
 	if len(results) == 0 && len(contentMatches) == 0 {
+		if !includeContent {
+			// v4.5.24: be explicit that file CONTENTS were not searched — the
+			// generic message caused callers to read this as a content-search miss.
+			return fmt.Sprintf("🔍 No filename matches for pattern '%s' in %s (filename-only search — file contents were NOT searched; pass include_content:true to search inside files)", pattern, path), nil
+		}
 		return fmt.Sprintf("🔍 No matches found for pattern '%s' in %s", pattern, path), nil
 	}
 

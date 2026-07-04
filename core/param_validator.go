@@ -80,7 +80,9 @@ var toolSchemas = map[string]ToolParamSchema{
 		"tolerant_whitespace": {ParamBoolean, false}, // treat tabs↔4sp, CRLF↔LF as equivalent
 	},
 	"list_directory": {
-		"path": {ParamString, true},
+		"path":          {ParamString, true},
+		"output_format": {ParamString, false}, // "compact" (default) | "json" | "tree"
+		"max_depth":     {ParamNumber, false}, // recursion depth for "tree"
 	},
 	"search_files": {
 		"path":            {ParamString, true},
@@ -104,6 +106,9 @@ var toolSchemas = map[string]ToolParamSchema{
 		"edits_json":          {ParamString, true},
 		"force":               {ParamBoolean, false},
 		"tolerant_whitespace": {ParamBoolean, false},
+		"dry_run":             {ParamBoolean, false}, // preview without writing (was read by handler but undeclared)
+		"expected_hash":       {ParamString, false},  // B3: stale-edit protection (parity with edit_file)
+		"diff_format":         {ParamString, false},  // ""/auto|full|summary|stat|none (parity with edit_file)
 	},
 
 	// ---- FILES (4) ----
