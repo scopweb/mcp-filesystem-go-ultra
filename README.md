@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra-Fast
 
-**v4.5.2** · Go · MCP 2025-11-25 · 17 core tools + git + help + fs super-tool
+**v4.5.25** · Go · MCP 2025-11-25 · 20 tools (17 core + git + minify_js + help, aliases disabled)
 
 A high-performance [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go. Designed for use with Claude Desktop and Claude Code, with first-class support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -8,16 +8,16 @@ A high-performance [Model Context Protocol](https://modelcontextprotocol.io) fil
 
 ## Features
 
-- **17 core tools** + **git** + **help** (consolidated from 59 in v3.x) — all functionality preserved, zero tool bloat
-- **31 tools total** (16 core + 13 aliases) with Claude Code-compatible names (View, Edit, Write, LS, GlobTool, GrepTool, etc.)
+- **17 core tools** + **git** + **minify_js** + **help** (consolidated from 59 in v3.x) — all functionality preserved, zero tool bloat
+- **20 tools total** — aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are **disabled** to save tokens; use canonical names
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
 - **Intelligent editing** with automatic backup, risk assessment, and rollback on failure
 - **3-tier cache** (BigCache + go-cache) with file watcher invalidation for O(1) reads
 - **Streaming and chunked I/O** for files up to 50 MB without blocking
 - **WSL ↔ Windows path translation** — accepts `/mnt/c/...`, `C:\...`, and `/tmp/...` transparently
 - **Compact mode** — minimal token responses (~90% reduction) for high-volume Claude Desktop sessions
-- **Risk assessment** — edits above configurable thresholds (30 / 50 / 90% change) require explicit confirmation
-- **Hook system** — pre/post hooks for write, edit, delete, create, move, and copy events
+- **Risk assessment** — edits above configurable thresholds (30 / 50 / 90% change) require explicit confirmation; accidental-rewrite guard (v4.5.10) blocks full-file rewrites via `edit_file`; `--auto-occ` (v4.5.17) detects external file changes
+- **Hook system** — 16 pre/post events (write, edit, delete, create, move, copy, read, search)
 - **Plan mode** — dry-run analysis with diff preview and risk report before applying changes
 - **Pipeline system** — 12 actions with conditions, templates, DAG-based parallel execution (5–22× fewer round-trips)
 - **Atomic batch operations** — grouped file operations with rollback on failure
@@ -38,10 +38,10 @@ go build -ldflags="-s -w" -trimpath -tags embed_rg -o filesystem-ultra-v4-embed.
 
 # Or use the build scripts
 build-windows.bat        # default
-build-windows-embed.bat  # with ripgrep
+build-windows.sh         # Linux/macOS
 ```
 
-Requires Go 1.26+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
+Requires Go 1.26.4+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
 
 ```bash
 # Run tests
@@ -120,15 +120,14 @@ The positional arguments after the flags are the allowed base paths. Omitting pa
 
 ## Tool Discovery
 
-Claude Desktop uses **lazy tool loading** — it only discovers ~5 tools per query via semantic search, missing most of the 16 available tools.
+Claude Desktop uses **lazy tool loading** — it only discovers ~5 tools per query via semantic search, missing most of the 20 available tools.
 
 Three layers solve this:
 
 | Layer | How it works | Client support |
 |-------|-------------|----------------|
 | **`/filesystem-ultra-tools` skill** | Claude Code skill that calls `help` on conversation start | Claude Code |
-| **`help` tool** | Keyword-rich description; returns full 16-tool catalog | Any MCP client |
-| **`fs` super-tool** | Single entry point dispatching to all 16 operations via `action` param | Any MCP client |
+| **`help` tool** | Keyword-rich description; returns full 20-tool catalog | Any MCP client |
 | **`server.WithInstructions()`** | Sends catalog during MCP initialize handshake | Spec-compliant clients |
 
 ### Using the skill
@@ -147,7 +146,7 @@ At the start of every conversation, do tool_search for "filesystem help" and the
 
 ---
 
-## Available Tools (16 + 6 aliases + fs + help)
+## Available Tools (20: 17 core + git + minify_js + help)
 
 ### Core (5)
 
@@ -159,11 +158,12 @@ At the start of every conversation, do tool_search for "filesystem help" and the
 | `list_directory` | Directory listing with cache |
 | `search_files` | Search by pattern with optional `file_types`, `include_content`, `include_context`, `case_sensitive`, `count_only` |
 
-### Edit+ (1)
+### Edit+ (2)
 
 | Tool | Description |
 |------|-------------|
-| `multi_edit` | Multiple find-and-replace operations on the same file in one call via `edits_json` |
+| `multi_edit` | Multiple find-and-replace operations on the same file in one call via `edits_json`. v4.5.25+: `diff_format` (auto|full|summary|stat|none) for aggregate batch diff |
+| `project_replace` | Rename a token across all files in a directory tree (regex or literal) |
 
 ### File Operations (4)
 
@@ -210,6 +210,24 @@ At the start of every conversation, do tool_search for "filesystem help" and the
 |------|-------------|
 | `get_file_info` | Size, permissions, timestamps, type |
 
+### Version Control (1)
+
+| Tool | Description |
+|------|-------------|
+| `git` | Git operations: `init`, `status`, `diff`, `log`, `add`, `commit`, `restore`, `branch` |
+
+### JavaScript (1)
+
+| Tool | Description |
+|------|-------------|
+| `minify_js` | Pure-Go JS minification (no Node dependency) |
+
+### Discovery (1)
+
+| Tool | Description |
+|------|-------------|
+| `help` | Returns the full 20-tool catalog with keywords for lazy discovery |
+
 ---
 
 ## Dashboard
@@ -248,7 +266,7 @@ Point the dashboard at the proxy logs to see the **Proxy / Tokens** page:
 dashboard.exe --log-dir=C:\logs\mcp-filesystem --proxy-log-dir=C:\logs\mcp-proxy --port=9100
 ```
 
-See [docs/setup/DASHBOARD_PROXY_SETUP.md](docs/setup/DASHBOARD_PROXY_SETUP.md) for full setup guide.
+See the [docs-website Dashboard & Monitoring guide](docs-website/src/content/docs/features/dashboard.md) for full setup guide.
 
 ### Audit Logging
 
@@ -270,7 +288,9 @@ tools_search.go             list_directory, search_files, analyze_operation
 tools_files.go              create_directory, delete_file, move_file, copy_file, get_file_info
 tools_batch.go              multi_edit, batch_operations, backup
 tools_platform.go           wsl, server_info
-tools_aliases.go            6 aliases, fs super-tool, help tool
+tools_aliases.go            Aliases + fs super-tool (DISABLED in v4.5.x), help tool
+tools_git.go                git (8 actions: init, status, diff, log, add, commit, restore, branch)
+tools_minify.go             minify_js (pure-Go JS minification)
 core/
   engine.go                 UltraFastEngine — central struct, cache, worker pool, metrics
   edit_operations.go        EditFile, MultiEdit — backup, risk assessment, hooks
@@ -280,7 +300,7 @@ core/
   backup_manager.go         Create, restore, compare, and clean backups
   impact_analyzer.go        Risk assessment (LOW / MEDIUM / HIGH / CRITICAL)
   edit_safety_layer.go      Context validation, stale-edit prevention
-  hooks.go                  Pre/post hook system (12 event types)
+  hooks.go                  Pre/post hook system (16 event types)
   large_file_processor.go   Line-by-line and chunk-based processing
   regex_transformer.go      Regex transformations with capture groups
   pipeline.go               Multi-step pipeline execution (sequential + parallel)
