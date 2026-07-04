@@ -1167,6 +1167,11 @@ type MultiEditResult struct {
 	Integrity        *FileIntegrityResult `json:"integrity,omitempty"`         // Auto-verification for HIGH/CRITICAL edits
 	StructureWarning string               `json:"structure_warning,omitempty"` // Delimiter imbalance introduced by these edits — point 2
 	NewHash          string               `json:"new_hash,omitempty"`          // content_hash after these edits — chain expected_hash without re-reading (new point 1)
+
+	// diff_format support (parity with edit_file): the tool layer renders the
+	// aggregate before/after diff with core.RenderDiff. Never serialized.
+	OriginalContent string `json:"-"`
+	FinalContent    string `json:"-"`
 }
 
 // MultiEdit performs multiple edits on a single file atomically
@@ -1320,6 +1325,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		TotalEdits:      len(edits),
 		MatchConfidence: "high",
 		EditDetails:     make([]EditDetail, 0, len(edits)),
+		OriginalContent: originalContent,
 	}
 
 	currentContent := originalContent
@@ -1460,6 +1466,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	// If only "already_present" edits (nothing changed), skip write
 	if result.SuccessfulEdits == 0 {
 		result.BackupID = backupID
+		result.FinalContent = originalContent
 		if aggregateImpact.IsRisky && !aggregateImpact.ShouldBlockOperation(false) {
 			result.RiskWarning = aggregateImpact.FormatRiskNotice(backupID, path)
 		}
@@ -1486,6 +1493,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		if aggregateImpact.IsRisky {
 			result.RiskWarning = aggregateImpact.FormatRiskNotice("", path)
 		}
+		result.FinalContent = currentContent
 		return result, nil
 	}
 
@@ -1571,6 +1579,10 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 
 	// New point 1: post-edit content_hash for re-read-free chaining.
 	result.NewHash = contentHashFNV(finalContent)
+
+	// diff_format support: expose final content so the tool layer can render
+	// the aggregate diff without re-reading the file.
+	result.FinalContent = finalContent
 
 	return result, nil
 }

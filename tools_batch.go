@@ -59,6 +59,8 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithString("edits_json", mcp.Required(), mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]. Also accepts old_str/new_str as aliases.")),
 		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 		mcp.WithBoolean("tolerant_whitespace", mcp.Description("Apply tolerant_whitespace semantics to all edits in the batch (1 tab = 4 spaces, CRLF = LF). Default: false.")),
+		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Default: false.")),
+		mcp.WithString("diff_format", mcp.Description("Controls how the aggregate diff of the whole batch is rendered (parity with edit_file): \"\"/\"auto\" (default): full diff when small, else summary with anchors; \"full\": complete unified diff; \"summary\": per-hunk ranges + anchor lines; \"stat\": just \"+added -removed\"; \"none\": no diff (previous behaviour).")),
 		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash returned by the last full read_file (range and batch reads don't return it). If the file's current hash doesn't match, the multi_edit is rejected so the model can re-read first. Same OCC token as edit_file (Improvement B3), atomic over the whole batch.")),
 	)
 	reg.addTool(multiEditTool, auditWrap(engine, "multi_edit", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -136,10 +138,11 @@ func registerBatchTools(reg *toolRegistry) {
 			return mcp.NewToolResultError("edits array cannot be empty"), nil
 		}
 
-		// Extract force, dry_run, and expected_hash parameters
+		// Extract force, dry_run, diff_format, and expected_hash parameters
 		force := false
 		dryRun := false
 		expectedHash := ""
+		diffFormat := diffFormatArg(args)
 		if args != nil {
 			if f, ok := args["force"].(bool); ok {
 				force = f
@@ -179,11 +182,15 @@ func registerBatchTools(reg *toolRegistry) {
 
 		// Bug #32: dry_run response format for multi_edit
 		if dryRun {
+			diffText := core.RenderDiff(result.OriginalContent, result.FinalContent, path, diffFormat)
 			if engine.IsCompactMode() {
 				msg := fmt.Sprintf("DRY RUN: %d edits would be applied, %d lines affected",
 					result.SuccessfulEdits, result.LinesAffected)
 				if result.RiskWarning != "" {
 					msg += result.RiskWarning
+				}
+				if diffText != "" {
+					msg += "\n" + diffText
 				}
 				msg += "\nNo changes were written to disk"
 				return mcp.NewToolResultText(msg), nil
@@ -192,6 +199,9 @@ func registerBatchTools(reg *toolRegistry) {
 				path, result.SuccessfulEdits, result.LinesAffected)
 			if result.RiskWarning != "" {
 				msg += result.RiskWarning
+			}
+			if diffText != "" {
+				msg += "\n" + diffText
 			}
 			return mcp.NewToolResultText(msg), nil
 		}
@@ -242,7 +252,11 @@ func registerBatchTools(reg *toolRegistry) {
 			if result.StructureWarning != "" {
 				msg += "\n" + result.StructureWarning
 			}
-			return mcp.NewToolResultStructured(multiEditStructured(path, result), msg), nil
+			// diff_format (parity with edit_file): aggregate diff of the whole batch
+			if diffText := core.RenderDiff(result.OriginalContent, result.FinalContent, path, diffFormat); diffText != "" {
+				msg += "\n" + diffText
+			}
+			return mcp.NewToolResultStructured(attachMessage(multiEditStructured(path, result), msg), msg), nil
 		}
 
 		// Verbose format: single line summary + optional sections
@@ -290,6 +304,14 @@ func registerBatchTools(reg *toolRegistry) {
 			sb.WriteString(result.RiskWarning)
 		}
 
+		// diff_format (parity with edit_file): aggregate diff of the whole batch
+		if diffText := core.RenderDiff(result.OriginalContent, result.FinalContent, path, diffFormat); diffText != "" {
+			sb.WriteString(diffText)
+			if !strings.HasSuffix(diffText, "\n") {
+				sb.WriteString("\n")
+			}
+		}
+
 		// Append file integrity verification result for HIGH/CRITICAL operations
 		if result.Integrity != nil {
 			inv := result.Integrity
@@ -319,7 +341,7 @@ func registerBatchTools(reg *toolRegistry) {
 			core.SetIntegrityStatus(ctx, result.Integrity.Verification, result.Integrity.Warning)
 		}
 
-		return mcp.NewToolResultStructured(multiEditStructured(path, result), sb.String()), nil
+		return mcp.NewToolResultStructured(attachMessage(multiEditStructured(path, result), sb.String()), sb.String()), nil
 	}))
 
 	// ============================================================================

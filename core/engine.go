@@ -1044,6 +1044,83 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 	return responseText, nil
 }
 
+// ListDirectoryJSON returns a structured JSON listing of a directory:
+// {"path":..., "total":N, "entries":[{"name","type","size","modified"},...]}
+// Cached under a synthetic key so it doesn't collide with the text listing.
+func (e *UltraFastEngine) ListDirectoryJSON(ctx context.Context, path string) (string, error) {
+	path = NormalizePath(path)
+
+	if err := e.acquireOperation(ctx, "list"); err != nil {
+		return "", err
+	}
+	start := time.Now()
+	defer e.releaseOperation("list", start)
+
+	if !e.IsPathAllowed(path) {
+		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
+	}
+
+	dirInfo, statErr := os.Stat(path)
+
+	// Separate cache key: same directory, different rendering.
+	cacheKey := path + "::json"
+	if cached, cachedMtime, hit := e.cache.GetDirectory(cacheKey); hit {
+		if statErr == nil && !dirInfo.ModTime().After(cachedMtime) {
+			return cached, nil
+		}
+		e.cache.InvalidateDirectory(cacheKey)
+	}
+
+	if statErr != nil {
+		return "", fmt.Errorf("failed to read directory: %w", statErr)
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	type dirEntry struct {
+		Name     string `json:"name"`
+		Type     string `json:"type"`
+		Size     int64  `json:"size,omitempty"`
+		Modified string `json:"modified,omitempty"`
+	}
+
+	out := struct {
+		Path      string     `json:"path"`
+		Total     int        `json:"total"`
+		Truncated bool       `json:"truncated,omitempty"`
+		Entries   []dirEntry `json:"entries"`
+	}{Path: path, Total: len(entries), Entries: make([]dirEntry, 0, len(entries))}
+
+	maxItems := e.config.MaxListItems
+	for i, entry := range entries {
+		if maxItems > 0 && i >= maxItems {
+			out.Truncated = true
+			break
+		}
+		de := dirEntry{Name: entry.Name(), Type: "file"}
+		if entry.IsDir() {
+			de.Type = "dir"
+		}
+		if info, infoErr := entry.Info(); infoErr == nil {
+			if !entry.IsDir() {
+				de.Size = info.Size()
+			}
+			de.Modified = info.ModTime().UTC().Format(time.RFC3339)
+		}
+		out.Entries = append(out.Entries, de)
+	}
+
+	data, err := json.Marshal(out)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal listing: %w", err)
+	}
+	responseText := string(data)
+	e.cache.SetDirectory(cacheKey, responseText, dirInfo.ModTime())
+	return responseText, nil
+}
+
 // EditFile implements intelligent file editing
 // MOVED to core/edit_operations.go
 

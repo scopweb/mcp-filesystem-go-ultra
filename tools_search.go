@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -19,11 +20,15 @@ func registerSearchTools(reg *toolRegistry) {
 	// ============================================================================
 	listDirTool := mcp.NewTool("list_directory",
 		mcp.WithTitleAnnotation("List Directory"),
-		mcp.WithDescription("list_directory — List directory contents (cached). Related: search_files, read_file, edit_file, create_directory, batch_operations."),
+		mcp.WithDescription("list_directory — List directory contents (cached). "+
+			"output_format: 'compact' (default), 'json' (structured entries with name/type/size/modified), 'tree' (recursive JSON tree, use max_depth). "+
+			"Related: search_files, read_file, edit_file, create_directory, batch_operations."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to directory (WSL or Windows format)")),
+		mcp.WithString("output_format", mcp.Description("Output format: 'compact' (default, token-efficient one-liner), 'json' (structured entries: name, type, size, modified RFC3339), 'tree' (recursive JSON tree)")),
+		mcp.WithNumber("max_depth", mcp.Description("Recursion depth for output_format:'tree' (default: 2)")),
 	)
 	reg.listDirHandler = auditWrap(engine, "list_directory", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -31,7 +36,26 @@ func registerSearchTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
 		}
 
-		listing, err := engine.ListDirectoryContent(ctx, path)
+		outputFormat := ""
+		maxDepth := 2
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if of, ok := args["output_format"].(string); ok {
+				outputFormat = of
+			}
+			if md, ok := args["max_depth"].(float64); ok && md > 0 {
+				maxDepth = int(md)
+			}
+		}
+
+		var listing string
+		switch outputFormat {
+		case "json":
+			listing, err = engine.ListDirectoryJSON(ctx, path)
+		case "tree":
+			listing, err = engine.ListDirectoryTree(ctx, core.NormalizePath(path), maxDepth)
+		default: // "" / "compact" / "text" — current behaviour
+			listing, err = engine.ListDirectoryContent(ctx, path)
+		}
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
@@ -86,6 +110,7 @@ func registerSearchTools(reg *toolRegistry) {
 		fileTypes := []interface{}{}
 		returnLines := false
 		outputFormat := "text"
+		contentIntent := false // content-only params passed → content search implied
 
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if co, ok := args["count_only"].(bool); ok {
@@ -125,9 +150,27 @@ func registerSearchTools(reg *toolRegistry) {
 			}
 			if of, ok := args["output_format"].(string); ok {
 				outputFormat = of
+				contentIntent = true
 			} else if out, ok := args["output"].(string); ok {
 				// "output" is the ripgrep-compatible alias for output_format
 				outputFormat = out
+				contentIntent = true
+			}
+			if _, ok := args["context_lines"]; ok {
+				contentIntent = true
+			}
+		}
+
+		// v4.5.24 false-negative guards:
+		// (1) path is a regular FILE → filename search is meaningless, force content search.
+		// (2) content-only params (output_format/output/context_lines) without
+		//     include_content imply content-search intent — honor it instead of
+		//     silently ignoring them in the filename-only SmartSearch path.
+		if !includeContent {
+			if contentIntent {
+				includeContent = true
+			} else if st, statErr := os.Stat(path); statErr == nil && !st.IsDir() {
+				includeContent = true
 			}
 		}
 

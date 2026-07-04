@@ -95,8 +95,8 @@ edit_file
 
 list_directory
 - Purpose: List directory contents
-- Key params: path
-- Examples: list_directory(path)
+- Key params: path, output_format (compact|json|tree), max_depth (for tree)
+- Examples: list_directory(path), list_directory(path, output_format:"json"), list_directory(path, output_format:"tree", max_depth:3)
 
 search_files
 - Purpose: Search by filename or file content
@@ -107,8 +107,8 @@ search_files
 
 multi_edit
 - Purpose: Apply multiple exact replacements to the same file atomically
-- Key params: path, edits_json
-- Examples: multi_edit(path, edits_json='[{"old_text":"A","new_text":"B"}]')
+- Key params: path, edits_json, diff_format (auto|full|summary|stat|none), dry_run, expected_hash
+- Examples: multi_edit(path, edits_json='[{"old_text":"A","new_text":"B"}]'), multi_edit(path, edits_json, diff_format:"full")
 
 ## Files (4)
 
