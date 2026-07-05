@@ -1,11 +1,11 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.5.2: 17 core tools + git + help. Aliases and fs super-tool disabled.
+description: Tool catalog for filesystem-ultra MCP server v4.5.25: 20 tools (17 core + git + minify_js + help). Aliases and fs super-tool disabled.
 ---
 
-# Filesystem Ultra v4.5.2 — Tool Discovery
+# Filesystem Ultra v4.5.25 — Tool Discovery
 
-## The 18 tools (17 core + git + help)
+## The 20 tools (17 core + git + minify_js + help)
 
 | Tool | Purpose |
 |------|---------|
@@ -26,7 +26,9 @@ description: Tool catalog for filesystem-ultra MCP server v4.5.2: 17 core tools 
 | `analyze_operation` | Dry-run impact analysis |
 | `wsl` | WSL/Windows sync and path conversion |
 | `server_info` | Stats, help, artifact capture |
-| `git` | Version control (status, diff, log, add, commit, restore, branch, init) |
+| `git` | Version control (status, diff, log, add, commit, restore, branch, init; `auto_message` for conventional commits) |
+| `minify_js` | Pure-Go JS minification, no Node (v4.5.7+) |
+| `help` | Discovery — call first to see all 20 tools |
 
 ## search_files ripgrep-compatible params
 
@@ -44,9 +46,13 @@ description: Tool catalog for filesystem-ultra MCP server v4.5.2: 17 core tools 
 - **Project-wide find/replace** → `project_replace` (1 call instead of N)
 - **Batch ops** → `batch_operations` (atomic, with rollback)
 - **Undo** → `backup(action:"undo_last")` or `backup(action:"restore", backup_id:"...")`
-- **Git operations** → `git` tool (status, diff, log, add, commit, restore, branch, init). **The path passed must be inside a git repository** (or use `init` to create one). Calling `git` on a non-repo path is the #1 source of errors (analysis of 18 calls showed 5 of 7 errors were "not a git repository" — instant failures before any git command ran).
+- **Git operations** → `git` tool (status, diff, log, add, commit, restore, branch, init). **The path passed must be inside a git repository** (or use `init` to create one). Calling `git` on a non-repo path is the #1 source of errors (analysis of 18 calls showed 5 of 7 errors were "not a git repository" — instant failures before any git command ran). Since v4.5.23 `restore` supports real dry-run and hardened path handling (`--` separator); no `force` needed.
+- **STALE_READ warning** (`edit_file` only): non-blocking notice if the file wasn't read in the last 10 min of this session. The engine records reads after each successful edit, so consecutive edits on the same file don't need re-reads. Hard external-change protection = `expected_hash` or `--auto-occ=block`.
 - **Dry-run** → `analyze_operation` or `edit_file(dry_run:true)` / `multi_edit(dry_run:true)` / `project_replace(preview:true)`
 - **Fast search** → `search_files` with `output_format:"json"` uses ripgrep when available
+- **Chain edits without re-reading** → every successful edit returns `content_hash`; pass it as `expected_hash` on the next edit. External-change detection also via `--auto-occ` flag (`off`/`warn` default/`block`) — only flags changes NOT made by this session.
+- **Line-based edits** → `edit_file` `mode:"delete_range"` (remove lines start..end) and `mode:"replace_range"` (replace lines with `new_text`) — 1-based inclusive, no fragile `old_text` match.
+- **Move lines between files atomically** → `batch_operations` op type `extract` (`source`, `destination`, `start_line`, `end_line`, `append`) — bytes written = bytes removed, both atomic, revert together under `atomic:true`.
 
 ## Critical workflow rules (anti-bug)
 
@@ -75,6 +81,7 @@ If you intend to rewrite most or all of a file's content, use `write_file` direc
 | Replace all occurrences of a pattern | `edit_file` mode `search_replace` |
 | Whole-file rewrite | `write_file` |
 | Multiple targeted changes same file | `multi_edit` with several anchors |
+| Delete/replace known line range | `edit_file` mode `delete_range` / `replace_range` |
 | Rename token project-wide | `project_replace` |
 
 ## project_replace — Project-wide find/replace
