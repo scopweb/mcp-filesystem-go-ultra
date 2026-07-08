@@ -98,6 +98,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"include":         {ParamString, false},  // glob pattern (alias for file_types)
 		"output_format":   {ParamString, false},  // "text" or "json"
 		"output":          {ParamString, false},  // alias for output_format
+		"max_results":     {ParamNumber, false},  // cap filenames returned (v4.5.26, fix #3)
 	},
 
 	// ---- EDIT+ (1) ----
