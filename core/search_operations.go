@@ -114,8 +114,12 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 	wholeWord, _ := request.Arguments["whole_word"].(bool)
 	includeContext, _ := request.Arguments["include_context"].(bool)
 	outputFormat, _ := request.Arguments["output_format"].(string)
+	// Default: "auto" — ripgrep-style 'path:line:content' for ≤5 matches,
+	// verbose with emojis for more. Empty string from the handler means the
+	// caller did not specify output_format (the common case).
+	// Explicit "text" is preserved as backward-compatible verbose/compact.
 	if outputFormat == "" {
-		outputFormat = "text"
+		outputFormat = "auto"
 	}
 
 	contextLines := 3
@@ -183,7 +187,20 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 		maxToShow = len(matches)
 	}
 
-	if e.config.CompactMode {
+	// Auto-detect output style for the default branch (outputFormat == "auto").
+	// "text" preserves the legacy verbose/compact layout below.
+	// "json" is handled in a separate branch AFTER this block.
+	// include_context always forces the verbose layout because Context: blocks
+	// don't fit in a single 'path:line:content' line.
+	const ripgrepThreshold = 5
+	useRipgrep := outputFormat == "auto" && !includeContext && len(matches) <= ripgrepThreshold
+
+	if useRipgrep {
+		// Ripgrep-style: one 'path:line:content' per match.
+		// Doesn't honor CompactMode (the whole point of auto is to give
+		// Grep-like direct readability when there are few hits).
+		result.WriteString(formatSearchMatchesRipgrep(matches, maxToShow))
+	} else if e.config.CompactMode {
 		// Compact format: minimal output but with full paths
 		result.WriteString(fmt.Sprintf("%d matches", len(matches)))
 		if len(matches) > 20 {
@@ -301,6 +318,29 @@ func formatSearchMatchesJSON(matches []SearchMatch, pattern, path string) string
 func jsonString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// formatSearchMatchesRipgrep emits matches in ripgrep's default content format:
+//     path:line:content
+// One row per match (ripgrep collapses same-line matches; we keep one-per-match
+// to preserve order and make line numbers unambiguous for the model).
+// Trailing CR/LF stripped from each line to keep output single-line per match
+// (Windows-encoded files would otherwise emit \r that breaks downstream parsers).
+func formatSearchMatchesRipgrep(matches []SearchMatch, maxToShow int) string {
+	if maxToShow <= 0 || maxToShow > len(matches) {
+		maxToShow = len(matches)
+	}
+	var b strings.Builder
+	b.Grow(maxToShow * 80) // rough preallocation — most lines fit in 80 bytes
+	for i := 0; i < maxToShow; i++ {
+		m := matches[i]
+		line := strings.TrimRight(m.Line, "\r\n")
+		fmt.Fprintf(&b, "%s:%d:%s\n", m.File, m.LineNumber, line)
+	}
+	if len(matches) > maxToShow {
+		fmt.Fprintf(&b, "... (%d more matches)\n", len(matches)-maxToShow)
+	}
+	return b.String()
 }
 
 // performSmartSearch
