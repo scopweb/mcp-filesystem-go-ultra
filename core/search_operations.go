@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,6 +17,10 @@ import (
 
 	"github.com/mcp/filesystem-ultra/mcp"
 )
+
+// errWalkStop is a sentinel returned from WalkDir callbacks to stop the walk
+// early once max_results is reached (perf #2, v4.5.27). Never surfaces to callers.
+var errWalkStop = errors.New("walk stopped: max_results reached")
 
 // SmartSearch performs intelligent search with regex and filters
 func (e *UltraFastEngine) SmartSearch(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResponse, error) {
@@ -327,10 +332,13 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 		}
 	}
 
-	// First pass: collect all files to search
+	// First pass: collect all files to search.
+	// Perf (#1, v4.5.27): WalkDir instead of Walk — Walk lstats every entry,
+	// WalkDir reuses the DirEntry from ReadDir (one syscall per dir, not per
+	// file). On the 50k-entry trees behind the 5-45s searches in the proxy
+	// log this is the dominant cost.
 	var filesToSearch []string
-	var walkErr error
-	filepath.Walk(path, func(currentPath string, info os.FileInfo, err error) error {
+	walkErr := filepath.WalkDir(path, func(currentPath string, d os.DirEntry, err error) error {
 		// Check context in walk callback
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr // Stop walk if context is cancelled
@@ -341,11 +349,23 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 		}
 
 		// Prune common large/irrelevant directories to avoid walking thousands of binaries
-		if info.IsDir() {
-			if searchSkipDirs[info.Name()] {
+		if d.IsDir() {
+			if searchSkipDirs[d.Name()] {
 				return filepath.SkipDir
 			}
 			return nil
+		}
+
+		// Perf (#2, v4.5.27): early exit — once max_results filename matches
+		// are collected and no content search is pending, the rest of the
+		// tree cannot change the response. Walk used to continue to the end.
+		if !includeContent {
+			resultsMu.Lock()
+			full := len(results) >= maxResults
+			resultsMu.Unlock()
+			if full {
+				return errWalkStop
+			}
 		}
 
 		// Filter by file types if specified
@@ -367,9 +387,9 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 		var matched bool
 		if isGlob {
 			// Glob pattern: use filepath.Match (e.g., "Reports.*" matches "Reports.dll")
-			matched, _ = filepath.Match(pattern, info.Name())
+			matched, _ = filepath.Match(pattern, d.Name())
 		} else {
-			matched = regexPattern.MatchString(info.Name())
+			matched = regexPattern.MatchString(d.Name())
 		}
 		if matched {
 			resultsMu.Lock()
@@ -379,16 +399,16 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 			resultsMu.Unlock()
 		}
 
-		// Add to content search list if applicable
-		if includeContent && info.Size() < 10*1024*1024 { // Increased to 10MB limit
-			if e.isTextFile(currentPath) {
+		// Add to content search list if applicable (stat only content candidates)
+		if includeContent && e.isTextFile(currentPath) {
+			if info, ierr := d.Info(); ierr == nil && info.Size() < 10*1024*1024 { // 10MB limit
 				filesToSearch = append(filesToSearch, currentPath)
 			}
 		}
 
 		return nil
 	})
-	if walkErr != nil {
+	if walkErr != nil && walkErr != errWalkStop && !errors.Is(walkErr, context.Canceled) && !errors.Is(walkErr, context.DeadlineExceeded) {
 		return "", walkErr
 	}
 
@@ -587,23 +607,26 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 		return nil, fmt.Errorf("invalid regex pattern: %w", err)
 	}
 
-	// First pass: collect all files to search
+	// First pass: collect all files to search (WalkDir: no per-entry lstat, v4.5.27)
 	var filesToSearch []string
-	err = filepath.Walk(path, func(currentPath string, info os.FileInfo, err error) error {
+	err = filepath.WalkDir(path, func(currentPath string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 
 		// Prune common large/irrelevant directories
-		if info.IsDir() {
-			if searchSkipDirs[info.Name()] {
+		if d.IsDir() {
+			if searchSkipDirs[d.Name()] {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
 		// Only search in text files with increased size limit
-		if !e.isTextFile(currentPath) || info.Size() > 10*1024*1024 { // Increased to 10MB limit
+		if !e.isTextFile(currentPath) {
+			return nil
+		}
+		if info, ierr := d.Info(); ierr != nil || info.Size() > 10*1024*1024 { // 10MB limit
 			return nil
 		}
 
@@ -994,16 +1017,16 @@ func (e *UltraFastEngine) countOccurrencesInDir(ctx context.Context, dirPath, pa
 	totalOccurrences := 0
 	filesScanned := 0
 
-	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(dirPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip errors
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if info.IsDir() {
+		if d.IsDir() {
 			// Skip hidden directories
-			if strings.HasPrefix(info.Name(), ".") && path != dirPath {
+			if strings.HasPrefix(d.Name(), ".") && path != dirPath {
 				return filepath.SkipDir
 			}
 			return nil
