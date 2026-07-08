@@ -1,5 +1,50 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.27] - 2026-07-08
+
+### feat(search): auto-detect `search_files` output_format — ripgrep-style for ≤5 matches
+
+The default `output_format:"text"` for `search_files` (with `include_content:true`)
+returned only `line[col:col]` positions without the line content, forcing a
+re-read of the file with `read_file` to see what was on each line. This broke
+the Grep intuition (Claude Code's built-in `Grep` shows the line content by
+default with `output_mode:"content"`).
+
+**New default behaviour** (`core/search_operations.go`):
+- ≤5 matches → ripgrep-style `path:line:content` (one row per match, CR/LF
+  stripped from line content).
+- >5 matches → existing verbose header with emojis (🔍 / 📁 / Context: blocks
+  unchanged).
+- `include_context:true` always forces verbose (the `Context:` block layout
+  doesn't fit a single-line ripgrep row).
+- `output_format:"json"` and `output_format:"text"` unchanged — JSON still
+  emits `{"matches":[…]}` and explicit `"text"` preserves backward-compatible
+  verbose/compact for any caller that relied on it.
+
+**Schema cleanup** (`tools_search.go`):
+- `output_format` description now explains the auto behaviour and the escape
+  hatch (`"text"` to force legacy verbose regardless of match count).
+- `output` alias description used to advertise `content|files_with_matches|count`
+  — values that were never implemented in the engine. Description now states
+  that only `"text"|"json"` are honoured and the legacy values fall through
+  to the default text branch.
+- Tool description updated to mention the auto-adapting default.
+
+**Tests**:
+- New `search_ripgrep_format_test.go` — 6 unit tests covering the threshold
+  (≤5 ripgrep, ≥6 verbose), `include_context` forcing verbose, JSON
+  unchanged, and backward compat for explicit `output_format:"text"`.
+- New `smoke_search_test.go` — 4 E2E tests that spawn the built binary and
+  drive it via stdio JSON-RPC to confirm the user-visible behaviour matches.
+  Skipped automatically when the binary is not present (set `SMOKE_BIN` or
+  build with `go build -o bin/filesystem-ultra-v4-new.exe .` to enable).
+
+`go build` and `go test ./...` clean on Windows. No regression in existing
+`TestAdvancedTextSearch*` / `TestSmartSearch*` / `TestCapSearchOutput*` /
+`TestSearchFilesParams`. Server restart required to load the new binary.
+
+---
+
 ## [4.5.25] - 2026-07-04
 
 ### feat(list_directory, multi_edit): structured directory output + aggregate batch diff

@@ -71,7 +71,8 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDescription("search_files — Search and find files by name or content. Supports regex, count_only, include_content. "+
+		mcp.WithDescription("search_files — Search and find files by name or content. Supports regex, count_only, include_content, include_context. "+
+			"Default output auto-adapts to match count (ripgrep-style 'path:line:content' for ≤5 matches, verbose with emojis otherwise). "+
 			"Use search_files to find, then edit_file to modify. Related: edit_file, read_file, multi_edit, batch_operations."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Base directory or file (WSL or Windows format)")),
 		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal pattern")),
@@ -84,8 +85,8 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithNumber("context_lines", mcp.Description("Number of context lines (default: 3)")),
 		mcp.WithBoolean("count_only", mcp.Description("Count pattern occurrences without full search (default: false)")),
 		mcp.WithString("return_lines", mcp.Description("Return line numbers of count matches (true/false, for count_only mode)")),
-		mcp.WithString("output_format", mcp.Description("Output format: 'text' or 'json' (default: 'text'). Use 'json' for structured AI parsing.")),
-		mcp.WithString("output", mcp.Description("Alias for output_format: content, files_with_matches, count")),
+		mcp.WithString("output_format", mcp.Description("Output format. 'text' = verbose with emojis (legacy default), 'json' = structured for AI parsing. If omitted: auto-detect — ripgrep-style 'path:line:content' when ≤5 matches, verbose when more. Pass 'text' explicitly to force the legacy verbose format regardless of match count.")),
+		mcp.WithString("output", mcp.Description("Alias for output_format. Accepts 'text' or 'json'. Legacy values 'content'|'files_with_matches'|'count' are NOT implemented and fall through to the default text branch.")),
 		mcp.WithNumber("max_results", mcp.Description("Maximum number of filenames to return (default: uses engine config; cap recommended for large trees)")),
 	)
 	reg.searchFilesHandler = auditWrap(engine, "search_files", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -110,7 +111,7 @@ func registerSearchTools(reg *toolRegistry) {
 		contextLines := 3
 		fileTypes := []interface{}{}
 		returnLines := false
-		outputFormat := "text"
+		outputFormat := "" // empty → engine defaults to "auto"; explicit "text" preserves legacy verbose/compact
 		contentIntent := false // content-only params passed → content search implied
 
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
