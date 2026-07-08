@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -156,6 +157,21 @@ func registerBatchTools(reg *toolRegistry) {
 		}
 
 		// Execute multi-edit
+		// Fix #4 (v4.5.26): emit a non-blocking [STALE_READ] hint if no
+		// read_file happened on this path in the current session. The proxy log
+		// shows ~36 multi_edit failures per month caused by the model reusing
+		// an old `old_text` after intervening edits — a classic stale-read loop.
+		// edit_file already does this; multi_edit was missing parity.
+		var staleWarning string
+		normPath := core.NormalizePath(path)
+		if info, statErr := os.Stat(normPath); statErr == nil {
+			editSignal := core.CheckEditOp(normPath, "", info.Size())
+			if editSignal.Status == core.FeedbackWarn && editSignal.Pattern == core.PatternStaleRead {
+				staleWarning = "\n⚠️  [STALE_READ] " + editSignal.Message +
+					"\n   → " + editSignal.Suggestion +
+					"\n   (multi_edit will still run — re-read once to silence this warning.)"
+			}
+		}
 		result, err := engine.MultiEdit(ctx, path, edits, force, dryRun, false, expectedHash)
 		if err != nil {
 			// Bug #27: If result is non-nil, this is an atomic rollback — include backup_id and details
@@ -175,9 +191,16 @@ func registerBatchTools(reg *toolRegistry) {
 				}
 				errMsg += fmt.Sprintf("Backup: %s (original file is safe)\n", result.BackupID)
 				errMsg += "Fix the failing old_text and retry. Use read_file to get exact text."
+				if staleWarning != "" {
+					errMsg += staleWarning
+				}
 				return mcp.NewToolResultError(errMsg), nil
 			}
-			return mcp.NewToolResultError(fmt.Sprintf("Multi-edit error: %v", err)), nil
+			errPlain := fmt.Sprintf("Multi-edit error: %v", err)
+			if staleWarning != "" {
+				errPlain += staleWarning
+			}
+			return mcp.NewToolResultError(errPlain), nil
 		}
 
 		// Bug #32: dry_run response format for multi_edit
@@ -252,6 +275,10 @@ func registerBatchTools(reg *toolRegistry) {
 			if result.StructureWarning != "" {
 				msg += "\n" + result.StructureWarning
 			}
+			// Fix #4 (v4.5.26): append non-blocking stale-read hint on success too.
+			if staleWarning != "" {
+				msg += staleWarning
+			}
 			// diff_format (parity with edit_file): aggregate diff of the whole batch
 			if diffText := core.RenderDiff(result.OriginalContent, result.FinalContent, path, diffFormat); diffText != "" {
 				msg += "\n" + diffText
@@ -275,6 +302,12 @@ func registerBatchTools(reg *toolRegistry) {
 		}
 		if result.FailedEdits > 0 {
 			sb.WriteString(fmt.Sprintf("  fail: %d\n", result.FailedEdits))
+		}
+
+		// Fix #4 (v4.5.26): stale-read hint on success path (verbose format)
+		if staleWarning != "" {
+			sb.WriteString(staleWarning)
+			sb.WriteString("\n")
 		}
 
 		if len(result.EditDetails) > 0 {
