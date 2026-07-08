@@ -580,7 +580,9 @@ func generateAutoCommitMessage(repoRoot string, stagedFiles int) string {
 	hasFix = strings.Contains(lower, "fix") || strings.Contains(lower, "bug") || strings.Contains(lower, "patch")
 	hasRefactor = strings.Contains(lower, "refactor") || strings.Contains(lower, "rename") || strings.Contains(lower, "move")
 
-	description := fmt.Sprintf("update %d file(s)", stagedFiles)
+	// Explicit description from staged file names (v4.5.26): "update 1 file(s)"
+	// says nothing — name the files when few, or count + common dir when many.
+	description := autoCommitDescription(fileNames, stagedFiles)
 
 	switch {
 	case hasFix || totalDeletions > 200:
@@ -596,6 +598,57 @@ func generateAutoCommitMessage(repoRoot string, stagedFiles int) string {
 	default:
 		return "feat: " + description
 	}
+}
+
+// autoCommitDescription builds an explicit commit description from staged
+// file names: 1-3 files → basenames; more → count + deepest common directory.
+// Falls back to the generic count when no names were parsed.
+func autoCommitDescription(fileNames []string, stagedFiles int) string {
+	if len(fileNames) == 0 {
+		return fmt.Sprintf("update %d file(s)", stagedFiles)
+	}
+	if len(fileNames) <= 3 {
+		bases := make([]string, len(fileNames))
+		for i, f := range fileNames {
+			if idx := strings.LastIndex(f, "/"); idx >= 0 {
+				bases[i] = f[idx+1:]
+			} else {
+				bases[i] = f
+			}
+		}
+		return "update " + strings.Join(bases, ", ")
+	}
+	if dir := commonDir(fileNames); dir != "" {
+		return fmt.Sprintf("update %d files in %s/", len(fileNames), dir)
+	}
+	return fmt.Sprintf("update %d files", len(fileNames))
+}
+
+// commonDir returns the deepest directory prefix shared by all paths
+// (git-style forward-slash paths), or "" if they only share the repo root.
+func commonDir(paths []string) string {
+	dirOf := func(p string) string {
+		if idx := strings.LastIndex(p, "/"); idx >= 0 {
+			return p[:idx]
+		}
+		return ""
+	}
+	common := strings.Split(dirOf(paths[0]), "/")
+	for _, p := range paths[1:] {
+		parts := strings.Split(dirOf(p), "/")
+		n := 0
+		for n < len(common) && n < len(parts) && common[n] == parts[n] {
+			n++
+		}
+		common = common[:n]
+		if len(common) == 0 {
+			return ""
+		}
+	}
+	if len(common) == 1 && common[0] == "" {
+		return ""
+	}
+	return strings.Join(common, "/")
 }
 
 // gitRestore restores files from index or a specific commit.
