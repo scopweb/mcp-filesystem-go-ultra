@@ -86,6 +86,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithString("return_lines", mcp.Description("Return line numbers of count matches (true/false, for count_only mode)")),
 		mcp.WithString("output_format", mcp.Description("Output format: 'text' or 'json' (default: 'text'). Use 'json' for structured AI parsing.")),
 		mcp.WithString("output", mcp.Description("Alias for output_format: content, files_with_matches, count")),
+		mcp.WithNumber("max_results", mcp.Description("Maximum number of filenames to return (default: uses engine config; cap recommended for large trees)")),
 	)
 	reg.searchFilesHandler = auditWrap(engine, "search_files", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -187,12 +188,19 @@ func registerSearchTools(reg *toolRegistry) {
 		// Bug #32: route ALL content searches through AdvancedTextSearch which properly
 		// handles case_sensitive:false. SmartSearch (the default path) ignores this flag.
 		if includeContent || wholeWord || includeContext {
-			engineReq := localmcp.CallToolRequest{Arguments: map[string]interface{}{
+			advArgs := map[string]interface{}{
 				"path": path, "pattern": pattern,
 				"case_sensitive": caseSensitive, "whole_word": wholeWord,
 				"include_context": includeContext, "context_lines": contextLines,
 				"output_format": outputFormat,
-			}}
+			}
+			// Forward optional max_results if caller set one (new param v4.5.26)
+			if rawArgs, ok := request.Params.Arguments.(map[string]interface{}); ok {
+				if mr, ok := rawArgs["max_results"].(float64); ok && mr > 0 {
+					advArgs["max_results"] = mr
+				}
+			}
+			engineReq := localmcp.CallToolRequest{Arguments: advArgs}
 			resp, err := engine.AdvancedTextSearch(ctx, engineReq)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -208,12 +216,28 @@ func registerSearchTools(reg *toolRegistry) {
 			"path": path, "pattern": pattern,
 			"include_content": includeContent, "file_types": fileTypes,
 		}}
+		// Forward optional max_results (new param v4.5.26) — engine falls back to
+		// config default when absent, so this is purely advisory.
+		if rawArgs, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if mr, ok := rawArgs["max_results"].(float64); ok && mr > 0 {
+				engineReq.Arguments["max_results"] = mr
+			}
+		}
 		resp, err := engine.SmartSearch(ctx, engineReq)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if len(resp.Content) > 0 {
-			return mcp.NewToolResultText(capSearchOutput(resp.Content[0].Text, engine)), nil
+			out := capSearchOutput(resp.Content[0].Text, engine)
+			// Fix #3 (v4.5.26): If the call omitted file_types/include AND returned
+			// many matches (>200), surface a soft hint. The proxy log showed dozens
+			// of search_files calls in 5–45 s on unwalkable trees like CRM/SmartAdmin
+			// because the model relied on defaults. The hint costs ~30 output tokens
+			// but prevents the next call from re-walking the whole tree.
+			if len(out) > 8000 && len(fileTypes) == 0 && !includeContent {
+				out += "\n\n💡 hint: this search returned many matches across many files. Next time, pass `file_types` (e.g. \".razor,.cs\") or `include` to skip unrelated trees and keep latency under 1s."
+			}
+			return mcp.NewToolResultText(out), nil
 		}
 		return mcp.NewToolResultText("No matches"), nil
 	})

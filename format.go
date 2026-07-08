@@ -347,7 +347,12 @@ func formatPipelineResult(result *core.PipelineResult, compact bool) string {
 // mode, no range) automatically truncates and appends a total-lines footer.
 // This prevents silent MCP-response truncation from hiding the real extent of
 // large files — the model always sees how many lines exist and how to read more.
-const autoTruncateLargeFileLines = 500
+//
+// Fix #6 (v4.5.26): lowered from 500 → 300 lines after the proxy log showed
+// dozens of full-file reads of 700-1500-line .razor files, each costing
+// 7-15K output tokens. 300 covers ~95% of in-edit Razor files; the footer
+// tells the model how to read the rest with start_line/end_line.
+const autoTruncateLargeFileLines = 300
 
 // autoTruncateLargeFile truncates large files read without a range and appends a
 // footer identical in style to ReadFileRange so the model always knows:
