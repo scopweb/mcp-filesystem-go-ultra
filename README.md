@@ -1,6 +1,8 @@
 # MCP Filesystem Server Ultra-Fast
 
-**v4.5.25** · Go · MCP 2025-11-25 · 20 tools (17 core + git + minify_js + help, aliases disabled)
+**v4.5.26** · Go · MCP 2025-11-25 · 20 tools (17 core + git + minify_js + help, aliases disabled)
+
+v4.5.26: `read_file`, `write_file`, `edit_file`, `multi_edit` publish `outputSchema` in `tools/list` and return a `structuredContent` payload alongside the text fallback. `write_file` now records its post-write `content_hash` in auto-OCC (Improvement new point 4), and edit_file/multi_edit responses include `parent_backup_id` for step-through undo via structured payloads. Text fallback is byte-identical to v4.5.25 — zero breaking changes.
 
 A high-performance [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go. Designed for use with Claude Desktop and Claude Code, with first-class support for large files, WSL/Windows interoperability, and token-efficient responses.
 

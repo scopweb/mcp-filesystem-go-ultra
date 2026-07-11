@@ -49,6 +49,7 @@ func registerBatchTools(reg *toolRegistry) {
 	// ============================================================================
 	multiEditTool := mcp.NewTool("multi_edit",
 		mcp.WithTitleAnnotation("Multi Edit"),
+		mcp.WithRawOutputSchema(multiEditOutputSchema),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
@@ -283,7 +284,7 @@ func registerBatchTools(reg *toolRegistry) {
 			if diffText := core.RenderDiff(result.OriginalContent, result.FinalContent, path, diffFormat); diffText != "" {
 				msg += "\n" + diffText
 			}
-			return mcp.NewToolResultStructured(attachMessage(multiEditStructured(path, result), msg), msg), nil
+			return mcp.NewToolResultStructured(attachMessage(attachParentBackup(multiEditStructured(path, result), engine, result.BackupID), msg), msg), nil
 		}
 
 		// Verbose format: single line summary + optional sections
@@ -374,7 +375,7 @@ func registerBatchTools(reg *toolRegistry) {
 			core.SetIntegrityStatus(ctx, result.Integrity.Verification, result.Integrity.Warning)
 		}
 
-		return mcp.NewToolResultStructured(attachMessage(multiEditStructured(path, result), sb.String()), sb.String()), nil
+		return mcp.NewToolResultStructured(attachMessage(attachParentBackup(multiEditStructured(path, result), engine, result.BackupID), sb.String()), sb.String()), nil
 	}))
 
 	// ============================================================================
