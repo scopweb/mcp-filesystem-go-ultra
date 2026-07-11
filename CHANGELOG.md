@@ -1,5 +1,80 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.26] - 2026-07-11
+
+### feat(core): structuredContent + outputSchema on `read_file`, `write_file`, `edit_file`, `multi_edit`
+
+Until v4.5.26 every tool response was a single text block; clients had to
+parse the compact format (`WRITTEN [C] ... | NB`, `M %s | %d@+%d-%d | %dL`,
+`UNDO:xxx | chain:yyy`) to recover counts, hashes, backup IDs and the parent
+in the undo chain. Any third-party MCP client — i.e. anything that is not
+Claude with the in-repo `CLAUDE.md` — had no interop contract.
+
+FASE 1 publishes the contract via MCP `outputSchema` and guarantees every
+success response carries a `structuredContent` payload conforming to it.
+
+**1. `write_file` structured payload + `RecordWriteHash` fix (`tools_core.go:206-216, 510-535, 573-631`).**
+Six success returns converted from `NewToolResultText` to
+`NewToolResultStructured(attachMessage(sc, msg), msg)`. Three payload shapes:
+- normal write: `{path, bytes_written, content_hash, message}`
+- base64 write: same shape (no base64 flag in the payload — the textual `msg`
+  suffix `... | %dB base64` already disambiguates).
+- warn/feedback write: above + `feedback` (the already-formatted compact
+  `[WARN:...]` or verbose multi-line string from `core.FormatFeedback` /
+  `FormatFeedbackCompact`) + `backup_id` (when the adaptive downgrade
+  auto-created a safety backup).
+
+`content_hash` is computed via `computeFileOCCHash(normPath)` and recorded
+through `core.RecordWriteHash(normPath, hash)` immediately after the successful
+`engine.WriteFileContent` / `engine.WriteBase64`. **This was missing in every
+prior release** — a `write_file` followed by an `edit_file` on the same path
+in the same session would trip a false auto-OCC `external_change` warning
+because the edit's on-disk hash check compared against the *pre-write* read
+hash. The smoke test in §5 of `docs/FASE1-STRUCTURED-OUTPUTSCHEMA.md`
+encadenates write→edit `content_hash`→`expected_hash` and asserts no external
+change warning fires — that's the proof the fix landed.
+
+**2. `parent_backup_id` on edit_file and multi_edit (`tools_core.go:217-228, attachParentBackup helper; applied at 8 sites).**
+New helper `attachParentBackup(m, engine, backupID)` looks up
+`engine.GetBackupManager().GetBackupInfo(id).PreviousBackupID` and injects
+`parent_backup_id` into the payload when the chain has a parent. Mirrors the
+`chain:` segment of the compact text response. Applied at all 8
+`NewToolResultStructured` call sites that emit `editStructured` /
+`multiEditStructured` (6 in `tools_core.go` for edit_file's replace_range,
+delete_range, compact, verbose paths; 2 in `tools_batch.go:286, 377` for
+multi_edit). The helper is mutation-style (returns the same map) so the two
+edit_file sites that conditionally add `external_change` to a local `sc`
+before the wrap keep both fields. A regression test in `output_schema_test.go`
+locks that contract — see "variable-site foot-gun" test there.
+
+**3. `read_file` multi-file branch + two read fallbacks to structured (`tools_core.go:280-290, 356-361, 384-389`).**
+The batch read (`paths` JSON array) was the only `NewToolResultText` success
+return left on `read_file`; converted to `NewToolResultStructured({"content":
+combined}, combined)`. The two read paths where `computeFileOCCHash` fails
+(base64 fallback, range fallback) were also converted for consistency —
+`content_hash` is optional in the schema so omitting it conforms.
+
+**4. `outputSchema` on the 4 tools (`output_schemas.go` new file; options added at `tools_core.go:206, 460, 605` and `tools_batch.go:51`).**
+Uses `mcp.WithRawOutputSchema(json.RawMessage)` — never `WithOutputSchema[T]`
+(marshal-time conflict in mcp-go). Schemas are JSON literals with full
+per-property descriptions, so `tools/list` is now self-documenting for any
+MCP client.
+
+**No breaking changes.** `Content[0].Text` is byte-identical to the prior
+`NewToolResultText(msg)` output for every converted branch — verified by
+inspecting the mcp-go SDK constructors (`mcp.NewToolResultStructured` and
+`mcp.NewToolResultText` both produce `Content: []Content{TextContent{Type:
+"text", Text: <arg>}}`). All existing tests
+(`content_hash_test.go`, `edit_structured_test.go`, `edit_auto_occ_test.go`,
+`read_file_range_test.go`, `edit_diff_test.go`,
+`search_replace_handler_test.go`, `occ_hash_partial_read_test.go`) continue
+to pass without modification — they all use `strings.Contains` substring
+checks on `Content[0].Text`, never `==` equality.
+
+**Files.** New: `output_schemas.go` (4 `json.RawMessage` schemas), `output_schema_test.go` (schema↔payload coherence). Modified: `tools_core.go`, `tools_batch.go`, `main.go` (version bump), `CHANGELOG.md`.
+
+---
+
 ## [4.5.28] - 2026-07-11
 
 ### feat(git): agent-usable refactor — paths array, output enum, show action, help(tool:"git")

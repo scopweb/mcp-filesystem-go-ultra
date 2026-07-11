@@ -184,6 +184,36 @@ func attachMessage(m map[string]any, msg string) map[string]any {
 	return m
 }
 
+// writeStructured builds the structured payload for write_file responses.
+// content_hash is the FNV-1a 8-hex OCC token of the file as written on disk —
+// callers pass it as expected_hash on a subsequent edit_file/multi_edit to
+// chain operations without re-reading.
+func writeStructured(absPath string, bytesWritten int, contentHash string) map[string]any {
+	m := map[string]any{
+		"path":          absPath,
+		"bytes_written": bytesWritten,
+	}
+	if contentHash != "" {
+		m["content_hash"] = contentHash
+	}
+	return m
+}
+
+// attachParentBackup adds parent_backup_id to a structured payload when the
+// backup chain has a previous entry, mirroring the "chain:" segment of the
+// compact text response. Defensive: no-ops when backupID is empty, the engine
+// is nil, or the engine has no backup manager wired up. Helper-only — does
+// not change the existing signatures of editStructured / multiEditStructured.
+func attachParentBackup(m map[string]any, engine *core.UltraFastEngine, backupID string) map[string]any {
+	if backupID == "" || engine == nil || engine.GetBackupManager() == nil {
+		return m
+	}
+	if info, err := engine.GetBackupManager().GetBackupInfo(backupID); err == nil && info.PreviousBackupID != "" {
+		m["parent_backup_id"] = info.PreviousBackupID
+	}
+	return m
+}
+
 // diffFormatArg reads the optional diff_format argument (point 1). Empty string
 // means "auto" — see core.RenderDiff for the supported values.
 func diffFormatArg(args map[string]interface{}) string {
@@ -204,6 +234,7 @@ func registerCoreTools(reg *toolRegistry) {
 	// ============================================================================
 	readFileTool := mcp.NewTool("read_file",
 		mcp.WithTitleAnnotation("Read File"),
+		mcp.WithRawOutputSchema(readFileOutputSchema),
 		mcp.WithDescription("read_file — Read file contents from the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
 			"Use read_file for ALL project files. Never use runtime built-in read tools for files on the host disk. "+
 			"Supports line ranges (start_line/end_line), head/tail mode, base64 for binary. "+
@@ -269,7 +300,11 @@ func registerCoreTools(reg *toolRegistry) {
 					}
 				}
 			}
-			return mcp.NewToolResultText(results.String()), nil
+			// FASE1: structuredContent conformance. No content_hash here —
+			// per-file hashes will come in a later phase (the readFileOutputSchema
+			// declares content_hash as optional precisely for this branch).
+			combined := results.String()
+			return mcp.NewToolResultStructured(map[string]any{"content": combined}, combined), nil
 		}
 
 		path, err := request.RequireString("path")
@@ -319,7 +354,10 @@ func registerCoreTools(reg *toolRegistry) {
 				core.RecordReadHash(core.NormalizePath(path), contentHash) // new point 4
 				return mcp.NewToolResultStructured(map[string]any{"content": body, "content_hash": contentHash}, body), nil
 			}
-			return mcp.NewToolResultText(body), nil
+			// FASE1: structuredContent conformance fallback (file read OK but
+			// computeFileOCCHash failed — usually transient lock). No
+			// content_hash; the schema declares it optional.
+			return mcp.NewToolResultStructured(map[string]any{"content": body}, body), nil
 		}
 
 		// Range read mode: read specific line range
@@ -347,7 +385,9 @@ func registerCoreTools(reg *toolRegistry) {
 				core.RecordReadHash(core.NormalizePath(path), contentHash) // new point 4
 				return mcp.NewToolResultStructured(map[string]any{"content": content, "content_hash": contentHash}, content), nil
 			}
-			return mcp.NewToolResultText(content), nil
+			// FASE1: structuredContent conformance fallback (range read OK but
+			// computeFileOCCHash failed). No content_hash; schema declares it optional.
+			return mcp.NewToolResultStructured(map[string]any{"content": content}, content), nil
 		}
 
 		// Default: read full file
@@ -412,6 +452,7 @@ func registerCoreTools(reg *toolRegistry) {
 	// ============================================================================
 	writeFileTool := mcp.NewTool("write_file",
 		mcp.WithTitleAnnotation("Write File"),
+		mcp.WithRawOutputSchema(writeFileOutputSchema),
 		mcp.WithDescription("write_file — Write/Create files on the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
 			"Use write_file for ALL project files — never use the runtime's built-in write/create tools for host paths. "+
 			"Creates or overwrites. For binary use content_base64 with encoding:\"base64\". "+
@@ -478,10 +519,23 @@ func registerCoreTools(reg *toolRegistry) {
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
-			if engine.IsCompactMode() {
-				return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, bytesWritten)), nil
+			// New point 4: track our own write so auto-OCC won't flag it as an
+			// external change on the next edit. Until v4.5.26 write_file did NOT
+			// call RecordWriteHash, so a subsequent edit_file on the same path
+			// could trip a false "external change" warning.
+			b64NormPath := core.NormalizePath(path)
+			b64ContentHash, _ := computeFileOCCHash(b64NormPath)
+			if b64ContentHash != "" {
+				core.RecordWriteHash(b64NormPath, b64ContentHash)
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s %s | %dB base64", diskPrefix(absPath), absPath, bytesWritten)), nil
+			if engine.IsCompactMode() {
+				msg := fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, bytesWritten)
+				sc := writeStructured(absPath, bytesWritten, b64ContentHash)
+				return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
+			}
+			msg := fmt.Sprintf("WRITTEN %s %s | %dB base64", diskPrefix(absPath), absPath, bytesWritten)
+			sc := writeStructured(absPath, bytesWritten, b64ContentHash)
+			return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
 		}
 
 		// Normal text write
@@ -538,21 +592,57 @@ func registerCoreTools(reg *toolRegistry) {
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
+			// New point 4: track our own write so auto-OCC won't flag it as an
+			// external change on the next edit. Until v4.5.26 write_file did NOT
+			// call RecordWriteHash, so a subsequent edit_file on the same path
+			// could trip a false "external change" warning.
+			writeContentHash, _ := computeFileOCCHash(normPath)
+			if writeContentHash != "" {
+				core.RecordWriteHash(normPath, writeContentHash)
+			}
 			core.SetFeedback(ctx, signal)
 			if engine.IsCompactMode() && !signal.Downgraded {
-				return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s %s | %dB | %s", diskPrefix(absPath), absPath, len(content), core.FormatFeedbackCompact(signal))), nil
+				msg := fmt.Sprintf("WRITTEN %s %s | %dB | %s", diskPrefix(absPath), absPath, len(content), core.FormatFeedbackCompact(signal))
+				sc := writeStructured(absPath, len(content), writeContentHash)
+				if newBackupID != "" {
+					sc["backup_id"] = newBackupID
+				}
+				sc["feedback"] = core.FormatFeedbackCompact(signal)
+				return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
 			}
-			return mcp.NewToolResultText(core.FormatFeedback(signal, fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, len(content)))), nil
+			msg := core.FormatFeedback(signal, fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, len(content)))
+			sc := writeStructured(absPath, len(content), writeContentHash)
+			if newBackupID != "" {
+				sc["backup_id"] = newBackupID
+			}
+			// Use the already-formatted feedback string (preserves the exact
+			// newline/arrow formatting FormatFeedback produces) as the value
+			// of the structured feedback field. No re-formatting — easier to
+			// keep the two surfaces in sync.
+			sc["feedback"] = core.FormatFeedback(signal, "")
+			return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
 		}
 
 		err = engine.WriteFileContent(ctx, path, content)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
-		if engine.IsCompactMode() {
-			return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, len(content))), nil
+		// New point 4: track our own write so auto-OCC won't flag it as an
+		// external change on the next edit. Until v4.5.26 write_file did NOT
+		// call RecordWriteHash, so a subsequent edit_file on the same path
+		// could trip a false "external change" warning.
+		writeContentHash, _ := computeFileOCCHash(normPath)
+		if writeContentHash != "" {
+			core.RecordWriteHash(normPath, writeContentHash)
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, len(content))), nil
+		if engine.IsCompactMode() {
+			msg := fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, len(content))
+			sc := writeStructured(absPath, len(content), writeContentHash)
+			return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
+		}
+		msg := fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, len(content))
+		sc := writeStructured(absPath, len(content), writeContentHash)
+		return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
 	})
 	reg.addTool(writeFileTool, reg.writeFileHandler)
 
@@ -561,6 +651,7 @@ func registerCoreTools(reg *toolRegistry) {
 	// ============================================================================
 	editFileTool := mcp.NewTool("edit_file",
 		mcp.WithTitleAnnotation("Edit File"),
+		mcp.WithRawOutputSchema(editFileOutputSchema),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
@@ -849,7 +940,7 @@ func registerCoreTools(reg *toolRegistry) {
 				if result.StructureWarning != "" {
 					msg += "\n" + result.StructureWarning
 				}
-				return mcp.NewToolResultStructured(attachMessage(editStructured(path, result), msg), msg), nil
+				return mcp.NewToolResultStructured(attachMessage(attachParentBackup(editStructured(path, result), engine, result.BackupID), msg), msg), nil
 			}
 			msg := fmt.Sprintf("Replaced lines %d-%d in %s\nLines: +%d -%d\nTotal lines now: %d",
 				startLine, endLine, path, result.LinesAdded, result.LinesRemoved, result.TotalLines)
@@ -859,7 +950,7 @@ func registerCoreTools(reg *toolRegistry) {
 			if result.StructureWarning != "" {
 				msg += "\n" + result.StructureWarning
 			}
-			return mcp.NewToolResultStructured(attachMessage(editStructured(path, result), msg), msg), nil
+			return mcp.NewToolResultStructured(attachMessage(attachParentBackup(editStructured(path, result), engine, result.BackupID), msg), msg), nil
 		}
 
 		// ---- MODE: delete_range ----
@@ -896,7 +987,7 @@ func registerCoreTools(reg *toolRegistry) {
 				if result.StructureWarning != "" {
 					msg += "\n" + result.StructureWarning
 				}
-				return mcp.NewToolResultStructured(attachMessage(editStructured(path, result), msg), msg), nil
+				return mcp.NewToolResultStructured(attachMessage(attachParentBackup(editStructured(path, result), engine, result.BackupID), msg), msg), nil
 			}
 			msg := fmt.Sprintf("Deleted lines %d-%d from %s\nLines removed: %d\nTotal lines now: %d",
 				startLine, endLine, path, result.LinesRemoved, result.TotalLines)
@@ -906,7 +997,7 @@ func registerCoreTools(reg *toolRegistry) {
 			if result.StructureWarning != "" {
 				msg += "\n" + result.StructureWarning
 			}
-			return mcp.NewToolResultStructured(attachMessage(editStructured(path, result), msg), msg), nil
+			return mcp.NewToolResultStructured(attachMessage(attachParentBackup(editStructured(path, result), engine, result.BackupID), msg), msg), nil
 		}
 
 		// ---- MODE: replace (default) with optional occurrence ----
@@ -1120,6 +1211,7 @@ func registerCoreTools(reg *toolRegistry) {
 			if autoOCCWarn != "" {
 				sc["external_change"] = autoOCCWarn
 			}
+			attachParentBackup(sc, engine, result.BackupID)
 			return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
 		}
 
