@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -19,26 +18,25 @@ func registerGitTools(reg *toolRegistry) {
 
 	gitTool := mcp.NewTool("git",
 		mcp.WithTitleAnnotation("Git Version Control"),
-		mcp.WithDescription("git — Git operations: status, diff, log, add, commit, branch, restore, init. "+
-			"Must be run from within a git repository. Related: analyze_operation, edit_file."),
+		mcp.WithDescription("git — Git operations: status, diff, log, show, add, commit, restore, branch, init. "+
+			"Must be run from within a git repository. Related: analyze_operation, edit_file, help."),
 		mcp.WithReadOnlyHintAnnotation(false),
-		mcp.WithDestructiveHintAnnotation(true), // Some actions (restore, branch delete, etc.) are destructive
+		mcp.WithDestructiveHintAnnotation(true), // restore, branch delete
 		mcp.WithIdempotentHintAnnotation(false), // commit, restore, branch delete are not idempotent
 
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, diff, log, add, commit, branch, restore, init")),
-		mcp.WithString("path", mcp.Description("Working directory or file path (default: auto-detect repo root)")),
-		mcp.WithString("message", mcp.Description("Commit message (for commit action)")),
-		mcp.WithBoolean("auto_message", mcp.Description("Auto-generate conventional commit message from staged changes (default: false)")),
-		mcp.WithString("paths", mcp.Description("JSON array of file paths (for add, restore)")),
-		mcp.WithString("branch_action", mcp.Description("For branch: list (default), create, delete")),
-		mcp.WithString("branch_name", mcp.Description("Branch name for create/delete")),
-		mcp.WithString("source", mcp.Description("Source commit for restore (e.g. HEAD~1, abc1234)")),
-		mcp.WithBoolean("staged", mcp.Description("Restore staged changes instead of working tree (for restore action)")),
-		mcp.WithBoolean("all", mcp.Description("Stage all modified files (for add action)")),
-		mcp.WithString("commit_range", mcp.Description("Diff between two commits: commit1..commit2")),
-		mcp.WithNumber("max_count", mcp.Description("Max log entries to return (default: 10)")),
-		mcp.WithBoolean("dry_run", mcp.Description("Preview without applying (for add, restore)")),
-		mcp.WithBoolean("force", mcp.Description("Force push/delete (skip safety checks)")),
+		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, diff, log, show, add, commit, restore, branch, init")),
+		mcp.WithString("path", mcp.Description("Working directory or file path (default: auto-detect repo root). If a file path, used as implicit pathspec for diff/log/status.")),
+		mcp.WithArray("paths", mcp.WithStringItems(),
+			mcp.Description("Pathspec: native array of file/dir paths relative to repo root. Limits diff/log/status/add/restore to these paths. Equivalent to 'git <cmd> -- <paths>'.")),
+		mcp.WithString("output", mcp.Description("Output format. diff/show: 'stat' (default) | 'name-only' | 'full'. status: 'name-only' (default) | 'full'. log: 'oneline' (default) | 'full'.")),
+		mcp.WithNumber("max_lines", mcp.Description("Max output lines before truncation with hint footer (default: 200)")),
+		mcp.WithNumber("limit", mcp.Description("log: max commits to return (default: 10)")),
+		mcp.WithString("rev", mcp.Description("Revision or range (e.g. 'HEAD~3', 'abc123..def456', 'main'). diff/log/show.")),
+		mcp.WithBoolean("staged", mcp.Description("diff: compare index vs HEAD (--cached). Default: false.")),
+		mcp.WithString("message", mcp.Description("commit: message text (required for commit)")),
+		mcp.WithString("name", mcp.Description("branch: branch name to create/delete/checkout")),
+		mcp.WithBoolean("checkout", mcp.Description("branch: with name=true, also switch to new branch (git switch -c). Default: false.")),
+		mcp.WithBoolean("force", mcp.Description("branch delete: true → -D (force). Other actions: ignored.")),
 	)
 
 	reg.addTool(gitTool, auditWrap(engine, "git", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -46,6 +44,12 @@ func registerGitTools(reg *toolRegistry) {
 
 		action, _ := args["action"].(string)
 		path, _ := args["path"].(string)
+
+		if action == "" {
+			return usageError(
+				"missing 'action' parameter",
+				`git(action:"status")  // or: diff, log, show, add, commit, restore, branch, init`), nil
+		}
 
 		// Normalize path
 		if path != "" {
@@ -60,7 +64,9 @@ func registerGitTools(reg *toolRegistry) {
 		// For all other actions, detect git repo
 		repoRoot, err := core.FindGitRoot(path)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return usageError(
+				fmt.Sprintf("path is not inside a git repository: %s", path),
+				`git(action:"init", path:"C:/path/to/repo")  // to create one`), nil
 		}
 
 		// Check access control
@@ -73,7 +79,7 @@ func registerGitTools(reg *toolRegistry) {
 		// force/gate state, rather than depending on each handler checking it
 		// after the gate. Applies to every user-supplied value that reaches git
 		// as a positional argument.
-		for _, f := range []string{"source", "branch_name", "commit_range"} {
+		for _, f := range []string{"rev", "name"} {
 			if v, _ := args[f].(string); v != "" {
 				if errRes := rejectOptionLike(f, v); errRes != nil {
 					return errRes, nil
@@ -83,18 +89,20 @@ func registerGitTools(reg *toolRegistry) {
 
 		// Anti-destructive protection for dangerous git operations
 		if isDestructiveGitAction(action, args) && !getBoolArg(args, "force") {
-			return mcp.NewToolResultError(
-				fmt.Sprintf("Destructive git operation '%s' requires force=true for safety. "+
-					"Use force=true only if you are sure.", action)), nil
+			return usageError(
+				fmt.Sprintf("destructive git operation '%s' requires force:true for safety", action),
+				fmt.Sprintf(`git(action:"%s", paths:["file.txt"], force:true)`, action)), nil
 		}
 
 		switch action {
 		case "status":
-			return gitStatus(ctx, engine, repoRoot)
+			return gitStatus(ctx, engine, repoRoot, args)
 		case "diff":
 			return gitDiff(ctx, engine, repoRoot, args)
 		case "log":
 			return gitLog(ctx, engine, repoRoot, args)
+		case "show":
+			return gitShow(ctx, engine, repoRoot, args)
 		case "add":
 			return gitAdd(ctx, engine, repoRoot, args)
 		case "commit":
@@ -104,9 +112,21 @@ func registerGitTools(reg *toolRegistry) {
 		case "branch":
 			return gitBranch(ctx, engine, repoRoot, args)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("Unknown action: %s. Valid: status, diff, log, add, commit, restore, branch, init", action)), nil
+			return usageError(
+				fmt.Sprintf("unknown action %q", action),
+				`git(action:"status")  // valid: status, diff, log, show, add, commit, restore, branch, init`), nil
 		}
-	}))
+	}),
+		// Examples for help(tool:"git") — manually curated per docs/git-tool-spec.md §5
+		`git(action:"status")`,
+		`git(action:"diff", paths:["lib/dPeticiones.php"], output:"stat")`,
+		`git(action:"log", limit:5, paths:["public_html/ajax/"])`,
+		`git(action:"show", rev:"HEAD", output:"full")`,
+		`git(action:"add", paths:["src/file.php"])`,
+		`git(action:"commit", message:"fix: short description")`,
+		`git(action:"restore", paths:["file.txt"], staged:true)`,
+		`git(action:"branch", name:"feature/new", checkout:true)`,
+	)
 }
 
 // gitInit initializes a new git repository
@@ -147,17 +167,45 @@ func gitInit(ctx context.Context, engine *core.UltraFastEngine, path string, arg
 	return mcp.NewToolResultText(fmt.Sprintf("Initialized empty Git repository in %s\n%s", targetPath, output)), nil
 }
 
-// gitStatus returns the current git status
-func gitStatus(ctx context.Context, engine *core.UltraFastEngine, repoRoot string) (*mcp.CallToolResult, error) {
-	output, werr := execGitCommand(repoRoot, "git", "status", "--porcelain=v1", "-b")
+// gitStatus returns the current git status.
+//
+// output:
+//   - "name-only" (default) → porcelain v1 with branch line (`-b`)
+//   - "full"                → porcelain v1 with branch line AND branch tracking info (porcelain=v2 -b)
+//
+// paths: optional native array; appended after `--` to limit the scope.
+func gitStatus(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	output, _ := parseOutputArg(args, "output", "name-only", []string{"name-only", "full"})
+	// parseOutputArg never errors with a valid default, but defensive:
+	if output == "" {
+		output = "name-only"
+	}
+
+	paths, errRes := pathsFromArgs(args)
+	if errRes != nil {
+		return errRes, nil
+	}
+
+	cmdArgs := []string{"status", "--porcelain=v1", "-b"}
+	if output == "full" {
+		cmdArgs = []string{"status", "--porcelain=v2", "-b"}
+	}
+	if len(paths) > 0 {
+		cmdArgs = append(cmdArgs, "--")
+		for _, p := range paths {
+			cmdArgs = append(cmdArgs, core.NormalizePath(p))
+		}
+	}
+
+	gitOutput, werr := execGitCommand(repoRoot, "git", cmdArgs...)
 	if werr != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("git status failed: %v\n%s", werr, output)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("git status failed: %v\n%s", werr, gitOutput)), nil
 	}
 
 	if engine.IsCompactMode() {
-		return gitStatusCompact(repoRoot, output)
+		return gitStatusCompact(repoRoot, gitOutput)
 	}
-	return mcp.NewToolResultText(output), nil
+	return mcp.NewToolResultText(gitOutput), nil
 }
 
 // gitStatusCompact returns a compact one-line status summary
@@ -216,23 +264,69 @@ func gitStatusCompact(repoRoot, output string) (*mcp.CallToolResult, error) {
 		repoName, currentBranch, stagedCount, unstagedCount, untrackedCount, status)), nil
 }
 
-// gitDiff returns the diff output
+// diffGuardrailThreshold is the file-count above which output:"full" without
+// paths is downgraded to stat with a banner. See upgrade plan §B guardrail L2.
+const diffGuardrailThreshold = 20
+
+// gitDiff returns the diff output with the 4-layer guardrail from docs/git-tool-spec.md §3.
+//
+// Layer 1 — default output = "stat".
+// Layer 2 — output=="full" && len(paths)==0 && changedFiles > diffGuardrailThreshold
+//           → downgrade to stat, prepend banner (no error, just degrade).
+// Layer 3 — output=="full" with explicit paths → honor the request.
+// Layer 4 — max_lines (default 200) applies to ALL output, with footer if truncated.
 func gitDiff(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	staged, _ := args["staged"].(bool)
-	commitRange, _ := args["commit_range"].(string)
-	if commitRange != "" {
-		if errRes := rejectOptionLike("commit_range", commitRange); errRes != nil {
+	rev, _ := args["rev"].(string)
+	if rev != "" {
+		if errRes := rejectOptionLike("rev", rev); errRes != nil {
 			return errRes, nil
 		}
 	}
 
-	var cmdArgs []string
-	if commitRange != "" {
-		cmdArgs = []string{"diff", "--no-ext-diff", commitRange}
-	} else if staged {
-		cmdArgs = []string{"diff", "--cached", "--no-ext-diff"}
-	} else {
-		cmdArgs = []string{"diff", "--no-ext-diff"}
+	out, errRes := parseOutputArg(args, "output", "stat", []string{"stat", "name-only", "full"})
+	if errRes != nil {
+		return errRes, nil
+	}
+
+	maxLines := parseIntArg(args, "max_lines", 200)
+	paths, errRes := pathsFromArgs(args)
+	if errRes != nil {
+		return errRes, nil
+	}
+
+	// ---- Layer 2 guardrail: count first, downgrade if too many files ----
+	banner := ""
+	if out == "full" && len(paths) == 0 {
+		count, cerr := countChangedFiles(repoRoot, rev, staged)
+		if cerr == nil && count > diffGuardrailThreshold {
+			out = "stat"
+			banner = fmt.Sprintf(
+				"[GUARDARRAIL: %d archivos modificados sin 'paths' — mostrando stat. Pide output:\"full\" con paths:[\"archivo\"] para diff concreto.]\n",
+				count)
+		}
+	}
+
+	// ---- Build git command ----
+	cmdArgs := []string{"diff", "--no-ext-diff"}
+	if staged {
+		cmdArgs = append(cmdArgs, "--cached")
+	}
+	if rev != "" {
+		cmdArgs = append(cmdArgs, rev)
+	}
+	switch out {
+	case "stat":
+		cmdArgs = append(cmdArgs, "--stat")
+	case "name-only":
+		cmdArgs = append(cmdArgs, "--name-only")
+	// "full" → no extra flag, plain patch
+	}
+	if len(paths) > 0 {
+		cmdArgs = append(cmdArgs, "--")
+		for _, p := range paths {
+			cmdArgs = append(cmdArgs, core.NormalizePath(p))
+		}
 	}
 
 	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
@@ -240,45 +334,71 @@ func gitDiff(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 		return mcp.NewToolResultError(fmt.Sprintf("git diff failed: %v\n%s", werr, output)), nil
 	}
 
-	if output == "" {
-		if commitRange != "" {
-			return mcp.NewToolResultText("No changes in range " + commitRange), nil
-		}
-		if staged {
+	if strings.TrimSpace(output) == "" {
+		// Friendly "no changes" message based on what was asked
+		switch {
+		case rev != "":
+			return mcp.NewToolResultText("No changes in range " + rev), nil
+		case staged:
 			return mcp.NewToolResultText("No staged changes"), nil
+		default:
+			return mcp.NewToolResultText("No unstaged changes"), nil
 		}
-		return mcp.NewToolResultText("No unstaged changes"), nil
 	}
 
-	if engine.IsCompactMode() {
-		lines := strings.Split(output, "\n")
-		maxLines := 50
-		truncated := len(lines) > maxLines
-		if truncated {
-			lines = lines[:maxLines]
-		}
-		result := strings.Join(lines, "\n")
-		if truncated {
-			totalLines := len(strings.Split(output, "\n"))
-			result += fmt.Sprintf("\n... (%d more lines — run git(action:\"diff\") for full output)", totalLines-maxLines)
-		}
-		return mcp.NewToolResultText(result), nil
+	// Compact mode of the SERVER caps differently, but the spec's max_lines always wins
+	// for LLM consumers. We apply max_lines unconditionally and prepend the banner if downgraded.
+	final := banner + truncateOutput(output, maxLines)
+
+	// Server compact mode still trims further if it's an extreme case (>10k chars).
+	if engine.IsCompactMode() && len(final) > 10000 {
+		final = final[:10000] + "\n... (truncated by compact mode)"
 	}
 
-	return mcp.NewToolResultText(output), nil
+	return mcp.NewToolResultText(final), nil
 }
 
-// gitLog returns the commit log
+// gitLog returns the commit log.
+//
+// output: "oneline" (default) | "full"
+// limit:  default 10
+// rev:    optional single rev or range
+// paths:  optional pathspec array
 func gitLog(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
-	maxCount := 10
-	if mc, ok := args["max_count"].(float64); ok && mc > 0 {
-		maxCount = int(mc)
+	rev, _ := args["rev"].(string)
+	if rev != "" {
+		if errRes := rejectOptionLike("rev", rev); errRes != nil {
+			return errRes, nil
+		}
 	}
 
-	cmdArgs := []string{"log", fmt.Sprintf("-%d", maxCount), "--oneline", "--decorate"}
-	if !engine.IsCompactMode() {
-		cmdArgs = []string{"log", fmt.Sprintf("-%d", maxCount),
-			"--format=%H|%s|%an|%ad", "--date=relative"}
+	out, errRes := parseOutputArg(args, "output", "oneline", []string{"oneline", "full"})
+	if errRes != nil {
+		return errRes, nil
+	}
+
+	limit := parseIntArg(args, "limit", 10)
+	maxLines := parseIntArg(args, "max_lines", 200)
+	paths, errRes := pathsFromArgs(args)
+	if errRes != nil {
+		return errRes, nil
+	}
+
+	cmdArgs := []string{"log", fmt.Sprintf("-%d", limit)}
+	if out == "oneline" {
+		cmdArgs = append(cmdArgs, "--oneline", "--decorate")
+	} else {
+		// full: hash + subject + author + date relative
+		cmdArgs = append(cmdArgs, "--format=%H|%s|%an|%ad", "--date=relative")
+	}
+	if rev != "" {
+		cmdArgs = append(cmdArgs, rev)
+	}
+	if len(paths) > 0 {
+		cmdArgs = append(cmdArgs, "--")
+		for _, p := range paths {
+			cmdArgs = append(cmdArgs, core.NormalizePath(p))
+		}
 	}
 
 	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
@@ -286,96 +406,101 @@ func gitLog(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 		return mcp.NewToolResultError(fmt.Sprintf("git log failed: %v\n%s", werr, output)), nil
 	}
 
-	if output == "" {
+	if strings.TrimSpace(output) == "" {
 		return mcp.NewToolResultText("No commits yet"), nil
 	}
 
-	if engine.IsCompactMode() {
-		lines := strings.Split(output, "\n")
-		var formatted []string
-		for _, line := range lines {
-			if strings.Contains(line, "|") {
-				parts := strings.SplitN(line, "|", 4)
-				if len(parts) >= 4 {
-					hash := parts[0][:8]
-					msg := parts[1]
-					author := parts[2]
-					date := parts[3]
-					formatted = append(formatted, fmt.Sprintf("%s %q | %s | %s", hash, msg, author, date))
-					continue
-				}
-			}
-			formatted = append(formatted, line)
-		}
-		return mcp.NewToolResultText(strings.Join(formatted, "\n")), nil
+	// Apply max_lines truncation unconditionally; this is the LLM-consumer contract.
+	return mcp.NewToolResultText(truncateOutput(output, maxLines)), nil
+}
+
+// gitShow displays a commit: stat by default, full/Name-only on demand.
+// rev is required; paths optionally scopes the diff shown.
+func gitShow(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	rev, _ := args["rev"].(string)
+	if rev == "" {
+		return usageError(
+			"missing 'rev' parameter (required for show)",
+			`git(action:"show", rev:"HEAD")`), nil
+	}
+	if errRes := rejectOptionLike("rev", rev); errRes != nil {
+		return errRes, nil
 	}
 
-	return mcp.NewToolResultText(output), nil
+	out, errRes := parseOutputArg(args, "output", "stat", []string{"stat", "name-only", "full"})
+	if errRes != nil {
+		return errRes, nil
+	}
+
+	maxLines := parseIntArg(args, "max_lines", 200)
+	paths, errRes := pathsFromArgs(args)
+	if errRes != nil {
+		return errRes, nil
+	}
+
+	cmdArgs := []string{"show", "--no-ext-diff", rev}
+	switch out {
+	case "stat":
+		cmdArgs = append(cmdArgs, "--stat")
+	case "name-only":
+		cmdArgs = append(cmdArgs, "--name-only")
+		// "full" → plain patch + commit metadata
+	}
+	if len(paths) > 0 {
+		cmdArgs = append(cmdArgs, "--")
+		for _, p := range paths {
+			cmdArgs = append(cmdArgs, core.NormalizePath(p))
+		}
+	}
+
+	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	if werr != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("git show failed: %v\n%s", werr, output)), nil
+	}
+
+	if strings.TrimSpace(output) == "" {
+		return mcp.NewToolResultText("No commit data for " + rev), nil
+	}
+
+	return mcp.NewToolResultText(truncateOutput(output, maxLines)), nil
 }
 
 // gitAdd stages files
 // Scope resolution (priority order, no silent fallbacks):
-//  1. paths (JSON array) — stage exactly those files
-//  2. path (string)      — stage that single file
-//  3. all:true           — stage entire working tree (-A)
-//  4. dry_run:true       — preview whatever scope was selected above
-//  5. none of the above  — explicit error, NEVER default to -A
+//  1. paths (native array) — stage exactly those files
+//  2. none of the above    — explicit error, NEVER default to -A
 func gitAdd(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
-	all, _ := args["all"].(bool)
-	dryRun, _ := args["dry_run"].(bool)
-	pathsStr, _ := args["paths"].(string)
-	filePath, _ := args["path"].(string)
-
-	var paths []string
-	if pathsStr != "" {
-		if err := json.Unmarshal([]byte(pathsStr), &paths); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("invalid paths JSON: %v", err)), nil
-		}
+	paths, errRes := pathsFromArgs(args)
+	if errRes != nil {
+		return errRes, nil
 	}
 
-	var cmdArgs []string
-	switch {
-	case len(paths) > 0:
-		// Explicit list — highest priority, exact scope.
-		// The "--" separator is REQUIRED: without it a path like "-A" or
-		// "--pathspec-from-file=/etc/passwd" would be parsed by git as an
-		// option instead of a filename (option injection).
-		normalized := make([]string, len(paths))
-		for i, p := range paths {
-			normalized[i] = core.NormalizePath(p)
-		}
-		cmdArgs = append([]string{"add", "--"}, normalized...)
-	case filePath != "":
-		// Single path — second priority. "--" guards against option injection.
-		cmdArgs = []string{"add", "--", core.NormalizePath(filePath)}
-	case all:
-		// Explicit opt-in to stage entire tree
-		cmdArgs = []string{"add", "-A"}
-	default:
-		// No scope specified — refuse silently-defaulting to -A
-		return mcp.NewToolResultError(
-			"git add requires one of: paths (JSON array), path (string), or all:true. " +
-				"Refusing to stage entire repo without explicit scope."), nil
+	if len(paths) == 0 {
+		return usageError(
+			"git add requires explicit 'paths' (no implicit 'add .')",
+			`git(action:"add", paths:["src/file.php"])`), nil
 	}
 
-	// Pre-write hook for add operation
+	// Normalize. "--" separator is REQUIRED: without it a path like "-A" or
+	// "--pathspec-from-file=/etc/passwd" would be parsed by git as an option.
+	normalized := make([]string, len(paths))
+	for i, p := range paths {
+		normalized[i] = core.NormalizePath(p)
+	}
+
+	// Pre-write hook
 	hookCtx := &core.HookContext{
 		Event:     core.HookPreWrite,
 		ToolName:  "git",
 		FilePath:  repoRoot,
 		Operation: "add",
-		Metadata:  map[string]interface{}{"git_operation": "add", "all": all, "dry_run": dryRun},
+		Metadata:  map[string]interface{}{"git_operation": "add"},
 	}
 	if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreWrite, hookCtx); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git add denied by hook: %v", err)), nil
 	}
 
-	if dryRun {
-		// Insert "-n" right after "add" — appending at the end would place it
-		// after the "--" separator, where git treats it as a pathspec.
-		cmdArgs = append(cmdArgs[:1], append([]string{"-n"}, cmdArgs[1:]...)...)
-	}
-
+	cmdArgs := append([]string{"add", "--"}, normalized...)
 	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
 	if werr != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git add failed: %v\n%s", werr, output)), nil
@@ -384,15 +509,7 @@ func gitAdd(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 	hookCtx.Event = core.HookPostWrite
 	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostWrite, hookCtx)
 
-	if dryRun {
-		if engine.IsCompactMode() {
-			return mcp.NewToolResultText("DRY RUN: " + output), nil
-		}
-		return mcp.NewToolResultText("Dry run — would stage:\n" + output), nil
-	}
-
 	if engine.IsCompactMode() {
-		// Count staged files from status
 		statusOut, _ := execGitCommand(repoRoot, "git", "status", "--porcelain")
 		lines := strings.Split(statusOut, "\n")
 		staged := 0
@@ -403,15 +520,21 @@ func gitAdd(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("OK: staged %d file(s)", staged)), nil
 	}
-
 	return mcp.NewToolResultText("Staged changes:\n" + output), nil
 }
 
 // gitCommit commits staged changes
+//
+// message: required (string)
+// paths:   optional native array; passed to `git commit -- <paths>` (commits only those)
+// When nothing is staged → usageError with the add example.
 func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	message, _ := args["message"].(string)
-	autoMessage, _ := args["auto_message"].(bool)
-	force, _ := args["force"].(bool)
+	if message == "" {
+		return usageError(
+			"missing 'message' parameter (required for commit)",
+			`git(action:"commit", message:"fix: short description")`), nil
+	}
 
 	// Pre-write hook — can deny commit
 	hookCtx := &core.HookContext{
@@ -425,6 +548,12 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 		return mcp.NewToolResultError(fmt.Sprintf("git commit denied by hook: %v", err)), nil
 	}
 
+	// Optional paths filter (commits a subset of the staged changes)
+	paths, errRes := pathsFromArgs(args)
+	if errRes != nil {
+		return errRes, nil
+	}
+
 	// Get staged diff --stat for risk assessment
 	stagedStat, werr := execGitCommand(repoRoot, "git", "diff", "--cached", "--shortstat")
 	if werr != nil {
@@ -432,7 +561,9 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 	}
 
 	if strings.TrimSpace(stagedStat) == "" {
-		return mcp.NewToolResultError("No staged changes to commit. Stage files first: git(action:\"add\") or git(action:\"add\", all:true)"), nil
+		return usageError(
+			"nothing staged to commit",
+			`git(action:"add", paths:["file.txt"])`), nil
 	}
 
 	// Risk assessment
@@ -445,30 +576,20 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 		riskLevel = "HIGH"
 	}
 
-	if riskLevel == "HIGH" && !force {
-		return mcp.NewToolResultError(fmt.Sprintf(
-			"HIGH risk commit detected: %d files, ~%d insertions, %d deletions. Set force:true if you want to proceed anyway.", stagedFiles, stagedInsertions, stagedDeletions)), nil
-	}
-
-	// Auto-generate message from staged content if requested
-	if autoMessage && message == "" {
-		message = generateAutoCommitMessage(repoRoot, stagedFiles)
-		if message == "" {
-			return mcp.NewToolResultError("auto_message: true but could not determine commit type. Please provide message manually."), nil
-		}
-	}
-
-	if message == "" {
-		return mcp.NewToolResultError("commit message is required. Usage: git(action:\"commit\", message:\"your message\") or git(action:\"commit\", auto_message:true)"), nil
-	}
-
 	hookCtx.Content = message
 	hookCtx.Metadata["risk"] = riskLevel
 	hookCtx.Metadata["staged_files"] = stagedFiles
 	hookCtx.Metadata["staged_insertions"] = stagedInsertions
 
-	// Execute commit
-	output, werr := execGitCommand(repoRoot, "git", "commit", "-m", message)
+	cmdArgs := []string{"commit", "-m", message}
+	if len(paths) > 0 {
+		cmdArgs = append(cmdArgs, "--")
+		for _, p := range paths {
+			cmdArgs = append(cmdArgs, core.NormalizePath(p))
+		}
+	}
+
+	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
 	if werr != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git commit failed: %v\n%s", werr, output)), nil
 	}
@@ -477,7 +598,6 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 	hookCtx.Metadata["commit_hash"] = extractCommitHash(output)
 	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostWrite, hookCtx)
 
-	// Build richer success response with commit metadata
 	commitHash, _ := execGitCommand(repoRoot, "git", "rev-parse", "--short", "HEAD")
 
 	if engine.IsCompactMode() {
@@ -493,7 +613,6 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 		return mcp.NewToolResultText(output), nil
 	}
 
-	// Verbose mode: return structured summary
 	summary := fmt.Sprintf("✅ Commit: %s\nMessage: %s\nFiles: %d | +%d -%d\nRisk: %s",
 		strings.TrimSpace(commitHash), message, stagedFiles, stagedInsertions, stagedDeletions, riskLevel)
 	return mcp.NewToolResultText(summary), nil
@@ -536,233 +655,62 @@ func parseShortStat(shortstat string) (files, insertions, deletions int) {
 	return fileCount, insertions, deletions
 }
 
-// generateAutoCommitMessage generates a conventional commit message from staged changes
-// Uses a single --numstat --name-only call to get both file names and deletion counts
-func generateAutoCommitMessage(repoRoot string, stagedFiles int) string {
-	// Single call: --numstat --name-only gives "ins del filename" per line
-	output, _ := execGitCommand(repoRoot, "git", "diff", "--cached", "--numstat", "--name-only")
-	if output == "" {
-		return ""
-	}
-
-	files := strings.Split(strings.TrimSpace(output), "\n")
-	var fileNames []string
-	hasTests, hasDocs, hasFix, hasConfig, hasRefactor := false, false, false, false, false
-	totalDeletions := 0
-
-	for _, line := range files {
-		if line == "" {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) >= 3 {
-			// "N     N     path/to/file" — fields[0]=ins, fields[1]=del, fields[2]=path
-			if fields[1] != "-" {
-				var del int
-				fmt.Sscanf(fields[1], "%d", &del)
-				totalDeletions += del
-			}
-			fileNames = append(fileNames, fields[2])
-		} else if len(fields) >= 1 {
-			fileNames = append(fileNames, fields[0])
-		}
-	}
-
-	// Detect commit type from file names
-	for _, f := range fileNames {
-		hasTests = hasTests || strings.Contains(f, "_test.go") || strings.Contains(f, ".test.")
-		hasDocs = hasDocs || strings.HasSuffix(f, ".md") || strings.Contains(f, "docs/")
-		hasConfig = hasConfig || strings.Contains(f, "config") || strings.HasSuffix(f, ".json") || strings.HasSuffix(f, ".yaml") || strings.HasSuffix(f, ".yml")
-	}
-
-	// Fallback: inspect raw output for fix/refactor keywords
-	lower := strings.ToLower(output)
-	hasFix = strings.Contains(lower, "fix") || strings.Contains(lower, "bug") || strings.Contains(lower, "patch")
-	hasRefactor = strings.Contains(lower, "refactor") || strings.Contains(lower, "rename") || strings.Contains(lower, "move")
-
-	// Explicit description from staged file names (v4.5.26): "update 1 file(s)"
-	// says nothing — name the files when few, or count + common dir when many.
-	description := autoCommitDescription(fileNames, stagedFiles)
-
-	switch {
-	case hasFix || totalDeletions > 200:
-		return "fix: " + description
-	case hasTests && !hasDocs:
-		return "test: " + description
-	case hasDocs:
-		return "docs: " + description
-	case hasConfig:
-		return "chore: " + description
-	case hasRefactor || totalDeletions > 100:
-		return "refactor: " + description
-	default:
-		return "feat: " + description
-	}
-}
-
-// autoCommitDescription builds an explicit commit description from staged
-// file names: 1-3 files → basenames; more → count + deepest common directory.
-// Falls back to the generic count when no names were parsed.
-func autoCommitDescription(fileNames []string, stagedFiles int) string {
-	if len(fileNames) == 0 {
-		return fmt.Sprintf("update %d file(s)", stagedFiles)
-	}
-	if len(fileNames) <= 3 {
-		bases := make([]string, len(fileNames))
-		for i, f := range fileNames {
-			if idx := strings.LastIndex(f, "/"); idx >= 0 {
-				bases[i] = f[idx+1:]
-			} else {
-				bases[i] = f
-			}
-		}
-		return "update " + strings.Join(bases, ", ")
-	}
-	if dir := commonDir(fileNames); dir != "" {
-		return fmt.Sprintf("update %d files in %s/", len(fileNames), dir)
-	}
-	return fmt.Sprintf("update %d files", len(fileNames))
-}
-
-// commonDir returns the deepest directory prefix shared by all paths
-// (git-style forward-slash paths), or "" if they only share the repo root.
-func commonDir(paths []string) string {
-	dirOf := func(p string) string {
-		if idx := strings.LastIndex(p, "/"); idx >= 0 {
-			return p[:idx]
-		}
-		return ""
-	}
-	common := strings.Split(dirOf(paths[0]), "/")
-	for _, p := range paths[1:] {
-		parts := strings.Split(dirOf(p), "/")
-		n := 0
-		for n < len(common) && n < len(parts) && common[n] == parts[n] {
-			n++
-		}
-		common = common[:n]
-		if len(common) == 0 {
-			return ""
-		}
-	}
-	if len(common) == 1 && common[0] == "" {
-		return ""
-	}
-	return strings.Join(common, "/")
-}
+// gitRestore restores files from index or a specific commit.
 
 // gitRestore restores files from index or a specific commit.
 //
-// Validation order (intentional, all checks happen BEFORE the destructive
-// force gate in the dispatcher):
-//  1. source option-injection check (if source supplied)
-//  2. required params: at least one of `paths` (non-empty JSON array) or `source`
-//  3. paths JSON parse (if paths supplied)
-//  4. path normalization
-//  5. command construction
+// params (per docs/git-tool-spec.md §1):
+//   - paths  native array, REQUIRED (refuse to default to whole tree)
+//   - staged bool: --staged variant (non-destructive, unstage-only)
+//   - rev    string: --source=<rev> variant
 //
-// Note: `git restore --staged` is non-destructive (only moves staged →
-// unstaged, never touches the working tree) and therefore does NOT require
-// force. The dispatcher accounts for this via isDestructiveGitAction.
+// Spec §2 row 'restore': no implicit whole-tree restore. Must pass `paths`.
+// `isDestructiveGitAction` exempts `staged:true` from the force gate.
 func gitRestore(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
-	pathsStr, _ := args["paths"].(string)
 	staged, _ := args["staged"].(bool)
-	source, _ := args["source"].(string)
-	dryRun, _ := args["dry_run"].(bool)
-
-	if source != "" {
-		if errRes := rejectOptionLike("source", source); errRes != nil {
+	rev, _ := args["rev"].(string)
+	if rev != "" {
+		if errRes := rejectOptionLike("rev", rev); errRes != nil {
 			return errRes, nil
 		}
 	}
 
-	// Parse paths (may be empty when source is provided — git restore --source
-	// without paths is valid: restores the whole tree to that source).
-	var paths []string
-	if pathsStr != "" {
-		if err := json.Unmarshal([]byte(pathsStr), &paths); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("invalid paths JSON: %v", err)), nil
-		}
+	paths, errRes := pathsFromArgs(args)
+	if errRes != nil {
+		return errRes, nil
 	}
-
-	// Required-params check runs BEFORE the force gate in the dispatcher so
-	// the user sees a coherent error for a malformed call instead of being
-	// bounced off the destructive-operation gate first.
-	if len(paths) == 0 && source == "" {
-		return mcp.NewToolResultError(
-			"git restore requires either paths (JSON array) or source (commit ref). " +
-				"Usage: git(action:\"restore\", paths:'[\"file.txt\"]') or " +
-				"git(action:\"restore\", source:\"HEAD~1\")"), nil
+	if len(paths) == 0 {
+		return usageError(
+			"git restore requires explicit 'paths' (no implicit whole-tree restore)",
+			`git(action:"restore", paths:["file.txt"])`), nil
 	}
-
 	for i := range paths {
 		paths[i] = core.NormalizePath(paths[i])
 	}
 
-	// Pre-delete hook for restore (it's destructive to working tree)
+	// Pre-delete hook (destructive to working tree when not --staged)
 	hookCtx := &core.HookContext{
 		Event:     core.HookPreDelete,
 		ToolName:  "git",
 		FilePath:  repoRoot,
 		Operation: "restore",
-		Metadata:  map[string]interface{}{"git_operation": "restore", "staged": staged, "source": source},
+		Metadata:  map[string]interface{}{"git_operation": "restore", "staged": staged, "rev": rev},
 	}
 	if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreDelete, hookCtx); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git restore denied by hook: %v", err)), nil
 	}
 
-	// dry_run: `git restore` has NO native preview flag (no -n, no --dry-run;
-	// both were historic bugs that errored with "unknown switch"). Emulate the
-	// preview with an equivalent `git diff` that shows exactly what the restore
-	// would change: for --staged the cached diff, for --source the diff against
-	// that commit, otherwise the working-tree diff.
-	if dryRun {
-		var diffArgs []string
-		switch {
-		case source != "":
-			// source already validated as non-option-like by the dispatcher.
-			diffArgs = []string{"diff", "--no-ext-diff", source}
-		case staged:
-			diffArgs = []string{"diff", "--no-ext-diff", "--cached"}
-		default:
-			diffArgs = []string{"diff", "--no-ext-diff"}
-		}
-		if len(paths) > 0 {
-			diffArgs = append(diffArgs, "--")
-			diffArgs = append(diffArgs, paths...)
-		}
-		output, werr := execGitCommand(repoRoot, "git", diffArgs...)
-		if werr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("git restore dry-run failed: %v\n%s", werr, output)), nil
-		}
-		if strings.TrimSpace(output) == "" {
-			return mcp.NewToolResultText("Dry run — nothing would change (files already match the restore source)"), nil
-		}
-		return mcp.NewToolResultText("Dry run — restore would apply this reverse diff:\n" + output), nil
-	}
-
-	// Build the command with "restore" ALWAYS first. Historic bug: the
-	// subcommand was only prepended inside the dry_run branch, so a real
-	// (non-dry-run) restore executed `git --staged -- file` / `git <src> -- file`
-	// which git rejects. Source must be passed as `--source=<rev>`, not
-	// positionally (a positional rev is parsed as a pathspec → "did not match").
+	// Build command. Subcommand "restore" ALWAYS first; `rev` (when present)
+	// must be passed as `--source=<rev>` (positional is parsed as a pathspec).
 	cmdArgs := []string{"restore"}
 	if staged {
 		cmdArgs = append(cmdArgs, "--staged")
 	}
-	if source != "" {
-		cmdArgs = append(cmdArgs, "--source="+source)
+	if rev != "" {
+		cmdArgs = append(cmdArgs, "--source="+rev)
 	}
-
-	if len(paths) > 0 {
-		cmdArgs = append(cmdArgs, "--")
-		cmdArgs = append(cmdArgs, paths...)
-	} else {
-		// source-only restore: git requires an explicit pathspec, so target the
-		// whole tree ("."). Guaranteed reachable: validation above rejects the
-		// no-paths-and-no-source case, so we only get here when source != "".
-		cmdArgs = append(cmdArgs, "--", ".")
-	}
+	cmdArgs = append(cmdArgs, "--")
+	cmdArgs = append(cmdArgs, paths...)
 
 	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
 	if werr != nil {
@@ -773,12 +721,9 @@ func gitRestore(ctx context.Context, engine *core.UltraFastEngine, repoRoot stri
 	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostDelete, hookCtx)
 
 	scope := fmt.Sprintf("%d file(s)", len(paths))
-	if len(paths) == 0 {
-		scope = "whole tree"
-	}
 	src := ""
-	if source != "" {
-		src = " from " + source
+	if rev != "" {
+		src = " from " + rev
 	}
 	if engine.IsCompactMode() {
 		return mcp.NewToolResultText(fmt.Sprintf("OK: restored %s%s", scope, src)), nil
@@ -803,19 +748,28 @@ func extractCommitHash(output string) string {
 	return ""
 }
 
-// gitBranch lists, creates, or deletes branches
+// gitBranch: list (default), create (+checkout switch), or delete.
+//
+// params:
+//   - name     branch name; absence → list mode
+//   - checkout bool; if true with name, also `git switch -c <name>` (create+switch)
+//   - force    bool; delete only — true escalates -d → -D
+//
+// Decision: `gitBranch` itself dispatches based on presence of `name` (list vs create/delete)
+// and whether the branch already exists (delete) or not (create). Pre-existing audit doc
+// gates `-d` vs `-D` on `force` (security audit 2026-07-02); preserved.
 func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
-	branchAction, _ := args["branch_action"].(string)
-	branchName, _ := args["branch_name"].(string)
-
-	if branchName != "" {
-		if errRes := rejectOptionLike("branch_name", branchName); errRes != nil {
+	name, _ := args["name"].(string)
+	if name != "" {
+		if errRes := rejectOptionLike("name", name); errRes != nil {
 			return errRes, nil
 		}
 	}
+	checkout, _ := args["checkout"].(bool)
+	force, _ := args["force"].(bool)
 
-	// List branches
-	if branchAction == "" || branchAction == "list" {
+	// ---- LIST (default, no name) ----
+	if name == "" {
 		output, werr := execGitCommand(repoRoot, "git", "branch", "-a")
 		if werr != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("git branch failed: %v\n%s", werr, output)), nil
@@ -834,24 +788,34 @@ func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 		return mcp.NewToolResultText(output), nil
 	}
 
-	// Create branch
-	if branchAction == "create" {
-		if branchName == "" {
-			return mcp.NewToolResultError("branch_name required for create. Usage: git(action:\"branch\", branch_action:\"create\", branch_name:\"feature/new\")"), nil
-		}
+	// ---- CREATE (name does not exist yet) ----
+	// Check existence cheaply: `git show-ref --verify refs/heads/<name>` exits non-zero if missing.
+	existsOut, existsErr := execGitCommand(repoRoot, "git", "show-ref", "--verify", "--quiet", "refs/heads/"+name)
+	branchExists := existsErr == nil && strings.TrimSpace(existsOut) == ""
 
+	if !branchExists {
 		hookCtx := &core.HookContext{
 			Event:     core.HookPreCreate,
 			ToolName:  "git",
 			FilePath:  repoRoot,
 			Operation: "branch-create",
-			Metadata:  map[string]interface{}{"git_operation": "branch-create", "branch": branchName},
+			Metadata:  map[string]interface{}{"git_operation": "branch-create", "branch": name, "checkout": checkout},
 		}
 		if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreCreate, hookCtx); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("git branch create denied: %v", err)), nil
 		}
 
-		output, werr := execGitCommand(repoRoot, "git", "branch", branchName)
+		var cmdArgs []string
+		var label string
+		if checkout {
+			// `git switch -c <name>` — create AND switch in one go
+			cmdArgs = []string{"switch", "-c", name}
+			label = "created and switched to"
+		} else {
+			cmdArgs = []string{"branch", name}
+			label = "created branch"
+		}
+		output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
 		if werr != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("git branch create failed: %v\n%s", werr, output)), nil
 		}
@@ -860,52 +824,39 @@ func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 		engine.GetHookManager().ExecuteHooks(ctx, core.HookPostCreate, hookCtx)
 
 		if engine.IsCompactMode() {
-			return mcp.NewToolResultText(fmt.Sprintf("OK: created branch %s", branchName)), nil
+			return mcp.NewToolResultText(fmt.Sprintf("OK: %s %s", label, name)), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("Created branch: %s", branchName)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("%s: %s", label, name)), nil
 	}
 
-	// Delete branch
-	if branchAction == "delete" {
-		if branchName == "" {
-			return mcp.NewToolResultError("branch_name required for delete. Usage: git(action:\"branch\", branch_action:\"delete\", branch_name:\"feature/old\")"), nil
-		}
-
-		hookCtx := &core.HookContext{
-			Event:     core.HookPreDelete,
-			ToolName:  "git",
-			FilePath:  repoRoot,
-			Operation: "branch-delete",
-			Metadata:  map[string]interface{}{"git_operation": "branch-delete", "branch": branchName},
-		}
-		force := false
-		if f, ok := args["force"].(bool); ok && f {
-			force = true
-		}
-
-		if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreDelete, hookCtx); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("git branch delete denied: %v", err)), nil
-		}
-
-		deleteCmd := "-d"
-		if force {
-			deleteCmd = "-D"
-		}
-		output, werr := execGitCommand(repoRoot, "git", "branch", deleteCmd, branchName)
-		if werr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("git branch delete failed: %v\n%s", werr, output)), nil
-		}
-
-		hookCtx.Event = core.HookPostDelete
-		engine.GetHookManager().ExecuteHooks(ctx, core.HookPostDelete, hookCtx)
-
-		if engine.IsCompactMode() {
-			return mcp.NewToolResultText(fmt.Sprintf("OK: deleted branch %s", branchName)), nil
-		}
-		return mcp.NewToolResultText(fmt.Sprintf("Deleted branch: %s", branchName)), nil
+	// ---- DELETE (branch already exists) ----
+	hookCtx := &core.HookContext{
+		Event:     core.HookPreDelete,
+		ToolName:  "git",
+		FilePath:  repoRoot,
+		Operation: "branch-delete",
+		Metadata:  map[string]interface{}{"git_operation": "branch-delete", "branch": name, "force": force},
+	}
+	if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreDelete, hookCtx); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("git branch delete denied: %v", err)), nil
 	}
 
-	return mcp.NewToolResultError(fmt.Sprintf("Unknown branch_action: %s. Valid: list, create, delete", branchAction)), nil
+	deleteCmd := "-d"
+	if force {
+		deleteCmd = "-D"
+	}
+	output, werr := execGitCommand(repoRoot, "git", "branch", deleteCmd, name)
+	if werr != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("git branch delete failed: %v\n%s", werr, output)), nil
+	}
+
+	hookCtx.Event = core.HookPostDelete
+	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostDelete, hookCtx)
+
+	if engine.IsCompactMode() {
+		return mcp.NewToolResultText(fmt.Sprintf("OK: deleted branch %s", name)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Deleted branch: %s", name)), nil
 }
 
 // execGitCommand executes a git command in the given directory.
@@ -975,12 +926,11 @@ func isDestructiveGitAction(action string, args map[string]any) bool {
 	switch action {
 	case "restore":
 		staged, _ := args["staged"].(bool)
-		dryRun, _ := args["dry_run"].(bool)
-		// Non-destructive variants: unstage-only or preview-only
-		if staged || dryRun {
+		// Non-destructive variant: unstage-only (`--staged` only moves staged → unstaged).
+		// Working-tree restore or restore-with-rev discards changes → destructive.
+		if staged {
 			return false
 		}
-		// git restore can discard changes or restore from other commits
 		return true
 	case "branch":
 		// branch delete is NOT gated here: `git branch -d` is safe by design
@@ -989,8 +939,6 @@ func isDestructiveGitAction(action string, args map[string]any) bool {
 		// would be backwards — it would force every delete into the -D path.
 		return false
 	case "commit":
-		// Commit itself is not extremely dangerous, but we can make it require force
-		// in some contexts. For now we keep it lenient.
 		return false
 	}
 	return false

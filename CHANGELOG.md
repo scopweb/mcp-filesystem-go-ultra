@@ -1,5 +1,72 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.5.28] - 2026-07-11
+
+### feat(git): agent-usable refactor — paths array, output enum, show action, help(tool:"git")
+
+The `git` tool was unusable for LLM agents in large repos: passthrough-style
+params (`args:"diff --stat"`), no `paths` filter (full 5.880-line diff dumps),
+no schema inspection (`help(tool:"git")` returned the server banner).
+
+This iteration implements `docs/git-tool-spec.md` end-to-end:
+
+**Schema (`tools_git.go:20-42`)** — rebuilt with the 12 params from spec §1:
+- `action` (required) enum extended with **`show`** (9 actions now).
+- `paths` is a **native `[]string` array** (no more JSON-string parsing).
+  Wire-as-is via `mcp.WithArray("paths", mcp.WithStringItems())`. A string
+  value is rejected with a `usage:` line that names the correct call shape.
+- New: `output` enum (`stat`/`name-only`/`full` for diff/status/show;
+  `oneline`/`full` for log), `max_lines` (default 200), `limit` (log, default 10),
+  `rev` (replaces `commit_range` + `source`), `name` + `checkout` for branch.
+- **`force` retained only for branch delete (-d vs -D).** All other force
+  semantics removed (see SECURITY-AUDIT addendum).
+- **Dropped**: `auto_message`, `branch_action`, `branch_name`, `source`, `all`,
+  `commit_range`, `max_count`, `dry_run` — per spec §6 "fuera de alcance".
+
+**Handlers**:
+- `gitDiff` now implements the **4-layer guardrail** per spec §3:
+  default `output:"stat"`; if `full` requested without `paths` AND >20 files
+  changed → degrade to stat with a top-of-output banner (LLMs read the start
+  of a tool result more reliably than the tail). `full` + explicit `paths`
+  always honored. `max_lines` applied to every output, footer with the
+  `Acota con paths:["..."]` hint when truncated.
+- `gitShow` is new (spec §2 row `show`); `rev` required, default stat.
+- `gitStatus` / `gitLog` / `gitShow` / `gitDiff` / `gitCommit` accept native
+  `paths`; all reject empty for destructive actions.
+- `gitBranch` dispatches on presence of `name` (list vs create/delete);
+  `name`+`checkout:true` → `git switch -c <name>` in one shot.
+- `gitAdd` / `gitRestore` no longer support implicit "everything"; explicit
+  `paths` only (refuse-by-default safety).
+- `gitCommit`: drops auto-generated message; explicit `message` required.
+
+**Errors with `usage:`** (spec §4): every git tool error now starts with
+`ERROR:` and ends with `usage: <example>` so an agent self-corrects in 1 call
+instead of 3. The helper `usageError(msg, example)` is centralized in
+`tools_helpers.go` for future application to the other 19 tools.
+
+**`help(tool:"git")`**: the standalone `help` tool now accepts a `tool` arg
+and renders **description + InputSchema (JSON) + 8 curated examples** for any
+registered tool. Powered by `toolRegistry.toolExamples` (new optional field).
+Built on variadic `addTool(tool, handler, examples...)` — the 17 existing
+call sites are source-compatible (variadic allows omitting examples).
+
+**Validation** (`core/param_validator.go:42-237`): `git` added to `toolSchemas`
+with the new params. **`paths` is omitted intentionally** — `ParamType` only
+supports string/number/boolean; the handler validates array shape via
+`pathsFromArgs`. `param_validator_test.go:106-118` updated.
+
+**Tests** (`git_diff_status_log_test.go`, new — 33 cases): table-driven for
+helpers, `usageError`, `truncateOutput`, `pathsFromArgs`, `parseOutputArg`;
+guardrail degradation/bypass for 21-file and 25-file repos; `max_lines`
+truncation footer; `rev` ranges; native-paths + string-rejection for `add`/
+`restore`; `gitCommit` success + nothing-staged + missing-message;
+`gitBranch` list/create+checkout/delete-force. Pre-existing
+`git_restore_test.go` migrated to new schema (`source` → `rev`,
+`branch_name` → `name`, native `[]interface{}` paths). **45 git-related tests passing.**
+
+**New helper file** `tools_helpers.go`: `usageError`, `pathsFromArgs`,
+`truncateOutput`, `parseIntArg`, `parseOutputArg`, `countChangedFiles`.
+
 ## [4.5.27] - 2026-07-08
 
 ### feat(search): auto-detect `search_files` output_format — ripgrep-style for ≤5 matches

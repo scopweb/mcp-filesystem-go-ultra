@@ -26,7 +26,7 @@ description: Tool catalog for filesystem-ultra MCP server v4.5.25: 20 tools (17 
 | `analyze_operation` | Dry-run impact analysis |
 | `wsl` | WSL/Windows sync and path conversion |
 | `server_info` | Stats, help, artifact capture |
-| `git` | Version control (status, diff, log, add, commit, restore, branch, init; `auto_message` for conventional commits) |
+| `git` | Version control (status, diff, log, **show**, add, commit, restore, branch, init). `paths` is a **native array**; `output` enum (`stat`/`name-only`/`full`); 4-layer guardrail downgrades big full diffs to stat with a top-of-output banner; `rev` replaces `commit_range`/`source`. Errors include a `usage:` line; `help(tool:"git")` returns schema + 8 curated examples. |
 | `minify_js` | Pure-Go JS minification, no Node (v4.5.7+) |
 | `help` | Discovery — call first to see all 20 tools |
 

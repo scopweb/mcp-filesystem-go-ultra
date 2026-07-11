@@ -214,7 +214,7 @@ At the start of every conversation, do tool_search for "filesystem help" and the
 
 | Tool | Description |
 |------|-------------|
-| `git` | Git operations: `init`, `status`, `diff`, `log`, `add`, `commit`, `restore`, `branch` |
+| `git` | Git operations: `init`, `status`, `diff`, `log`, `show`, `add`, `commit`, `restore`, `branch`. Native-array `paths[]`, `output` enum, 4-layer diff guardrail, `rev` (replaces `commit_range`/`source`). |
 
 ### JavaScript (1)
 
@@ -289,7 +289,7 @@ tools_files.go              create_directory, delete_file, move_file, copy_file,
 tools_batch.go              multi_edit, batch_operations, backup
 tools_platform.go           wsl, server_info
 tools_aliases.go            Aliases + fs super-tool (DISABLED in v4.5.x), help tool
-tools_git.go                git (8 actions: init, status, diff, log, add, commit, restore, branch)
+tools_git.go                git (9 actions: init, status, diff, log, show, add, commit, restore, branch)
 tools_minify.go             minify_js (pure-Go JS minification)
 core/
   engine.go                 UltraFastEngine — central struct, cache, worker pool, metrics
