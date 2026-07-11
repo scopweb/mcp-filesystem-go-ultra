@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -376,16 +379,76 @@ func registerSuperTool(reg *toolRegistry) {
 	}))
 }
 
-// registerHelpTool registers the standalone help discovery tool
+// registerHelpTool registers the standalone help discovery tool.
+//
+// Usage:
+//   - help()           → server banner (no regression)
+//   - help(tool:"git") → schema + description + examples for that tool
+//
+// The per-tool output is generated from the registered mcp.Tool schema and
+// the optional examples map populated by addTool(..., examples...). Currently
+// only the git tool ships with curated examples; other tools render schema
+// only (still useful for an LLM discovering them).
 func registerHelpTool(reg *toolRegistry) {
 	helpTool := mcp.NewTool("help",
 		mcp.WithTitleAnnotation("Server Help"),
-		mcp.WithDescription("Returns tool catalog and usage information."),
+		mcp.WithDescription("Returns tool catalog or per-tool signature. Call help() for an overview; call help(tool:\"X\") for tool X's schema and examples."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithString("tool", mcp.Description("Tool name (e.g. \"git\"). When set, returns that tool's schema + examples.")),
 	)
-	reg.server.AddTool(helpTool, func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return mcp.NewToolResultText(serverInstructions), nil
+	reg.server.AddTool(helpTool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, _ := request.Params.Arguments.(map[string]any)
+		name, _ := args["tool"].(string)
+		if name == "" {
+			return mcp.NewToolResultText(serverInstructions), nil
+		}
+
+		// Find the tool in the registry
+		all := reg.server.ListTools()
+		st, ok := all[name]
+		if !ok {
+			return usageError(
+				fmt.Sprintf("no tool named %q registered on this server", name),
+				`help()  // for the catalog`),
+				nil
+		}
+
+		// Render description + schema (from InputSchema JSON) + examples.
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("## %s\n\n", st.Tool.Name))
+		if d := st.Tool.Description; d != "" {
+			sb.WriteString(d)
+			sb.WriteString("\n\n")
+		}
+
+		// Schema dump — marshal compactly, omit noise. The InputSchema is a
+		// map[string]any with "type":"object", "properties":..., "required":[...].
+		if raw, err := json.MarshalIndent(st.Tool.InputSchema, "", "  "); err == nil {
+			sb.WriteString("### Parameters\n```json\n")
+			sb.Write(raw)
+			sb.WriteString("\n```\n\n")
+		}
+
+		if examples, ok := reg.toolExamples[name]; ok && len(examples) > 0 {
+			sb.WriteString("### Examples\n")
+			for _, ex := range examples {
+				sb.WriteString("- `")
+				sb.WriteString(ex)
+				sb.WriteString("`\n")
+			}
+			sb.WriteString("\n")
+		} else {
+			// Stable order for any "discover all tools" use
+			names := make([]string, 0, len(all))
+			for k := range all {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			_ = names // future: emit cross-references
+		}
+
+		return mcp.NewToolResultText(sb.String()), nil
 	})
 }

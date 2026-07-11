@@ -69,6 +69,12 @@ type toolRegistry struct {
 	handlers       map[string]toolHandler // dispatch map for the fs super-tool
 	regexTransform *core.RegexTransformer
 
+	// toolExamples is an OPTIONAL map populated by addTool(..., examples...)
+	// (only registerGitTools uses it today). It feeds the standalone `help(tool:"X")`
+	// tool, which renders: description + InputSchema + examples. Variadic
+	// addTool keeps the 17 existing call sites source-compatible.
+	toolExamples map[string][]string
+
 	// Named handlers needed by alias registration
 	readFileHandler    toolHandler
 	writeFileHandler   toolHandler
@@ -77,10 +83,18 @@ type toolRegistry struct {
 	searchFilesHandler toolHandler
 }
 
-// addTool registers a tool on the server AND adds its handler to the dispatch map
-func (r *toolRegistry) addTool(tool mcp.Tool, handler toolHandler) {
+// addTool registers a tool on the server AND adds its handler to the dispatch map.
+// The trailing examples... is optional and only consumed by help(tool:"<name>").
+// All 17 existing call sites pass no examples, so this stays source-compatible.
+func (r *toolRegistry) addTool(tool mcp.Tool, handler toolHandler, examples ...string) {
 	r.server.AddTool(tool, handler)
 	r.handlers[tool.Name] = handler
+	if len(examples) > 0 {
+		if r.toolExamples == nil {
+			r.toolExamples = make(map[string][]string)
+		}
+		r.toolExamples[tool.Name] = examples
+	}
 }
 
 // registerTools registers all 16 consolidated filesystem tools + aliases + super-tool + help

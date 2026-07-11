@@ -108,7 +108,7 @@ func TestValidateToolParams_AllToolsRegistered(t *testing.T) {
 		"read_file", "write_file", "edit_file", "list_directory", "search_files",
 		"multi_edit", "move_file", "copy_file", "delete_file", "create_directory",
 		"batch_operations", "backup", "analyze_operation", "wsl", "server_info",
-		"get_file_info", "search", "edit", "write", "help",
+		"get_file_info", "git", "search", "edit", "write", "help",
 	}
 	for _, tool := range expected {
 		if _, ok := toolSchemas[tool]; !ok {

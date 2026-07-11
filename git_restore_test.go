@@ -21,7 +21,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -128,7 +127,7 @@ func TestRestore_StagedUnstage(t *testing.T) {
 	res, err := gitRestore(context.Background(), engine, dir, map[string]interface{}{
 		"action": "restore",
 		"staged": true,
-		"paths":  mustJSON(t, []string{f}),
+		"paths":  pathsArgs(t, []string{f}),
 	})
 	if err != nil {
 		t.Fatalf("gitRestore returned error: %v", err)
@@ -165,7 +164,7 @@ func TestRestore_WTDiscard(t *testing.T) {
 
 	res, err := gitRestore(context.Background(), engine, dir, map[string]interface{}{
 		"action": "restore",
-		"paths":  mustJSON(t, []string{f}),
+		"paths":  pathsArgs(t, []string{f}),
 	})
 	if err != nil || res.IsError {
 		t.Fatalf("gitRestore: err=%v res=%v", err, res)
@@ -190,8 +189,8 @@ func TestRestore_SourceWithPaths(t *testing.T) {
 
 	res, err := gitRestore(context.Background(), engine, dir, map[string]interface{}{
 		"action": "restore",
-		"source": "HEAD~1",
-		"paths":  mustJSON(t, []string{f}),
+		"rev":    "HEAD~1",
+		"paths":  pathsArgs(t, []string{f}),
 	})
 	if err != nil || res.IsError {
 		t.Fatalf("gitRestore: err=%v res=%v", err, res)
@@ -217,9 +216,12 @@ func TestRestore_SourceWholeTree(t *testing.T) {
 	writeFile(t, b, "v2\n")
 	commitAll(t, dir, "v2")
 
+	// v4.5.25+: source-only restore is rejected — whole-tree restore is no
+	// longer a supported flow (spec §2 row 'restore'). Pass paths explicitly.
 	res, err := gitRestore(context.Background(), engine, dir, map[string]interface{}{
 		"action": "restore",
-		"source": "HEAD~1",
+		"rev":    "HEAD~1",
+		"paths":  pathsArgs(t, []string{a, b}),
 	})
 	if err != nil || res.IsError {
 		t.Fatalf("gitRestore: err=%v res=%v", err, res)
@@ -232,9 +234,10 @@ func TestRestore_SourceWholeTree(t *testing.T) {
 	}
 }
 
-// TestRestore_DryRunPreview verifies that dry_run produces a diff preview and
-// does NOT modify the working tree. Before v4.5.23 this used `git restore -n`,
-// which errors "unknown switch".
+// TestRestore_DryRunPreview verifies that an explicit rev produces a
+// destructive restore. The v4.5.25 spec removed `dry_run` from restore;
+// the equivalent preview is now `git(action:"diff", rev:"X")`. This test
+// now covers the rev-based restore (the only remaining destructive variant).
 func TestRestore_DryRunPreview(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -245,29 +248,24 @@ func TestRestore_DryRunPreview(t *testing.T) {
 	commitAll(t, dir, "init")
 	writeFile(t, f, "v2\n")
 
+	// Rev-based restore now bypasses dry_run entirely (per spec §2 row 'restore').
+	// Restore to HEAD reverts the WT to "v1".
 	res, err := gitRestore(context.Background(), engine, dir, map[string]interface{}{
-		"action":  "restore",
-		"paths":   mustJSON(t, []string{f}),
-		"dry_run": true,
+		"action": "restore",
+		"rev":    "HEAD",
+		"paths":  pathsArgs(t, []string{f}),
 	})
 	if err != nil || res.IsError {
-		t.Fatalf("gitRestore dry_run: err=%v res=%v", err, res)
+		t.Fatalf("gitRestore: err=%v res=%v", err, res)
 	}
-	text := firstText(res)
-	if !strings.Contains(text, "Dry run") {
-		t.Fatalf("dry_run response missing 'Dry run' prefix: %s", text)
-	}
-	if !strings.Contains(text, "v2") {
-		t.Fatalf("dry_run response should include the staged change ('v2'), got: %s", text)
-	}
-	// Working tree must be untouched.
-	if got := readFile(t, f); got != "v2" {
-		t.Fatalf("dry_run must not modify WT: got %q", got)
+	if got := readFile(t, f); got != "v1" {
+		t.Fatalf("expected v1 after restore, got %q", got)
 	}
 }
 
-// TestRestore_DryRunNoChange verifies the dry-run "nothing would change"
-// branch (file already matches the restore source).
+// TestRestore_DryRunNoChange: pre-v4.5.25 this tested the dry-run diff branch.
+// Now dry_run is gone; the equivalent preview is `git(action:"diff", rev:"HEAD")`
+// returning "No unstaged changes" when files already match. We cover that path.
 func TestRestore_DryRunNoChange(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -277,22 +275,21 @@ func TestRestore_DryRunNoChange(t *testing.T) {
 	writeFile(t, f, "stable\n")
 	commitAll(t, dir, "init")
 
-	res, err := gitRestore(context.Background(), engine, dir, map[string]interface{}{
-		"action":  "restore",
-		"source":  "HEAD",
-		"dry_run": true,
+	// No changes → diff returns "No unstaged changes" (preview-style).
+	res, err := gitDiff(context.Background(), engine, dir, map[string]interface{}{
+		"action": "diff",
+		"paths":  pathsArgs(t, []string{f}),
 	})
-	if err != nil || res.IsError {
-		t.Fatalf("gitRestore dry_run: err=%v res=%v", err, res)
+	if err != nil {
+		t.Fatalf("gitDiff: %v", err)
 	}
-	if !strings.Contains(firstText(res), "nothing would change") {
-		t.Fatalf("expected 'nothing would change' message, got: %s", firstText(res))
+	if !strings.Contains(firstText(res), "No unstaged changes") {
+		t.Fatalf("expected 'No unstaged changes' for clean file, got: %s", firstText(res))
 	}
 }
 
-// TestRestore_OptionLikeSourceRejected verifies that an option-like source
-// (e.g. "-s") is rejected by rejectOptionLike inside gitRestore (defense in
-// depth: the dispatcher also rejects it).
+// TestRestore_OptionLikeSourceRejected: option-injection guard now targets
+// the new `rev` parameter (was `source` before v4.5.25).
 func TestRestore_OptionLikeSourceRejected(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -300,15 +297,16 @@ func TestRestore_OptionLikeSourceRejected(t *testing.T) {
 	defer engine.Close()
 	res, err := gitRestore(context.Background(), engine, dir, map[string]interface{}{
 		"action": "restore",
-		"source": "-s",
+		"rev":    "-s",
+		"paths":  pathsArgs(t, []string{"f.txt"}),
 	})
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
 	if !res.IsError {
-		t.Fatalf("expected error result for option-like source, got success: %s", firstText(res))
+		t.Fatalf("expected error result for option-like rev, got success: %s", firstText(res))
 	}
-	if !strings.Contains(firstText(res), "source") {
+	if !strings.Contains(firstText(res), "rev") {
 		t.Fatalf("error should name the offending field, got: %s", firstText(res))
 	}
 }
@@ -329,7 +327,7 @@ func TestRestore_MissingParams(t *testing.T) {
 	if !res.IsError {
 		t.Fatalf("expected error for missing params, got success: %s", firstText(res))
 	}
-	if !strings.Contains(firstText(res), "requires either paths") {
+	if !strings.Contains(firstText(res), "explicit 'paths'") {
 		t.Fatalf("error should mention missing params, got: %s", firstText(res))
 	}
 }
@@ -353,7 +351,7 @@ func TestAdd_OptionInjectionList(t *testing.T) {
 
 	res, err := gitAdd(context.Background(), engine, dir, map[string]interface{}{
 		"action": "add",
-		"paths":  mustJSON(t, []string{"-A"}),
+		"paths":  pathsArgs(t, []string{"-A"}), // native array; "--" separator makes git treat it as a path
 	})
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -387,24 +385,24 @@ func TestAdd_OptionInjectionSingle(t *testing.T) {
 	}
 }
 
-// TestAdd_DryRunNoOp verifies dry_run on a non-changed file returns the dry
-// preview, not an error, AND does not modify the index. The fix moved `-n`
-// to right after `add` so it isn't swallowed by the `--` separator.
+// TestAdd_DryRunNoOp: v4.5.25 dropped `dry_run` and `all` from add. The
+// native-array `paths` arg is now mandatory (no implicit `add .`). This test
+// now covers the success path with explicit native paths.
 func TestAdd_DryRunNoOp(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 	engine := newGitTestEngine(t, dir)
 	defer engine.Close()
+	writeFile(t, filepath.Join(dir, "new.txt"), "x")
 	res, err := gitAdd(context.Background(), engine, dir, map[string]interface{}{
-		"action":  "add",
-		"dry_run": true,
-		"all":     true,
+		"action": "add",
+		"paths":  pathsArgs(t, []string{"new.txt"}),
 	})
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
 	if res.IsError {
-		t.Fatalf("dry_run add returned error: %s", firstText(res))
+		t.Fatalf("add returned error: %s", firstText(res))
 	}
 }
 
@@ -424,7 +422,7 @@ func TestAdd_RequiresScope(t *testing.T) {
 	if !res.IsError {
 		t.Fatalf("expected error for missing scope, got success: %s", firstText(res))
 	}
-	if !strings.Contains(firstText(res), "requires one of") {
+	if !strings.Contains(firstText(res), "git add requires explicit") {
 		t.Fatalf("error should describe required scope, got: %s", firstText(res))
 	}
 }
@@ -462,9 +460,8 @@ func TestBranch_DeleteMerged(t *testing.T) {
 	}
 
 	res, err := gitBranch(context.Background(), engine, dir, map[string]interface{}{
-		"action":        "branch",
-		"branch_action": "delete",
-		"branch_name":   "feature",
+		"action": "branch",
+		"name":   "feature",
 		// no force → -d
 	})
 	if err != nil {
@@ -495,9 +492,8 @@ func TestBranch_DeleteUnmergedRequiresForce(t *testing.T) {
 
 	// Without force: -d should refuse (unmerged).
 	res, err := gitBranch(context.Background(), engine, dir, map[string]interface{}{
-		"action":        "branch",
-		"branch_action": "delete",
-		"branch_name":   "diverged",
+		"action": "branch",
+		"name":   "diverged",
 	})
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -511,10 +507,9 @@ func TestBranch_DeleteUnmergedRequiresForce(t *testing.T) {
 
 	// With force: -D succeeds.
 	res, err = gitBranch(context.Background(), engine, dir, map[string]interface{}{
-		"action":        "branch",
-		"branch_action": "delete",
-		"branch_name":   "diverged",
-		"force":         true,
+		"action": "branch",
+		"name":   "diverged",
+		"force":  true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -535,9 +530,8 @@ func TestBranch_OptionLikeRejected(t *testing.T) {
 	engine := newGitTestEngine(t, dir)
 	defer engine.Close()
 	res, err := gitBranch(context.Background(), engine, dir, map[string]interface{}{
-		"action":        "branch",
-		"branch_action": "delete",
-		"branch_name":   "--delete-this",
+		"action": "branch",
+		"name":   "--delete-this",
 	})
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -586,14 +580,18 @@ func TestRejectOptionLike(t *testing.T) {
 // helpers
 // ----------------------------------------------------------------------------
 
-// mustJSON JSON-encodes v, failing the test on error.
-func mustJSON(t *testing.T, v interface{}) string {
+// mustJSON was used historically when paths arrived as a JSON string.
+// v4.5.25 requires native arrays (`pathsArgs`); mustJSON is no longer needed.
+
+// pathsArgs converts a []string into the []interface{} form expected by the
+// git tool's native `paths` array parameter.
+func pathsArgs(t *testing.T, ss []string) []interface{} {
 	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatalf("json: %v", err)
+	out := make([]interface{}, len(ss))
+	for i, s := range ss {
+		out[i] = s
 	}
-	return string(b)
+	return out
 }
 
 // mustGit runs `git` in dir with args and returns combined output, failing
