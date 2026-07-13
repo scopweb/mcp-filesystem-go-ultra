@@ -54,7 +54,8 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithDescription("multi_edit — Apply multiple edits to a single file on the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
-			"Use multi_edit for ALL multi-edit operations — never use the runtime's built-in edit tools for host paths. "+
+			"Use multi_edit for ALL multi-edit operations — never use the runtime's built-in edit tools for host paths; those may target a different sandbox. "+
+			"After a successful mutation, verify independently with get_file_info/list_directory and read_file when content matters. "+
 			"Atomically applies all replacements. Auto-backup with undo. "+
 			"Related: edit_file (single edit), read_file, search_files, batch_operations."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
@@ -143,6 +144,7 @@ func registerBatchTools(reg *toolRegistry) {
 		// Extract force, dry_run, diff_format, and expected_hash parameters
 		force := false
 		dryRun := false
+		tolerantWhitespace := false
 		expectedHash := ""
 		diffFormat := diffFormatArg(args)
 		if args != nil {
@@ -151,6 +153,9 @@ func registerBatchTools(reg *toolRegistry) {
 			}
 			if dr, ok := args["dry_run"].(bool); ok {
 				dryRun = dr
+			}
+			if tw, ok := args["tolerant_whitespace"].(bool); ok {
+				tolerantWhitespace = tw
 			}
 			if eh, ok := args["expected_hash"].(string); ok {
 				expectedHash = eh
@@ -173,7 +178,7 @@ func registerBatchTools(reg *toolRegistry) {
 					"\n   (multi_edit will still run — re-read once to silence this warning.)"
 			}
 		}
-		result, err := engine.MultiEdit(ctx, path, edits, force, dryRun, false, expectedHash)
+		result, err := engine.MultiEdit(ctx, path, edits, force, dryRun, tolerantWhitespace, expectedHash)
 		if err != nil {
 			// Bug #27: If result is non-nil, this is an atomic rollback — include backup_id and details
 			if result != nil && result.BackupID != "" {
@@ -197,7 +202,7 @@ func registerBatchTools(reg *toolRegistry) {
 				}
 				return mcp.NewToolResultError(errMsg), nil
 			}
-			errPlain := fmt.Sprintf("Multi-edit error: %v", err)
+			errPlain := fmt.Sprintf("Multi-edit error: %v", err) + filesystemMismatchSuffix(err)
 			if staleWarning != "" {
 				errPlain += staleWarning
 			}

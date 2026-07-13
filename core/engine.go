@@ -752,7 +752,7 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 	}
 
 	// Invalidate cache
-	e.invalidateFileReadCache(path)
+	e.invalidateMutatedPath(path)
 
 	// Execute post-write hooks
 	hookCtx.Event = HookPostWrite
@@ -824,7 +824,7 @@ func (e *UltraFastEngine) WriteFileBytes(ctx context.Context, path string, data 
 	}
 
 	// Invalidate cache
-	e.invalidateFileReadCache(path)
+	e.invalidateMutatedPath(path)
 
 	// Auto-sync to Windows if enabled (async, non-blocking)
 	if e.autoSyncManager != nil {

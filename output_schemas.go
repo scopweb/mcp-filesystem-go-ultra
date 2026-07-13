@@ -21,14 +21,15 @@ var readFileOutputSchema = json.RawMessage(`{
 var writeFileOutputSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "path": {"type": "string", "description": "Absolute normalized path the file was written to"},
-    "bytes_written": {"type": "integer"},
-    "content_hash": {"type": "string", "description": "FNV-1a 8-hex hash of the file as written. Pass as expected_hash on a subsequent edit_file/multi_edit to chain operations without re-reading."},
+    "path": {"type": "string", "description": "Absolute canonical host path observed after the write"},
+    "bytes_written": {"type": "integer", "description": "Actual byte length observed by reopening the final host file after hooks and EOL preservation"},
+    "verified": {"type": "boolean", "description": "True only when the final host file was independently reopened and measured after the atomic write"},
+    "content_hash": {"type": "string", "description": "FNV-1a 8-hex hash computed from the reopened host file. Pass as expected_hash on a subsequent edit_file/multi_edit to chain operations without re-reading."},
     "backup_id": {"type": "string", "description": "Present when a safety backup was auto-created (adaptive guard). Full ID for backup(action:'restore') or backup(action:'undo_last')."},
-    "feedback": {"type": "string", "description": "Non-blocking warning (truncation/inflation/rewrite heuristics)"},
+    "feedback": {"type": "string", "description": "Non-blocking warning (truncation/inflation/rewrite heuristics or failed post-write read-back)"},
     "message": {"type": "string", "description": "Human-readable summary, identical to the text content block"}
   },
-  "required": ["path", "bytes_written", "message"]
+  "required": ["path", "bytes_written", "verified", "message"]
 }`)
 
 var editFileOutputSchema = json.RawMessage(`{

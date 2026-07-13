@@ -1,22 +1,41 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // usageError formats an error response with a usage example, per docs/git-tool-spec.md §4.
-// Format:
-//
-//	ERROR: <msg>
-//	usage: <example>
 //
 // Always returns (result, nil) — never a non-nil error — so the caller goes through the
 // normal mcp.NewToolResultError path and is logged with status "error" by auditWrap.
 func usageError(msg, example string) *mcp.CallToolResult {
 	return mcp.NewToolResultError(fmt.Sprintf("ERROR: %s\nusage: %s", msg, example))
+}
+
+// filesystemMismatchHint is appended to read/edit/info responses when the host
+// reports a missing path. The recovery guidance is the same for every
+// missing-path error so consumers can match on the prefix.
+const filesystemMismatchHint = "FILESYSTEM MISMATCH? This path is missing from the filesystem visible to filesystem-ultra. If another tool previously read or wrote this known path, stop and verify it with filesystem-ultra:read_file/get_file_info, audit recent mutations made through the failing tool family, and understand the mismatch before retrying or switching tools."
+
+// filesystemMismatchSuffix adds the recovery guidance only for genuine
+// missing-path errors. PathError and fmt.Errorf("...: %w") preserve
+// fs.ErrNotExist so callers do not need to inspect brittle error strings.
+func filesystemMismatchSuffix(err error) string {
+	if err == nil || !errors.Is(err, fs.ErrNotExist) {
+		return ""
+	}
+	return "\n→ " + filesystemMismatchHint
+}
+
+// formatToolError preserves the existing "Error:" prefix while making a known
+// missing path actionable. Non-not-found errors remain byte-identical.
+func formatToolError(err error) string {
+	return fmt.Sprintf("Error: %v", err) + filesystemMismatchSuffix(err)
 }
 
 // pathsFromArgs extracts the pathspec from args["paths"] as []string.

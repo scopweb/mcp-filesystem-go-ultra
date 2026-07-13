@@ -1,8 +1,8 @@
 # MCP Filesystem Server Ultra-Fast
 
-**v4.5.26** · Go · MCP 2025-11-25 · 20 tools (17 core + git + minify_js + help, aliases disabled)
+**v4.5.29** · Go · MCP 2025-11-25 · 20 tools (17 core + git + minify_js + help, aliases disabled)
 
-v4.5.26: `read_file`, `write_file`, `edit_file`, `multi_edit` publish `outputSchema` in `tools/list` and return a `structuredContent` payload alongside the text fallback. `write_file` now records its post-write `content_hash` in auto-OCC (Improvement new point 4), and edit_file/multi_edit responses include `parent_backup_id` for step-through undo via structured payloads. Text fallback is byte-identical to v4.5.25 — zero breaking changes.
+v4.5.29 hardens host/sandbox filesystem separation: `help()` is generated from the 20 registered tools, discovery surfaces explain that runtime-native file tools may target a different sandbox, missing known paths include an actionable mismatch diagnostic, and `write_file` returns verified post-write evidence with the actual on-disk byte count/hash. v4.5.26 introduced `outputSchema` + `structuredContent` for `read_file`, `write_file`, `edit_file`, and `multi_edit`; the text fallback remains available for clients that do not consume structured output.
 
 A high-performance [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go. Designed for use with Claude Desktop and Claude Code, with first-class support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -129,8 +129,8 @@ Three layers solve this:
 | Layer | How it works | Client support |
 |-------|-------------|----------------|
 | **`/filesystem-ultra-tools` skill** | Claude Code skill that calls `help` on conversation start | Claude Code |
-| **`help` tool** | Keyword-rich description; returns full 20-tool catalog | Any MCP client |
-| **`server.WithInstructions()`** | Sends catalog during MCP initialize handshake | Spec-compliant clients |
+| **`help` tool** | Generates a catalog from the 20 tools actually registered in this server | Any MCP client |
+| **`server.WithInstructions()`** | Identifies the server's real-host filesystem scope and points to `help()` | Spec-compliant clients |
 
 ### Using the skill
 
@@ -145,6 +145,12 @@ This calls the `help` tool and loads the full catalog. You can also add this to 
 ```
 At the start of every conversation, do tool_search for "filesystem help" and then call filesystem-ultra:help()
 ```
+
+### Host filesystem vs runtime sandbox
+
+`filesystem-ultra:*` tools operate on the host filesystem visible to the MCP server. A client may also expose native tools such as `create_file`, `str_replace`, or `view`; those can run in a separate sandbox even when passed a Windows-looking path.
+
+For a host project, bind the whole task to the filesystem-ultra family. After every creation or edit, verify independently with `get_file_info` or `list_directory`, and use `read_file` when content matters. If a known file reports `File not found`, stop and audit recent operations made through the failing tool family before retrying or switching tools.
 
 ---
 

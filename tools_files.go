@@ -118,7 +118,7 @@ func registerFileTools(reg *toolRegistry) {
 		if permanent {
 			err = engine.DeleteFile(ctx, path)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+				return mcp.NewToolResultError(formatToolError(err)), nil
 			}
 			if engine.IsCompactMode() {
 				return mcp.NewToolResultText(fmt.Sprintf("OK: %s deleted", path)), nil
@@ -129,7 +129,7 @@ func registerFileTools(reg *toolRegistry) {
 		// Default: soft delete
 		info, err := engine.SoftDeleteFile(ctx, path)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
 		core.SetSoftDeleteID(ctx, info.SDID)
 
@@ -166,7 +166,7 @@ func registerFileTools(reg *toolRegistry) {
 
 		err = engine.MoveFile(ctx, sourcePath, destPath)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
 
 		if engine.IsCompactMode() {
@@ -202,7 +202,7 @@ func registerFileTools(reg *toolRegistry) {
 
 		err = engine.CopyFile(ctx, sourcePath, destPath)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
 
 		if engine.IsCompactMode() {
@@ -216,7 +216,8 @@ func registerFileTools(reg *toolRegistry) {
 	// ============================================================================
 	fileInfoTool := mcp.NewTool("get_file_info",
 		mcp.WithTitleAnnotation("File Info"),
-		mcp.WithDescription("get_file_info — File/directory metadata (size, permissions, dates). "+
+		mcp.WithDescription("get_file_info — File/directory metadata (size, permissions, dates) from the real host filesystem. "+
+			"Use it after host mutations to verify existence and actual size independently; runtime-native info tools may inspect a different sandbox. "+
 			"Batch: pass paths (JSON array) to get info for multiple files in one call. Related: read_file, list_directory, search_files."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -262,7 +263,7 @@ func registerFileTools(reg *toolRegistry) {
 
 		info, err := engine.GetFileInfo(ctx, path)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
 		return mcp.NewToolResultText(info), nil
 	}))

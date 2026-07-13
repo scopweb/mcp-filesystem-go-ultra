@@ -123,6 +123,13 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	return nil
 }
 
+// contentHashBytes returns the FNV-1a (8 hex) OCC token for raw file bytes.
+func contentHashBytes(raw []byte) string {
+	h := fnv.New32a()
+	h.Write(raw)
+	return fmt.Sprintf("%08x", h.Sum32())
+}
+
 // computeFileOCCHash returns the FNV-1a (8 hex) hash of the full file's raw
 // bytes — the same OCC token edit_file / multi_edit validate via expected_hash
 // (they hash os.ReadFile(path)). It reads the whole file from disk so that
@@ -136,10 +143,31 @@ func computeFileOCCHash(path string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	h := fnv.New32a()
-	h.Write(raw)
-	return fmt.Sprintf("%08x", h.Sum32()), true
+	return contentHashBytes(raw), true
 }
+
+// verifyOnDiskWrite independently reopens the final host file after the engine
+// reports success. Size and hash are derived from the same bytes so the
+// structured response cannot mix requested input size with hook/EOL-transformed
+// content. The returned path is the canonical authorized target when available.
+func verifyOnDiskWrite(engine *core.UltraFastEngine, path string) (verifiedPath string, bytesWritten int, contentHash string, verified bool) {
+	verifiedPath = resolveAbsForResponse(path)
+	normPath := core.NormalizePath(path)
+	if engine != nil {
+		if resolved, err := engine.ResolveAndAuthorize("verify_write", normPath); err == nil {
+			normPath = resolved
+			verifiedPath = resolveAbsForResponse(resolved)
+		}
+	}
+
+	raw, err := os.ReadFile(normPath)
+	if err != nil {
+		return verifiedPath, 0, "", false
+	}
+	return verifiedPath, len(raw), contentHashBytes(raw), true
+}
+
+const unverifiedWriteWarning = "POST-WRITE VERIFICATION FAILED: the atomic write returned success, but the host file could not be reopened. Confirm with get_file_info/read_file before continuing; do not repeat the write blindly."
 
 // editStructured builds the structured payload returned alongside the text
 // response of an edit op (new point 3). Clients that understand structuredContent
@@ -185,13 +213,14 @@ func attachMessage(m map[string]any, msg string) map[string]any {
 }
 
 // writeStructured builds the structured payload for write_file responses.
-// content_hash is the FNV-1a 8-hex OCC token of the file as written on disk —
-// callers pass it as expected_hash on a subsequent edit_file/multi_edit to
-// chain operations without re-reading.
-func writeStructured(absPath string, bytesWritten int, contentHash string) map[string]any {
+// bytesWritten and content_hash are measured by reopening the host file after
+// the write. verified is always present so clients never have to infer whether
+// the evidence came from an actual read-back.
+func writeStructured(absPath string, bytesWritten int, contentHash string, verified bool) map[string]any {
 	m := map[string]any{
 		"path":          absPath,
 		"bytes_written": bytesWritten,
+		"verified":      verified,
 	}
 	if contentHash != "" {
 		m["content_hash"] = contentHash
@@ -236,7 +265,8 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithTitleAnnotation("Read File"),
 		mcp.WithRawOutputSchema(readFileOutputSchema),
 		mcp.WithDescription("read_file — Read file contents from the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
-			"Use read_file for ALL project files. Never use runtime built-in read tools for files on the host disk. "+
+			"Use read_file for ALL project files. Never use runtime built-in read tools for files on the host disk; those may target a different sandbox. "+
+			"Use it after host mutations when content matters; get_file_info/list_directory verify existence and size independently. "+
 			"Supports line ranges (start_line/end_line), head/tail mode, base64 for binary. "+
 			"Batch: pass paths (JSON array) to read multiple files in one call. "+
 			"To MODIFY files use edit_file. Related: edit_file, write_file, search_files, multi_edit, batch_operations."),
@@ -393,7 +423,7 @@ func registerCoreTools(reg *toolRegistry) {
 		// Default: read full file
 		content, err := engine.ReadFileContent(ctx, path)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
 
 		// Record read for stale-read detection in feedback system
@@ -454,7 +484,8 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithTitleAnnotation("Write File"),
 		mcp.WithRawOutputSchema(writeFileOutputSchema),
 		mcp.WithDescription("write_file — Write/Create files on the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
-			"Use write_file for ALL project files — never use the runtime's built-in write/create tools for host paths. "+
+			"Use write_file for ALL project files — never use the runtime's built-in write/create tools for host paths; those may target a different sandbox. "+
+			"Returns verified post-write host evidence, but still confirm each mutation independently with get_file_info/list_directory and read_file when content matters. "+
 			"Creates or overwrites. For binary use content_base64 with encoding:\"base64\". "+
 			"WARNING: To modify/edit existing files use edit_file instead. Related: edit_file, multi_edit, copy_file, batch_operations."),
 		mcp.WithReadOnlyHintAnnotation(false),
@@ -478,10 +509,8 @@ func registerCoreTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(validationErr.Error()), nil
 		}
 
-		// Resolve the absolute target path so the response shows where the file
-		// actually landed (NormalizePath converts WSL → Windows, filepath.Abs
-		// resolves relatives). Falls back to the input path on error.
-		absPath := resolveAbsForResponse(path)
+		// The final response path is resolved after the write by
+		// verifyOnDiskWrite, which can report the canonical authorized target.
 
 		// Check for base64 content
 		contentBase64 := ""
@@ -515,26 +544,27 @@ func registerCoreTools(reg *toolRegistry) {
 				return mcp.NewToolResultError(fmt.Sprintf("Invalid base64: %v", decodeErr)), nil
 			}
 
-			bytesWritten, err := engine.WriteBase64(ctx, path, b64Content)
+			_, err := engine.WriteBase64(ctx, path, b64Content)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
-			// New point 4: track our own write so auto-OCC won't flag it as an
-			// external change on the next edit. Until v4.5.26 write_file did NOT
-			// call RecordWriteHash, so a subsequent edit_file on the same path
-			// could trip a false "external change" warning.
-			b64NormPath := core.NormalizePath(path)
-			b64ContentHash, _ := computeFileOCCHash(b64NormPath)
-			if b64ContentHash != "" {
-				core.RecordWriteHash(b64NormPath, b64ContentHash)
+			// Reopen the final host file so the payload carries actual disk
+			// evidence, not merely the decoded input length.
+			verifiedPath, bytesWritten, b64ContentHash, verified := verifyOnDiskWrite(engine, path)
+			if verified {
+				core.RecordWriteHash(core.NormalizePath(path), b64ContentHash)
 			}
-			if engine.IsCompactMode() {
-				msg := fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, bytesWritten)
-				sc := writeStructured(absPath, bytesWritten, b64ContentHash)
-				return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
+			msg := fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(verifiedPath), verifiedPath, bytesWritten)
+			if !engine.IsCompactMode() {
+				msg += " base64"
 			}
-			msg := fmt.Sprintf("WRITTEN %s %s | %dB base64", diskPrefix(absPath), absPath, bytesWritten)
-			sc := writeStructured(absPath, bytesWritten, b64ContentHash)
+			if !verified {
+				msg += "\n⚠ " + unverifiedWriteWarning
+			}
+			sc := writeStructured(verifiedPath, bytesWritten, b64ContentHash, verified)
+			if !verified {
+				sc["feedback"] = unverifiedWriteWarning
+			}
 			return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
 		}
 
@@ -592,26 +622,33 @@ func registerCoreTools(reg *toolRegistry) {
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
-			// New point 4: track our own write so auto-OCC won't flag it as an
-			// external change on the next edit. Until v4.5.26 write_file did NOT
-			// call RecordWriteHash, so a subsequent edit_file on the same path
-			// could trip a false "external change" warning.
-			writeContentHash, _ := computeFileOCCHash(normPath)
-			if writeContentHash != "" {
+			// Reopen once after the write so hooks/EOL transformations are reflected
+			// in both the byte count and OCC token.
+			verifiedPath, bytesWritten, writeContentHash, verified := verifyOnDiskWrite(engine, path)
+			if verified {
 				core.RecordWriteHash(normPath, writeContentHash)
 			}
 			core.SetFeedback(ctx, signal)
 			if engine.IsCompactMode() && !signal.Downgraded {
-				msg := fmt.Sprintf("WRITTEN %s %s | %dB | %s", diskPrefix(absPath), absPath, len(content), core.FormatFeedbackCompact(signal))
-				sc := writeStructured(absPath, len(content), writeContentHash)
+				msg := fmt.Sprintf("WRITTEN %s %s | %dB | %s", diskPrefix(verifiedPath), verifiedPath, bytesWritten, core.FormatFeedbackCompact(signal))
+				if !verified {
+					msg += " | " + unverifiedWriteWarning
+				}
+				sc := writeStructured(verifiedPath, bytesWritten, writeContentHash, verified)
 				if newBackupID != "" {
 					sc["backup_id"] = newBackupID
 				}
 				sc["feedback"] = core.FormatFeedbackCompact(signal)
+				if !verified {
+					sc["feedback"] = sc["feedback"].(string) + " | " + unverifiedWriteWarning
+				}
 				return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
 			}
-			msg := core.FormatFeedback(signal, fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, len(content)))
-			sc := writeStructured(absPath, len(content), writeContentHash)
+			msg := core.FormatFeedback(signal, fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(verifiedPath), verifiedPath, bytesWritten))
+			if !verified {
+				msg += "\n⚠ " + unverifiedWriteWarning
+			}
+			sc := writeStructured(verifiedPath, bytesWritten, writeContentHash, verified)
 			if newBackupID != "" {
 				sc["backup_id"] = newBackupID
 			}
@@ -620,6 +657,9 @@ func registerCoreTools(reg *toolRegistry) {
 			// of the structured feedback field. No re-formatting — easier to
 			// keep the two surfaces in sync.
 			sc["feedback"] = core.FormatFeedback(signal, "")
+			if !verified {
+				sc["feedback"] = sc["feedback"].(string) + "\n" + unverifiedWriteWarning
+			}
 			return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
 		}
 
@@ -627,21 +667,18 @@ func registerCoreTools(reg *toolRegistry) {
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
-		// New point 4: track our own write so auto-OCC won't flag it as an
-		// external change on the next edit. Until v4.5.26 write_file did NOT
-		// call RecordWriteHash, so a subsequent edit_file on the same path
-		// could trip a false "external change" warning.
-		writeContentHash, _ := computeFileOCCHash(normPath)
-		if writeContentHash != "" {
+		verifiedPath, bytesWritten, writeContentHash, verified := verifyOnDiskWrite(engine, path)
+		if verified {
 			core.RecordWriteHash(normPath, writeContentHash)
 		}
-		if engine.IsCompactMode() {
-			msg := fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, len(content))
-			sc := writeStructured(absPath, len(content), writeContentHash)
-			return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
+		msg := fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(verifiedPath), verifiedPath, bytesWritten)
+		if !verified {
+			msg += "\n⚠ " + unverifiedWriteWarning
 		}
-		msg := fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(absPath), absPath, len(content))
-		sc := writeStructured(absPath, len(content), writeContentHash)
+		sc := writeStructured(verifiedPath, bytesWritten, writeContentHash, verified)
+		if !verified {
+			sc["feedback"] = unverifiedWriteWarning
+		}
 		return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
 	})
 	reg.addTool(writeFileTool, reg.writeFileHandler)
@@ -656,7 +693,8 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithDescription("edit_file — Edit existing files on the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
-			"Use edit_file for ALL project file modifications — never use the runtime's built-in edit tools for host paths. "+
+			"Use edit_file for ALL project file modifications — never use the runtime's built-in edit tools for host paths; those may target a different sandbox. "+
+			"After success, verify independently with get_file_info/list_directory and read_file when content matters. "+
 			"Modes: default (exact match replace), search_replace (regex/literal all occurrences), regex (capture groups). "+
 			"Auto-backup on every edit — undo with backup(action:\"undo_last\"). Related: multi_edit, read_file, search_files, batch_operations."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to file (WSL or Windows format)")),
@@ -1118,7 +1156,7 @@ func registerCoreTools(reg *toolRegistry) {
 			core.RecordFailedOldText(path, oldText)
 			editSignal := core.CheckEditOp(path, oldText, fileSize)
 			core.SetFeedback(ctx, editSignal)
-			errMsg := fmt.Sprintf("Error: %v", err)
+			errMsg := formatToolError(err)
 			errMsg = core.FormatFeedback(editSignal, errMsg)
 			return mcp.NewToolResultError(errMsg), nil
 		}

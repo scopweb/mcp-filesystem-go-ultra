@@ -379,10 +379,43 @@ func registerSuperTool(reg *toolRegistry) {
 	}))
 }
 
+// renderToolCatalog builds the no-argument help response from the registered
+// tools. Keeping discovery data here prevents the catalog from drifting when a
+// tool is added, removed, or an alias is disabled.
+func renderToolCatalog(reg *toolRegistry) string {
+	all := reg.server.ListTools()
+	names := make([]string, 0, len(all))
+	for name := range all {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# MCP Filesystem Ultra v%s — %d registered tools\n\n", serverVersion, len(names)))
+	sb.WriteString("## Filesystem scope\n")
+	sb.WriteString("These tools operate on the real host filesystem visible to this MCP server. Runtime-native create_file, str_replace, view, or similar tools may target a different sandbox.\n\n")
+	sb.WriteString("## Host project workflow\n")
+	sb.WriteString("1. Bind the project to one filesystem tool family; use filesystem-ultra for host project paths.\n")
+	sb.WriteString("2. After every host mutation, verify independently with get_file_info or list_directory; use read_file when content matters.\n")
+	sb.WriteString("3. If a known file reports 'not found', stop and confirm it with the host reader, then audit recent writes made through the failing tool family before retrying.\n")
+	sb.WriteString("4. Disabled aliases (including create_file) and the fs super-tool are not registered here.\n\n")
+	sb.WriteString("## Registered tools\n")
+	for _, name := range names {
+		registered := all[name]
+		description := strings.TrimSpace(registered.Tool.Description)
+		if idx := strings.Index(description, ". "); idx >= 0 {
+			description = description[:idx+1]
+		}
+		sb.WriteString(fmt.Sprintf("- `%s` — %s\n", name, description))
+	}
+	sb.WriteString("\nCall help(tool:\"X\") for a tool's schema and curated examples.\n")
+	return sb.String()
+}
+
 // registerHelpTool registers the standalone help discovery tool.
 //
 // Usage:
-//   - help()           → server banner (no regression)
+//   - help()           → dynamic catalog + host-filesystem workflow
 //   - help(tool:"git") → schema + description + examples for that tool
 //
 // The per-tool output is generated from the registered mcp.Tool schema and
@@ -402,7 +435,7 @@ func registerHelpTool(reg *toolRegistry) {
 		args, _ := request.Params.Arguments.(map[string]any)
 		name, _ := args["tool"].(string)
 		if name == "" {
-			return mcp.NewToolResultText(serverInstructions), nil
+			return mcp.NewToolResultText(renderToolCatalog(reg)), nil
 		}
 
 		// Find the tool in the registry
