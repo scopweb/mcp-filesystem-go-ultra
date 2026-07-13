@@ -1,9 +1,16 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.5.25: 20 tools (17 core + git + minify_js + help). Aliases and fs super-tool disabled.
+description: Tool catalog for filesystem-ultra MCP server v4.5.29: 20 tools (17 core + git + minify_js + help). Host-filesystem binding, post-write verification, aliases disabled.
 ---
 
-# Filesystem Ultra v4.5.25 — Tool Discovery
+# Filesystem Ultra v4.5.29 — Tool Discovery
+
+## Bind each project to one filesystem tool family
+
+- `filesystem-ultra` operates on the real host filesystem visible to its MCP server (`C:\...`, host-mounted `/mnt/...`, etc.). Runtime-native `create_file`, `str_replace`, `view`, or similar tools may operate in a different sandbox.
+- Before the first project read or write, select the family explicitly mapped to that project. For host projects reachable through filesystem-ultra, use only its read/write/edit/list/info/copy/delete tools; reserve native tools for explicit agent scratch work.
+- After every host creation or edit, verify independently with `get_file_info` or `list_directory`; use `read_file` when content matters. A successful write response alone does not prove that a different tool family targeted the host.
+- Treat `File not found` for a known file as a filesystem-mismatch signal: stop, confirm with the host reader, audit recent writes made through the failing family, and understand the mismatch before retrying. Never switch tools silently.
 
 ## The 20 tools (17 core + git + minify_js + help)
 

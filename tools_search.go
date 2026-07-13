@@ -20,8 +20,8 @@ func registerSearchTools(reg *toolRegistry) {
 	// ============================================================================
 	listDirTool := mcp.NewTool("list_directory",
 		mcp.WithTitleAnnotation("List Directory"),
-		mcp.WithDescription("list_directory — List directory contents (cached). "+
-			"output_format: 'compact' (default), 'json' (structured entries with name/type/size/modified), 'tree' (recursive JSON tree, use max_depth). "+
+		mcp.WithDescription("list_directory — List directory contents on the real host filesystem; use it to verify a host creation/edit independently. "+
+			"Runtime-native directory tools may inspect a different sandbox. output_format: 'compact' (default), 'json' (structured entries with name/type/size/modified), 'tree' (recursive JSON tree, use max_depth). "+
 			"Related: search_files, read_file, edit_file, create_directory, batch_operations."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -57,7 +57,7 @@ func registerSearchTools(reg *toolRegistry) {
 			listing, err = engine.ListDirectoryContent(ctx, path)
 		}
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
 		return mcp.NewToolResultText(listing), nil
 	})

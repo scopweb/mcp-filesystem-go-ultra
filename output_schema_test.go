@@ -140,7 +140,7 @@ func TestWriteFileSchema_IsValid(t *testing.T) {
 func TestWriteFileSchema_FullPayload_Conforms(t *testing.T) {
 	// Full payload: writeStructured + feedback + backup_id + message
 	schema := parseSchema(t, writeFileOutputSchema)
-	sc := writeStructured("C:/x/file.go", 42, "abcd1234")
+	sc := writeStructured("C:/x/file.go", 42, "abcd1234", true)
 	sc["backup_id"] = "20260711-120000-aaaa"
 	sc["feedback"] = " [WARN:truncation]"
 	attachMessage(sc, "WRITTEN [C] C:/x/file.go | 42B")
@@ -151,7 +151,7 @@ func TestWriteFileSchema_MinimalPayload_Conforms(t *testing.T) {
 	// Minimal: just path + bytes_written + message (no hash, no feedback).
 	// Required keys must still be present.
 	schema := parseSchema(t, writeFileOutputSchema)
-	sc := writeStructured("C:/x/file.go", 42, "") // empty hash → no content_hash key
+	sc := writeStructured("C:/x/file.go", 42, "", false) // failed read-back → no content_hash key
 	attachMessage(sc, "WRITTEN [C] C:/x/file.go | 42B")
 	assertPayloadConforms(t, schema, sc)
 }

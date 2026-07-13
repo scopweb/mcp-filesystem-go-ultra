@@ -52,14 +52,15 @@ func DefaultConfiguration() *Configuration {
 	}
 }
 
-// serverInstructions is sent to the client during the MCP initialize handshake
-// and returned by the help tool.
-const serverInstructions = `MCP Filesystem Ultra — File operations server. Run 'help' for tool list.`
+// serverInstructions is sent to the client during the MCP initialize handshake.
+// Keep this factual and compact: detailed workflow policy belongs in help() and
+// the filesystem-ultra-tools skill, not in every user turn.
+const serverInstructions = `MCP Filesystem Ultra — operates on the real host filesystem visible to this MCP server (for example C:\, D:\, or /mnt/...). Runtime-native file tools may target a different sandbox. Run help() for the registered tool catalog and host-filesystem workflow guidance.`
 
 // serverVersion is the single source of truth for the version reported by
 // --version, the MCP handshake, the help header and the startup logs.
 // Keep in sync with the top CHANGELOG entry.
-const serverVersion = "4.5.26"
+const serverVersion = "4.5.29"
 
 // buildCommit and buildDate are stamped at build time via
 //

@@ -167,7 +167,7 @@ func (e *UltraFastEngine) DeleteLineRange(ctx context.Context, path string, star
 	if werr := atomicWriteFile(path, []byte(remaining), fileMode); werr != nil {
 		return "", nil, fmt.Errorf("error writing file: %w", werr)
 	}
-	e.invalidateFileReadCache(path)
+	e.invalidateMutatedPath(path)
 
 	removedLines := countRemovedLines(removed)
 	result = &EditResult{
@@ -245,7 +245,7 @@ func (e *UltraFastEngine) ReplaceLineRange(ctx context.Context, path string, sta
 	if werr := atomicWriteFile(path, []byte(remaining), fileMode); werr != nil {
 		return nil, fmt.Errorf("error writing file: %w", werr)
 	}
-	e.invalidateFileReadCache(path)
+	e.invalidateMutatedPath(path)
 
 	removedLines := countRemovedLines(removed)
 	addedLines := countRemovedLines(newText)

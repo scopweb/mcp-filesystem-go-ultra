@@ -13,9 +13,15 @@ func getHelpContent(topic string, compactMode bool) string {
 	case "overview":
 		sb.WriteString("# MCP Filesystem Ultra v" + serverVersion + " - Quick Start\n")
 		sb.WriteString(`
-## CRITICAL RULE
-Always use MCP tools (read_file, write_file, edit_file) instead of native file tools.
-These auto-convert paths between WSL (/mnt/c/) and Windows (C:\).
+## FILESYSTEM SCOPE
+filesystem-ultra tools operate on the real host filesystem visible to this MCP server.
+Runtime-native create_file, str_replace, view, or similar tools may operate in a different sandbox.
+
+## HOST PROJECT WORKFLOW
+1. Bind each project to one filesystem tool family; use filesystem-ultra for host project paths.
+2. After every host mutation, verify independently with get_file_info or list_directory; use read_file when content matters.
+3. Treat "file not found" for a known file as a possible filesystem mismatch: stop, confirm with the host reader, and audit recent writes made through the failing tool family.
+4. Do not switch tools or retry silently until the mismatch is understood.
 
 ## THE GOLDEN RULE
 Surgical edits save 98% tokens:
@@ -23,9 +29,9 @@ BAD:  read_file(large) -> write_file(large) = 250k tokens
 GOOD: search_files -> read_file(start_line/end_line) -> edit_file = 2k tokens
 
 ## AVAILABLE TOPICS
-Call server_info(topic) with:
+Call server_info(action:"help", topic:"...") with:
 - "workflow" - The 4-step efficient workflow
-- "tools"    - Complete list of 16 tools
+- "tools"    - Complete list of 20 tools
 - "read"     - Reading files efficiently
 - "write"    - Writing and creating files
 - "edit"     - Editing files (most important!)
@@ -71,120 +77,100 @@ server_info(action:"stats")
 `)
 
 	case "tools":
-		sb.WriteString(`# COMPLETE TOOL LIST (16 Tools)
+		sb.WriteString(`# COMPLETE TOOL LIST (20 Tools)
 
-Use this topic when the client hides full tool schemas. Each entry lists the most important parameters only.
+Use help() for the live catalog generated from the registered MCP tools. This topic is the compact reference for clients that hide full schemas.
 
-## Core (5)
+## Core I/O (6)
 
 read_file
 - Purpose: Read a full file, line range, head/tail, or base64 content
-- Key params: path, start_line, end_line, max_lines, mode, encoding
-- Examples: read_file(path), read_file(path, start_line=10, end_line=30)
+- Key params: path, paths, start_line, end_line, max_lines, mode, encoding
 
 write_file
 - Purpose: Create or overwrite a file atomically
 - Key params: path, content, content_base64, encoding
-- Examples: write_file(path, content="text")
 
 edit_file
-- Purpose: Modify existing files with backup and risk checks
-- Key params: path, old_text, new_text, mode, pattern, replacement, occurrence, force
-- Modes: replace (default), search_replace, regex
-- Examples: edit_file(path, old_text, new_text), edit_file(path, mode:"search_replace", pattern, replacement)
+- Purpose: Modify existing files with backup, OCC, risk checks, and diffs
+- Key params: path, old_text, new_text, mode, pattern, replacement, occurrence, expected_hash
+
+multi_edit
+- Purpose: Apply multiple exact replacements to one file atomically
+- Key params: path, edits_json, diff_format, dry_run, expected_hash
 
 list_directory
 - Purpose: List directory contents
-- Key params: path, output_format (compact|json|tree), max_depth (for tree)
-- Examples: list_directory(path), list_directory(path, output_format:"json"), list_directory(path, output_format:"tree", max_depth:3)
+- Key params: path, output_format (compact|json|tree), max_depth
 
 search_files
-- Purpose: Search by filename or file content
+- Purpose: Search by filename or content
 - Key params: path, pattern, file_types, include_content, include_context, case_sensitive, count_only
-- Examples: search_files(path, pattern), search_files(path, pattern, include_content=true)
 
-## Edit+ (1)
+## File Operations (5)
 
-multi_edit
-- Purpose: Apply multiple exact replacements to the same file atomically
-- Key params: path, edits_json, diff_format (auto|full|summary|stat|none), dry_run, expected_hash
-- Examples: multi_edit(path, edits_json='[{"old_text":"A","new_text":"B"}]'), multi_edit(path, edits_json, diff_format:"full")
-
-## Files (4)
+get_file_info
+- Purpose: Return metadata for one or several files/directories
+- Key params: path, paths
 
 move_file
 - Purpose: Move or rename a file or directory
 - Key params: source_path, dest_path
-- Examples: move_file(source_path, dest_path)
 
 copy_file
 - Purpose: Copy a file or directory
 - Key params: source_path, dest_path
-- Examples: copy_file(source_path, dest_path)
 
 delete_file
 - Purpose: Soft-delete by default, or hard-delete permanently
-- Key params: path, permanent
-- Examples: delete_file(path), delete_file(path, permanent=true)
+- Key params: path, paths, permanent
 
 create_directory
 - Purpose: Create a directory tree like mkdir -p
 - Key params: path
-- Examples: create_directory(path)
 
-## Analysis (2)
-
-get_file_info
-- Purpose: Return metadata for a file or directory
-- Key params: path
-- Examples: get_file_info(path)
-
-analyze_operation
-- Purpose: Preview risk and impact before acting
-- Key params: path, operation
-- Valid operations: file, optimize, write, edit, delete
-- Examples: analyze_operation(path, operation:"edit")
-
-## Batch (1)
+## Batch, Recovery, and Platform (6)
 
 batch_operations
 - Purpose: Run atomic multi-file ops, pipelines, or batch rename
 - Key params: request_json, pipeline_json, rename_json
-- Examples: batch_operations(request_json='{"operations":[...]}')
 
-## Backup (1)
+project_replace
+- Purpose: Find/replace a token across a project tree
+- Key params: path, find, replace, file_types, preview
 
 backup
 - Purpose: List, inspect, compare, restore, clean up, or undo backups
 - Key params: action, backup_id, file_path, preview, filter_path
-- Valid actions: list, info, compare, cleanup, restore, undo_last
-- Examples: backup(action:"list"), backup(action:"undo_last")
 
-## WSL (1)
+analyze_operation
+- Purpose: Preview risk and impact before acting
+- Key params: path, operation
 
 wsl
 - Purpose: WSL/Windows sync, status, and autosync operations
-- Key params: action, wsl_path, windows_path, direction, auto_create_dirs
-- Valid actions: status, sync
-- Examples: wsl(action:"status"), wsl(wsl_path, windows_path, direction)
-
-## Info (1)
+- Key params: action, wsl_path, windows_path, direction
 
 server_info
-- Purpose: Help topics, performance stats, and artifact management
+- Purpose: Static help topics, performance stats, and artifact management
 - Key params: action, topic, sub_action, content, path
-- Valid actions: help, stats, artifact
-- Examples: server_info(action:"stats"), server_info(action:"help", topic:"edit")
 
-## Aliases (6 + help)
+## Version Control, JavaScript, and Discovery (3)
 
-read_text_file -> read_file
-search -> search_files
-edit -> edit_file
-write -> write_file
-create_file -> write_file
-directory_tree -> list_directory
-help -> standalone discovery tool, not an alias
+git
+- Purpose: Safe Git status, diff, log, show, add, commit, restore, branch, and init actions
+- Key params: action, path, paths, output, rev, max_lines
+
+minify_js
+- Purpose: Pure-Go JavaScript minification without Node
+- Key params: path, output_path
+
+help
+- Purpose: Dynamic registered-tool catalog; help(tool:"X") returns schema + examples
+- Key params: tool
+
+## Disabled Names
+Aliases read_text_file, search, edit, write, create_file, directory_tree, View, Edit, Write, Replace, LS, GlobTool, GrepTool and the fs super-tool are NOT registered. A runtime-native tool with one of those names may target a different sandbox; it is not a filesystem-ultra alias.
 `)
 
 	case "read":
@@ -565,7 +551,7 @@ Repeated edits on a broken file make recovery harder.
 Available topics:
 - overview  - Quick start guide
 - workflow  - The 4-step efficient workflow
-- tools     - Complete list of 16 tools
+- tools     - Complete list of 20 tools
 - read      - Reading files efficiently
 - write     - Writing and creating files
 - edit      - Editing files (most important!)

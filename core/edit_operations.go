@@ -25,6 +25,24 @@ func contentHashFNV(s string) string {
 	return fmt.Sprintf("%08x", h.Sum32())
 }
 
+// countOccurrencesTolerant returns how many literal occurrences of needle are
+// present in haystack. With tolerantWhitespace=true, tab/4-space runs and
+// CRLF/LF are normalized before the count, matching the tolerant matcher the
+// engine uses for performIntelligentEdit. The ambiguity guard runs only on
+// multi_edit batches, so this is intentionally a byte-exact/normalized count
+// and does not try to enumerate the engine's full fallback ladder.
+func countOccurrencesTolerant(haystack, needle string, tolerantWhitespace bool) int {
+	if needle == "" {
+		return 0
+	}
+	if !tolerantWhitespace {
+		return strings.Count(haystack, needle)
+	}
+	hay := normalizeLineEndings(strings.ReplaceAll(haystack, "\t", "    "))
+	ndl := normalizeLineEndings(strings.ReplaceAll(needle, "\t", "    "))
+	return strings.Count(hay, ndl)
+}
+
 // EditResult represents file edit operation results
 type EditResult struct {
 	ModifiedContent  string
@@ -220,7 +238,7 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 	}
 
 	// Invalidate cache
-	e.invalidateFileReadCache(path)
+	e.invalidateMutatedPath(path)
 
 	// DO NOT remove backup - keep it persistent for recovery
 	// (old behavior: os.Remove(backupPath) - removed for Bug10 fix)
@@ -863,7 +881,7 @@ func (e *UltraFastEngine) searchAndReplaceInFile(filePath, pattern, replacement 
 	}
 
 	// Invalidate cache
-	e.invalidateFileReadCache(filePath)
+	e.invalidateMutatedPath(filePath)
 
 	return len(matches), nil
 }
@@ -1357,6 +1375,24 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 			continue
 		}
 
+		// Ambiguity guard (incident 2026-07-13, second report). The internal
+		// performIntelligentEdit fan-out silently replaces all occurrences, so
+		// a single-edit batch that matches N>1 times succeeds without warning
+		// and the model has no way to know it fanned out. Refuse the edit
+		// before performIntelligentEdit is called and surface the count.
+		ambiguity := countOccurrencesTolerant(currentContent, edit.OldText, tolerantWhitespace)
+		if ambiguity > 1 {
+			detail.Status = EditStatusAmbiguous
+			detail.Error = fmt.Sprintf("ambiguous match: old_text for edit %d matches %d times (expected 1). Quote more surrounding context, pass tolerant_whitespace:false with an occurrence:1 single edit_file, or split into separate writes", i+1, ambiguity)
+			result.FailedEdits++
+			result.Errors = append(result.Errors, fmt.Sprintf("edit %d: %s", i+1, detail.Error))
+			if result.MatchConfidence == "high" {
+				result.MatchConfidence = "medium"
+			}
+			result.EditDetails = append(result.EditDetails, detail)
+			continue
+		}
+
 		// Apply this edit
 		editResult, editErr := e.performIntelligentEdit(currentContent, edit.OldText, edit.NewText, false)
 		if editErr != nil || editResult.ReplacementCount == 0 {
@@ -1526,7 +1562,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	}
 
 	// Invalidate cache
-	e.invalidateFileReadCache(path)
+	e.invalidateMutatedPath(path)
 
 	// DO NOT remove backup - keep it persistent for recovery (Bug #16)
 
@@ -1837,7 +1873,7 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 	}
 
 	// Invalidate cache
-	e.invalidateFileReadCache(validPath)
+	e.invalidateMutatedPath(validPath)
 
 	// Execute post-edit hooks
 	workingDir, _ := os.Getwd()

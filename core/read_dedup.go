@@ -66,6 +66,8 @@ func forgetReadFlight(path string) {
 }
 
 // invalidateFileReadCache removes cached bytes and forgets read dedup for path.
+// It is intentionally file-only for move/delete call sites that manage several
+// source/destination directory caches explicitly.
 func (e *UltraFastEngine) invalidateFileReadCache(path string) {
 	if e == nil || e.cache == nil || path == "" {
 		forgetReadFlight(path)
@@ -73,6 +75,23 @@ func (e *UltraFastEngine) invalidateFileReadCache(path string) {
 	}
 	e.cache.InvalidateFile(path)
 	forgetReadFlight(path)
+}
+
+// invalidateMutatedPath removes every cache entry whose value can be stale
+// after file content changes: file bytes, metadata, and the parent directory
+// listing. Mutation paths with special source/destination semantics may keep
+// using invalidateFileReadCache and invalidate their directories explicitly.
+func (e *UltraFastEngine) invalidateMutatedPath(path string) {
+	if e == nil || path == "" {
+		return
+	}
+	path = NormalizePath(path)
+	e.invalidateFileReadCache(path)
+	if e.cache == nil {
+		return
+	}
+	e.cache.InvalidateMetadata(path)
+	e.cache.InvalidateDirectory(filepath.Dir(path))
 }
 
 // extractLineRangeFromBytes builds the same response shape as ReadFileRange's
