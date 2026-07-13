@@ -1,5 +1,67 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.5.30] - 2026-07-13
+
+### fix(project_replace): batch backup is now snapshotted BEFORE the writes (rollback actually rolls back)
+
+Closes the "Known issue documented" line from v4.5.29. The bug: `project_replace` invoked `CreateBatchBackup` *after* all atomic writes succeeded, so the snapshot captured the post-replace bytes and `backup(action:"restore", backup_id:...)` was a silent no-op — the original content was already gone the moment the writes landed. The "backup_id" returned in the response gave the appearance of a rollback path that did not exist, which is worse than returning nothing.
+
+A partial-failure edge made it worse: when `processFile` errored mid-batch (sequential mode does `break`, parallel mode had already dispatched every file), the files written so far were mutated **with no backup at all** — the `CreateBatchBackup` call never ran because `err` aborted the function first.
+
+**Changes (`core/project_replace.go:181-238, 348-357`):**
+
+- The pre-write count loop now also produces `filesWithMatches` (the list of files with `count > 0`) in the same read pass — no extra disk reads.
+- `CreateBatchBackup(filesWithMatches, "project_replace", …)` is invoked **after** the count + risk assessment and **before** the write loop. **Fail-closed:** if `create_backup:true` and the snapshot fails, the function returns `backup failed (no files modified): …` and zero files are touched. Previously the backup error was evaluated only when the files were already in their post-replace state.
+- The write loop now iterates `filesWithMatches` instead of `matchedFiles`, skipping the redundant read for files with no matches (a small perf win).
+- After successful writes, `e.SetCurrentBackupID(path, backupID)` is called for every modified file. This mirrors `edit_file`'s chain registration and means `backup(action:"undo_last", file_path:"…")` can now step back through the project_replace layer — `undo_last` was previously blind to files touched by project_replace.
+- The "Create backup AFTER processing" block at the bottom of the function was removed.
+- New helper `countMatches(content, literal, caseSensitive, literalText, regexPattern)` centralises the match-counting logic so the pre-write count and the in-loop replacement count cannot drift — drifting them would risk backing up files that won't change or skipping files that will.
+
+**Behavior on partial failure:** unchanged on the surface (the function still returns the first `processFile` error), but the user now has a real recovery path — `backup(action:"restore", backup_id:…)` reverts every file in the batch to its pre-replace bytes. The restore helper auto-creates a pre-restore safety snapshot (its existing `createBackup=true` default), so the rollback is itself recoverable.
+
+**No breaking changes:** the response shape is byte-identical for the success path. `backup_id` still appears under the same field. The only user-visible change is that `backup(action:"restore")` now actually rolls back.
+
+**Regression coverage (`tests/project_replace_test.go:319-413`):**
+
+- `TestProjectReplace_BackupRestoresOriginalContent` — seeds two files with `func Alpha`, runs `project_replace(..., create_backup:true)`, calls `engine.GetBackupManager().RestoreBackup(result.BackupID, "", true)`, and asserts every file is back to its ORIGINAL bytes. This test would have caught the original bug.
+- `TestProjectReplace_BackupRegistersUndoChain` — asserts `engine.GetCurrentBackupID(testFile) == result.BackupID` after a project_replace with `create_backup:true`, locking the undo-chain wiring.
+
+**Verification:** `go test ./core/` PASS (1.094s) · `go test ./tests/` PASS (20.169s, includes the 2 new tests) · `go test ./tests/security/` PASS (0.823s) · `go vet ./...` clean · `go build -ldflags="-s -w" -trimpath -o filesystem-ultra-v4.exe .` builds (8.5MB).
+
+---
+
+## [4.5.29] - 2026-07-13
+
+### fix(incident): host/sandbox separation, verified write evidence, and project_replace cache invalidation
+
+The 2026-07-13 incident report (mixed native `create_file`/`str_replace` with filesystem-ultra host writes) exposed three failure modes the server can defend against even though it cannot intercept runtime-native tools:
+
+1. **Discovery drift** — `help()` returned only a one-line banner while README/CLAUDE promised a 20-tool catalog; `server_info(action:"help", topic:"tools")` still advertised 16 tools and the disabled `create_file` alias; the skill did not foreground the host/sandbox binding.
+2. **Trust without verification** — `write_file` reported `len(content)` even when hooks or EOL preservation produced different bytes; it ignored read-back errors and never invalidated the parent directory cache. A subsequent `list_directory`/`read_file` would silently serve stale data.
+3. **project_replace cache hole** — `core/project_replace.go` wrote via raw `os.WriteFile`, bypassing the engine: the read cache stayed warm, the session OCC baseline pointed at the pre-replace bytes, and the very next `read_file` returned the OLD content. A doctored report of "wrote 3 replacements" was followed by a `read_file` showing no replacement, which the model then used to compose the next `edit_file` and hit `old_text not found`.
+
+**Defensive changes (server-side; the model can still ignore these instructions):**
+
+- **`serverInstructions` and help surfaces** (incident discovery) — `serverInstructions` now identifies the host filesystem scope in one sentence and points at `help()`, without re-introducing the long imperative block removed in v4.3.6. `help()` renders a dynamic catalog of every tool actually registered on this server (20 tools; aliases like `create_file` are no longer advertised). `server_info(action:"help")` and the discovery skill were updated to the same scope and rule set. The host project workflow (bind, verify, not-found = mismatch, no silent switching) is now surfaced both in `help()` and in the `filesystem-ultra-tools` skill.
+- **Verified post-write evidence** — `write_file` opens the final host file independently after the engine reports success, then reports the canonical path, the actual on-disk byte length, the FNV-1a hash computed from those bytes, and a `verified:bool` flag. The `writeFileOutputSchema` schema documents this and lists `verified` as required alongside `path`, `bytes_written` and `message`. If the read-back fails, the response carries `verified:false` plus a non-blocking warning so a downstream `get_file_info`/`read_file` is forced.
+- **Centralized mutation-cache invalidation** — new `invalidateMutatedPath(path)` helper removes the file cache, the metadata cache entry, and the parent directory cache in one call. Every internal write path (`WriteFileContent`, `WriteFileBytes`, `EditFile`, `searchAndReplaceInFile`, regex transforms, line-range edits, streaming write, project_replace, and the soft/permanent delete paths) now goes through it. Move/copy still uses its existing multi-path invalidation.
+- **`project_replace` cache fix** — per-file write is now atomic (preserves file mode) and immediately calls `invalidateMutatedPath` + `RecordWriteHash`. The next `read_file` returns the new bytes and the auto-OCC baseline matches disk; subsequent `edit_file` chains no longer trip a false external-change warning. Parallel mode surfaces the first error instead of swallowing it.
+- **Filesystem-mismatch diagnostic** — every MCP error path that reports a missing host file now appends a `FILESYSTEM MISMATCH?` recovery block: confirm with `filesystem-ultra:read_file`/`get_file_info`, audit recent mutations made through the failing tool family, and never switch tools silently. Helper `formatToolError` keeps the existing `Error: …` prefix for non-missing errors so old clients see no behavior change. *(Post-review completion, 2026-07-13: the first pass only wired the hint into `read_file`, `get_file_info`, `move_file`, `copy_file` and `delete_file`; `list_directory`, `edit_file` and `multi_edit` now emit it too, with handler-level regression tests in `help_test.go`.)*
+- **Known issue documented** — `project_replace` creates its batch backup AFTER writing, so the backup contains the post-replace bytes and `backup(action:"restore")` cannot roll back the operation. Fixed in v4.5.30 (backup now snapshotted before the writes; see the v4.5.30 entry above). `docs/ISSUE-project-replace-backup-after-write.md` retains the repro and the resolution narrative for traceability.
+
+**No breaking changes** — `Content[0].Text` is byte-identical to v4.5.26 unless the new mismatch diagnostic applies or `verified` is required. The `writeFileOutputSchema` now requires `verified`, which is a soft requirement: handlers always set it, but clients that only render text will not see a difference.
+
+**New regression coverage:** `help_test.go` (catalog, host-scope wording, no disabled aliases, mismatch suffix, server-instructions contract), `write_verified_test.go` (verified evidence and CRLF size preservation), `core/project_replace_cache_test.go` (cache + OCC baseline refresh after project_replace), and `multi_edit_ambiguity_test.go` (ambiguity guard + tolerant_whitespace plumbing for `multi_edit`).
+
+### fix: multi_edit ambiguity guard and tolerant_whitespace plumbing
+
+Two latent bugs in `multi_edit` were uncovered by the same debugging session and are fixed in the same release:
+
+- **Ambiguity guard (`core/edit_operations.go`)** — `multi_edit` silently fanned out via `performIntelligentEdit` when `old_text` matched N>1 times. The handler now pre-counts occurrences (honouring `tolerant_whitespace` when set) and refuses with a clear "ambiguous match: old_text for edit N matches K times (expected 1)" error before any mutation. The atomic-rollback branch keeps the file untouched.
+- **tolerant_whitespace plumbing (`tools_batch.go`)** — the flag was declared in the schema and validated by `core/param_validator.go` but silently dropped by the multi_edit handler (it hard-coded `false` at the engine call). The handler now extracts and forwards it, restoring parity with `edit_file`.
+
+---
+
 ## [4.5.26] - 2026-07-11
 
 ### feat(core): structuredContent + outputSchema on `read_file`, `write_file`, `edit_file`, `multi_edit`
