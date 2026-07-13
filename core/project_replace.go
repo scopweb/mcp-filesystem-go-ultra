@@ -178,23 +178,20 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 		}, nil
 	}
 
-	// Calculate risk assessment before any writes
+	// Calculate risk assessment before any writes AND collect the list of files
+	// that actually contain matches. We do both in one read pass so the per-file
+	// counts stay in sync with the backup set we will snapshot below.
+	filesWithMatches := make([]string, 0, len(matchedFiles))
 	var totalOccurrences int
 	for _, f := range matchedFiles {
 		content, err := os.ReadFile(f)
 		if err != nil {
 			continue
 		}
-		if literal {
-			if caseSensitive {
-				totalOccurrences += strings.Count(string(content), literalText)
-			} else {
-				// Case-insensitive count
-				re := regexp.MustCompile("(?i)" + regexp.QuoteMeta(literalText))
-				totalOccurrences += len(re.FindAllString(string(content), -1))
-			}
-		} else {
-			totalOccurrences += len(regexPattern.FindAllString(string(content), -1))
+		count := countMatches(string(content), literal, caseSensitive, literalText, regexPattern)
+		if count > 0 {
+			filesWithMatches = append(filesWithMatches, f)
+			totalOccurrences += count
 		}
 	}
 
@@ -208,7 +205,7 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 	}
 
 	result := &ProjectReplaceResult{
-		FilesChanged: len(matchedFiles),
+		FilesChanged: len(filesWithMatches),
 		DryRun:       preview,
 		RiskLevel:    riskLevel,
 	}
@@ -217,6 +214,25 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 		// Just count
 		result.TotalReplaced = totalOccurrences
 		return result, nil
+	}
+
+	// Snapshot the pre-replace bytes BEFORE any writes.
+	// v4.5.29+: previously the backup was created *after* all writes completed,
+	// which meant a successful "restore" only rolled back to the post-replace
+	// state — the original content was already gone. With this guard the
+	// backup captures disk state prior to the first atomic write, so a
+	// subsequent `backup(action:"restore", backup_id:...)` reverts the entire
+	// batch to its pre-replace state. If `create_backup:true` and the snapshot
+	// fails, abort without touching any file (fail-closed).
+	var backupID string
+	if createBackup && e.backupManager != nil && len(filesWithMatches) > 0 {
+		backupID, err = e.backupManager.CreateBatchBackup(filesWithMatches, "project_replace",
+			fmt.Sprintf("ProjectReplace: %d files, %d replacements, risk=%s",
+				len(filesWithMatches), totalOccurrences, riskLevel))
+		if err != nil {
+			return nil, fmt.Errorf("backup failed (no files modified): %w", err)
+		}
+		result.BackupID = backupID
 	}
 
 	// Process files
@@ -229,6 +245,7 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 
 	var results []fileResult
 	var mu sync.Mutex
+	var firstProcessErr error
 
 	processFile := func(f string) error {
 		content, err := os.ReadFile(f)
@@ -249,23 +266,25 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 			newContent = regexPattern.ReplaceAllString(string(content), replace)
 		}
 
-		// Count replacements
-		replaced := strings.Count(string(content), literalText)
-		if literal && !caseSensitive {
-			re := regexp.MustCompile("(?i)" + regexp.QuoteMeta(literalText))
-			replaced = len(re.FindAllString(string(content), -1))
-		} else if !literal {
-			replaced = len(regexPattern.FindAllString(string(content), -1))
-		}
-
+		// Count replacements using the shared helper so the per-file count here
+		// cannot drift from the pre-write count that built filesWithMatches.
+		replaced := countMatches(string(content), literal, caseSensitive, literalText, regexPattern)
 		if replaced == 0 {
 			return nil
 		}
 
-		// Write back
-		if err := os.WriteFile(f, []byte(newContent), 0644); err != nil {
+		// Write back atomically without re-entering the engine semaphore held by
+		// ProjectReplace. Refresh every cache surface and the session OCC baseline
+		// before another tool can verify or edit the file.
+		fileMode := os.FileMode(0644)
+		if info, statErr := os.Stat(f); statErr == nil {
+			fileMode = info.Mode()
+		}
+		if err := atomicWriteFile(f, []byte(newContent), fileMode); err != nil {
 			return err
 		}
+		e.invalidateMutatedPath(f)
+		RecordWriteHash(NormalizePath(f), contentHashFNV(newContent))
 
 		mu.Lock()
 		results = append(results, fileResult{f, replaced, oldSize, int64(len(newContent))})
@@ -276,18 +295,38 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 
 	if parallel && e.workerPool != nil {
 		var wg sync.WaitGroup
-		for _, f := range matchedFiles {
+		for _, f := range filesWithMatches {
 			wg.Add(1)
-			e.workerPool.Submit(func() {
-				processFile(f)
+			filePath := f
+			if submitErr := e.workerPool.Submit(func() {
+				defer wg.Done()
+				if processErr := processFile(filePath); processErr != nil {
+					mu.Lock()
+					if firstProcessErr == nil {
+						firstProcessErr = processErr
+					}
+					mu.Unlock()
+				}
+			}); submitErr != nil {
 				wg.Done()
-			})
+				mu.Lock()
+				if firstProcessErr == nil {
+					firstProcessErr = submitErr
+				}
+				mu.Unlock()
+			}
 		}
 		wg.Wait()
 	} else {
-		for _, f := range matchedFiles {
-			processFile(f)
+		for _, f := range filesWithMatches {
+			if processErr := processFile(f); processErr != nil {
+				firstProcessErr = processErr
+				break
+			}
 		}
+	}
+	if firstProcessErr != nil {
+		return nil, fmt.Errorf("project replace failed: %w", firstProcessErr)
 	}
 
 	// Populate result
@@ -304,19 +343,15 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 		})
 	}
 
-	// Create backup AFTER processing, only for files that actually had replacements
-	var backupID string
-	if createBackup && e.backupManager != nil && len(results) > 0 {
-		changedFiles := make([]string, 0, len(results))
+	// Register the pre-write backup in the per-file undo chain so that a later
+	// `backup(action:"undo_last", file_path:"...")` can step back through the
+	// project_replace layer (mirrors how `edit_file` registers its chain entry).
+	// Without this, undo_last would have no idea which backup to revert to for
+	// files touched by project_replace. No-op when no backup was created.
+	if backupID != "" {
 		for _, r := range results {
-			changedFiles = append(changedFiles, r.path)
+			e.SetCurrentBackupID(r.path, backupID)
 		}
-		backupID, err = e.backupManager.CreateBatchBackup(changedFiles, "project_replace",
-			fmt.Sprintf("ProjectReplace: %d files, %d replacements, risk=%s", len(results), result.TotalReplaced, riskLevel))
-		if err != nil {
-			return nil, fmt.Errorf("backup failed: %w", err)
-		}
-		result.BackupID = backupID
 	}
 
 	if riskLevel == "HIGH" || riskLevel == "CRITICAL" {
@@ -324,4 +359,20 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 	}
 
 	return result, nil
+}
+
+// countMatches returns the number of matches that the configured find/replace
+// pattern would produce for content. Centralised so the pre-write count loop
+// (which builds the backup set) and the in-loop replacement count stay in
+// lockstep — drifting them would risk backing up files that won't actually be
+// changed or skipping files that will.
+func countMatches(content string, literal, caseSensitive bool, literalText string, regexPattern *regexp.Regexp) int {
+	if literal {
+		if caseSensitive {
+			return strings.Count(content, literalText)
+		}
+		re := regexp.MustCompile("(?i)" + regexp.QuoteMeta(literalText))
+		return len(re.FindAllString(content, -1))
+	}
+	return len(regexPattern.FindAllString(content, -1))
 }

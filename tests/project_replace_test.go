@@ -317,3 +317,96 @@ func TestProjectReplace_EmptyDirectory(t *testing.T) {
 		t.Errorf("Expected 0 files changed in empty dir, got %d", result.FilesChanged)
 	}
 }
+
+// TestProjectReplace_BackupRestoresOriginalContent is the regression test for
+// the bug documented in docs/ISSUE-project-replace-backup-after-write.md.
+// Before the fix, the batch backup was created AFTER the writes completed,
+// so it captured the post-replace bytes; restoring it was a no-op. The fix
+// moves the snapshot to BEFORE the first atomic write, which means
+// `backup(action:"restore", backup_id:...)` now reverts the whole tree to
+// its pre-replace state — exactly what an agent reaching for the rollback
+// button expects.
+func TestProjectReplace_BackupRestoresOriginalContent(t *testing.T) {
+	tmpDir := t.TempDir()
+	engine := createTestEngineWithPath(t, tmpDir)
+	defer engine.Close()
+
+	testFiles := []string{
+		filepath.Join(tmpDir, "a.go"),
+		filepath.Join(tmpDir, "b.go"),
+	}
+	originals := []string{
+		"package a\n\nfunc Alpha() {}\n",
+		"package b\n\nfunc Alpha() {}\n",
+	}
+	for i, f := range testFiles {
+		if err := os.WriteFile(f, []byte(originals[i]), 0644); err != nil {
+			t.Fatalf("seed %s: %v", f, err)
+		}
+	}
+
+	result, err := engine.ProjectReplace(context.Background(), tmpDir, "func Alpha", "func Omega", true, true, ".go", nil, nil, false, true, false, 100)
+	if err != nil {
+		t.Fatalf("ProjectReplace failed: %v", err)
+	}
+	if result.BackupID == "" {
+		t.Fatal("expected backup_id in result when create_backup=true")
+	}
+
+	// Sanity-check that the writes actually happened — otherwise the
+	// restore assertion below would be vacuous.
+	for _, f := range testFiles {
+		got, _ := os.ReadFile(f)
+		if strings.Contains(string(got), "func Alpha") {
+			t.Fatalf("file %s was not modified by project_replace (precondition for restore)", filepath.Base(f))
+		}
+	}
+
+	// Restore from the project_replace backup. createBackup=true so a safety
+	// pre-restore snapshot is taken automatically.
+	restoredFiles, preRestoreID, err := engine.GetBackupManager().RestoreBackup(result.BackupID, "", true)
+	if err != nil {
+		t.Fatalf("RestoreBackup failed: %v", err)
+	}
+	if len(restoredFiles) != len(testFiles) {
+		t.Errorf("expected %d files restored, got %d (%v)", len(testFiles), len(restoredFiles), restoredFiles)
+	}
+	if preRestoreID == "" {
+		t.Error("expected a pre-restore safety backup ID when createBackup=true")
+	}
+
+	// Critical assertion: every file must contain its ORIGINAL content,
+	// not the post-replace bytes.
+	for i, f := range testFiles {
+		got, _ := os.ReadFile(f)
+		if string(got) != originals[i] {
+			t.Errorf("restore did not revert %s:\n  got:  %q\n  want: %q", filepath.Base(f), got, originals[i])
+		}
+	}
+}
+
+// TestProjectReplace_BackupRegistersUndoChain verifies that after a
+// project_replace with create_backup=true, every touched file is registered
+// in the per-file undo chain so `backup(action:"undo_last", file_path:...)`
+// can step back through the project_replace layer (mirrors how edit_file
+// registers its chain entry).
+func TestProjectReplace_BackupRegistersUndoChain(t *testing.T) {
+	tmpDir := t.TempDir()
+	engine := createTestEngineWithPath(t, tmpDir)
+	defer engine.Close()
+
+	testFile := filepath.Join(tmpDir, "chain.go")
+	original := "package x\n\nfunc Alpha() {}\n"
+	if err := os.WriteFile(testFile, []byte(original), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	result, err := engine.ProjectReplace(context.Background(), tmpDir, "func Alpha", "func Omega", true, true, ".go", nil, nil, false, true, false, 100)
+	if err != nil {
+		t.Fatalf("ProjectReplace failed: %v", err)
+	}
+
+	if got := engine.GetCurrentBackupID(testFile); got != result.BackupID {
+		t.Errorf("expected chain entry %q for %s, got %q", result.BackupID, testFile, got)
+	}
+}
