@@ -18,9 +18,9 @@ description: Tool catalog for filesystem-ultra MCP server v4.5.29: 20 tools (17 
 |------|---------|
 | `read_file` | Read files (single or batch via `paths`) |
 | `write_file` | Write/create files (binary via base64) |
-| `edit_file` | Replace exact text, regex, nth occurrence |
-| `multi_edit` | Multiple edits in one file |
-| `project_replace` | Project-wide find/replace in one call |
+| `edit_file` | Replace exact text, regex, nth occurrence. Override the rewrite guard with `allow_rewrite:true` (not `force`). |
+| `multi_edit` | Multiple edits in one file. **Ambiguity guard (v4.5.29):** any `old_text` matching >1 times in the original file rejects the whole batch and rolls it back. |
+| `project_replace` | Project-wide find/replace in one call. `create_backup:true` snapshots files **before** the writes so `backup(action:"restore")` rolls back the operation. |
 | `list_directory` | List directory contents |
 | `search_files` | Search by pattern (regex or literal) |
 | `get_file_info` | File info (single or batch) |
@@ -44,19 +44,23 @@ description: Tool catalog for filesystem-ultra MCP server v4.5.29: 20 tools (17 
 | Native | Alias | Purpose |
 |--------|-------|---------|
 | `file_types` | `include` | Glob pattern filter (e.g., `*.go`, `**/*.ts`) |
-| `output_format` | `output` | `content`, `files_with_matches`, `count` |
+| `output_format` | `output` | `"text"` (force legacy verbose with emojis) or `"json"` (structured). The auto default renders ripgrep-style `path:line:content` for ≤5 matches and verbose otherwise. **The legacy values `content`/`files_with_matches`/`count` are NOT implemented** and fall through to the default text branch — do not pass them. |
+
+**Auto-ripgrep mode (default):** omit `output_format`/`output` to get a compact `path:line:content` row when there are ≤5 matches, or the legacy verbose layout otherwise. Force the legacy verbose format regardless of count by passing `output_format:"text"`. `include_context:true` always forces the verbose layout (context blocks don't fit a one-line row).
 
 ## Key behaviors
 
 - **Modify existing files** → `edit_file`
-- **Multiple edits same file** → `multi_edit`
+- **Multiple edits same file** → `multi_edit` (each `old_text` must be unique in the **original** file — an ambiguity guard rejects batches where any edit matches >1 times and rolls the whole batch back; split into separate `edit_file` calls or quote more context if you hit it)
 - **Project-wide find/replace** → `project_replace` (1 call instead of N)
 - **Batch ops** → `batch_operations` (atomic, with rollback)
-- **Undo** → `backup(action:"undo_last")` or `backup(action:"restore", backup_id:"...")`
+- **Undo** → `backup(action:"undo_last")` / `backup(action:"undo_chain", file_path:"...")` / `backup(action:"restore", backup_id:"...")`
+- **Soft-delete recovery** → `delete_file` is soft by default. Locate via `backup(action:"list_trash")`, restore with `backup(action:"restore_trash", backup_id:"...")`, or purge with `backup(action:"purge_trash")`. Hard-delete with `delete_file(permanent:true)`.
 - **Git operations** → `git` tool (status, diff, log, add, commit, restore, branch, init). **The path passed must be inside a git repository** (or use `init` to create one). Calling `git` on a non-repo path is the #1 source of errors (analysis of 18 calls showed 5 of 7 errors were "not a git repository" — instant failures before any git command ran). Since v4.5.23 `restore` supports real dry-run and hardened path handling (`--` separator); no `force` needed.
 - **STALE_READ warning** (`edit_file` only): non-blocking notice if the file wasn't read in the last 10 min of this session. The engine records reads after each successful edit, so consecutive edits on the same file don't need re-reads. Hard external-change protection = `expected_hash` or `--auto-occ=block`.
 - **Dry-run** → `analyze_operation` or `edit_file(dry_run:true)` / `multi_edit(dry_run:true)` / `project_replace(preview:true)`
-- **Fast search** → `search_files` with `output_format:"json"` uses ripgrep when available
+- **Fast search** → `search_files` with `output_format:"json"` uses ripgrep when available. To force the legacy verbose layout (emoji headers, Context: blocks) regardless of match count, pass `output_format:"text"`.
+- **Tool discovery & schema lookup** → `help()` renders the dynamic 20-tool catalog with host-filesystem workflow; `help(tool:"X")` returns `description + InputSchema + curated examples` for any registered tool (8 examples shipped for `git`; other tools render schema only).
 - **Chain edits without re-reading** → every successful edit returns `content_hash`; pass it as `expected_hash` on the next edit. External-change detection also via `--auto-occ` flag (`off`/`warn` default/`block`) — only flags changes NOT made by this session.
 - **Line-based edits** → `edit_file` `mode:"delete_range"` (remove lines start..end) and `mode:"replace_range"` (replace lines with `new_text`) — 1-based inclusive, no fragile `old_text` match.
 - **Move lines between files atomically** → `batch_operations` op type `extract` (`source`, `destination`, `start_line`, `end_line`, `append`) — bytes written = bytes removed, both atomic, revert together under `atomic:true`.
@@ -79,7 +83,7 @@ If you intend to rewrite most or all of a file's content, use `write_file` direc
 
 **Heuristic:**
 - `len(new_text) > 2 × len(old_text)` AND file has content beyond the match → probably you want `write_file`
-- The server now BLOCKS this pattern by default (use `force:true` to override)
+- The server now BLOCKS this pattern by default. **The override flag is `allow_rewrite:true` — not `force`.** `force` is reserved for the risk-threshold bypass (CRITICAL risk). A `force:true` edit that *also* matches the rewrite heuristic will still be blocked; use `allow_rewrite:true` to acknowledge a near-total rewrite, or switch to `write_file` (recommended).
 
 **Tool guidance:**
 | Situation | Use |
