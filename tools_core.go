@@ -243,6 +243,37 @@ func attachParentBackup(m map[string]any, engine *core.UltraFastEngine, backupID
 	return m
 }
 
+// editStructuredFromContents builds a schema-valid edit_file structured payload
+// for code paths that do not return a fully-populated *core.EditResult
+// (search_replace, occurrence and regex modes). Line stats mirror the semantics
+// of EditFile: removed = oldSpanLines*replacements, added = newSpanLines*replacements,
+// net-adjusted against the real line delta of the file.
+func editStructuredFromContents(path, oldContent, newContent string, replacements, oldSpanLines, newSpanLines int, backupID string) map[string]any {
+	originalLines := strings.Count(oldContent, "\n") + 1
+	totalLines := strings.Count(newContent, "\n") + 1
+	linesRemoved := oldSpanLines * replacements
+	linesAdded := newSpanLines * replacements
+	if net := linesAdded - linesRemoved; net != totalLines-originalLines {
+		if totalLines >= originalLines {
+			linesAdded = totalLines - originalLines + linesRemoved
+		} else {
+			linesRemoved = originalLines - totalLines + linesAdded
+		}
+	}
+	m := map[string]any{
+		"path":          path,
+		"replacements":  replacements,
+		"lines_added":   linesAdded,
+		"lines_removed": linesRemoved,
+		"total_lines":   totalLines,
+		"content_hash":  contentHashBytes([]byte(newContent)),
+	}
+	if backupID != "" {
+		m["backup_id"] = backupID
+	}
+	return m
+}
+
 // diffFormatArg reads the optional diff_format argument (point 1). Empty string
 // means "auto" — see core.RenderDiff for the supported values.
 func diffFormatArg(args map[string]interface{}) string {
@@ -822,6 +853,8 @@ func registerCoreTools(reg *toolRegistry) {
 				}
 			}
 
+			oldContentRaw, _ := os.ReadFile(normPath)
+
 			result, err := regexTransform.Transform(ctx, core.RegexTransformConfig{
 				FilePath:      path,
 				Patterns:      patterns,
@@ -851,7 +884,6 @@ func registerCoreTools(reg *toolRegistry) {
 			// Add diff preview for dry run
 			if dryRun && result.TransformedContent != "" {
 				newContentStr := result.TransformedContent
-				oldContentRaw, _ := os.ReadFile(normPath)
 				unifiedDiff := core.RenderDiff(string(oldContentRaw), newContentStr, path, diffFormatArg(args))
 				if unifiedDiff != "" {
 					output.WriteString("\nDiff (DRY RUN - no changes made):\n")
@@ -867,7 +899,15 @@ func registerCoreTools(reg *toolRegistry) {
 				}
 			}
 
-			return mcp.NewToolResultText(output.String()), nil
+			newContentStr := result.TransformedContent
+			if !dryRun {
+				if newRaw, readErr := os.ReadFile(normPath); readErr == nil {
+					newContentStr = string(newRaw)
+				}
+			}
+			msg := output.String()
+			return mcp.NewToolResultStructured(attachMessage(
+				editStructuredFromContents(path, string(oldContentRaw), newContentStr, result.TotalReplacements, 0, 0, result.BackupID), msg), msg), nil
 		}
 
 		// ---- MODE: search_replace ----
@@ -899,7 +939,9 @@ func registerCoreTools(reg *toolRegistry) {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 			if len(resp.Content) == 0 {
-				return mcp.NewToolResultText("No output"), nil
+				oldStr := string(oldContentRaw)
+				msg := "No output"
+				return mcp.NewToolResultStructured(attachMessage(editStructuredFromContents(path, oldStr, oldStr, 0, 0, 0, ""), msg), msg), nil
 			}
 			respText := resp.Content[0].Text
 
@@ -907,23 +949,35 @@ func registerCoreTools(reg *toolRegistry) {
 			// so we synthesize the would-be content in memory using the same logic
 			// as searchAndReplaceInFile (literal pattern, regexp.QuoteMeta).
 			var unifiedDiff string
+			var newContentStr string
 			if dryRun {
+				newContentStr = string(oldContentRaw)
 				if re, reErr := regexp.Compile(regexp.QuoteMeta(pattern)); reErr == nil {
 					// Escape $ in replacement (Go interprets $ as capture group reference)
 					safeReplacement := strings.ReplaceAll(replacement, "$", "$$")
-					previewContent := re.ReplaceAllString(string(oldContentRaw), safeReplacement)
-					unifiedDiff = core.RenderDiff(string(oldContentRaw), previewContent, path, diffFormatArg(args))
+					newContentStr = re.ReplaceAllString(string(oldContentRaw), safeReplacement)
+					unifiedDiff = core.RenderDiff(string(oldContentRaw), newContentStr, path, diffFormatArg(args))
 				}
 			} else {
 				newContentRaw, _ := os.ReadFile(normPath)
-				unifiedDiff = core.RenderDiff(string(oldContentRaw), string(newContentRaw), path, diffFormatArg(args))
+				newContentStr = string(newContentRaw)
+				unifiedDiff = core.RenderDiff(string(oldContentRaw), newContentStr, path, diffFormatArg(args))
+			}
+
+			count := 0
+			if !strings.Contains(respText, "No matches") {
+				count = parseReplacementCount(respText)
+			}
+			structured := func(msg string) map[string]any {
+				return attachMessage(editStructuredFromContents(path, string(oldContentRaw), newContentStr, count,
+					strings.Count(pattern, "\n")+1, strings.Count(replacement, "\n")+1, ""), msg)
 			}
 
 			if engine.IsCompactMode() {
 				if strings.Contains(respText, "No matches") {
-					return mcp.NewToolResultText("OK: 0 replacements"), nil
+					msg := "OK: 0 replacements"
+					return mcp.NewToolResultStructured(structured(msg), msg), nil
 				}
-				count := parseReplacementCount(respText)
 				prefix := "OK"
 				if dryRun {
 					prefix = "DRY RUN"
@@ -935,13 +989,13 @@ func registerCoreTools(reg *toolRegistry) {
 				if unifiedDiff != "" {
 					msg += "\n" + unifiedDiff
 				}
-				return mcp.NewToolResultText(msg), nil
+				return mcp.NewToolResultStructured(structured(msg), msg), nil
 			}
 
 			if unifiedDiff != "" {
 				respText += "\nDiff:\n" + unifiedDiff
 			}
-			return mcp.NewToolResultText(respText), nil
+			return mcp.NewToolResultStructured(structured(respText), respText), nil
 		}
 
 		// ---- MODE: replace_range ----
@@ -1097,12 +1151,15 @@ func registerCoreTools(reg *toolRegistry) {
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
+			core.RecordWriteHash(core.NormalizePath(path), result.NewHash)
 
 			if engine.IsCompactMode() {
-				return mcp.NewToolResultText(fmt.Sprintf("OK: replaced occurrence #%d", occurrence)), nil
+				msg := fmt.Sprintf("OK: replaced occurrence #%d", occurrence)
+				return mcp.NewToolResultStructured(attachMessage(editStructured(path, result), msg), msg), nil
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("Successfully replaced occurrence #%d\nLine affected: %d\nConfidence: %s",
-				occurrence, result.LinesAffected, result.MatchConfidence)), nil
+			msg := fmt.Sprintf("Successfully replaced occurrence #%d\nLine affected: %d\nConfidence: %s",
+				occurrence, result.LinesAffected, result.MatchConfidence)
+			return mcp.NewToolResultStructured(attachMessage(editStructured(path, result), msg), msg), nil
 		}
 
 		// Default: standard EditFile
