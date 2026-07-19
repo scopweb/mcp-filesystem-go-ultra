@@ -1,6 +1,6 @@
 module github.com/mcp/filesystem-ultra
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/allegro/bigcache/v3 v3.1.0

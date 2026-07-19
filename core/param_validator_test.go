@@ -92,6 +92,28 @@ func TestValidateToolParams_PathOrPaths(t *testing.T) {
 	}
 }
 
+func TestValidateToolParams_GitPathsNativeArray(t *testing.T) {
+	args := map[string]interface{}{
+		"action": "add",
+		"paths":  []interface{}{"a.go", "b.go"},
+	}
+	errs := ValidateToolParams("git", args)
+	if len(errs) > 0 {
+		t.Errorf("git paths array should be accepted, got: %v", errs)
+	}
+}
+
+func TestValidateToolParams_GitPathsWrongType(t *testing.T) {
+	args := map[string]interface{}{
+		"action": "add",
+		"paths":  `["a.go"]`,
+	}
+	errs := ValidateToolParams("git", args)
+	if len(errs) == 0 || !strContains(errs[0], "expected array") {
+		t.Errorf("git paths string should be rejected as the wrong type, got: %v", errs)
+	}
+}
+
 func TestValidateToolParams_UnknownTool(t *testing.T) {
 	// Unknown tools should pass validation (no schema = no checks)
 	args := map[string]interface{}{

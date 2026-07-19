@@ -13,6 +13,7 @@ import (
 	"math"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -2092,6 +2093,38 @@ type trashRestoreRequest struct {
 	SDID string `json:"sd_id"`
 }
 
+// rejectCrossSite guards state-changing endpoints against cross-site request
+// forgery. The dashboard binds to localhost without authentication, so a
+// malicious website could otherwise trigger operations via a plain HTML form
+// POST (CORS only blocks reading the response, not sending the request).
+//
+// Strategy:
+//  1. Sec-Fetch-Site (sent by all modern browsers): allow only "same-origin"
+//     and "none" (direct navigation). "same-site" is rejected too because the
+//     real UI is always same-origin, and other localhost apps have no
+//     legitimate reason to mutate the trash.
+//  2. Fallback Origin check: when present, its host must match the request
+//     host (i.e. the dashboard's own address).
+//  3. Requests with neither header (curl, scripts, non-browser clients) are
+//     allowed — the threat model is browser-based attacks.
+func rejectCrossSite(w http.ResponseWriter, r *http.Request) bool {
+	if sfs := r.Header.Get("Sec-Fetch-Site"); sfs != "" {
+		if sfs != "same-origin" && sfs != "none" {
+			http.Error(w, `{"error":"cross-site request forbidden"}`, http.StatusForbidden)
+			return true
+		}
+		return false
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		if err != nil || !strings.EqualFold(u.Host, r.Host) {
+			http.Error(w, `{"error":"cross-origin request forbidden"}`, http.StatusForbidden)
+			return true
+		}
+	}
+	return false
+}
+
 // trashRestoreResponse is the JSON body returned by POST /api/trash/restore.
 type trashRestoreResponse struct {
 	OK           bool   `json:"ok"`
@@ -2109,6 +2142,9 @@ func trashRestoreHandler(backupDir string) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodPost {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		if rejectCrossSite(w, r) {
 			return
 		}
 		if backupDir == "" {
@@ -2213,6 +2249,9 @@ func trashPurgeHandler(backupDir string) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodPost {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		if rejectCrossSite(w, r) {
 			return
 		}
 		if backupDir == "" {

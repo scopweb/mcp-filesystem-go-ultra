@@ -499,3 +499,57 @@ func TestTrashFileHandlerRejectsPathTraversal(t *testing.T) {
 		}
 	}
 }
+
+// TestRejectCrossSite verifies CSRF protection on state-changing endpoints.
+// A malicious website can make the user's browser POST to the localhost
+// dashboard via a plain HTML form (CORS does not block sending, only reading).
+// The guard rejects cross-site browser requests while allowing the real
+// (same-origin) UI and non-browser clients such as curl.
+func TestRejectCrossSite(t *testing.T) {
+	cases := []struct {
+		name   string
+		sfs    string // Sec-Fetch-Site header value ("" = header absent)
+		origin string // Origin header value ("" = header absent)
+		want   int
+	}{
+		{"cross-site fetch", "cross-site", "", http.StatusForbidden},
+		{"same-site fetch", "same-site", "", http.StatusForbidden},
+		{"same-origin fetch", "same-origin", "", http.StatusOK},
+		{"direct navigation", "none", "", http.StatusOK},
+		{"no headers (curl)", "", "", http.StatusOK},
+		{"matching origin", "", "http://example.com", http.StatusOK},
+		{"foreign origin", "", "http://evil.example.com", http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := strings.NewReader(`{"dry_run":true,"older_than_days":1}`)
+			req := httptest.NewRequest("POST", "/api/trash/purge", body)
+			req.Host = "example.com"
+			if tc.sfs != "" {
+				req.Header.Set("Sec-Fetch-Site", tc.sfs)
+			}
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			w := httptest.NewRecorder()
+			trashPurgeHandler(t.TempDir())(w, req)
+			if w.Code != tc.want {
+				t.Errorf("status = %d, want %d", w.Code, tc.want)
+			}
+		})
+	}
+}
+
+// TestTrashRestoreRejectsCrossSite — the restore endpoint must apply the
+// same CSRF guard as purge.
+func TestTrashRestoreRejectsCrossSite(t *testing.T) {
+	h := trashRestoreHandler(t.TempDir())
+	req := httptest.NewRequest("POST", "/api/trash/restore",
+		strings.NewReader(`{"sd_id":"sd-20260611-150455-aaaaaaaaaaaa"}`))
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	w := httptest.NewRecorder()
+	h(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", w.Code)
+	}
+}

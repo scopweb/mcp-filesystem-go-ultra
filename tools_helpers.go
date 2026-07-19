@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -65,6 +67,8 @@ func pathsFromArgs(args map[string]interface{}) ([]string, *mcp.CallToolResult) 
 			out = append(out, s)
 		}
 		return out, nil
+	case []string:
+		return append([]string(nil), v...), nil
 	case string:
 		// Old API: caller passed a JSON string. Refuse explicitly so the agent self-corrects.
 		return nil, usageError(
@@ -75,6 +79,21 @@ func pathsFromArgs(args map[string]interface{}) ([]string, *mcp.CallToolResult) 
 			fmt.Sprintf("'paths' must be an array of strings, got %T", raw),
 			`git(action:"diff", paths:["src/file.php"])`)
 	}
+}
+
+func implicitGitPathspec(path, repoRoot string) (string, bool) {
+	if path == "" || repoRoot == "" {
+		return "", false
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return "", false
+	}
+	rel, err := filepath.Rel(repoRoot, path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
 }
 
 // truncateOutput truncates text to maxLines and appends a footer if truncated.
