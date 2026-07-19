@@ -40,6 +40,18 @@ Found during a live end-to-end battery against the running server (build 326a537
 
 **Verification:** `go build ./...` · `go vet ./...` clean · `go test ./...` PASS (all packages). Also verified live against the running server (build 5029f95): all three previously failing modes return proper structured responses with correct on-disk results.
 
+### test(hardening): Fase 1 — conformance sweep, E2E smoke battery, stub-argv tests + dry_run structured fix
+
+Implements Phase 1 of the hardening plan ("new features must ship with strict-client verification"): the three test layers that would have caught all four bugs found on 2026-07-19 from CI.
+
+**1. Handler-level schema sweep (`output_schema_sweep_test.go`).** `output_schema_test.go` validated the payload *builders* with synthetic data; this sweep drives the REAL handlers through 15 success paths across the 4 schema-declared tools (read_file ×5, write_file ×2, edit_file ×7 — every mode, multi_edit) and validates the actual `StructuredContent` against each declared schema (required keys, orphan keys, type spot-checks, plus the `message` == text-block identity contract). **It immediately caught a 4th non-conformant path** the manual audit had missed: `edit_file` with `dry_run:true` returned plain text. Fixed in the same commit — the dry-run branch now returns a structured payload describing the CURRENT on-disk state (never a hash that doesn't match disk) with the would-be replacement count.
+
+**2. E2E smoke battery (`tests/e2e/`, build tag `e2e`).** Builds the real server binary, launches it over stdio with the strict mcp-go client, and drives all 20 tools end to end — including every edit_file mode and a git init/add/commit cycle with shell metacharacters in the message. The strict client surfaces the -32600 class automatically on any schema-declared tool returning plain text. Excluded from `go test ./...` via the tag; run explicitly with `go test -tags e2e ./tests/e2e/`.
+
+**3. Stub-argv tests (`testdata/argvstub/` + `git_argv_stub_test.go` + `core/ripgrep_search_test.go`).** A helper binary records each invocation's argv as JSON; tests build it as `git`, `cmd` and `rg` and prepend it to PATH. Asserts that a commit message containing `& | % ^ < > "` reaches the git process byte-identical with NO cmd invocation (regression guard for the removed cmd.exe fallback), and that ripgrep receives the pattern immediately after `-e`, followed by `--` and the path, with skip-dirs as `--glob` exclusions (regression guard for the flag-injection and the invalid `--ignore` form).
+
+**Verification:** `go build ./...` · `go vet ./...` clean · `go test ./...` PASS (all packages) · `go test -tags e2e ./tests/e2e/` PASS (1.6s).
+
 ### feat(git): `paths` as native array param, implicit file pathspec, and porcelain-v2 status parsing
 Follow-up to the v4.5.25 agent-usable refactor, tightening how agents pass paths to the `git` tool:
 
