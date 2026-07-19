@@ -52,6 +52,20 @@ Implements Phase 1 of the hardening plan ("new features must ship with strict-cl
 
 **Verification:** `go build ./...` · `go vet ./...` clean · `go test ./...` PASS (all packages) · `go test -tags e2e ./tests/e2e/` PASS (1.6s).
 
+### ci(hardening): Fase 2 — release gate script + E2E in CI + Go 1.26.5 workflows
+
+Implements Phase 2 of the hardening plan (release discipline): the gates now run automatically, so "green main = releasable" without anyone remembering a checklist.
+
+**Changes:**
+
+- **`scripts/release-check.ps1` (new)** — local release gate mirroring CI: build → vet → full test suite → E2E smoke battery → govulncheck → `go mod tidy` no-diff → gofmt on files changed vs `origin/main` → version-coherence report (CHANGELOG top vs `serverVersion`). Exits non-zero on any failed gate; `-SkipE2E`/`-SkipVuln` flags for fast local iteration. Verified end-to-end: ALL GREEN in ~40 s.
+- **`.github/workflows/ci.yml`** — `GO_VERSION` bumped to **1.26.5** (required: go.mod moved in v4.5.31; the previous 1.26.4 pin would have pulled the vulnerable stdlib in CI). New step runs the **E2E smoke battery** (`go test -tags e2e ./tests/e2e/`) on both Linux and Windows — the strict-client layer from Fase 1 is now enforced on every push/PR.
+- **`.github/workflows/release.yml`** — same `GO_VERSION` bump so tagged releases build with the patched stdlib.
+
+**Cadence model (no human checklist):** CI gates every push/PR; batch changes and tag a release from green main (weekly rhythm is a social convention, not machinery). `release-check.ps1` is the local pre-flight for the same decision.
+
+**Verification:** `pwsh scripts/release-check.ps1` → ALL GREEN (build 3s, vet 2s, full suite 27s, e2e 2s, govulncheck 3s, tidy, gofmt, version coherence).
+
 ### feat(git): `paths` as native array param, implicit file pathspec, and porcelain-v2 status parsing
 Follow-up to the v4.5.25 agent-usable refactor, tightening how agents pass paths to the `git` tool:
 

@@ -14,9 +14,8 @@ on:
     branches: [ main ]
 
 env:
-  # Bump to 1.26.4+ for stdlib security fixes (GO-2026-5039, GO-2026-5037
-  # in net/textproto and crypto/x509 — both fixed in 1.26.4).
-  GO_VERSION: '1.26.4'
+  # Go 1.26.5: required by go.mod (GO-2026-5856 crypto/tls, GO-2026-4970 os).
+  GO_VERSION: '1.26.5'
 
 jobs:
   # ============================================================
@@ -97,6 +96,14 @@ jobs:
         run: |
           go test -p 1 ./core/... -count=1
           go test -p 1 ./tests/security/... -count=1
+
+      # E2E smoke battery (Fase 2 hardening gate): builds the real binary,
+      # launches it over stdio with the strict mcp-go client, and drives all
+      # 20 tools — surfaces the -32600 class (schema tool returning plain
+      # text) that in-process unit tests cannot see. Lightweight: one binary
+      # build + a short battery, safe for the Windows runner memory budget.
+      - name: Run E2E smoke battery (strict MCP client)
+        run: go test -tags e2e ./tests/e2e/ -count=1 -v
 
   # ============================================================
   # BUILD JOB
