@@ -1252,20 +1252,25 @@ func registerCoreTools(reg *toolRegistry) {
 
 		// Bug #32: dry_run response format
 		if dryRun {
+			// Dry-run leaves the file untouched: the structured payload reports
+			// the CURRENT on-disk state (oldContentStr) with the would-be
+			// replacement count — never a hash that doesn't match disk.
+			sc := editStructuredFromContents(path, oldContentStr, oldContentStr, result.ReplacementCount,
+				strings.Count(oldText, "\n")+1, strings.Count(newText, "\n")+1, "")
 			if engine.IsCompactMode() {
 				msg := fmt.Sprintf("DRY RUN: %d changes would be made", result.ReplacementCount)
 				if result.RiskWarning != "" {
 					msg += result.RiskWarning
 				}
 				msg += "\nNo changes were written to disk"
-				return mcp.NewToolResultText(msg), nil
+				return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
 			}
 			msg := fmt.Sprintf("DRY RUN — No changes made\nFile: %s\nWould change: %d replacement(s)\nMatch confidence: %s\nLines affected: %d",
 				path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)
 			if result.RiskWarning != "" {
 				msg += result.RiskWarning
 			}
-			return mcp.NewToolResultText(msg), nil
+			return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
 		}
 
 		if engine.IsCompactMode() {
