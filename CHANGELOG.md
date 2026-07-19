@@ -66,6 +66,21 @@ Implements Phase 2 of the hardening plan (release discipline): the gates now run
 
 **Verification:** `pwsh scripts/release-check.ps1` → ALL GREEN (build 3s, vet 2s, full suite 27s, e2e 2s, govulncheck 3s, tidy, gofmt, version coherence).
 
+### feat(stability): Fase 3 — feature stability tiers with enforced experimental policy
+
+Implements Phase 3 of the hardening plan: the "edges fray while the core is solid" failure mode now has a structural gate.
+
+**Policy (now enforced, not aspirational):**
+
+- New tools/modes ship as **experimental for exactly one release cycle**. Entries live in `experimentalFeatures` (`experimental.go`) with the version introduced.
+- Experimental tools get an automatic `[EXPERIMENTAL since vX.Y.Z]` description prefix at registration and **must NOT declare an outputSchema** — the schema is the interop contract, earned only when the handler-level conformance sweep covers the feature. `applyExperimentalPolicy` (called from the `addTool` chokepoint) **panics** if an experimental tool registers with a schema: a programmer error that fails in dev/CI, never in a release.
+- Graduation (next release): sweep coverage + optional outputSchema + entry removal. `TestExperimental_EntriesWellFormed` **fails on stale entries** (`since` < `serverVersion`), so the version bump at release time mechanically forces graduation.
+- The 17 core tools are frozen except bug fixes.
+
+**Files:** `experimental.go` (registry + policy), `experimental_test.go` (5 tests: well-formed entries, registered-tool references, schema panic, description prefix, stable tools untouched), `tools_core.go` (one-line chokepoint call), CLAUDE.md (policy documented for agent sessions).
+
+**Verification:** `go build ./...` · `go vet ./...` clean · `go test ./...` PASS · `go test -tags e2e ./tests/e2e/` PASS.
+
 ### feat(git): `paths` as native array param, implicit file pathspec, and porcelain-v2 status parsing
 Follow-up to the v4.5.25 agent-usable refactor, tightening how agents pass paths to the `git` tool:
 

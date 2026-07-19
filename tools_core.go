@@ -87,6 +87,7 @@ type toolRegistry struct {
 // The trailing examples... is optional and only consumed by help(tool:"<name>").
 // All 17 existing call sites pass no examples, so this stays source-compatible.
 func (r *toolRegistry) addTool(tool mcp.Tool, handler toolHandler, examples ...string) {
+	tool = applyExperimentalPolicy(tool)
 	r.server.AddTool(tool, handler)
 	r.handlers[tool.Name] = handler
 	if len(examples) > 0 {
