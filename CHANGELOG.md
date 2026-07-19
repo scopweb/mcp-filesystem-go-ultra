@@ -38,7 +38,7 @@ Found during a live end-to-end battery against the running server (build 326a537
 
 **Regression coverage (`edit_structured_test.go`):** shared `assertEditStructured` helper checks every schema-required key; three new tests drive the previously broken paths end-to-end (`TestEditFile_SearchReplaceStructured`, `TestEditFile_OccurrenceStructured` — also asserts exact post-edit bytes, `TestEditFile_RegexStructured`).
 
-**Verification:** `go build ./...` · `go vet ./...` clean · `go test ./...` PASS (all packages). NOTE: the fix is in source + tests; the prebuilt binaries in `bin/` predate it and must be rebuilt (the running server holds the .exe open).
+**Verification:** `go build ./...` · `go vet ./...` clean · `go test ./...` PASS (all packages). Also verified live against the running server (build 5029f95): all three previously failing modes return proper structured responses with correct on-disk results.
 
 ### feat(git): `paths` as native array param, implicit file pathspec, and porcelain-v2 status parsing
 Follow-up to the v4.5.25 agent-usable refactor, tightening how agents pass paths to the `git` tool:
