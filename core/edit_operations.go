@@ -1906,6 +1906,14 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 		ReplacementCount: 1,
 		MatchConfidence:  "high",
 		LinesAffected:    1,
+		LinesAdded:       strings.Count(newLine, "\n") + 1,
+		LinesRemoved:     1,
+		TotalLines:       len(lines),
+		NewHash: func() string {
+			h := fnv.New32a()
+			h.Write([]byte(newContent))
+			return fmt.Sprintf("%08x", h.Sum32())
+		}(),
 	}, nil
 }
 

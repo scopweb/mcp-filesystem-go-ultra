@@ -25,8 +25,22 @@ A full security review (govulncheck + manual code audit) surfaced one affected s
 
 **Verification:** `go build ./...` · `go vet ./...` clean · `go test ./...` PASS (all packages, incl. the pre-existing git suites that drive `execGitCommand` end-to-end) · `govulncheck ./...` → "No vulnerabilities found".
 
-### feat(git): `paths` as native array param, implicit file pathspec, and porcelain-v2 status parsing
+### fix(edit_file): structured output conformance for search_replace, occurrence and regex modes (-32600)
 
+Found during a live end-to-end battery against the running server (build 326a537): three `edit_file` code paths returned plain `NewToolResultText` responses while the tool declares an MCP `outputSchema` (v4.5.26). Strict clients (mcp-go SDK / opencode) reject a schema-declared result without `structuredContent` with JSON-RPC **-32600 "Tool edit_file has an output schema but did not return structured content"** — the edit DID apply on disk, but the caller saw a hard error and lost the response payload.
+
+**Changes (`tools_core.go`, `core/edit_operations.go`):**
+
+- `mode:"search_replace"` — all three return points (no-output, compact, verbose) now emit `NewToolResultStructured` with the full schema payload. The dry-run preview content is reused for the structured line/hash stats instead of being computed only for the diff.
+- `occurrence` mode — the handler now returns `editStructured(...)` like the default replace path. `core.ReplaceNthOccurrence` previously left most of its `*EditResult` zero-valued; it now populates `LinesAdded`, `LinesRemoved`, `TotalLines` and `NewHash` (FNV-1a of the post-edit bytes), and the handler records the hash for auto-OCC chaining.
+- `mode:"regex"` — the verbose result is now wrapped in structured content (replacements, line delta, post-edit content hash, backup id when present).
+- New helper `editStructuredFromContents(path, old, new, replacements, oldSpanLines, newSpanLines, backupID)` synthesizes a schema-valid payload from pre/post contents, mirroring `EditFile`'s line-count semantics (span lines × count, net-adjusted against the real file delta).
+
+**Regression coverage (`edit_structured_test.go`):** shared `assertEditStructured` helper checks every schema-required key; three new tests drive the previously broken paths end-to-end (`TestEditFile_SearchReplaceStructured`, `TestEditFile_OccurrenceStructured` — also asserts exact post-edit bytes, `TestEditFile_RegexStructured`).
+
+**Verification:** `go build ./...` · `go vet ./...` clean · `go test ./...` PASS (all packages). NOTE: the fix is in source + tests; the prebuilt binaries in `bin/` predate it and must be rebuilt (the running server holds the .exe open).
+
+### feat(git): `paths` as native array param, implicit file pathspec, and porcelain-v2 status parsing
 Follow-up to the v4.5.25 agent-usable refactor, tightening how agents pass paths to the `git` tool:
 
 - **`paths` is now a declared `ParamArray`** (`core/param_validator.go`) — a new `ParamArray` type accepts `[]interface{}`/`[]string`, so the git schema validates the native array instead of silently skipping it. `pathsFromArgs` also accepts `[]string` for callers that pre-parse (`tools_helpers.go`).
