@@ -12,11 +12,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/mcp/filesystem-ultra/core"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+	"github.com/mcp/filesystem-ultra/core"
 )
 
 // mcpText extracts the first text content from an mcp.CallToolResult.
@@ -31,6 +33,32 @@ func mcpText(t *testing.T, res *mcp.CallToolResult) string {
 		}
 	}
 	return ""
+}
+
+func newRegisteredGitHandler(engine *core.UltraFastEngine) toolHandler {
+	s := server.NewMCPServer("test", "0.0.0")
+	reg := &toolRegistry{
+		server:   s,
+		engine:   engine,
+		handlers: make(map[string]toolHandler),
+	}
+	registerGitTools(reg)
+	return reg.handlers["git"]
+}
+
+func callRegisteredGit(t *testing.T, handler toolHandler, args map[string]interface{}) *mcp.CallToolResult {
+	t.Helper()
+	request := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name:      "git",
+			Arguments: args,
+		},
+	}
+	result, err := handler(context.Background(), request)
+	if err != nil {
+		t.Fatalf("git handler: %v", err)
+	}
+	return result
 }
 
 // setupRepoWithFile: init repo + one committed file (f.txt). Returns dir and
@@ -190,6 +218,48 @@ func TestParseOutputArg_Invalid(t *testing.T) {
 // gitDiff tests
 // ----------------------------------------------------------------------------
 
+func TestGitToolHandler_FilePathIsImplicitPathspec(t *testing.T) {
+	dir, engine := setupRepoWithFile(t)
+	defer engine.Close()
+	writeAndCommit(t, dir, "g.txt", "v1\n", "add g")
+	writeAndCommit(t, dir, "f.txt", "v2\n", "touch f")
+	writeAndCommit(t, dir, "g.txt", "v2\n", "touch g")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("dirty f\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "g.txt"), []byte("dirty g\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := newRegisteredGitHandler(engine)
+	filePath := filepath.Join(dir, "f.txt")
+
+	diffText := mcpText(t, callRegisteredGit(t, handler, map[string]interface{}{
+		"action": "diff",
+		"path":   filePath,
+		"output": "name-only",
+	}))
+	if !strings.Contains(diffText, "f.txt") || strings.Contains(diffText, "g.txt") {
+		t.Fatalf("implicit diff pathspec was not respected: %s", diffText)
+	}
+
+	statusText := mcpText(t, callRegisteredGit(t, handler, map[string]interface{}{
+		"action": "status",
+		"path":   filePath,
+	}))
+	if !strings.Contains(statusText, "f.txt") || strings.Contains(statusText, "g.txt") {
+		t.Fatalf("implicit status pathspec was not respected: %s", statusText)
+	}
+
+	logText := mcpText(t, callRegisteredGit(t, handler, map[string]interface{}{
+		"action": "log",
+		"path":   filePath,
+	}))
+	if !strings.Contains(logText, "touch f") || strings.Contains(logText, "touch g") {
+		t.Fatalf("implicit log pathspec was not respected: %s", logText)
+	}
+}
+
 func TestGitDiff_DefaultStat(t *testing.T) {
 	dir, engine := setupRepoWithFile(t)
 	defer engine.Close()
@@ -343,6 +413,27 @@ func TestGitShow_DefaultStat(t *testing.T) {
 // ----------------------------------------------------------------------------
 // gitAdd tests
 // ----------------------------------------------------------------------------
+
+func TestGitToolHandler_NativePathsReachAdd(t *testing.T) {
+	dir, engine := setupRepoWithFile(t)
+	defer engine.Close()
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := callRegisteredGit(t, newRegisteredGitHandler(engine), map[string]interface{}{
+		"action": "add",
+		"path":   dir,
+		"paths":  []interface{}{"new.txt"},
+	})
+	if result.IsError {
+		t.Fatalf("native paths rejected before add: %s", mcpText(t, result))
+	}
+	staged := mustGit(t, dir, "diff", "--cached", "--name-only")
+	if strings.TrimSpace(staged) != "new.txt" {
+		t.Fatalf("expected only new.txt staged, got %q", staged)
+	}
+}
 
 func TestGitAdd_NativePathsOK(t *testing.T) {
 	dir, engine := setupRepoWithFile(t)
@@ -570,6 +661,28 @@ func TestGitBranch_OptionLikeNameRejected(t *testing.T) {
 // ----------------------------------------------------------------------------
 // gitStatus tests
 // ----------------------------------------------------------------------------
+
+func TestGitStatusCompact_PorcelainFormatsAreEquivalent(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "repo")
+	v1 := "## main...origin/main\nM  staged.txt\n M modified.txt\n?? new.txt\n"
+	v2 := "# branch.oid abc123\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -0\n1 M. N... 100644 100644 100644 abc abc staged.txt\n1 .M N... 100644 100644 100644 abc abc modified.txt\n? new.txt\n"
+
+	v1Result, err := gitStatusCompact(repoRoot, v1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v2Result, err := gitStatusCompact(repoRoot, v2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1Text, v2Text := mcpText(t, v1Result), mcpText(t, v2Result)
+	if v1Text != v2Text {
+		t.Fatalf("porcelain summaries differ:\nv1: %s\nv2: %s", v1Text, v2Text)
+	}
+	if !strings.Contains(v1Text, "(main...origin/main) | +1 ~1 ?1 | dirty") {
+		t.Fatalf("unexpected compact summary: %s", v1Text)
+	}
+}
 
 func TestGitStatus_NameOnlyDefault(t *testing.T) {
 	dir, engine := setupRepoWithFile(t)

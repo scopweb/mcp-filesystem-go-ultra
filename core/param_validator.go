@@ -13,6 +13,7 @@ const (
 	ParamString ParamType = iota
 	ParamNumber           // JSON numbers arrive as float64
 	ParamBoolean
+	ParamArray
 )
 
 func (t ParamType) String() string {
@@ -23,6 +24,8 @@ func (t ParamType) String() string {
 		return "number"
 	case ParamBoolean:
 		return "boolean"
+	case ParamArray:
+		return "array"
 	default:
 		return "unknown"
 	}
@@ -191,19 +194,17 @@ var toolSchemas = map[string]ToolParamSchema{
 	},
 
 	// ---- VERSION CONTROL (1) ----
-	// NOTE: `paths` is intentionally absent — it is a native array, but ParamType
-	// only supports string/number/boolean. The handler parses it via pathsFromArgs
-	// in tools_helpers.go and emits a usageError on shape mismatch.
 	"git": {
 		"action":    {ParamString, true},
 		"path":      {ParamString, false},
+		"paths":     {ParamArray, false},
 		"output":    {ParamString, false}, // "stat" | "name-only" | "full" (diff); "name-only" | "full" (status); "oneline" | "full" (log); "stat" | "name-only" | "full" (show)
 		"max_lines": {ParamNumber, false}, // default 200
 		"limit":     {ParamNumber, false}, // log: default 10
 		"rev":       {ParamString, false}, // single rev or range; replaces commit_range + source
 		"staged":    {ParamBoolean, false},
 		"message":   {ParamString, false},
-		"name":      {ParamString, false}, // branch: list when empty
+		"name":      {ParamString, false},  // branch: list when empty
 		"checkout":  {ParamBoolean, false}, // branch: true → git switch -c
 		"force":     {ParamBoolean, false}, // branch delete: true → -D
 	},
@@ -319,6 +320,13 @@ func typeMatches(expected ParamType, v interface{}) bool {
 			return s == "true" || s == "false"
 		}
 		return false
+	case ParamArray:
+		switch v.(type) {
+		case []interface{}, []string:
+			return true
+		default:
+			return false
+		}
 	}
 	return true
 }

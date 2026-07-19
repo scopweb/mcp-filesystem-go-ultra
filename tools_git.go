@@ -74,6 +74,15 @@ func registerGitTools(reg *toolRegistry) {
 			return mcp.NewToolResultError("access denied: path outside allowed directories"), nil
 		}
 
+		if _, hasPaths := args["paths"]; !hasPaths {
+			switch action {
+			case "status", "diff", "log":
+				if pathspec, ok := implicitGitPathspec(path, repoRoot); ok {
+					args["paths"] = []interface{}{pathspec}
+				}
+			}
+		}
+
 		// Option-injection guard runs BEFORE the destructive gate so an
 		// option-like value (leading '-') is rejected coherently regardless of
 		// force/gate state, rather than depending on each handler checking it
@@ -212,37 +221,73 @@ func gitStatus(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 func gitStatusCompact(repoRoot, output string) (*mcp.CallToolResult, error) {
 	lines := strings.Split(output, "\n")
 
-	currentBranch := ""
+	currentBranch, upstream := "", ""
 	stagedCount, unstagedCount, untrackedCount := 0, 0, 0
 
 	for _, line := range lines {
-		if len(line) < 3 {
+		if line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, "## ") {
-			arrowIdx := strings.Index(line, " -> ")
-			if arrowIdx != -1 {
-				currentBranch = line[arrowIdx+5:]
-			} else {
-				parts := strings.Fields(line[3:])
-				if len(parts) > 0 {
-					currentBranch = strings.TrimSuffix(parts[0], "(...")
+
+		switch {
+		case strings.HasPrefix(line, "## "):
+			branchState := strings.TrimSpace(strings.TrimPrefix(line, "## "))
+			switch {
+			case strings.HasPrefix(branchState, "No commits yet on "):
+				currentBranch = strings.TrimPrefix(branchState, "No commits yet on ")
+			case strings.HasPrefix(branchState, "Initial commit on "):
+				currentBranch = strings.TrimPrefix(branchState, "Initial commit on ")
+			default:
+				fields := strings.Fields(branchState)
+				if len(fields) > 0 {
+					currentBranch = fields[0]
+				}
+			}
+			continue
+		case strings.HasPrefix(line, "# branch.head "):
+			currentBranch = strings.TrimSpace(strings.TrimPrefix(line, "# branch.head "))
+			continue
+		case strings.HasPrefix(line, "# branch.upstream "):
+			upstream = strings.TrimSpace(strings.TrimPrefix(line, "# branch.upstream "))
+			continue
+		case strings.HasPrefix(line, "# "):
+			continue
+		case strings.HasPrefix(line, "? "):
+			untrackedCount++
+			continue
+		case strings.HasPrefix(line, "! "):
+			continue
+		case len(line) >= 4 && line[1] == ' ' && (line[0] == '1' || line[0] == '2' || line[0] == 'u'):
+			fields := strings.Fields(line)
+			if len(fields) > 1 && len(fields[1]) >= 2 {
+				if fields[1][0] != '.' {
+					stagedCount++
+				}
+				if fields[1][1] != '.' {
+					unstagedCount++
 				}
 			}
 			continue
 		}
 
-		staged := line[0]
-		unstaged := line[1]
-
-		if staged != ' ' && staged != '?' {
+		if len(line) < 2 {
+			continue
+		}
+		staged, unstaged := line[0], line[1]
+		if staged == '?' && unstaged == '?' {
+			untrackedCount++
+			continue
+		}
+		if staged != ' ' {
 			stagedCount++
 		}
-		if unstaged == '?' {
-			untrackedCount++
-		} else if unstaged != ' ' {
+		if unstaged != ' ' {
 			unstagedCount++
 		}
+	}
+
+	if currentBranch != "" && upstream != "" {
+		currentBranch += "..." + upstream
 	}
 
 	repoName := repoRoot
@@ -272,7 +317,9 @@ const diffGuardrailThreshold = 20
 //
 // Layer 1 — default output = "stat".
 // Layer 2 — output=="full" && len(paths)==0 && changedFiles > diffGuardrailThreshold
-//           → downgrade to stat, prepend banner (no error, just degrade).
+//
+//	→ downgrade to stat, prepend banner (no error, just degrade).
+//
 // Layer 3 — output=="full" with explicit paths → honor the request.
 // Layer 4 — max_lines (default 200) applies to ALL output, with footer if truncated.
 func gitDiff(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
@@ -320,7 +367,7 @@ func gitDiff(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 		cmdArgs = append(cmdArgs, "--stat")
 	case "name-only":
 		cmdArgs = append(cmdArgs, "--name-only")
-	// "full" → no extra flag, plain patch
+		// "full" → no extra flag, plain patch
 	}
 	if len(paths) > 0 {
 		cmdArgs = append(cmdArgs, "--")
@@ -861,46 +908,22 @@ func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 
 // execGitCommand executes a git command in the given directory.
 //
+// Security: arguments are passed straight to the git process via
+// CreateProcess (Windows) / execve (Unix) — never through a command
+// interpreter — so shell metacharacters (& | % ^ ") in commit messages,
+// branch names or paths are inert. A previous version fell back to
+// `cmd /c git <args>` on Windows, where cmd.exe re-parses the command
+// line and interprets those metacharacters (command-injection vector).
+// The fallback was removed: Go resolves and executes .cmd/.bat shims
+// directly via exec.Command, so the cmd.exe path never fired in
+// practice and only added attack surface.
+//
 // Implementation note: we use cmd.Run() with explicit Stdout/Stderr buffers
-// instead of cmd.CombinedOutput(). Reason: CombinedOutput() internally
-// re-assigns cmd.Stdout and cmd.Stderr to its own buffers and returns the
-// merged stream — but it requires those fields to be unset when called.
-// On Windows, the cmd.exe fallback in particular would pre-assign Stderr
-// (and CombinedOutput would then panic with "exec: Stderr already set")
-// whenever the primary `git` invocation exited non-zero and control fell
-// through to the cmd.exe branch. Run() with caller-owned buffers avoids
-// the collision entirely and also lets us build a structured error message
-// that distinguishes stdout from stderr.
+// instead of cmd.CombinedOutput(). CombinedOutput() internally re-assigns
+// cmd.Stdout and cmd.Stderr to its own buffers and requires those fields
+// to be unset when called; keeping caller-owned buffers lets us build a
+// structured error message that distinguishes stdout from stderr.
 func execGitCommand(dir, command string, args ...string) (string, error) {
-	if runtime.GOOS == "windows" {
-		// Try git directly first (safest)
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-		err := cmd.Run()
-		if err == nil {
-			return stdout.String(), nil
-		}
-
-		// Safer fallback: pass arguments properly instead of string concatenation.
-		// This prevents command injection even if paths contain special characters.
-		cmdArgs := append([]string{"/c", "git"}, args...)
-		cmd2 := exec.Command("cmd", cmdArgs...)
-		cmd2.Dir = dir
-		var stdout2, stderr2 bytes.Buffer
-		cmd2.Stdout = &stdout2
-		cmd2.Stderr = &stderr2
-		err = cmd2.Run()
-		out := stdout2.Bytes()
-		if err != nil {
-			out = append(stdout2.Bytes(), stderr2.Bytes()...)
-		}
-		return string(out), err
-	}
-
-	// Unix
 	cmd := exec.Command(command, args...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer

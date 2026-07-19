@@ -92,12 +92,21 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 		args = append(args, "-C", fmt.Sprintf("%d", contextLines))
 	}
 
-	// Add skip directories via --ignore flag for each
+	// Exclude noisy directories via glob. The former `--ignore <dir>` form was
+	// wrong: --ignore is a boolean flag (counterpart of --no-ignore), so every
+	// dir name was parsed as a positional argument — the first one became the
+	// search pattern and the user's real pattern/path became search paths,
+	// making ripgrep error out (silent fallback to native search).
 	for dir := range searchSkipDirs {
-		args = append(args, "--ignore", dir)
+		args = append(args, "--glob", "!**/"+dir+"/**")
 	}
 
-	args = append(args, pattern, path)
+	// `-e` forces the next argument to be parsed as the pattern even when it
+	// starts with '-' — this prevents flag injection (e.g. a pattern of
+	// "--pre=<cmd>" would otherwise make ripgrep execute an arbitrary
+	// preprocessor command per file). `--` marks the end of flags so the
+	// search path is always positional.
+	args = append(args, "-e", pattern, "--", path)
 
 	// Determine which ripgrep binary to use
 	rgBin := "rg" // default: PATH
@@ -110,6 +119,11 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 	cmd := exec.CommandContext(ctx, rgBin, args...)
 	output, err := cmd.Output()
 	if err != nil {
+		// ripgrep exit code 1 means "no matches found" — a valid result,
+		// not a failure. Codes >= 2 are real errors.
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return []SearchMatch{}, nil
+		}
 		return nil, fmt.Errorf("ripgrep failed: %w", err)
 	}
 

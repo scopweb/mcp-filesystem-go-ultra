@@ -1,5 +1,42 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.5.31] - 2026-07-19
+
+### security: govulncheck-driven hardening — Go 1.26.5, git cmd.exe fallback removed, ripgrep argv injection, dashboard CSRF
+
+A full security review (govulncheck + manual code audit) surfaced one affected stdlib CVE, two medium code-level findings, and one latent functionality bug in the ripgrep search path that had gone unnoticed because the native fallback masked it.
+
+**1. Toolchain upgraded to Go 1.26.5 (`go.mod`).** govulncheck flagged GO-2026-5856 (`crypto/tls` ECH privacy leak) as reachable via the dashboard's `http.ListenAndServe` and GO-2026-4970 (`os`) as imported-but-not-called; both are fixed in go1.26.5. After the bump, `govulncheck ./...` reports **zero vulnerabilities** (module dependencies were already clean).
+
+**2. Command injection via the Windows `cmd /c` fallback in git — removed (`tools_git.go`).** `execGitCommand` fell back to `exec.Command("cmd", "/c", "git", args...)` when the direct invocation failed. Go's argv joining does not escape cmd.exe metacharacters, so a commit message or branch name containing `&`, `|` or `%VAR%` (reachable via prompt injection) would be interpreted by the shell whenever the fallback fired. Empirically verified that Go ≥1.19 resolves and executes `.cmd`/`.bat` shims directly via `exec.Command`, so the fallback was dead code in practice — environments where `git` resolves at all never needed it, and environments where it doesn't resolve gain nothing from it. The function is now a single interpreter-free path (CreateProcess / execve only).
+
+**3. ripgrep flag injection + broken skip-dirs (`core/ripgrep_search.go`).** Three issues in the same argv block:
+
+- The search pattern was appended bare to the argv, so a pattern starting with `-` was parsed as a ripgrep flag. `--pre=<cmd>` is the dangerous one: ripgrep runs the given preprocessor command per file. Verified live that rg 15.1 consumed `--pre=calc` as a flag in the old form. The pattern is now passed as `-e <pattern>` and flag parsing is terminated with `--` before the search path.
+- **Latent bug:** skip directories were passed as `--ignore <dir>`, but `--ignore` is a *boolean* flag (counterpart of `--no-ignore`). Every dir name became a positional argument, the first one became the search pattern, and the user's real pattern/path became search paths — rg errored out and the caller silently fell back to native search, meaning the ripgrep path effectively never ran with skip-dirs configured. Now uses `--glob "!**/<dir>/**"`.
+- rg exit code 1 (no matches) was treated as a hard failure, discarding a valid empty result; it now returns an empty match set. Codes ≥ 2 remain errors.
+
+**4. CSRF guard on state-changing dashboard endpoints (`cmd/dashboard/main.go`).** The dashboard binds to localhost without authentication (documented), and while it correctly sends no CORS wildcard, CORS only blocks *reading* responses — a malicious website could still fire operations via a plain HTML form POST (`enctype=text/plain` produces a valid JSON body). `POST /api/trash/restore` and `POST /api/trash/purge` now require `Sec-Fetch-Site: same-origin|none` (all modern browsers send it), with a fallback `Origin`-vs-`Host` check when the header is absent. Non-browser clients (curl, scripts) send neither header and are unaffected. The `0.0.0.0` bind remains an explicit opt-in with its existing startup warning.
+
+**Regression coverage:**
+
+- `core/ripgrep_search_test.go` (new) — `--pre=calc` pattern returns 0 matches instead of executing a preprocessor; a legitimate dash-prefixed pattern (`--verbose`) still matches literally; `node_modules` content is excluded while sibling files match.
+- `cmd/dashboard/main_test.go` — 7-case table for the CSRF guard on purge (cross-site/same-site rejected; same-origin/none/no-headers/matching-origin allowed; foreign origin rejected) plus a cross-site rejection test on restore.
+
+**Verification:** `go build ./...` · `go vet ./...` clean · `go test ./...` PASS (all packages, incl. the pre-existing git suites that drive `execGitCommand` end-to-end) · `govulncheck ./...` → "No vulnerabilities found".
+
+### feat(git): `paths` as native array param, implicit file pathspec, and porcelain-v2 status parsing
+
+Follow-up to the v4.5.25 agent-usable refactor, tightening how agents pass paths to the `git` tool:
+
+- **`paths` is now a declared `ParamArray`** (`core/param_validator.go`) — a new `ParamArray` type accepts `[]interface{}`/`[]string`, so the git schema validates the native array instead of silently skipping it. `pathsFromArgs` also accepts `[]string` for callers that pre-parse (`tools_helpers.go`).
+- **Implicit pathspec from `path`** (`implicitGitPathspec`, `tools_helpers.go`) — when `path` points to a *file* inside the repo and no explicit `paths` array is given, `status`/`diff`/`log` automatically scope to that file (`git <cmd> -- <relative-path>`). Directory paths, repo-external files, and missing paths leave behavior unchanged.
+- **`gitStatusCompact` parses both porcelain formats** — v1 (`## branch...`) and v2 (`# branch.head` / `# branch.upstream`) headers, plus the `No commits yet on` / `Initial commit on` states of a fresh repo, and v2's `1:`/`2:`/`u:` record prefixes for staged/unstaged counts. Previously, `output:"full"` (porcelain v2) produced an empty/misparsed compact summary.
+
+**Regression coverage (`git_diff_status_log_test.go`):** `TestGitToolHandler_FilePathIsImplicitPathspec`, `TestGitToolHandler_NativePathsReachAdd`, `TestGitStatusCompact_PorcelainFormatsAreEquivalent`, plus `ParamArray` validation cases in `core/param_validator_test.go`.
+
+---
+
 ## [Unreleased / 4.5.30] - 2026-07-13
 
 ### fix(project_replace): batch backup is now snapshotted BEFORE the writes (rollback actually rolls back)
