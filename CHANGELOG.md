@@ -81,6 +81,18 @@ Implements Phase 3 of the hardening plan: the "edges fray while the core is soli
 
 **Verification:** `go build ./...` · `go vet ./...` clean · `go test ./...` PASS · `go test -tags e2e ./tests/e2e/` PASS.
 
+### docs(readme): Fase 4 — reposition from "ultra-fast" to safety-first
+
+Implements Phase 4 of the hardening plan (honest positioning): the README now leads with the actual differentiator — the safety/guardrail layer — and demotes raw speed to a footnote.
+
+**Changes (`README.md`):**
+
+- **Intro paragraph** reframed: "built for **safe editing by AI agents** — automatic backups with step-through undo, optimistic concurrency, accidental-rewrite guard, strict path security, risk assessment on every mutation… It also happens to be fast — but speed is the footnote, not the pitch."
+- **Features regrouped into three tiers**: *Safety & correctness (the point)* — backups/undo chain, OCC (`content_hash`/`expected_hash`), rewrite guard, path security, risk assessment, access control, plan mode, structured output; *Productivity* — tool consolidation, hooks, pipelines, batch, compact mode, audit, dashboard; *Performance (the footnote)* — cache tiers, streaming, WSL translation, embedded ripgrep.
+- **Factual rot fixed in passing**: Go requirement 1.26.4→1.26.5 (matches go.mod), dependency versions synced with go.mod (mcp-go v0.54.1, fsnotify v1.10.1, ants v2.12.1), and the stale "Current release: v4.2.1" line replaced with a pointer to the changelog (it was ~29 versions behind).
+
+No code changes.
+
 ### feat(git): `paths` as native array param, implicit file pathspec, and porcelain-v2 status parsing
 Follow-up to the v4.5.25 agent-usable refactor, tightening how agents pass paths to the `git` tool:
 

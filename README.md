@@ -4,28 +4,41 @@
 
 v4.5.29 hardens host/sandbox filesystem separation: `help()` is generated from the 20 registered tools, discovery surfaces explain that runtime-native file tools may target a different sandbox, missing known paths include an actionable mismatch diagnostic, and `write_file` returns verified post-write evidence with the actual on-disk byte count/hash. v4.5.26 introduced `outputSchema` + `structuredContent` for `read_file`, `write_file`, `edit_file`, and `multi_edit`; the text fallback remains available for clients that do not consume structured output.
 
-A high-performance [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go. Designed for use with Claude Desktop and Claude Code, with first-class support for large files, WSL/Windows interoperability, and token-efficient responses.
+A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, built for **safe editing by AI agents**: automatic backups with step-through undo, optimistic concurrency (detects external file changes), an accidental-rewrite guard, strict path security, and risk assessment on every mutation — so an agent mistake is a prompt away from being reverted, never a lost file. Designed for Claude Desktop and Claude Code, with first-class support for large files, WSL/Windows interoperability, and token-efficient responses. It also happens to be fast (3-tier cache, worker pool, streaming I/O, optional embedded ripgrep) — but speed is the footnote, not the pitch.
 
 ---
 
 ## Features
 
+**Safety & correctness (the point):**
+
+- **Automatic backups with step-through undo** — every mutation is recoverable: `backup(action:"undo_last")` walks the chain; `restore` returns any file to its pre-edit bytes
+- **Optimistic concurrency (OCC)** — `content_hash`/`expected_hash` chaining detects external file changes between read and edit; `--auto-occ` warns or blocks on stale edits
+- **Accidental-rewrite guard** (v4.5.10) — blocks `edit_file` calls that look like intended full-file rewrites (the classic agent concat bug)
+- **Path security** — symlink-resolved containment via `filepath.Rel`, NTFS ADS blocking, RTLO/zero-width Unicode rejection, Windows reserved names, TOCTOU symlink defense
+- **Risk assessment** — edits above configurable thresholds (30 / 50 / 90% change) flagged; HIGH/CRITICAL include post-edit integrity verification
+- **Access control** — restrict the server to specific directory trees via `--allowed-paths` (enforced in batch ops too)
+- **Plan mode** — dry-run analysis with diff preview and risk report before applying changes
+- **Structured output** — `outputSchema` + `structuredContent` on the 4 I/O core tools, with a handler-level conformance sweep enforcing the contract in CI
+
+**Productivity:**
+
 - **17 core tools** + **git** + **minify_js** + **help** (consolidated from 59 in v3.x) — all functionality preserved, zero tool bloat
 - **20 tools total** — aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are **disabled** to save tokens; use canonical names
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
-- **Intelligent editing** with automatic backup, risk assessment, and rollback on failure
+- **Hook system** — 16 pre/post events (write, edit, delete, create, move, copy, read, search)
+- **Pipeline system** — 12 actions with conditions, templates, DAG-based parallel execution (5–22× fewer round-trips)
+- **Atomic batch operations** — grouped file operations with rollback on failure
+- **Compact mode** — minimal token responses (~90% reduction) for high-volume Claude Desktop sessions
+- **Audit logging** — JSON Lines operation log + metrics snapshots for observability
+- **Dashboard** — separate HTTP binary for real-time metrics, operation log, and backup recovery
+
+**Performance (the footnote):**
+
 - **3-tier cache** (BigCache + go-cache) with file watcher invalidation for O(1) reads
 - **Streaming and chunked I/O** for files up to 50 MB without blocking
 - **WSL ↔ Windows path translation** — accepts `/mnt/c/...`, `C:\...`, and `/tmp/...` transparently
-- **Compact mode** — minimal token responses (~90% reduction) for high-volume Claude Desktop sessions
-- **Risk assessment** — edits above configurable thresholds (30 / 50 / 90% change) require explicit confirmation; accidental-rewrite guard (v4.5.10) blocks full-file rewrites via `edit_file`; `--auto-occ` (v4.5.17) detects external file changes
-- **Hook system** — 16 pre/post events (write, edit, delete, create, move, copy, read, search)
-- **Plan mode** — dry-run analysis with diff preview and risk report before applying changes
-- **Pipeline system** — 12 actions with conditions, templates, DAG-based parallel execution (5–22× fewer round-trips)
-- **Atomic batch operations** — grouped file operations with rollback on failure
-- **Audit logging** — JSON Lines operation log + metrics snapshots for observability
-- **Dashboard** — separate HTTP binary for real-time metrics, operation log, and backup recovery
-- **Access control** — restrict the server to specific directory trees via `--allowed-paths`
+- **Optional embedded ripgrep** (`embed_rg` tag) for accelerated content search
 
 ---
 
@@ -43,7 +56,7 @@ build-windows.bat        # default
 build-windows.sh         # Linux/macOS
 ```
 
-Requires Go 1.26.4+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
+Requires Go 1.26.5+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
 
 ```bash
 # Run tests
@@ -373,11 +386,11 @@ tests/
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `github.com/mark3labs/mcp-go` | v0.44.1 | MCP server SDK |
+| `github.com/mark3labs/mcp-go` | v0.54.1 | MCP server SDK |
 | `github.com/allegro/bigcache/v3` | v3.1.0 | File content cache |
 | `github.com/patrickmn/go-cache` | v2.1.0 | Directory and metadata cache |
-| `github.com/panjf2000/ants/v2` | v2.11.5 | Goroutine pool |
-| `github.com/fsnotify/fsnotify` | v1.9.0 | File system event watching |
+| `github.com/panjf2000/ants/v2` | v2.12.1 | Goroutine pool |
+| `github.com/fsnotify/fsnotify` | v1.10.1 | File system event watching |
 
 ---
 
@@ -387,9 +400,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history.
-
-Current release: **v4.2.1** — allowed-path root protection, main.go split, dry_run fix.
+See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest unreleased: v4.5.31 — security hardening, structured-output conformance, stability tiers).
 
 ---
 
