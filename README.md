@@ -1,42 +1,41 @@
-# MCP Filesystem Server Ultra-Fast
+# MCP Filesystem Server Ultra
 
-**v4.5.29** · Go · MCP 2025-11-25 · 20 tools (17 core + git + minify_js + help, aliases disabled)
+**v4.5.29** · Go · MCP 2025-11-25 · 20 tools (17 core + git + minify_js + help)
 
-v4.5.29 hardens host/sandbox filesystem separation: `help()` is generated from the 20 registered tools, discovery surfaces explain that runtime-native file tools may target a different sandbox, missing known paths include an actionable mismatch diagnostic, and `write_file` returns verified post-write evidence with the actual on-disk byte count/hash. v4.5.26 introduced `outputSchema` + `structuredContent` for `read_file`, `write_file`, `edit_file`, and `multi_edit`; the text fallback remains available for clients that do not consume structured output.
+A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop and Claude Code, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
-A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, built for **safe editing by AI agents**: automatic backups with step-through undo, optimistic concurrency (detects external file changes), an accidental-rewrite guard, strict path security, and risk assessment on every mutation — so an agent mistake is a prompt away from being reverted, never a lost file. Designed for Claude Desktop and Claude Code, with first-class support for large files, WSL/Windows interoperability, and token-efficient responses. It also happens to be fast (3-tier cache, worker pool, streaming I/O, optional embedded ripgrep) — but speed is the footnote, not the pitch.
+Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are disabled; only the 20 canonical tool names are registered.
 
 ---
 
 ## Features
 
-**Safety & correctness (the point):**
+### Safety and correctness
 
-- **Automatic backups with step-through undo** — every mutation is recoverable: `backup(action:"undo_last")` walks the chain; `restore` returns any file to its pre-edit bytes
+- **Automatic backups with step-through undo** — every mutation is recoverable: `backup(action:"undo_last")` walks the chain; `restore` returns a file to its pre-edit bytes
 - **Optimistic concurrency (OCC)** — `content_hash`/`expected_hash` chaining detects external file changes between read and edit; `--auto-occ` warns or blocks on stale edits
-- **Accidental-rewrite guard** (v4.5.10) — blocks `edit_file` calls that look like intended full-file rewrites (the classic agent concat bug)
+- **Accidental-rewrite guard** (v4.5.10) — blocks `edit_file` calls that look like unintended full-file rewrites
 - **Path security** — symlink-resolved containment via `filepath.Rel`, NTFS ADS blocking, RTLO/zero-width Unicode rejection, Windows reserved names, TOCTOU symlink defense
-- **Risk assessment** — edits above configurable thresholds (30 / 50 / 90% change) flagged; HIGH/CRITICAL include post-edit integrity verification
-- **Access control** — restrict the server to specific directory trees via `--allowed-paths` (enforced in batch ops too)
+- **Risk assessment** — mutations above configurable thresholds are flagged (20% change = MEDIUM, 75% = HIGH by default); HIGH/CRITICAL results include post-edit integrity verification
+- **Access control** — restrict the server to specific directory trees via `--allowed-paths` (also enforced in batch operations)
 - **Plan mode** — dry-run analysis with diff preview and risk report before applying changes
-- **Structured output** — `outputSchema` + `structuredContent` on the 4 I/O core tools, with a handler-level conformance sweep enforcing the contract in CI
+- **Structured output** — `outputSchema` + `structuredContent` on the 4 I/O core tools, with a handler-level conformance sweep enforced in CI
 
-**Productivity:**
+### Productivity
 
-- **17 core tools** + **git** + **minify_js** + **help** (consolidated from 59 in v3.x) — all functionality preserved, zero tool bloat
-- **20 tools total** — aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are **disabled** to save tokens; use canonical names
+- **20 tools** — 17 core + `git` + `minify_js` + `help`, consolidated from 59 in v3.x with no loss of functionality
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
 - **Hook system** — 16 pre/post events (write, edit, delete, create, move, copy, read, search)
-- **Pipeline system** — 12 actions with conditions, templates, DAG-based parallel execution (5–22× fewer round-trips)
+- **Pipeline system** — 12 actions with conditions, templates, and DAG-based parallel execution; reduces client/server round-trips for multi-step refactors
 - **Atomic batch operations** — grouped file operations with rollback on failure
-- **Compact mode** — minimal token responses (~90% reduction) for high-volume Claude Desktop sessions
-- **Audit logging** — JSON Lines operation log + metrics snapshots for observability
+- **Compact mode** — reduced-token responses for high-volume sessions
+- **Audit logging** — JSON Lines operation log + metrics snapshots
 - **Dashboard** — separate HTTP binary for real-time metrics, operation log, and backup recovery
 
-**Performance (the footnote):**
+### Performance
 
-- **3-tier cache** (BigCache + go-cache) with file watcher invalidation for O(1) reads
-- **Streaming and chunked I/O** for files up to 50 MB without blocking
+- **3-tier cache** (BigCache + go-cache) with file-watcher invalidation
+- **Streaming and chunked I/O** for files up to 50 MB
 - **WSL ↔ Windows path translation** — accepts `/mnt/c/...`, `C:\...`, and `/tmp/...` transparently
 - **Optional embedded ripgrep** (`embed_rg` tag) for accelerated content search
 
@@ -92,7 +91,9 @@ Add to your `claude_desktop_config.json`:
   }
 }
 ```
+
 Linux:
+
 ```json
 {
   "mcpServers": {
@@ -117,14 +118,14 @@ The positional arguments after the flags are the allowed base paths. Omitting pa
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--compact-mode` | off | Minimal token responses |
+| `--compact-mode` | off | Reduced-token responses |
 | `--cache-size` | 100MB | In-memory file cache limit |
 | `--parallel-ops` | 2×CPU (max 16) | Max concurrent operations |
 | `--backup-dir` | system temp | Directory for automatic backups |
 | `--backup-max-age` | 72h | Maximum backup retention |
 | `--backup-max-count` | 50 | Maximum backup count per file |
-| `--risk-threshold-medium` | 30 | % change that triggers a warning |
-| `--risk-threshold-high` | 50 | % change that requires `force: true` |
+| `--risk-threshold-medium` | 20 | % change flagged as medium risk |
+| `--risk-threshold-high` | 75 | % change flagged as high risk |
 | `--hooks-enabled` | off | Enable pre/post operation hooks |
 | `--hooks-config` | — | Path to hooks configuration JSON |
 | `--log-dir` | — | Directory for audit logs and metrics (enables logging) |
@@ -135,14 +136,14 @@ The positional arguments after the flags are the allowed base paths. Omitting pa
 
 ## Tool Discovery
 
-Claude Desktop uses **lazy tool loading** — it only discovers ~5 tools per query via semantic search, missing most of the 20 available tools.
+Claude Desktop uses **lazy tool loading** — it discovers only a few tools per query via semantic search, missing most of the 20 registered tools.
 
-Three layers solve this:
+Three layers address this:
 
 | Layer | How it works | Client support |
 |-------|-------------|----------------|
 | **`/filesystem-ultra-tools` skill** | Claude Code skill that calls `help` on conversation start | Claude Code |
-| **`help` tool** | Generates a catalog from the 20 tools actually registered in this server | Any MCP client |
+| **`help` tool** | Generates a catalog from the tools actually registered in the server | Any MCP client |
 | **`server.WithInstructions()`** | Identifies the server's real-host filesystem scope and points to `help()` | Spec-compliant clients |
 
 ### Using the skill
@@ -167,26 +168,28 @@ For a host project, bind the whole task to the filesystem-ultra family. After ev
 
 ---
 
-## Available Tools (20: 17 core + git + minify_js + help)
+## Available Tools
 
-### Core (5)
+### Reading and editing (5)
 
 | Tool | Description |
 |------|-------------|
 | `read_file` | Read full file, line range (`start_line`/`end_line`), head/tail (`max_lines`+`mode`), or base64 (`encoding:"base64"`) |
-| `write_file` | Create or overwrite file. Supports text (`content`) and binary (`encoding:"base64"`) |
+| `write_file` | Create or overwrite a file. Supports text (`content`) and binary (`encoding:"base64"`) |
 | `edit_file` | Find-and-replace with backup and risk assessment. Modes: exact match (default), `search_replace` (all occurrences), `regex` (capture groups), `occurrence:N` (Nth match) |
-| `list_directory` | Directory listing with cache |
-| `search_files` | Search by pattern with optional `file_types`, `include_content`, `include_context`, `case_sensitive`, `count_only` |
+| `multi_edit` | Multiple find-and-replace operations on the same file in one call via `edits_json`. v4.5.25+: `diff_format` (auto\|full\|summary\|stat\|none) for the aggregate batch diff |
+| `project_replace` | Rename a token across all files in a directory tree (regex or literal) |
 
-### Edit+ (2)
+### Search and inspection (4)
 
 | Tool | Description |
 |------|-------------|
-| `multi_edit` | Multiple find-and-replace operations on the same file in one call via `edits_json`. v4.5.25+: `diff_format` (auto|full|summary|stat|none) for aggregate batch diff |
-| `project_replace` | Rename a token across all files in a directory tree (regex or literal) |
+| `list_directory` | Directory listing with cache |
+| `search_files` | Search by pattern with optional `file_types`, `include_content`, `include_context`, `case_sensitive`, `count_only` |
+| `get_file_info` | Size, permissions, timestamps, type |
+| `analyze_operation` | Dry-run preview via `operation`: file, edit, delete, write, optimize, compare |
 
-### File Operations (4)
+### File operations (4)
 
 | Tool | Description |
 |------|-------------|
@@ -195,58 +198,21 @@ For a host project, bind the whole task to the filesystem-ultra family. After ev
 | `delete_file` | Soft-delete (default) or permanent (`permanent: true`) |
 | `create_directory` | Create directory tree (`mkdir -p`) |
 
-### Batch & Pipeline (1)
+### Batch and recovery (2)
 
 | Tool | Description |
 |------|-------------|
 | `batch_operations` | Atomic batch ops (`request_json`), multi-step pipelines (`pipeline_json`), or batch rename (`rename_json`) — with rollback on failure |
-
-### Backup (1)
-
-| Tool | Description |
-|------|-------------|
 | `backup` | Manage backups via `action`: list, info, compare, cleanup, restore |
 
-### Analysis (1)
-
-| Tool | Description |
-|------|-------------|
-| `analyze_operation` | Dry-run preview via `operation`: file, edit, delete, write, optimize, compare |
-
-### WSL (1)
+### Platform and utilities (5)
 
 | Tool | Description |
 |------|-------------|
 | `wsl` | WSL ↔ Windows sync and status. Params: `wsl_path`/`windows_path` + `direction`, or `action:"status"` |
-
-### Utility (1)
-
-| Tool | Description |
-|------|-------------|
-| `server_info` | Server diagnostics via `action`: stats, help, artifact |
-
-### Info (1)
-
-| Tool | Description |
-|------|-------------|
-| `get_file_info` | Size, permissions, timestamps, type |
-
-### Version Control (1)
-
-| Tool | Description |
-|------|-------------|
-| `git` | Git operations: `init`, `status`, `diff`, `log`, `show`, `add`, `commit`, `restore`, `branch`. Native-array `paths[]`, `output` enum, 4-layer diff guardrail, `rev` (replaces `commit_range`/`source`). |
-
-### JavaScript (1)
-
-| Tool | Description |
-|------|-------------|
+| `git` | Git operations: `init`, `status`, `diff`, `log`, `show`, `add`, `commit`, `restore`, `branch`. Native-array `paths[]`, `output` enum, `rev` for revisions |
 | `minify_js` | Pure-Go JS minification (no Node dependency) |
-
-### Discovery (1)
-
-| Tool | Description |
-|------|-------------|
+| `server_info` | Server diagnostics via `action`: stats, help, artifact |
 | `help` | Returns the full 20-tool catalog with keywords for lazy discovery |
 
 ---
@@ -263,10 +229,10 @@ go build -ldflags="-s -w" -trimpath -o dashboard.exe ./cmd/dashboard/
 dashboard.exe --log-dir=C:\logs\mcp-filesystem --backup-dir=C:\backups --port=9100
 ```
 
-- No coupling with MCP server (file-based communication only)
+- No coupling with the MCP server (file-based communication only)
 - Embedded web assets via `go:embed` (single binary, no dependencies)
 - Real-time updates via SSE (Server-Sent Events)
-- Pages: Dashboard (metrics), Operations (audit log), Backups (enterprise recovery), Statistics, Proxy/Tokens, Edit Analysis
+- Pages: Dashboard (metrics), Operations (audit log), Backups (search and recovery), Statistics, Proxy/Tokens, Edit Analysis
 
 ### MCP Proxy
 
@@ -287,11 +253,12 @@ Point the dashboard at the proxy logs to see the **Proxy / Tokens** page:
 dashboard.exe --log-dir=C:\logs\mcp-filesystem --proxy-log-dir=C:\logs\mcp-proxy --port=9100
 ```
 
-See the [docs-website Dashboard & Monitoring guide](docs-website/src/content/docs/features/dashboard.md) for full setup guide.
+See the [docs-website Dashboard & Monitoring guide](docs-website/src/content/docs/features/dashboard.md) for the full setup.
 
 ### Audit Logging
 
 When `--log-dir` is set on the MCP server, it writes:
+
 - `operations.jsonl` — JSON Lines audit log (one entry per tool call, auto-rotates at 10MB)
 - `metrics.json` — Performance metrics snapshot (updated every 30 seconds)
 
@@ -300,7 +267,7 @@ When `--log-dir` is set on the MCP server, it writes:
 ## Architecture
 
 ```
-main.go                     Entry point — config, CLI flags, server startup (~250 lines)
+main.go                     Entry point — config, CLI flags, server startup
 audit.go                    auditWrap — request normalization + audit logging
 format.go                   Response formatters, parseSize, truncateContent, formatSize
 help_content.go             getHelpContent() — static help text for all topics
@@ -309,7 +276,7 @@ tools_search.go             list_directory, search_files, analyze_operation
 tools_files.go              create_directory, delete_file, move_file, copy_file, get_file_info
 tools_batch.go              multi_edit, batch_operations, backup
 tools_platform.go           wsl, server_info
-tools_aliases.go            Aliases + fs super-tool (DISABLED in v4.5.x), help tool
+tools_aliases.go            Aliases + fs super-tool (disabled), help tool
 tools_git.go                git (9 actions: init, status, diff, log, show, add, commit, restore, branch)
 tools_minify.go             minify_js (pure-Go JS minification)
 core/
@@ -371,7 +338,7 @@ tests/
 
 ## Security
 
-- `IsPathAllowed()` resolves symlinks via `filepath.EvalSymlinks()` before containment check — prevents symlink escape from allowed paths
+- `IsPathAllowed()` resolves symlinks via `filepath.EvalSymlinks()` before the containment check — prevents symlink escape from allowed paths
 - **Allowed-path root protection** (v4.2.1) — `delete_file`, `soft_delete`, and `move_file` reject the `--allowed-paths` root itself, preventing `os.RemoveAll()` from wiping an entire tree
 - Strict parameter validation — unknown params rejected, types enforced (`core/param_validator.go`)
 - Temp files and backup IDs use `crypto/rand` (not timestamps)
