@@ -2,6 +2,32 @@
 
 ## [Unreleased / 4.5.31] - 2026-07-19
 
+### fix(tools): multi_edit aliases + tolerant validation, project_replace force gate, self-diagnosing access-denied, STALE_READ once-per-session
+
+Four user-reported issues fixed in one pass; each was reproduced live against the running server on `C:\temp` after the fix.
+
+**1. `multi_edit` rejected valid batches with "context validation failed: none of the N edits match" — two root causes (`core/edit_operations.go`).**
+
+- **Silent key mismatch.** The issue's repro used `old_string`/`new_string` (Claude Code / filesystem-ultra-rust convention), but `MultiEditOperation.UnmarshalJSON` only accepted `old_text`/`old_str`. Unrecognized keys silently decoded to empty strings, every edit was skipped by the pre-validation loop, and the batch failed with the misleading context-validation message — while single `edit_file` calls with the same strings succeeded. The unmarshaler now accepts all three conventions and **fails loudly** when no recognized old key is present, listing the received keys: `edit has no recognized old key (expected old_text, old_str or old_string; got keys: newString, oldString)`.
+- **`tolerant_whitespace` dropped mid-pipeline.** The flag was honored by the ambiguity counter but NOT by the context-validation loop, the risk simulation, or the actual `performIntelligentEdit` apply call (all hardcoded `false`) — so a batch that needed the tolerant matcher (tab ↔ 4-space, CRLF ↔ LF) was rejected in validation or failed to apply. All three phases now forward the flag end-to-end.
+
+**2. `project_replace` applied HIGH/CRITICAL batches silently, then told the user to "Use force=true to proceed" (`core/project_replace.go`, `tools_batch.go`).** The tool schema declared `force` and the risk warning referenced it, but the handler never parsed the flag and the engine had no such parameter — writes always went through. The real-world fallout: a CRITICAL rename applied silently, the warning tricked the user into re-running with `force=true`, and the replacement double-applied (`examples/examples/...` in 12 files). Now, without `force=true`, a HIGH/CRITICAL call is a **pure preview**: `Blocked: true` in the result, zero writes, no backup created, and the output is prefixed unambiguously — `BLOCKED (no changes written)` / `PREVIEW (no changes written)` / `APPLIED:` (compact) or a `Status:` line (verbose). The applied-with-force warning explicitly says so (`CRITICAL risk applied (force=true)`), replacing the misleading "proceed" wording. Risk now counts files *with matches* instead of every scanned file.
+
+**3. Access-denied errors now list the effective allowed directories (`core/engine.go` + 30 call sites).** New `engine.AllowedDirsSuffix()` / `engine.AccessDeniedError()`; every access-denied path across `engine.go`, `edit_operations.go`, `file_operations.go`, `line_range.go`, `pipeline.go`, `plan_mode.go`, `project_replace.go`, `streaming_operations.go`, `batch_operations.go` (nil-safe manager helper), `tools_git.go`, `tools_platform.go` and `tools_minify.go` produces e.g. `access denied — outside allowed directories: C:\temp\; C:\tmp\; ...`, so Go/Rust variant sandbox mismatches are diagnosable from the error alone. Open-access mode explains the rejection came from the always-on path security policy.
+
+**4. STALE_READ warning noise (`core/feedback.go`).** The warning fired on *every* edit of a file whose pre-edit read was done with a non-filesystem-ultra tool (the session tracker only sees this server's reads). It is now emitted **at most once per file per session** (re-armed by a real `read_file`, tracked in `sessionState.staleWarned`) and **suppressed entirely when `expected_hash` is passed** — that token is cryptographic proof of a prior read. `CheckEditOp` gained a variadic `expectedHashProvided` flag (backward compatible); the `edit_file` and `multi_edit` handlers forward it.
+
+**Regression coverage:**
+
+- `multi_edit_old_string_test.go` (new) — 3-edit CRLF Markdown file with em-dashes via `old_string`/`new_string` (the exact issue repro, CRLF preserved), LF variant, `tolerant_whitespace:true` with tab/space-mixed indentation, and the fail-loud path for unrecognized keys (asserts the misleading "context validation failed" does NOT appear).
+- `core/project_replace_force_gate_test.go` (new) — 1000-occurrence CRITICAL batch: blocked-without-force leaves the disk byte-identical, forced run applies exactly once, repeat is a no-op; `AccessDeniedError` lists every configured allowed dir (and the security-policy note in open-access mode).
+- `core/feedback_stale_read_test.go` (new) — warns once per file then silences, `expected_hash` suppression, re-arm after `RecordRead`.
+- All 13 existing `ProjectReplace` call sites updated for the new `force` parameter.
+
+**Live verification against the running server (build ab77414) on `C:\temp`:** old_string CRLF+em-dash batch applied 3/3; tolerant tab/space batch applied 2/2; camelCase keys rejected with the new clear message; CRITICAL project_replace `BLOCKED` with disk verified untouched (1000/0), then `APPLIED` with `force:true`; access-denied on `C:\Windows\...` listed all 47 effective allowed dirs; STALE_READ shown on first failure, absent on the identical second call, and fully suppressed by `expected_hash`.
+
+**Verification:** `go build ./...` · `go vet ./...` clean · `go test ./...` PASS (all packages).
+
 ### security: govulncheck-driven hardening — Go 1.26.5, git cmd.exe fallback removed, ripgrep argv injection, dashboard CSRF
 
 A full security review (govulncheck + manual code audit) surfaced one affected stdlib CVE, two medium code-level findings, and one latent functionality bug in the ripgrep search path that had gone unnoticed because the native fallback masked it.
