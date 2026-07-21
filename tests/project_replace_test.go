@@ -32,7 +32,7 @@ func TestProjectReplace_Basic(t *testing.T) {
 	}
 
 	// Execute project_replace WITHOUT backup (to isolate the backup issue)
-	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode(", "utf8e(", true, true, ".php,.html", nil, nil, false, false, true, 1000)
+	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode(", "utf8e(", true, true, ".php,.html", nil, nil, false, false, true, 1000, false)
 	if err != nil {
 		t.Fatalf("ProjectReplace failed: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestProjectReplace_DryRun(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode(", "utf8e(", true, true, ".php", nil, nil, true, true, true, 1000)
+	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode(", "utf8e(", true, true, ".php", nil, nil, true, true, true, 1000, false)
 	if err != nil {
 		t.Fatalf("ProjectReplace failed: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestProjectReplace_FileTypeFilter(t *testing.T) {
 	}
 
 	// Only .php files
-	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode", "utf8e", true, true, ".php", nil, nil, false, false, true, 1000)
+	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode", "utf8e", true, true, ".php", nil, nil, false, false, true, 1000, false)
 	if err != nil {
 		t.Fatalf("ProjectReplace failed: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestProjectReplace_ExcludePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode", "utf8e", true, true, ".php", nil, []string{"jotajotape/**"}, false, false, true, 1000)
+	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode", "utf8e", true, true, ".php", nil, []string{"jotajotape/**"}, false, false, true, 1000, false)
 	if err != nil {
 		t.Fatalf("ProjectReplace failed: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestProjectReplace_Regex(t *testing.T) {
 	}
 
 	// Replace item_\d+ with obj_$1
-	result, err := engine.ProjectReplace(context.Background(), tmpDir, `item_(\d+)`, `obj_$1`, false, true, ".php", nil, nil, false, false, true, 1000)
+	result, err := engine.ProjectReplace(context.Background(), tmpDir, `item_(\d+)`, `obj_$1`, false, true, ".php", nil, nil, false, false, true, 1000, false)
 	if err != nil {
 		t.Fatalf("ProjectReplace regex failed: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestProjectReplace_CaseInsensitive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode", "utf8e", true, false, ".php", nil, nil, false, false, true, 1000)
+	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode", "utf8e", true, false, ".php", nil, nil, false, false, true, 1000, false)
 	if err != nil {
 		t.Fatalf("ProjectReplace failed: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestProjectReplace_MaxFilesCap(t *testing.T) {
 	}
 
 	// Set max_files=5
-	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode", "utf8e", true, true, ".go", nil, nil, false, false, true, 5)
+	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode", "utf8e", true, true, ".go", nil, nil, false, false, true, 5, false)
 	if err != nil {
 		t.Fatalf("ProjectReplace failed: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestProjectReplace_NoMatches(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode", "utf8e", true, true, ".php", nil, nil, false, false, true, 1000)
+	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode", "utf8e", true, true, ".php", nil, nil, false, false, true, 1000, false)
 	if err != nil {
 		t.Fatalf("ProjectReplace failed: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestProjectReplace_BackupCreation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode", "utf8e", true, true, ".php", nil, nil, false, true, true, 1000)
+	result, err := engine.ProjectReplace(context.Background(), tmpDir, "utf8_encode", "utf8e", true, true, ".php", nil, nil, false, true, true, 1000, false)
 	if err != nil {
 		t.Fatalf("ProjectReplace failed: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestProjectReplace_EmptyDirectory(t *testing.T) {
 	emptyDir := filepath.Join(tmpDir, "empty")
 	os.MkdirAll(emptyDir, 0755)
 
-	result, err := engine.ProjectReplace(context.Background(), emptyDir, "utf8_encode", "utf8e", true, true, ".php", nil, nil, false, false, true, 1000)
+	result, err := engine.ProjectReplace(context.Background(), emptyDir, "utf8_encode", "utf8e", true, true, ".php", nil, nil, false, false, true, 1000, false)
 	if err != nil {
 		t.Fatalf("ProjectReplace failed: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestProjectReplace_BackupRestoresOriginalContent(t *testing.T) {
 		}
 	}
 
-	result, err := engine.ProjectReplace(context.Background(), tmpDir, "func Alpha", "func Omega", true, true, ".go", nil, nil, false, true, false, 100)
+	result, err := engine.ProjectReplace(context.Background(), tmpDir, "func Alpha", "func Omega", true, true, ".go", nil, nil, false, true, false, 100, false)
 	if err != nil {
 		t.Fatalf("ProjectReplace failed: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestProjectReplace_BackupRegistersUndoChain(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	result, err := engine.ProjectReplace(context.Background(), tmpDir, "func Alpha", "func Omega", true, true, ".go", nil, nil, false, true, false, 100)
+	result, err := engine.ProjectReplace(context.Background(), tmpDir, "func Alpha", "func Omega", true, true, ".go", nil, nil, false, true, false, 100, false)
 	if err != nil {
 		t.Fatalf("ProjectReplace failed: %v", err)
 	}

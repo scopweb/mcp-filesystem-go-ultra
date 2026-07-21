@@ -97,6 +97,16 @@ func (m *BatchOperationManager) SetEngine(engine *UltraFastEngine) {
 	m.engine = engine
 }
 
+// allowedDirsSuffix delegates to the engine's AllowedDirsSuffix so batch
+// access-denied errors also list the effective allowed directories. Nil-safe:
+// returns "" when no engine is wired (standalone manager use).
+func (m *BatchOperationManager) allowedDirsSuffix() string {
+	if m.engine == nil {
+		return ""
+	}
+	return m.engine.AllowedDirsSuffix()
+}
+
 // executeHooksForOperation runs pre/post hooks for batch operations when an engine is available.
 // This ensures hooks are respected even when using the batch manager's low-level execution path.
 // Returns error only if a hook denied the operation.
@@ -264,7 +274,7 @@ func (m *BatchOperationManager) validateOperations(operations []FileOperation) [
 		if m.engine != nil && len(m.engine.config.AllowedPaths) > 0 {
 			for _, p := range m.collectPaths(op) {
 				if p != "" && !m.engine.IsPathAllowed(p) {
-					errors = append(errors, fmt.Sprintf("Op %d: access denied — path '%s' is not in allowed paths", i, p))
+					errors = append(errors, fmt.Sprintf("Op %d: access denied — path '%s' is not in allowed paths%s", i, p, m.allowedDirsSuffix()))
 				}
 			}
 			// Prevent destructive operations on allowed-path roots
@@ -274,7 +284,7 @@ func (m *BatchOperationManager) validateOperations(operations []FileOperation) [
 					target = op.Source
 				}
 				if target != "" && m.engine.IsAllowedPathRoot(target) {
-					errors = append(errors, fmt.Sprintf("Op %d: access denied — cannot %s allowed-path root '%s'", i, op.Type, target))
+					errors = append(errors, fmt.Sprintf("Op %d: access denied — cannot %s allowed-path root '%s'%s", i, op.Type, target, m.allowedDirsSuffix()))
 				}
 			}
 		}

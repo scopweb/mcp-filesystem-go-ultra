@@ -59,7 +59,7 @@ func registerBatchTools(reg *toolRegistry) {
 			"Atomically applies all replacements. Auto-backup with undo. "+
 			"Related: edit_file (single edit), read_file, search_files, batch_operations."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
-		mcp.WithString("edits_json", mcp.Required(), mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]. Also accepts old_str/new_str as aliases.")),
+		mcp.WithString("edits_json", mcp.Required(), mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]. Also accepts old_str/new_str and old_string/new_string as aliases.")),
 		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 		mcp.WithBoolean("tolerant_whitespace", mcp.Description("Apply tolerant_whitespace semantics to all edits in the batch (1 tab = 4 spaces, CRLF = LF). Default: false.")),
 		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Default: false.")),
@@ -171,7 +171,7 @@ func registerBatchTools(reg *toolRegistry) {
 		var staleWarning string
 		normPath := core.NormalizePath(path)
 		if info, statErr := os.Stat(normPath); statErr == nil {
-			editSignal := core.CheckEditOp(normPath, "", info.Size())
+			editSignal := core.CheckEditOp(normPath, "", info.Size(), expectedHash != "")
 			if editSignal.Status == core.FeedbackWarn && editSignal.Pattern == core.PatternStaleRead {
 				staleWarning = "\n⚠️  [STALE_READ] " + editSignal.Message +
 					"\n   → " + editSignal.Suggestion +
@@ -509,7 +509,7 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithBoolean("create_backup", mcp.Description("Create single consolidated backup (default: true)")),
 		mcp.WithBoolean("parallel", mcp.Description("Process files in parallel (default: true)")),
 		mcp.WithNumber("max_files", mcp.Description("Maximum files to process (safety cap, default: 1000)")),
-		mcp.WithBoolean("force", mcp.Description("Force operation even if HIGH/CRITICAL risk (default: false)")),
+		mcp.WithBoolean("force", mcp.Description("Required to APPLY a HIGH/CRITICAL-risk batch (default: false). Without it, a HIGH/CRITICAL call is a pure preview: nothing is written and the result is marked BLOCKED.")),
 	)
 	reg.addTool(projectReplaceTool, auditWrap(engine, "project_replace", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -556,6 +556,10 @@ func registerBatchTools(reg *toolRegistry) {
 		if mf, ok := args["max_files"].(float64); ok {
 			maxFiles = int(mf)
 		}
+		force := false
+		if f, ok := args["force"].(bool); ok {
+			force = f
+		}
 
 		// Parse include/exclude paths
 		var includePaths, excludePaths []string
@@ -566,14 +570,26 @@ func registerBatchTools(reg *toolRegistry) {
 			json.Unmarshal([]byte(exc), &excludePaths)
 		}
 
-		result, err := engine.ProjectReplace(ctx, path, find, replace, literal, caseSensitive, fileTypes, includePaths, excludePaths, preview, createBackup, parallel, maxFiles)
+		result, err := engine.ProjectReplace(ctx, path, find, replace, literal, caseSensitive, fileTypes, includePaths, excludePaths, preview, createBackup, parallel, maxFiles, force)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("project_replace error: %v", err)), nil
 		}
 
-		// Format response
+		// Format response. The status prefix is UNAMBIGUOUS about whether the
+		// disk was touched: APPLIED (written), PREVIEW (not written) or
+		// BLOCKED (risk gate refused, not written). The previous "PR ..." line
+		// with a trailing "Use force=true to proceed" read as if the batch had
+		// been refused when it had in fact already been applied — re-running
+		// with force=true then double-applied the replacement.
 		if engine.IsCompactMode() {
-			msg := fmt.Sprintf("PR %s | find:'%s' | %d files | %d replacements", path, find, result.FilesChanged, result.TotalReplaced)
+			status := "APPLIED"
+			switch {
+			case result.Blocked:
+				status = "BLOCKED (no changes written)"
+			case result.DryRun:
+				status = "PREVIEW (no changes written)"
+			}
+			msg := fmt.Sprintf("%s: %s | find:'%s' | %d files | %d replacements", status, path, find, result.FilesChanged, result.TotalReplaced)
 			if result.BackupID != "" {
 				shortID := result.BackupID
 				if len(shortID) > 12 {
@@ -584,9 +600,6 @@ func registerBatchTools(reg *toolRegistry) {
 			if result.RiskWarning != "" {
 				msg += " | " + strings.TrimPrefix(result.RiskWarning, "⚠️ ")
 			}
-			if result.DryRun {
-				msg += " (preview)"
-			}
 			return mcp.NewToolResultText(msg), nil
 		}
 
@@ -594,6 +607,14 @@ func registerBatchTools(reg *toolRegistry) {
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("project_replace: '%s' → '%s'\n", find, replace))
 		sb.WriteString(fmt.Sprintf("Path: %s\n", path))
+		switch {
+		case result.Blocked:
+			sb.WriteString("Status: BLOCKED (risk gate) — no changes written; re-run with force=true to apply\n")
+		case result.DryRun:
+			sb.WriteString("Status: PREVIEW — no changes written\n")
+		default:
+			sb.WriteString("Status: APPLIED — changes written to disk\n")
+		}
 		sb.WriteString(fmt.Sprintf("Files changed: %d\n", result.FilesChanged))
 		sb.WriteString(fmt.Sprintf("Total replacements: %d\n", result.TotalReplaced))
 		if result.BackupID != "" {
@@ -602,8 +623,8 @@ func registerBatchTools(reg *toolRegistry) {
 		if result.RiskLevel != "" && result.RiskLevel != "LOW" {
 			sb.WriteString(fmt.Sprintf("⚠️ Risk: %s\n", result.RiskLevel))
 		}
-		if result.DryRun {
-			sb.WriteString("(preview mode - no changes written)\n")
+		if result.RiskWarning != "" {
+			sb.WriteString(result.RiskWarning + "\n")
 		}
 		if len(result.PerFileResults) > 0 && len(result.PerFileResults) <= 20 {
 			sb.WriteString("\nPer-file results:\n")

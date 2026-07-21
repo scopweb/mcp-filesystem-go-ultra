@@ -588,7 +588,7 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 
 	// Check if path is allowed (security + access control)
 	if !e.IsPathAllowed(path) {
-		return "", &PathError{Op: "read", Path: path, Err: fmt.Errorf("access denied")}
+		return "", e.AccessDeniedError("read", path)
 	}
 
 	// TOCTOU defense: re-resolve symlinks and re-authorize the canonical target
@@ -669,7 +669,7 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 
 	// Check if path is allowed (security + access control)
 	if !e.IsPathAllowed(path) {
-		return &PathError{Op: "write", Path: path, Err: fmt.Errorf("access denied")}
+		return e.AccessDeniedError("write", path)
 	}
 
 	// TOCTOU defense: re-resolve symlinks and re-authorize the canonical target
@@ -789,7 +789,7 @@ func (e *UltraFastEngine) WriteFileBytes(ctx context.Context, path string, data 
 
 	// Check if path is allowed (security + access control)
 	if !e.IsPathAllowed(path) {
-		return &PathError{Op: "write_bytes", Path: path, Err: fmt.Errorf("access denied")}
+		return e.AccessDeniedError("write_bytes", path)
 	}
 
 	// Check context before proceeding with write
@@ -880,7 +880,7 @@ func (e *UltraFastEngine) ReadFileBytes(ctx context.Context, path string) ([]byt
 
 	// Check if path is allowed (security + access control)
 	if !e.IsPathAllowed(path) {
-		return nil, &PathError{Op: "read_bytes", Path: path, Err: fmt.Errorf("access denied")}
+		return nil, e.AccessDeniedError("read_bytes", path)
 	}
 
 	// Check file info
@@ -946,7 +946,7 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 
 	// Check if path is allowed (security + access control)
 	if !e.IsPathAllowed(path) {
-		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
+		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths%s", path, e.AllowedDirsSuffix())
 	}
 
 	// Stat the directory once; used both for existence check and mtime validation.
@@ -1057,7 +1057,7 @@ func (e *UltraFastEngine) ListDirectoryJSON(ctx context.Context, path string) (s
 	defer e.releaseOperation("list", start)
 
 	if !e.IsPathAllowed(path) {
-		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
+		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths%s", path, e.AllowedDirsSuffix())
 	}
 
 	dirInfo, statErr := os.Stat(path)
@@ -1158,6 +1158,26 @@ Search Operations: %d`,
 		e.metrics.WriteOperations,
 		e.metrics.ListOperations,
 		e.metrics.SearchOperations)
+}
+
+// AllowedDirsSuffix returns a human-readable suffix listing the effective
+// allowed directories, for inclusion in access-denied error messages. When
+// access control is not configured (open-access mode) it notes that the
+// rejection came from the always-on path security policy instead. Keeping
+// this in one place guarantees every "access denied" the server emits is
+// self-diagnosing (issue: Go/Rust variant parity — the error must name the
+// allowed directories so sandbox mismatches are visible without logs).
+func (e *UltraFastEngine) AllowedDirsSuffix() string {
+	if len(e.config.AllowedPaths) == 0 {
+		return " (rejected by the always-on path security policy; no allowed directories are configured)"
+	}
+	return fmt.Sprintf(" — outside allowed directories: %s", strings.Join(e.config.AllowedPaths, "; "))
+}
+
+// AccessDeniedError builds a PathError whose message lists the effective
+// allowed directories via AllowedDirsSuffix.
+func (e *UltraFastEngine) AccessDeniedError(op, path string) *PathError {
+	return &PathError{Op: op, Path: path, Err: fmt.Errorf("access denied%s", e.AllowedDirsSuffix())}
 }
 
 // IsPathAllowed checks if the given path is within one of the allowed base paths.
@@ -1305,7 +1325,7 @@ func (e *UltraFastEngine) ResolveAndAuthorize(op, path string) (string, error) {
 		return "", &PathError{Op: op, Path: path, Err: fmt.Errorf("failed to resolve path: %w", err)}
 	}
 	if !e.IsPathAllowed(resolved) {
-		return "", &PathError{Op: op, Path: path, Err: fmt.Errorf("access denied")}
+		return "", e.AccessDeniedError(op, path)
 	}
 	return resolved, nil
 }
@@ -1461,7 +1481,7 @@ func (e *UltraFastEngine) ListDirectoryTree(ctx context.Context, path string, ma
 	defer e.releaseOperation("tree", start)
 
 	if !e.IsPathAllowed(path) {
-		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths", path)
+		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths%s", path, e.AllowedDirsSuffix())
 	}
 
 	type TreeNode struct {

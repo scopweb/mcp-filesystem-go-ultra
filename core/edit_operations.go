@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -105,7 +106,7 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 
 	// Check if path is allowed (security + access control)
 	if !e.IsPathAllowed(path) {
-		return nil, &PathError{Op: "edit", Path: path, Err: fmt.Errorf("access denied")}
+		return nil, e.AccessDeniedError("edit", path)
 	}
 
 	// Validate file
@@ -413,7 +414,7 @@ func (e *UltraFastEngine) validatePath(path string) (string, error) {
 
 	// Enforce allowed paths if configured (security + access control)
 	if !e.IsPathAllowed(abs) {
-		return "", fmt.Errorf("access denied: path '%s' not in allowed paths", abs)
+		return "", fmt.Errorf("access denied: path '%s' not in allowed paths%s", abs, e.AllowedDirsSuffix())
 	}
 	return abs, nil
 }
@@ -1112,33 +1113,60 @@ func isTextContent(content string) bool {
 }
 
 // MultiEditOperation represents a single edit in a batch.
-// Supports both old_text/new_text and old_str/new_str (Claude Desktop alias).
+// Supports old_text/new_text, old_str/new_str (Claude Desktop alias) and
+// old_string/new_string (Claude Code / filesystem-ultra-rust convention).
 type MultiEditOperation struct {
 	OldText string `json:"old_text"`
 	NewText string `json:"new_text"`
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling to accept both
-// old_text/new_text and old_str/new_str parameter names.
-// Claude Desktop sometimes uses old_str/new_str (from its native str_replace convention).
+// UnmarshalJSON implements custom JSON unmarshaling to accept the old/new
+// key conventions used by different MCP clients: old_text/new_text,
+// old_str/new_str (Claude Desktop str_replace convention) and
+// old_string/new_string (Claude Code / rust-variant convention).
+//
+// If none of the recognized old keys is present the unmarshal FAILS LOUDLY
+// listing the received keys. Previously such edits silently decoded to an
+// empty OldText, were skipped by context validation, and surfaced as the
+// misleading "context validation failed: none of the N edits match the
+// current file content" — even when every string existed verbatim in the
+// file and single edit_file calls with the same strings succeeded.
 func (m *MultiEditOperation) UnmarshalJSON(data []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 
-	// Accept old_text or old_str
+	// Accept old_text, old_str or old_string
 	if v, ok := raw["old_text"].(string); ok && v != "" {
 		m.OldText = v
 	} else if v, ok := raw["old_str"].(string); ok && v != "" {
 		m.OldText = v
+	} else if v, ok := raw["old_string"].(string); ok && v != "" {
+		m.OldText = v
 	}
 
-	// Accept new_text or new_str
+	// Accept new_text, new_str or new_string
 	if v, ok := raw["new_text"].(string); ok && v != "" {
 		m.NewText = v
 	} else if v, ok := raw["new_str"].(string); ok && v != "" {
 		m.NewText = v
+	} else if v, ok := raw["new_string"].(string); ok && v != "" {
+		m.NewText = v
+	}
+
+	if m.OldText == "" {
+		_, hasOldText := raw["old_text"]
+		_, hasOldStr := raw["old_str"]
+		_, hasOldString := raw["old_string"]
+		if !hasOldText && !hasOldStr && !hasOldString {
+			keys := make([]string, 0, len(raw))
+			for k := range raw {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			return fmt.Errorf("edit has no recognized old key (expected old_text, old_str or old_string; got keys: %s)", strings.Join(keys, ", "))
+		}
 	}
 
 	return nil
@@ -1206,7 +1234,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 
 	// Check if path is allowed (security + access control)
 	if !e.IsPathAllowed(path) {
-		return nil, &PathError{Op: "multi_edit", Path: path, Err: fmt.Errorf("access denied")}
+		return nil, e.AccessDeniedError("multi_edit", path)
 	}
 
 	// Validate file
@@ -1250,6 +1278,15 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 			continue
 		}
 		contextValid, _ := e.validateEditContext(originalContent, edit.OldText)
+		if !contextValid && tolerantWhitespace {
+			// validateEditContext does not know the tolerant matcher — honor
+			// tolerant_whitespace in the validation phase too (tab ↔ 4-space,
+			// CRLF ↔ LF), otherwise the batch is rejected here while the very
+			// same edit would succeed through performIntelligentEdit.
+			if countOccurrencesTolerant(originalContent, edit.OldText, true) > 0 {
+				contextValid = true
+			}
+		}
 		if contextValid {
 			validEditCount++
 			continue
@@ -1280,7 +1317,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		if edit.OldText == "" {
 			continue
 		}
-		simResult, simErr := e.performIntelligentEdit(simContent, edit.OldText, edit.NewText, false)
+		simResult, simErr := e.performIntelligentEdit(simContent, edit.OldText, edit.NewText, tolerantWhitespace)
 		if simErr == nil && simResult.ReplacementCount > 0 {
 			simContent = simResult.ModifiedContent
 		}
@@ -1393,8 +1430,9 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 			continue
 		}
 
-		// Apply this edit
-		editResult, editErr := e.performIntelligentEdit(currentContent, edit.OldText, edit.NewText, false)
+		// Apply this edit (forward tolerantWhitespace so the batch honors the
+		// flag end-to-end: validation, ambiguity count, simulation and apply)
+		editResult, editErr := e.performIntelligentEdit(currentContent, edit.OldText, edit.NewText, tolerantWhitespace)
 		if editErr != nil || editResult.ReplacementCount == 0 {
 			// Check "already_present" / "ambiguous" (Bug #27 fix)
 			// Compare against originalContent to determine if old_text was actually in the file.

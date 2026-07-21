@@ -37,7 +37,7 @@ func TestProjectReplace_InvalidatesReadCacheAndRefreshesBaseline(t *testing.T) {
 	RecordReadHash(NormalizePath(path), contentHashFNV(original))
 
 	// Mutate via project_replace and confirm the cache + baseline were refreshed.
-	if _, err := engine.ProjectReplace(context.Background(), dir, "alpha", "OMEGA", true, true, "", nil, nil, false, false, false, 100); err != nil {
+	if _, err := engine.ProjectReplace(context.Background(), dir, "alpha", "OMEGA", true, true, "", nil, nil, false, false, false, 100, false); err != nil {
 		t.Fatalf("ProjectReplace: %v", err)
 	}
 

@@ -68,12 +68,21 @@ type sessionState struct {
 	// on disk externally since the client last saw it, even when the caller did
 	// not pass expected_hash.
 	knownHash map[string]string
+
+	// Map of path -> true once the STALE_READ warning has been emitted for
+	// that file in this session. The warning is informational; repeating it
+	// on every edit of the same file is pure noise (issue: it fires whenever
+	// the pre-edit read was done with a non-filesystem-ultra tool, so the
+	// "was read" tracking never sees the read). Cleared by RecordRead /
+	// RecordReadHash so a genuine post-read staleness can warn again.
+	staleWarned map[string]bool
 }
 
 var globalSession = &sessionState{
 	failedOldText: make(map[string]map[string]int),
 	lastRead:      make(map[string]time.Time),
 	knownHash:     make(map[string]string),
+	staleWarned:   make(map[string]bool),
 }
 
 // autoOCCMode controls automatic optimistic-concurrency checking (new point 4):
@@ -97,6 +106,7 @@ func RecordRead(path string) {
 	globalSession.mu.Lock()
 	defer globalSession.mu.Unlock()
 	globalSession.lastRead[path] = time.Now()
+	delete(globalSession.staleWarned, path)
 }
 
 // RecordReadHash records the content_hash the session observed for a file on a
@@ -110,6 +120,7 @@ func RecordReadHash(path, hash string) {
 	defer globalSession.mu.Unlock()
 	globalSession.knownHash[path] = hash
 	globalSession.lastRead[path] = time.Now()
+	delete(globalSession.staleWarned, path)
 }
 
 // RecordWriteHash records the content_hash of a file AFTER the session wrote or
@@ -284,7 +295,10 @@ func CheckWriteOp(path string, newContent string, existingSize int64) *FeedbackS
 }
 
 // CheckEditOp evaluates an edit_file operation before it executes.
-func CheckEditOp(path, oldText string, fileSize int64) *FeedbackSignal {
+// expectedHashProvided (optional) tells the detector the caller passed an
+// explicit expected_hash — cryptographic proof of a prior read — in which
+// case the STALE_READ warning is suppressed entirely.
+func CheckEditOp(path, oldText string, fileSize int64, expectedHashProvided ...bool) *FeedbackSignal {
 	// Stale read: file not read in this session in the last 10 minutes
 	globalSession.mu.Lock()
 	lastRead, hasRead := globalSession.lastRead[path]
@@ -311,6 +325,24 @@ func CheckEditOp(path, oldText string, fileSize int64) *FeedbackSignal {
 
 	staleDuration := 10 * time.Minute
 	if !hasRead || time.Since(lastRead) > staleDuration {
+		// Suppress when the caller passed expected_hash: that token could only
+		// come from a prior read_file response, so the file WAS read — just
+		// possibly outside this tool family's tracking.
+		if len(expectedHashProvided) > 0 && expectedHashProvided[0] {
+			return OK()
+		}
+		// Emit at most once per file per session. The warning exists to catch
+		// genuine stale-read loops; repeating it on every edit of a file the
+		// user read with a different tool is noise.
+		globalSession.mu.Lock()
+		alreadyWarned := globalSession.staleWarned[path]
+		if !alreadyWarned {
+			globalSession.staleWarned[path] = true
+		}
+		globalSession.mu.Unlock()
+		if alreadyWarned {
+			return OK()
+		}
 		return &FeedbackSignal{
 			Status:  FeedbackWarn,
 			Pattern: PatternStaleRead,
