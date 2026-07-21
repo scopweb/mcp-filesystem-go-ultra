@@ -127,7 +127,7 @@ func (e *UltraFastEngine) DeleteLineRange(ctx context.Context, path string, star
 		return "", nil, fmt.Errorf("operation cancelled: %w", err)
 	}
 	if !e.IsPathAllowed(path) {
-		return "", nil, &PathError{Op: "delete_range", Path: path, Err: fmt.Errorf("access denied")}
+		return "", nil, e.AccessDeniedError("delete_range", path)
 	}
 	if err := e.validateEditableFile(path); err != nil {
 		return "", nil, fmt.Errorf("file validation failed: %w", err)
@@ -205,7 +205,7 @@ func (e *UltraFastEngine) ReplaceLineRange(ctx context.Context, path string, sta
 		return nil, fmt.Errorf("operation cancelled: %w", err)
 	}
 	if !e.IsPathAllowed(path) {
-		return nil, &PathError{Op: "replace_range", Path: path, Err: fmt.Errorf("access denied")}
+		return nil, e.AccessDeniedError("replace_range", path)
 	}
 	if err := e.validateEditableFile(path); err != nil {
 		return nil, fmt.Errorf("file validation failed: %w", err)

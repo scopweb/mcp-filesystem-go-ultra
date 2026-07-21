@@ -21,6 +21,10 @@ type ProjectReplaceResult struct {
 	RiskLevel      string                     `json:"risk_level,omitempty"`
 	RiskWarning    string                     `json:"risk_warning,omitempty"`
 	DryRun         bool                       `json:"dry_run"`
+	// Blocked is true when the risk gate (HIGH/CRITICAL without force=true)
+	// refused to write anything. The result is a pure preview: counts describe
+	// what WOULD change, and the disk is guaranteed untouched.
+	Blocked bool `json:"blocked,omitempty"`
 }
 
 // ProjectReplaceFileResult contains results for a single file
@@ -47,7 +51,12 @@ type ProjectReplaceFileResult struct {
 //   - createBackup: if true, create a single consolidated backup
 //   - parallel: if true, process files in parallel
 //   - maxFiles: maximum number of files to process (safety cap)
-func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replace string, literal, caseSensitive bool, fileTypes string, includePaths, excludePaths []string, preview, createBackup, parallel bool, maxFiles int) (*ProjectReplaceResult, error) {
+//   - force: required to apply HIGH/CRITICAL-risk batches. Without it the
+//     operation is a pure preview — nothing is written (issue: the force
+//     flag was advertised in the schema and in the risk warning but never
+//     enforced, so a CRITICAL replace applied silently and re-running with
+//     force=true applied it a SECOND time)
+func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replace string, literal, caseSensitive bool, fileTypes string, includePaths, excludePaths []string, preview, createBackup, parallel bool, maxFiles int, force bool) (*ProjectReplaceResult, error) {
 	// Normalize path
 	path = NormalizePath(path)
 
@@ -60,7 +69,7 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 
 	// Check access control
 	if !e.IsPathAllowed(path) {
-		return nil, &PathError{Op: "project_replace", Path: path, Err: fmt.Errorf("access denied")}
+		return nil, e.AccessDeniedError("project_replace", path)
 	}
 
 	// Parse file types
@@ -196,11 +205,11 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 	}
 
 	riskLevel := "LOW"
-	if totalOccurrences >= 1000 || len(matchedFiles) >= 80 {
+	if totalOccurrences >= 1000 || len(filesWithMatches) >= 80 {
 		riskLevel = "CRITICAL"
-	} else if totalOccurrences >= 500 || len(matchedFiles) >= 50 {
+	} else if totalOccurrences >= 500 || len(filesWithMatches) >= 50 {
 		riskLevel = "HIGH"
-	} else if totalOccurrences >= 100 || len(matchedFiles) >= 30 {
+	} else if totalOccurrences >= 100 || len(filesWithMatches) >= 30 {
 		riskLevel = "MEDIUM"
 	}
 
@@ -213,6 +222,20 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 	if preview {
 		// Just count
 		result.TotalReplaced = totalOccurrences
+		return result, nil
+	}
+
+	// Risk gate: HIGH/CRITICAL batches require force=true. Without it, NOTHING
+	// is written and no backup is created — the result is a pure preview with
+	// an explicit Blocked marker. Previously the writes went through anyway
+	// and the warning said "Use force=true to proceed", which tricked callers
+	// into re-running with force=true and applying the replacement a second
+	// time (producing e.g. examples/examples/... duplications).
+	if (riskLevel == "HIGH" || riskLevel == "CRITICAL") && !force {
+		result.Blocked = true
+		result.DryRun = true
+		result.TotalReplaced = totalOccurrences
+		result.RiskWarning = fmt.Sprintf("⚠️ %s risk: %d files, %d replacements — BLOCKED, no files were modified. Re-run with force=true to apply.", riskLevel, result.FilesChanged, totalOccurrences)
 		return result, nil
 	}
 
@@ -355,7 +378,10 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 	}
 
 	if riskLevel == "HIGH" || riskLevel == "CRITICAL" {
-		result.RiskWarning = fmt.Sprintf("⚠️ %s risk: %d files, %d replacements. Use force=true to proceed with future operations.", riskLevel, result.FilesChanged, result.TotalReplaced)
+		// Reaching here means force=true was passed (the risk gate above
+		// returns early otherwise) — say so explicitly so the output cannot
+		// be misread as "still needs force".
+		result.RiskWarning = fmt.Sprintf("⚠️ %s risk applied (force=true): %d files, %d replacements were written.", riskLevel, result.FilesChanged, result.TotalReplaced)
 	}
 
 	return result, nil

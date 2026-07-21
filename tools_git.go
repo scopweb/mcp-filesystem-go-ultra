@@ -71,7 +71,7 @@ func registerGitTools(reg *toolRegistry) {
 
 		// Check access control
 		if !engine.IsPathAllowed(repoRoot) {
-			return mcp.NewToolResultError("access denied: path outside allowed directories"), nil
+			return mcp.NewToolResultError("access denied: path outside allowed directories"+engine.AllowedDirsSuffix()), nil
 		}
 
 		if _, hasPaths := args["paths"]; !hasPaths {
@@ -147,7 +147,7 @@ func gitInit(ctx context.Context, engine *core.UltraFastEngine, path string, arg
 	targetPath = core.NormalizePath(targetPath)
 
 	if !engine.IsPathAllowed(targetPath) {
-		return mcp.NewToolResultError("access denied: path outside allowed directories"), nil
+		return mcp.NewToolResultError("access denied: path outside allowed directories"+engine.AllowedDirsSuffix()), nil
 	}
 
 	// githooks for init - use pre-create hook context

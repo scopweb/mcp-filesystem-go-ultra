@@ -1212,7 +1212,7 @@ func registerCoreTools(reg *toolRegistry) {
 		if err != nil {
 			// Record failed old_text for reinforcement detection
 			core.RecordFailedOldText(path, oldText)
-			editSignal := core.CheckEditOp(path, oldText, fileSize)
+			editSignal := core.CheckEditOp(path, oldText, fileSize, expectedHash != "")
 			core.SetFeedback(ctx, editSignal)
 			errMsg := formatToolError(err)
 			errMsg = core.FormatFeedback(editSignal, errMsg)
@@ -1242,7 +1242,7 @@ func registerCoreTools(reg *toolRegistry) {
 		}
 
 		// Collect non-blocking feedback signals
-		editSignal := core.CheckEditOp(path, oldText, fileSize)
+		editSignal := core.CheckEditOp(path, oldText, fileSize, expectedHash != "")
 		newTextSignal := core.CheckEditNewText(newText, fileSize)
 		// Annotate audit with the most severe signal
 		if editSignal.Status != core.FeedbackOK {

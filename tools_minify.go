@@ -51,7 +51,7 @@ func registerMinifyTools(reg *toolRegistry) {
 
 		// Access control
 		if !engine.IsPathAllowed(normPath) {
-			return mcp.NewToolResultError(fmt.Sprintf("Error: access denied: %s", normPath)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Error: access denied: %s%s", normPath, engine.AllowedDirsSuffix())), nil
 		}
 
 		// TOCTOU defense: re-resolve symlinks and re-authorize the canonical

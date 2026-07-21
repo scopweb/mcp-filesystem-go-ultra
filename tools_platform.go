@@ -296,7 +296,7 @@ func registerPlatformTools(reg *toolRegistry) {
 					windowsPath, _ = core.WSLToWindows(wslPath)
 				}
 				if !engine.IsPathAllowed(wslPath) || (windowsPath != "" && !engine.IsPathAllowed(windowsPath)) {
-					return mcp.NewToolResultError("access denied: one or both paths are outside allowed directories"), nil
+					return mcp.NewToolResultError("access denied: one or both paths are outside allowed directories"+engine.AllowedDirsSuffix()), nil
 				}
 
 				err := engine.WSLWindowsCopy(ctx, wslPath, windowsPath, createDirs)
@@ -322,7 +322,7 @@ func registerPlatformTools(reg *toolRegistry) {
 
 				// Security: validate both sides
 				if !engine.IsPathAllowed(windowsPath) || (wslDest != "" && !engine.IsPathAllowed(wslDest)) {
-					return mcp.NewToolResultError("access denied: one or both paths are outside allowed directories"), nil
+					return mcp.NewToolResultError("access denied: one or both paths are outside allowed directories"+engine.AllowedDirsSuffix()), nil
 				}
 
 				err := engine.WSLWindowsCopy(ctx, windowsPath, wslDest, createDirs)
