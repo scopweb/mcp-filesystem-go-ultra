@@ -147,6 +147,11 @@ func TestOutputSchema_HandlerSweep(t *testing.T) {
 		{name: "multi_edit basic", tool: "multi_edit", schema: multiSchema, textMessage: true,
 			args: map[string]any{"path": freshFile("me1.txt", sample),
 				"edits_json": `[{"old_text":"beta","new_text":"B"},{"old_text":"gamma","new_text":"G"}]`}},
+		// Regression (2026-07-22): multi_edit dry_run returned plain text and
+		// strict clients rejected it with a bare "Tool execution failed".
+		{name: "multi_edit dry_run", tool: "multi_edit", schema: multiSchema, textMessage: true,
+			args: map[string]any{"path": freshFile("me2.txt", sample),
+				"edits_json": `[{"old_text":"beta","new_text":"B"}]`, "dry_run": true}},
 	}
 
 	for _, tc := range cases {

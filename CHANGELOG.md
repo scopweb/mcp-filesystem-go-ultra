@@ -1,5 +1,21 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.5.32] - 2026-07-22
+
+### fix(multi_edit): dry_run returned plain text on a schema-declared tool — "Tool execution failed" on strict clients (+ batch aliases, byte counter)
+
+User-reported with an excellent isolation matrix: `multi_edit` with `dry_run:true` failed 100% of the time on any file (12-byte `.txt` included), while the identical call without `dry_run` succeeded. Root cause was NOT dry-run logic, Razor syntax, batch size, `tolerant_whitespace`, or EOL style — it was the same class of bug as the -32600 incident (2026-07-19): the dry-run branch returned `mcp.NewToolResultText` while `multi_edit` declares an MCP `outputSchema` (v4.5.26). Strict clients reject schema-declared results without `structuredContent`, surfacing a bare "Tool execution failed" with no diagnostics. `edit_file` dry-run already returned structured content, which is why it worked. The handler-level sweep covered `edit dry_run` but had no `multi_edit dry_run` case.
+
+**1. `multi_edit` dry_run now returns structured output (`tools_batch.go`).** Both the compact and verbose dry-run branches emit `NewToolResultStructured(attachMessage(multiEditStructured(...)))`, parity with `edit_file`. The dry-run payload deliberately omits `content_hash`/`backup_id` (nothing was written), matching the edit_file dry-run contract.
+
+**2. `batch_operations` accepts natural aliases for `search_and_replace` fields (`core/batch_operations.go`).** Sending `search`/`replace` (the natural names for an op called `search_and_replace`) was rejected demanding `old_text`. `FileOperation.UnmarshalJSON` now maps `search`/`find`/`pattern` → `old_text` and `replace`/`replacement` → `new_text`, parity with `multi_edit`'s `old_str`/`old_string` aliases. Canonical `old_text`/`new_text` take precedence when both are present.
+
+**3. `batch_operations:search_and_replace` byte counter (`core/batch_operations.go`).** `BytesAffected` stored the replacement *count* (a 13-op batch where one op inserted ~230 bytes reported `(1 B)` on every op). It now reports the real byte delta (file size before/after), parity with the `edit` op.
+
+**Regression coverage:** `output_schema_sweep_test.go` gains a `multi_edit dry_run` sweep case — verified to fail before the fix (`StructuredContent is <nil>, want map[string]any — plain-text result on a schema-declared tool`) and pass after.
+
+**Verification:** `go build ./...` · `go vet ./...` clean · `go test ./...` PASS (all packages).
+
 ## [Unreleased / 4.5.31] - 2026-07-19
 
 ### fix(tools): multi_edit aliases + tolerant validation, project_replace force gate, self-diagnosing access-denied, STALE_READ once-per-session

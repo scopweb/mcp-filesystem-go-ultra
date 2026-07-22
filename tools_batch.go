@@ -209,7 +209,10 @@ func registerBatchTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(errPlain), nil
 		}
 
-		// Bug #32: dry_run response format for multi_edit
+		// Bug #32: dry_run response format for multi_edit.
+		// Must return StructuredContent (parity with edit_file dry_run):
+		// multi_edit declares an outputSchema, and strict MCP clients reject
+		// plain-text results on schema-declared tools ("Tool execution failed").
 		if dryRun {
 			diffText := core.RenderDiff(result.OriginalContent, result.FinalContent, path, diffFormat)
 			if engine.IsCompactMode() {
@@ -222,7 +225,7 @@ func registerBatchTools(reg *toolRegistry) {
 					msg += "\n" + diffText
 				}
 				msg += "\nNo changes were written to disk"
-				return mcp.NewToolResultText(msg), nil
+				return mcp.NewToolResultStructured(attachMessage(multiEditStructured(path, result), msg), msg), nil
 			}
 			msg := fmt.Sprintf("DRY RUN — No changes made\nFile: %s\nWould apply: %d edits\nLines affected: %d",
 				path, result.SuccessfulEdits, result.LinesAffected)
@@ -232,7 +235,7 @@ func registerBatchTools(reg *toolRegistry) {
 			if diffText != "" {
 				msg += "\n" + diffText
 			}
-			return mcp.NewToolResultText(msg), nil
+			return mcp.NewToolResultStructured(attachMessage(multiEditStructured(path, result), msg), msg), nil
 		}
 
 		// Update backup chain for undo step-through
