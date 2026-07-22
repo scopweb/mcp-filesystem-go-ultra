@@ -26,6 +26,43 @@ type FileOperation struct {
 	Options     map[string]interface{} `json:"options"`     // Opciones adicionales
 }
 
+// UnmarshalJSON accepts natural aliases for search_and_replace/edit fields
+// (parity with multi_edit's old_str/old_string aliases): "search", "find" and
+// "pattern" map to old_text; "replace" and "replacement" map to new_text.
+// Canonical old_text/new_text take precedence when both are present.
+func (op *FileOperation) UnmarshalJSON(data []byte) error {
+	type plain FileOperation
+	var aux struct {
+		plain
+		Search      string `json:"search"`
+		Find        string `json:"find"`
+		Pattern     string `json:"pattern"`
+		Replace     string `json:"replace"`
+		Replacement string `json:"replacement"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	*op = FileOperation(aux.plain)
+	if op.OldText == "" {
+		for _, alias := range []string{aux.Search, aux.Find, aux.Pattern} {
+			if alias != "" {
+				op.OldText = alias
+				break
+			}
+		}
+	}
+	if op.NewText == "" {
+		for _, alias := range []string{aux.Replace, aux.Replacement} {
+			if alias != "" {
+				op.NewText = alias
+				break
+			}
+		}
+	}
+	return nil
+}
+
 // BatchRequest representa una solicitud de operaciones en batch
 type BatchRequest struct {
 	Operations   []FileOperation `json:"operations"`
@@ -773,6 +810,10 @@ func (m *BatchOperationManager) executeSearchAndReplace(op FileOperation, result
 	if m.engine == nil {
 		return fmt.Errorf("search_and_replace requires engine (not available in standalone batch mode)")
 	}
+	var sizeBefore int64
+	if info, statErr := os.Stat(op.Path); statErr == nil {
+		sizeBefore = info.Size()
+	}
 	replacements, err := m.engine.searchAndReplaceInFile(op.Path, op.OldText, op.NewText, true, false)
 	if err != nil {
 		return err
@@ -780,7 +821,11 @@ func (m *BatchOperationManager) executeSearchAndReplace(op FileOperation, result
 	if replacements == 0 {
 		return fmt.Errorf("pattern '%s' not found in %s", op.OldText, op.Path)
 	}
-	result.BytesAffected = int64(replacements)
+	// Report the byte delta (parity with edit), not the replacement count.
+	result.BytesAffected = int64(replacements) * int64(len(op.NewText)-len(op.OldText))
+	if info, statErr := os.Stat(op.Path); statErr == nil {
+		result.BytesAffected = info.Size() - sizeBefore
+	}
 
 	// Post-write hook (best effort)
 	_ = m.executeHooksForOperation(ctx, HookPostWrite, op)
