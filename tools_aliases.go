@@ -443,8 +443,8 @@ func registerHelpTool(reg *toolRegistry) {
 		st, ok := all[name]
 		if !ok {
 			return usageError(
-				fmt.Sprintf("no tool named %q registered on this server", name),
-				`help()  // for the catalog`),
+					fmt.Sprintf("no tool named %q registered on this server", name),
+					`help()  // for the catalog`),
 				nil
 		}
 

@@ -775,13 +775,15 @@ func (m *BatchOperationManager) executeEdit(op FileOperation, result *OperationR
 		}
 		finalContent = editResult.ModifiedContent
 	} else {
-		// Fallback
-		finalContent = strings.Replace(original, op.OldText, op.NewText, 1)
-		if finalContent == original {
+		// Fallback (with boundary-newline preservation, same as the engine path)
+		idx := strings.Index(original, op.OldText)
+		if idx < 0 {
 			return fmt.Errorf("old_text not found in file: %s. "+
 				"ALWAYS read the file with read_file BEFORE editing. "+
 				"Copy the exact text from the read result as old_text", op.Path)
 		}
+		matchEnd := idx + len(op.OldText)
+		finalContent = original[:idx] + preserveBoundaryNewline(original, matchEnd, op.OldText, op.NewText) + original[matchEnd:]
 	}
 
 	err = os.WriteFile(op.Path, []byte(finalContent), 0644)

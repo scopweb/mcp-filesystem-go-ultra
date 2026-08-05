@@ -2,6 +2,7 @@ package core
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -256,20 +257,19 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 	}
 
 	// Calculate diff stats: +added -removed lines (standard diff format)
-	originalLines := strings.Count(string(content), "\n") + 1
-	result.TotalLines = strings.Count(finalContent, "\n") + 1
-	oldTextLines := strings.Count(oldText, "\n") + 1
-	newTextLines := strings.Count(newText, "\n") + 1
-	result.LinesRemoved = oldTextLines * result.ReplacementCount
-	result.LinesAdded = newTextLines * result.ReplacementCount
-	// Sanity check: net change must match total line difference
-	if net := result.LinesAdded - result.LinesRemoved; net != result.TotalLines-originalLines {
-		// Fallback: derive from actual line counts (handles edge cases like whitespace normalization)
-		if result.TotalLines >= originalLines {
-			result.LinesAdded = result.TotalLines - originalLines + result.LinesRemoved
-		} else {
-			result.LinesRemoved = originalLines - result.TotalLines + result.LinesAdded
-		}
+	result.TotalLines = CountLines(finalContent)
+	if added, removed, exact := DiffCounts(string(content), finalContent); exact {
+		// Real diff counts: identical context lines are NOT counted
+		// (fixes lines_added/lines_removed reporting the whole replaced
+		// block instead of the actually changed lines).
+		result.LinesAdded = added
+		result.LinesRemoved = removed
+	} else {
+		// Legacy block estimate for pathological files (DP matrix guard).
+		oldTextLines := strings.Count(oldText, "\n") + 1
+		newTextLines := strings.Count(newText, "\n") + 1
+		result.LinesRemoved = oldTextLines * result.ReplacementCount
+		result.LinesAdded = newTextLines * result.ReplacementCount
 	}
 
 	// Store backup ID in result
@@ -560,7 +560,7 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 				firstMatch = false
 			}
 			sb.WriteString(content[last:matchStart])
-			sb.WriteString(newText)
+			sb.WriteString(preserveBoundaryNewline(content, matchEnd, oldText, newText))
 			last = matchEnd
 		}
 		sb.WriteString(content[last:])
@@ -598,7 +598,7 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 				break
 			}
 			sb.WriteString(content[last : last+idx])
-			sb.WriteString(newText)
+			sb.WriteString(preserveBoundaryNewline(content, last+idx+len(normalizedOld), normalizedOld, newText))
 			last = last + idx + len(normalizedOld)
 		}
 		sb.WriteString(content[last:])
@@ -673,8 +673,14 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 	}
 
 	if modified {
+		modifiedContent := resultBuilder.String()
+		// bufio.Scanner strips line terminators, so a file ending in "\n"
+		// would lose its trailing newline on reassembly — restore it.
+		if strings.HasSuffix(content, "\n") && !strings.HasSuffix(modifiedContent, "\n") {
+			modifiedContent += "\n"
+		}
 		return &EditResult{
-			ModifiedContent:  resultBuilder.String(),
+			ModifiedContent:  modifiedContent,
 			ReplacementCount: replacements,
 			MatchConfidence:  "medium",
 			LinesAffected:    affectedLines,
@@ -683,7 +689,7 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 
 	// OPTIMIZATION 5: Multiline search only if single-line failed
 	if strings.Contains(content, oldText) {
-		newContent := strings.ReplaceAll(content, oldText, newText)
+		newContent := replaceAllPreserveBoundary(content, oldText, newText)
 		return &EditResult{
 			ModifiedContent:  newContent,
 			ReplacementCount: 1,
@@ -703,7 +709,7 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 	if convertedOld != oldText {
 		convertedNew := normalizeLiteralEscapes(newText)
 		if idx := strings.Index(content, convertedOld); idx >= 0 {
-			newContent := strings.ReplaceAll(content, convertedOld, convertedNew)
+			newContent := replaceAllPreserveBoundary(content, convertedOld, convertedNew)
 			replacements := strings.Count(content, convertedOld)
 			return &EditResult{
 				ModifiedContent:  newContent,
@@ -832,8 +838,8 @@ func (e *UltraFastEngine) searchAndReplaceInFile(filePath, pattern, replacement 
 
 	contentStr := string(content)
 
-	// Check if it's a text file (basic check)
-	if !isTextContent(contentStr) {
+	// Check if it's a text file (BOM + null-byte check on first 512 bytes)
+	if !isTextContent(content) {
 		return 0, nil // Skip binary files
 	}
 
@@ -928,6 +934,32 @@ func detectEOL(content string) string {
 		// default that won't surprise downstream tools.)
 		return "\n"
 	}
+}
+
+// detectFileEOL returns the dominant line-ending style of an on-disk file by
+// sampling only its first eolSampleSize bytes. This avoids reading multi-MB
+// files into memory just to decide CRLF vs LF on the write path.
+func detectFileEOL(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	buf := make([]byte, eolSampleSize)
+	n, err := f.Read(buf)
+	if err != nil && n == 0 {
+		return "", err
+	}
+	sample := string(buf[:n])
+	// Drop a trailing partial line so a "\r" split from its "\n" at the
+	// sample boundary is not counted as a lone CR.
+	if n == eolSampleSize {
+		if idx := strings.LastIndexByte(sample, '\n'); idx >= 0 {
+			sample = sample[:idx+1]
+		}
+	}
+	return detectEOL(sample), nil
 }
 
 // restoreEOL converts content (assumed normalized to LF) back to the given
@@ -1106,10 +1138,22 @@ func calculateLinesWithText(content, text string) int {
 	return count
 }
 
-func isTextContent(content string) bool {
-	// Simple heuristic: if content has too many null bytes, it's likely binary
-	nullCount := strings.Count(content, "\x00")
-	return float64(nullCount)/float64(len(content)) < 0.01
+// isTextContent checks already-read bytes for binary signatures:
+// UTF-16/UTF-32 BOMs (content search would garble) and null bytes.
+// Only the first 512 bytes are inspected (grep-style sampling).
+func isTextContent(content []byte) bool {
+	head := content
+	if len(head) > 512 {
+		head = head[:512]
+	}
+	if len(head) >= 4 && ((head[0] == 0xFF && head[1] == 0xFE && head[2] == 0x00 && head[3] == 0x00) ||
+		(head[0] == 0x00 && head[1] == 0x00 && head[2] == 0xFE && head[3] == 0xFF)) {
+		return false // UTF-32
+	}
+	if len(head) >= 2 && ((head[0] == 0xFF && head[1] == 0xFE) || (head[0] == 0xFE && head[1] == 0xFF)) {
+		return false // UTF-16
+	}
+	return bytes.IndexByte(head, 0) == -1
 }
 
 // MultiEditOperation represents a single edit in a batch.
@@ -1521,7 +1565,11 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	result.LinesAffected = totalLinesAffected
 	result.LinesAdded = totalLinesAdded
 	result.LinesRemoved = totalLinesRemoved
-	result.TotalLines = strings.Count(currentContent, "\n") + 1
+	if added, removed, exact := DiffCounts(originalContent, currentContent); exact {
+		result.LinesAdded = added
+		result.LinesRemoved = removed
+	}
+	result.TotalLines = CountLines(currentContent)
 	result.StartLine = firstStartLine
 	result.EndLine = lastEndLine
 
@@ -1939,14 +1987,18 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 		_ = e.autoSyncManager.AfterEdit(validPath)
 	}
 
+	added, removed, exact := DiffCounts(string(content), newContent)
+	if !exact {
+		added, removed = strings.Count(newLine, "\n")+1, 1
+	}
 	return &EditResult{
 		ModifiedContent:  newContent,
 		ReplacementCount: 1,
 		MatchConfidence:  "high",
 		LinesAffected:    1,
-		LinesAdded:       strings.Count(newLine, "\n") + 1,
-		LinesRemoved:     1,
-		TotalLines:       len(lines),
+		LinesAdded:       added,
+		LinesRemoved:     removed,
+		TotalLines:       CountLines(newContent),
 		NewHash: func() string {
 			h := fnv.New32a()
 			h.Write([]byte(newContent))

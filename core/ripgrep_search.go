@@ -16,14 +16,14 @@ import (
 // It first checks PATH, then falls back to embedded binary if embed_rg build tag is set.
 // Returns availability status and version string.
 func DetectRipgrep() (available bool, version string) {
-	// First try: check if rg is in PATH
-	if cmd := exec.Command("rg", "--version"); runVersionCheck(cmd) {
-		output, err := cmd.Output()
-		if err == nil {
-			parts := strings.Fields(string(output))
-			if len(parts) >= 2 {
-				return true, parts[1]
-			}
+	// First try: check if rg is in PATH.
+	// NOTE: an exec.Cmd can only be started once — the previous implementation
+	// called Run() and then Output() on the SAME Cmd, so Output always failed
+	// with "exec: already started" and ripgrep was never detected from PATH.
+	if output, err := exec.Command("rg", "--version").Output(); err == nil {
+		parts := strings.Fields(string(output))
+		if len(parts) >= 2 {
+			return true, parts[1]
 		}
 	}
 
@@ -45,13 +45,6 @@ func DetectRipgrep() (available bool, version string) {
 	return false, ""
 }
 
-// runVersionCheck attempts to run rg --version without capturing output.
-// Returns true if successful (rg is available).
-func runVersionCheck(cmd *exec.Cmd) bool {
-	cmd.Run()
-	return cmd.ProcessState != nil && cmd.ProcessState.Success()
-}
-
 // ripgrepMatch represents ripgrep's JSON output format for matches.
 type ripgrepMatch struct {
 	Type string `json:"type"`
@@ -67,6 +60,10 @@ type ripgrepMatch struct {
 			Start int `json:"start"`
 			End   int `json:"end"`
 		} `json:"bytes"`
+		Submatches []struct {
+			Start int `json:"start"`
+			End   int `json:"end"`
+		} `json:"submatches"`
 		ContextLine *string `json:"context_line,omitempty"`
 	} `json:"data"`
 }
@@ -80,6 +77,18 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 	args := []string{
 		"--json",
 		"--max-filesize=10M",
+		// Parity with the native walk: the native path searches everything
+		// except searchSkipDirs — it does NOT respect .gitignore and DOES
+		// descend into hidden files/dirs. Without these flags ripgrep would
+		// silently skip git-ignored files (e.g. .env) and hidden paths,
+		// returning fewer results than the native fallback.
+		"--no-ignore",
+		"--hidden",
+		// Parity with the native path: do NOT transcode UTF-16 files. The
+		// native search treats BOM'd UTF-16/UTF-32 files as binary and skips
+		// them; ripgrep's default "auto" encoding would happily search them,
+		// returning matches the native path never reports.
+		"--encoding=none",
 	}
 
 	if !caseSensitive {
@@ -99,6 +108,12 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 	// making ripgrep error out (silent fallback to native search).
 	for dir := range searchSkipDirs {
 		args = append(args, "--glob", "!**/"+dir+"/**")
+	}
+	// v4.5.31: exclude generated/minified bundles from ripgrep searches too.
+	// (*.min.* catches .min.js/.min.css and any future variant; *.map catches
+	// source maps which are also single-line JSON blobs.)
+	for _, pat := range searchMinifiedPatterns {
+		args = append(args, "--glob", "!**/"+pat)
 	}
 
 	// `-e` forces the next argument to be parsed as the pattern even when it
@@ -128,6 +143,11 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 	}
 
 	var matches []SearchMatch
+	// pendingContext holds the trailing context lines rg emitted since the
+	// last match record; they become the leading context of the next match.
+	// Context records are also appended to the previous match (trailing
+	// context), mirroring the native path's per-match window.
+	var pendingContext []string
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -142,24 +162,50 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 			continue
 		}
 
-		// Only process match type
-		if rgMatch.Type != "match" {
+		switch rgMatch.Type {
+		case "begin":
+			// New file: context lines from the previous file must not leak
+			// into this one's matches.
+			pendingContext = pendingContext[:0]
+			continue
+		case "context":
+			ctxLine := truncateSearchLine(strings.TrimSpace(strings.TrimRight(rgMatch.Data.Lines.Text, "\r\n")), 0)
+			if includeContext && contextLines > 0 {
+				// Trailing context of the previous match (cap at contextLines
+				// after the match line: leading + match + trailing ≈ 2N).
+				if len(matches) > 0 && len(matches[len(matches)-1].Context) < 2*contextLines {
+					matches[len(matches)-1].Context = append(matches[len(matches)-1].Context, ctxLine)
+				}
+				if len(pendingContext) < contextLines {
+					pendingContext = append(pendingContext, ctxLine)
+				}
+			}
+			continue
+		case "match":
+			// handled below
+		default:
 			continue
 		}
 
 		match := SearchMatch{
 			File:       rgMatch.Data.Path.Text,
 			LineNumber: rgMatch.Data.LineNumber,
-			Line:       rgMatch.Data.Lines.Text,
-			MatchStart: rgMatch.Data.Bytes.Start,
-			MatchEnd:   rgMatch.Data.Bytes.End,
+			// rg's lines.text keeps the trailing newline; the native
+			// bufio.Scanner path strips it. Trim for output parity and
+			// truncate so a single minified line cannot dominate the response.
+			Line: truncateSearchLine(strings.TrimRight(rgMatch.Data.Lines.Text, "\r\n"), 0),
 		}
-
-		// Add context lines if present (ripgrep provides them via separate "context" type lines)
-		// For now, we capture the main match line; context is available via -C flag
-		if includeContext && contextLines > 0 {
-			// Ripgrep outputs context as separate "context" type lines before/after match lines
-			// We collect these as context on the following match
+		// Byte offsets of the first submatch (native path reports the first
+		// regex hit per line too, via FindStringIndex).
+		if len(rgMatch.Data.Submatches) > 0 {
+			match.MatchStart = rgMatch.Data.Submatches[0].Start
+			match.MatchEnd = rgMatch.Data.Submatches[0].End
+		}
+		if includeContext && contextLines > 0 && len(pendingContext) > 0 {
+			match.Context = append(match.Context, pendingContext...)
+			pendingContext = pendingContext[:0]
+		} else {
+			pendingContext = pendingContext[:0]
 		}
 
 		matches = append(matches, match)

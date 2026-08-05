@@ -127,6 +127,11 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 		contextLines = int(cl)
 	}
 
+	maxResults := e.config.MaxSearchResults
+	if mr, ok := request.Arguments["max_results"].(float64); ok && mr > 0 {
+		maxResults = int(mr)
+	}
+
 	if path == "" || pattern == "" {
 		return &mcp.CallToolResponse{
 			Content: []mcp.TextContent{
@@ -172,6 +177,16 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 		}, nil
 	}
 
+	// Honor max_results on the content-search path (previously ignored —
+	// the native worker AND the ripgrep path both returned unbounded
+	// matches, and output_format:"json" dumped all of them).
+	totalBeforeCap := len(matches)
+	truncated := false
+	if maxResults > 0 && len(matches) > maxResults {
+		matches = matches[:maxResults]
+		truncated = true
+	}
+
 	if len(matches) == 0 {
 		return &mcp.CallToolResponse{
 			Content: []mcp.TextContent{
@@ -182,10 +197,11 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 
 	var result strings.Builder
 
-	maxToShow := e.config.MaxSearchResults
+	maxToShow := maxResults
 	if maxToShow > len(matches) {
 		maxToShow = len(matches)
 	}
+	_ = truncated // surfaced via JSON payload; kept for parity with the structured response contract
 
 	// Auto-detect output style for the default branch (outputFormat == "auto").
 	// "text" preserves the legacy verbose/compact layout below.
@@ -200,7 +216,11 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 		// Doesn't honor CompactMode (the whole point of auto is to give
 		// Grep-like direct readability when there are few hits).
 		result.WriteString(formatSearchMatchesRipgrep(matches, maxToShow))
-	} else if e.config.CompactMode {
+	} else if e.config.CompactMode && outputFormat != "text" {
+		// NOTE: an explicit output_format:"text" opts out of CompactMode —
+		// the flag sets the DEFAULT, it is not an absolute override. This is
+		// what the tool description (tools_search.go, param output_format)
+		// has always promised.
 		// Compact format: minimal output but with full paths
 		result.WriteString(fmt.Sprintf("%d matches", len(matches)))
 		if len(matches) > 20 {
@@ -221,13 +241,14 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 				}
 			}
 		} else {
-			// Compact without context: comma-separated positions
+			// Compact without context: one line per match WITH content.
+			// (Bug fix: this branch used to print positions only, silently
+			// dropping match.Line even though AdvancedTextSearch is only
+			// reachable via content search — forcing a second read_file call
+			// for every search with >5 hits.)
 			for i := 0; i < maxToShow; i++ {
-				if i > 0 {
-					result.WriteString(", ")
-				}
 				match := matches[i]
-				result.WriteString(fmt.Sprintf("%s:%d[%d:%d]", match.File, match.LineNumber, match.MatchStart, match.MatchEnd))
+				result.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd, match.Line))
 			}
 		}
 
@@ -266,7 +287,7 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 	if outputFormat == "json" {
 		return &mcp.CallToolResponse{
 			Content: []mcp.TextContent{
-				{Text: formatSearchMatchesJSON(matches, pattern, path)},
+				{Text: formatSearchMatchesJSON(matches, pattern, path, totalBeforeCap, maxResults)},
 			},
 		}, nil
 	}
@@ -279,12 +300,16 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 }
 
 // formatSearchMatchesJSON formats search matches as structured JSON for AI parsing
-func formatSearchMatchesJSON(matches []SearchMatch, pattern, path string) string {
+func formatSearchMatchesJSON(matches []SearchMatch, pattern, path string, totalBeforeCap int, maxResults int) string {
 	var buf strings.Builder
 	buf.WriteString("{\n")
 	buf.WriteString(fmt.Sprintf(`  "pattern": %s, `, jsonString(pattern)))
 	buf.WriteString(fmt.Sprintf(`  "path": %s, `, jsonString(path)))
-	buf.WriteString(fmt.Sprintf(`  "total_matches": %d, `, len(matches)))
+	buf.WriteString(fmt.Sprintf(`  "total_matches": %d, `, totalBeforeCap))
+	buf.WriteString(fmt.Sprintf(`  "returned_matches": %d, `, len(matches)))
+	if maxResults > 0 && totalBeforeCap > len(matches) {
+		buf.WriteString(`  "truncated": true, `)
+	}
 	buf.WriteString(`  "matches": [`)
 
 	for i, m := range matches {
@@ -321,7 +346,9 @@ func jsonString(s string) string {
 }
 
 // formatSearchMatchesRipgrep emits matches in ripgrep's default content format:
-//     path:line:content
+//
+//	path:line:content
+//
 // One row per match (ripgrep collapses same-line matches; we keep one-per-match
 // to preserve order and make line numbers unambiguous for the model).
 // Trailing CR/LF stripped from each line to keep output single-line per match
@@ -439,8 +466,13 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 			resultsMu.Unlock()
 		}
 
-		// Add to content search list if applicable (stat only content candidates)
-		if includeContent && e.isTextFile(currentPath) {
+		// Add to content search list if applicable (stat only content candidates).
+		// Perf (v4.5.30): isTextCandidate does zero I/O (extension map only);
+		// the definitive binary check happens in the worker on the bytes it
+		// already read (isTextContent).
+		// v4.5.31: skip generated/minified bundles (*.min.*, *.map) by default —
+		// their single-line content is not human-readable and blows up responses.
+		if includeContent && isTextCandidate(currentPath) && !isMinifiedFile(currentPath) {
 			if info, ierr := d.Info(); ierr == nil && info.Size() < 10*1024*1024 { // 10MB limit
 				filesToSearch = append(filesToSearch, currentPath)
 			}
@@ -487,9 +519,19 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 					return
 				}
 
+				// Definitive binary check on the bytes we already read
+				// (BOM + null bytes). Replaces the old per-file open in the walk.
+				if !isTextContent(content) {
+					return
+				}
+
 				// Use bufio.Scanner for memory-efficient line processing
 				// Avoids allocating all lines at once (30-40% memory savings)
 				scanner := bufio.NewScanner(bytes.NewReader(content))
+				// v4.5.31: allow very long lines (minified bundles can be a single
+				// multi-KB line) so we can still process them if they somehow get
+				// past the minified-file filter. Default 64KB token limit would fail.
+				scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
 				var localMatches []SearchMatch
 				lineNum := 0
 
@@ -505,7 +547,7 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 						match := SearchMatch{
 							File:       currentFile,
 							LineNumber: lineNum,
-							Line:       line, // ✅ NO TrimSpace - mantener línea original
+							Line:       truncateSearchLine(line, 0), // v4.5.31: truncate minified lines
 							MatchStart: matchStart,
 							MatchEnd:   matchEnd,
 						}
@@ -578,7 +620,7 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 					}
 					m := contentMatches[i]
 					// Use full path instead of just basename
-					resultBuilder.WriteString(fmt.Sprintf("%s:%d[%d:%d]", m.File, m.LineNumber, m.MatchStart, m.MatchEnd))
+					resultBuilder.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s", m.File, m.LineNumber, m.MatchStart, m.MatchEnd, m.Line))
 				}
 			} else {
 				resultBuilder.WriteString(": ")
@@ -587,7 +629,7 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 						resultBuilder.WriteString(", ")
 					}
 					// Use full path instead of just basename
-					resultBuilder.WriteString(fmt.Sprintf("%s:%d[%d:%d]", match.File, match.LineNumber, match.MatchStart, match.MatchEnd))
+					resultBuilder.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s", match.File, match.LineNumber, match.MatchStart, match.MatchEnd, match.Line))
 				}
 			}
 		} else {
@@ -623,8 +665,11 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 	var matchesMu sync.Mutex
 	var matches []SearchMatch
 
-	// Try ripgrep if available and output format is json
-	if e.ripgrepAvailable && outputFormat == "json" {
+	// Try ripgrep first when available (5-50× faster than the native walk on
+	// large trees). Offsets (submatches), context lines (-C), and skip-dir
+	// exclusions are parsed for full parity with the native path; on any
+	// ripgrep failure we fall through to the native implementation.
+	if e.ripgrepAvailable {
 		rgMatches, rgErr := e.RunRipgrepSearch(ctx, path, pattern, caseSensitive, wholeWord, includeContext, contextLines)
 		if rgErr == nil {
 			return rgMatches, nil
@@ -662,11 +707,13 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 			return nil
 		}
 
-		// Only search in text files with increased size limit
-		if !e.isTextFile(currentPath) {
+		// Only search in text-file candidates (zero-I/O extension filter;
+		// content validated in the worker) with increased size limit.
+		// v4.5.31: skip generated/minified bundles (*.min.*, *.map) by default.
+		if !isTextCandidate(currentPath) || isMinifiedFile(currentPath) {
 			return nil
 		}
-		if info, ierr := d.Info(); ierr != nil || info.Size() > 10*1024*1024 { // 10MB limit
+		if info, ierr := d.Info(); ierr == nil && info.Size() > 10*1024*1024 { // 10MB limit
 			return nil
 		}
 
@@ -693,6 +740,12 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 				return
 			}
 
+			// Definitive binary check on the bytes we already read
+			// (BOM + null bytes). Replaces the old per-file open in the walk.
+			if !isTextContent(content) {
+				return
+			}
+
 			var localMatches []SearchMatch
 
 			// When context is not needed, use bufio.Scanner for memory efficiency
@@ -700,6 +753,9 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 			if !includeContext {
 				// Memory-efficient path: 30-40% memory savings with bufio.Scanner
 				scanner := bufio.NewScanner(bytes.NewReader(content))
+				// v4.5.31: allow very long lines so we don't silently stop scanning
+				// if a file with minified-like lines slips through the filter.
+				scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
 				lineNum := 0
 
 				for scanner.Scan() {
@@ -712,7 +768,7 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 						match := SearchMatch{
 							File:       currentFile,
 							LineNumber: lineNum,
-							Line:       line, // ✅ NO TrimSpace - mantener línea original
+							Line:       truncateSearchLine(line, 0), // v4.5.31: keep output small
 							MatchStart: matchStart,
 							MatchEnd:   matchEnd,
 						}
@@ -730,12 +786,12 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 						match := SearchMatch{
 							File:       currentFile,
 							LineNumber: lineNum + 1,
-							Line:       line, // ✅ NO TrimSpace - mantener línea original
+							Line:       truncateSearchLine(line, 0), // v4.5.31: keep output small
 							MatchStart: matchStart,
 							MatchEnd:   matchEnd,
 						}
 
-						// Add context
+						// Add context (truncated to avoid huge context lines)
 						var context []string
 						// Use built-in min/max (Go 1.21+) - no need for helper functions
 						start := max(0, lineNum-contextLines)
@@ -743,7 +799,7 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 
 						for i := start; i < end; i++ {
 							if i != lineNum {
-								context = append(context, strings.TrimSpace(lines[i]))
+								context = append(context, truncateSearchLine(strings.TrimSpace(lines[i]), 0))
 							}
 						}
 						match.Context = context
@@ -790,6 +846,40 @@ var searchSkipDirs = map[string]bool{
 // For example, "Reports.*" as regex means "Report" + zero+ 's' + literal dot, not "anything after Report".
 func isGlobPattern(pattern string) bool {
 	return strings.ContainsAny(pattern, "*?[")
+}
+
+// searchMinifiedPatterns lists filename fragments that identify generated/minified
+// bundles. Files matching these are skipped by content search by default because
+// their single-line output is not human-readable and wastes tokens.
+var searchMinifiedPatterns = []string{
+	".min.", // catches *.min.js, *.min.css, *.min.json, etc.
+	".map",  // source maps
+}
+
+// isMinifiedFile reports whether a file is a generated/minified bundle that should
+// be skipped by content search by default.
+func isMinifiedFile(path string) bool {
+	name := strings.ToLower(filepath.Base(path))
+	for _, p := range searchMinifiedPatterns {
+		if strings.Contains(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// truncateSearchLine truncates a matched line to maxLen runes, appending an ellipsis
+// when truncation occurs. This prevents a single minified line from blowing up the
+// response size.
+func truncateSearchLine(line string, maxLen int) string {
+	if maxLen <= 0 {
+		maxLen = MaxSearchLineLength
+	}
+	runes := []rune(line)
+	if len(runes) <= maxLen {
+		return line
+	}
+	return string(runes[:maxLen]) + " …"
 }
 
 // textExtensionsMap is a pre-computed map for O(1) text extension lookup
@@ -852,68 +942,16 @@ var textExtensionsMap = map[string]bool{
 	".lock": true, // Lock files (package-lock.json, yarn.lock, etc.)
 }
 
-// isTextFile determines if a file is likely a text file
-func (e *UltraFastEngine) isTextFile(path string) bool {
-	// Check by extension first (O(1) map lookup - very fast)
+// isTextCandidate is the walk-safe, zero-I/O text/binary pre-filter.
+// Perf (v4.5.30): the old isTextFile opened and read 512 bytes of EVERY file
+// inside the serial WalkDir callback — 2 syscalls per candidate file before
+// the parallel workers even started. This function answers from the filename
+// alone: known binary extensions are rejected, everything else (known text
+// extensions, unknown, or no extension) is deferred to the worker, which
+// validates the content it already read via isTextContent.
+func isTextCandidate(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
-	if textExtensionsMap[ext] {
-		// Extension matched: still need to check for binary-in-text encodings (UTF-16, UTF-32)
-		// because content search would fail on garbled output
-		file, err := os.Open(path)
-		if err != nil {
-			return true // assume text if can't open (extension is authoritative)
-		}
-		defer file.Close()
-
-		// Read first 512 bytes to check for binary-in-text signatures
-		buffer := make([]byte, 512)
-		n, err := file.Read(buffer)
-		if err != nil && n == 0 {
-			return true
-		}
-
-		// Check for UTF-16 / UTF-32 BOM (common in Windows .cs files with non-ASCII chars)
-		// UTF-16 LE: FF FE, UTF-16 BE: FE FF, UTF-32 LE: FF FE 00 00, UTF-32 BE: 00 00 FE FF
-		if n >= 4 && ((buffer[0] == 0xFF && buffer[1] == 0xFE && buffer[2] == 0x00 && buffer[3] == 0x00) ||
-			(buffer[0] == 0x00 && buffer[1] == 0x00 && buffer[2] == 0xFE && buffer[3] == 0xFF)) {
-			return false // UTF-32 - skip from text search
-		}
-		if n >= 2 && ((buffer[0] == 0xFF && buffer[1] == 0xFE) || (buffer[0] == 0xFE && buffer[1] == 0xFF)) {
-			return false // UTF-16 - skip from text search
-		}
-
-		// Check for null bytes (common in binary files)
-		for i := 0; i < n; i++ {
-			if buffer[i] == 0 {
-				return false
-			}
-		}
-
-		return true
-	}
-
-	// If no extension or unknown extension, check content (slower)
-	file, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer file.Close()
-
-	// Read first 512 bytes to check for binary content
-	buffer := make([]byte, 512)
-	n, err := file.Read(buffer)
-	if err != nil && n == 0 {
-		return false
-	}
-
-	// Check for null bytes (common in binary files)
-	for i := 0; i < n; i++ {
-		if buffer[i] == 0 {
-			return false
-		}
-	}
-
-	return true
+	return !binaryExtensionsMap[ext]
 }
 
 // CountOccurrences counts occurrences of a pattern in a file and optionally returns line numbers
@@ -1071,13 +1109,16 @@ func (e *UltraFastEngine) countOccurrencesInDir(ctx context.Context, dirPath, pa
 			}
 			return nil
 		}
-		if !e.isTextFile(path) {
+		if !isTextCandidate(path) || isMinifiedFile(path) {
 			return nil
 		}
 
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return nil // skip unreadable files
+		}
+		if !isTextContent(content) {
+			return nil // skip binary content (BOM / null bytes)
 		}
 
 		filesScanned++

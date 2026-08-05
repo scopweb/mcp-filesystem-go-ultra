@@ -88,6 +88,7 @@ func registerFileTools(reg *toolRegistry) {
 							results.WriteString(fmt.Sprintf("FAIL: %s — %v\n", p, err))
 							continue
 						}
+						core.InvalidateKnownHash(p)
 						successCount++
 						results.WriteString(fmt.Sprintf("OK: %s deleted\n", p))
 					} else {
@@ -96,6 +97,7 @@ func registerFileTools(reg *toolRegistry) {
 							results.WriteString(fmt.Sprintf("FAIL: %s — %v\n", p, err))
 							continue
 						}
+						core.InvalidateKnownHash(p)
 						successCount++
 						// Annotate audit with the SD-ID (last one wins for batch — the
 						// tool-level audit entry will only carry the final SD-ID, but
@@ -120,6 +122,7 @@ func registerFileTools(reg *toolRegistry) {
 			if err != nil {
 				return mcp.NewToolResultError(formatToolError(err)), nil
 			}
+			core.InvalidateKnownHash(core.NormalizePath(path))
 			if engine.IsCompactMode() {
 				return mcp.NewToolResultText(fmt.Sprintf("OK: %s deleted", path)), nil
 			}
@@ -132,6 +135,7 @@ func registerFileTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
 		core.SetSoftDeleteID(ctx, info.SDID)
+		core.InvalidateKnownHash(core.NormalizePath(path))
 
 		if engine.IsCompactMode() {
 			return mcp.NewToolResultText(formatSoftDeleteCompact(path, info)), nil
@@ -168,6 +172,8 @@ func registerFileTools(reg *toolRegistry) {
 		if err != nil {
 			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
+		core.InvalidateKnownHash(core.NormalizePath(sourcePath))
+		core.RefreshKnownHashes([]string{core.NormalizePath(destPath)})
 
 		if engine.IsCompactMode() {
 			return mcp.NewToolResultText(fmt.Sprintf("OK: moved to %s", destPath)), nil
@@ -204,6 +210,7 @@ func registerFileTools(reg *toolRegistry) {
 		if err != nil {
 			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
+		core.RefreshKnownHashes([]string{core.NormalizePath(destPath)})
 
 		if engine.IsCompactMode() {
 			return mcp.NewToolResultText(fmt.Sprintf("OK: copied to %s", destPath)), nil

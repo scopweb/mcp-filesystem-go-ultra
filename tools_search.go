@@ -111,7 +111,7 @@ func registerSearchTools(reg *toolRegistry) {
 		contextLines := 3
 		fileTypes := []interface{}{}
 		returnLines := false
-		outputFormat := "" // empty → engine defaults to "auto"; explicit "text" preserves legacy verbose/compact
+		outputFormat := ""     // empty → engine defaults to "auto"; explicit "text" preserves legacy verbose/compact
 		contentIntent := false // content-only params passed → content search implied
 
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {

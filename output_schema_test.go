@@ -248,14 +248,14 @@ func TestMultiEditSchema_IsValid(t *testing.T) {
 func TestMultiEditSchema_FullPayload_Conforms(t *testing.T) {
 	schema := parseSchema(t, multiEditOutputSchema)
 	result := &core.MultiEditResult{
-		SuccessfulEdits: 3,
-		TotalEdits:      3,
-		LinesAdded:      5,
-		LinesRemoved:    2,
-		TotalLines:      20,
-		NewHash:         "abcd1234",
-		BackupID:        "20260711-140000-dddd",
-		RiskWarning:     "MEDIUM risk",
+		SuccessfulEdits:  3,
+		TotalEdits:       3,
+		LinesAdded:       5,
+		LinesRemoved:     2,
+		TotalLines:       20,
+		NewHash:          "abcd1234",
+		BackupID:         "20260711-140000-dddd",
+		RiskWarning:      "MEDIUM risk",
 		StructureWarning: "ok",
 		Integrity: &core.FileIntegrityResult{
 			Verification: "OK",
