@@ -25,6 +25,10 @@ const (
 	// Default buffer sizes for I/O operations
 	DefaultBufferSize = 64 * 1024 // 64KB - optimal for most disk I/O
 
+	// eolSampleSize is how many bytes detectFileEOL reads from the start of an
+	// existing file to decide its line-ending style on the write path.
+	eolSampleSize = 8 * 1024
+
 	// Context timeout for file operations
 	DefaultOperationTimeout = 30 * time.Second
 
@@ -69,4 +73,9 @@ const (
 	// Prevents accidental multi-MB output that wastes tokens (~500KB ≈ 125k tokens).
 	// Operators can override via Config.MaxSearchOutputBytes; 0 = use default.
 	DefaultMaxSearchOutputBytes = 500 * 1024
+
+	// MaxSearchLineLength is the maximum number of characters emitted per matched
+	// line in search_files output. Longer lines (typical of minified bundles) are
+	// truncated with an ellipsis to keep responses token-efficient.
+	MaxSearchLineLength = 500
 )

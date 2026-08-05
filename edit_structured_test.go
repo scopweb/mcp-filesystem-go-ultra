@@ -147,8 +147,9 @@ func TestEditFile_OccurrenceStructured(t *testing.T) {
 	if got := num(m["replacements"]); got != 1 {
 		t.Errorf("replacements = %v, want 1", m["replacements"])
 	}
-	if got := num(m["total_lines"]); got != 2 {
-		t.Errorf("total_lines = %v, want 2", m["total_lines"])
+	if got := num(m["total_lines"]); got != 1 {
+		// After FIX 3 total_lines matches read_file semantics (no phantom line).
+		t.Errorf("total_lines = %v, want 1", m["total_lines"])
 	}
 	if h, _ := m["content_hash"].(string); h == "" {
 		t.Errorf("occurrence response missing content_hash")

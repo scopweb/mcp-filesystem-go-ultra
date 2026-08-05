@@ -1,5 +1,41 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.5.34] - 2026-08-05
+
+### fix(edit): boundary-newline preservation, auto-OCC resync, native insert mode, tighter auto diff summary
+
+Feedback-driven (`docs/filesystem-ultra-feedback.md`, real session on a C#/Razor codebase): one byte-integrity bug, one false-warning bug, two friction points.
+
+**1. Boundary-newline preservation (`core/splice.go`, `core/edit_operations.go`, `core/whitespace_matcher.go`, `core/batch_operations.go`).** When `old_text` ended with `\n` and `new_text` did not, the line following the match was fused onto the last line of the replacement (`{` + `using var conn...` on one line — build broken). New `preserveBoundaryNewline` helper keeps the boundary newline on every splice site (fast path, OPTIMIZATION 3/5/6, tolerant matcher, batch fallback). OPTIMIZATION 4 (bufio.Scanner path) also no longer drops the file's trailing newline on reassembly. Regression: `tests/bug10_test.go` (6 cases: LF, CRLF, EOF, tolerant, scanner).
+
+**2. Auto-OCC baseline resync after session-initiated mutations (`tools_batch.go`, `tools_core.go`, `tools_files.go`, `core/resync_occ_test.go`).** `backup` restore/undo_last/restore_trash, `edit_file` modes `regex`/`search_replace`, and `move_file`/`copy_file` now call `core.RefreshKnownHashes` (re-reads disk = ground truth); `delete_file` invalidates the baseline. `edit_file`/`multi_edit` record the post-write hash from disk instead of the in-memory value, so hooks/autosync/EOL rewrites can no longer cause a false "file changed on disk" on the next edit.
+
+**3. `edit_file` mode `insert` (`core/insert_operation.go`, `tools_core.go`, `core/param_validator.go`).** Native anchor-based insert: `mode:"insert"` with `anchor` + `position:"after"|"before"`, text in `new_text`. The anchor is preserved byte-for-byte and the text lands on its own line(s) — never replaces anything, so it bypasses the accidental-rewrite guard that used to block legitimate ~100-line method inserts. Backup+chain, hooks, auto-OCC/`expected_hash`, EOL preservation, dry-run and structured output in parity with the default replace branch. Tests: `tests/insert_mode_test.go` (8 cases).
+
+**4. Auto diff summary threshold 200 → 40 (`core/diff.go`).** Large edits no longer dump thousands of diff lines by default; above 40 diff lines the `auto` format returns per-hunk ranges + anchor lines with an elision note. `diff_format:"full"` remains available on demand.
+
+**Verification:** `go build ./...` · `go vet ./...` clean · `go test ./core/... ./tests/...` PASS (incl. 14 new regression tests) · live end-to-end verification of all four fixes against the running server.
+
+## [Unreleased / 4.5.33] - 2026-07-23
+
+### fix(search, edit): compact search content, real diff line counters, max_results cap
+
+Fixes five closely related bugs in `search_files` compact output and `edit_file` / `multi_edit` line counters (see `docs/ISSUE-search-compact-content-and-edit-counters.md`).
+
+**1. Compact search without context now prints the matched line (`core/search_operations.go`).** `AdvancedTextSearch` and `SmartSearch` content matches used to emit only `file:line[start:end]` coordinates in compact mode, forcing a second `read_file` for every hit. The compact branch now includes the line content for every match, matching the behavior already promised for `include_context` and `output_format:"auto"`.
+
+**2. Explicit `output_format:"text"` opts out of `--compact-mode` (`core/search_operations.go`).** The flag was treated as an absolute override, but the tool description always promised it only sets the default. `output_format:"text"` now forces verbose layout even when `CompactMode` is enabled.
+
+**3. `total_lines` no longer counts a phantom trailing line (`core/diff.go`, `core/edit_operations.go`, `tools_core.go`).** All reported line counts now use `core.CountLines`, which agrees with `read_file` / `bufio.Scanner`: a final `\n` does NOT create an extra empty line. This fixes `EditFile`, `MultiEdit`, `ReplaceNthOccurrence`, and the `edit_file` structured path for `search_replace` / `regex` / `occurrence` modes.
+
+**4. `lines_added` / `lines_removed` now reflect the real diff (`core/diff.go`, `core/edit_operations.go`, `tools_core.go`).** Previously these fields reported the entire replaced block (e.g. +3 -3 for a 3-line replacement where only the middle line changed). They are now computed from the same Myers diff used by `RenderDiff`, so identical context lines are not counted. For pathological files that would exceed the O(m·n) DP matrix guard, the code falls back to the legacy block estimate.
+
+**5. `max_results` is honored on the content-search path (`core/search_operations.go`).** `AdvancedTextSearch` ignored `max_results` and returned every match, with `output_format:"json"` dumping the entire list. It now caps the result set and reports `total_matches`, `returned_matches`, and `truncated` in the JSON payload.
+
+**Regression coverage:** `tests/issue_2026_07_search_counters_test.go` (8 cases) + `issue_2026_07_structured_test.go` (1 case) covering compact content, `output_format:"text"` override, `CountLines` semantics, real diff counts, pure insertion, and `max_results` capping.
+
+**Verification:** `go build ./...` · `go vet ./...` clean · `go test ./core/... ./tests/...` PASS.
+
 ## [Unreleased / 4.5.32] - 2026-07-22
 
 ### fix(multi_edit): dry_run returned plain text on a schema-declared tool — "Tool execution failed" on strict clients (+ batch aliases, byte counter)

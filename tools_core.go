@@ -246,19 +246,24 @@ func attachParentBackup(m map[string]any, engine *core.UltraFastEngine, backupID
 
 // editStructuredFromContents builds a schema-valid edit_file structured payload
 // for code paths that do not return a fully-populated *core.EditResult
-// (search_replace, occurrence and regex modes). Line stats mirror the semantics
-// of EditFile: removed = oldSpanLines*replacements, added = newSpanLines*replacements,
-// net-adjusted against the real line delta of the file.
+// (search_replace, occurrence and regex modes). Line stats are the real
+// Myers-diff line counts (identical context lines are NOT counted) with a
+// legacy span-based fallback when the DP matrix guard says the file is too
+// large for an exact diff.
 func editStructuredFromContents(path, oldContent, newContent string, replacements, oldSpanLines, newSpanLines int, backupID string) map[string]any {
-	originalLines := strings.Count(oldContent, "\n") + 1
-	totalLines := strings.Count(newContent, "\n") + 1
-	linesRemoved := oldSpanLines * replacements
-	linesAdded := newSpanLines * replacements
-	if net := linesAdded - linesRemoved; net != totalLines-originalLines {
-		if totalLines >= originalLines {
-			linesAdded = totalLines - originalLines + linesRemoved
-		} else {
-			linesRemoved = originalLines - totalLines + linesAdded
+	totalLines := core.CountLines(newContent)
+	linesAdded, linesRemoved, exact := core.DiffCounts(oldContent, newContent)
+	if !exact {
+		// Legacy span estimate (DP matrix guard for pathological files).
+		originalLines := core.CountLines(oldContent)
+		linesRemoved = oldSpanLines * replacements
+		linesAdded = newSpanLines * replacements
+		if net := linesAdded - linesRemoved; net != totalLines-originalLines {
+			if totalLines >= originalLines {
+				linesAdded = totalLines - originalLines + linesRemoved
+			} else {
+				linesRemoved = originalLines - totalLines + linesAdded
+			}
 		}
 	}
 	m := map[string]any{
@@ -736,7 +741,9 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("new_str", mcp.Description("Alias for new_text")),
 		mcp.WithBoolean("force", mcp.Description("Force the operation through the risk-threshold check (CRITICAL risk). A safety backup is always created. Note: force does NOT bypass the accidental-rewrite guard — use allow_rewrite for that. Default: false.")),
 		mcp.WithBoolean("allow_rewrite", mcp.Description("Bypass ONLY the accidental full-file rewrite guard (small old_text + large new_text with file content remaining). Prefer write_file for a real full-file rewrite; set allow_rewrite:true only when you genuinely want edit semantics on a near-total rewrite. A safety backup is created. Default: false.")),
-		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\", \"delete_range\" (remove lines start_line..end_line), \"replace_range\" (replace lines start_line..end_line with new_text)")),
+		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\", \"delete_range\" (remove lines start_line..end_line), \"replace_range\" (replace lines start_line..end_line with new_text), \"insert\" (insert new_text before/after anchor without replacing anything)")),
+		mcp.WithString("anchor", mcp.Description("Anchor text for mode:\"insert\". Must match exactly once in the file. The anchor is preserved; new_text is inserted on its own line(s).")),
+		mcp.WithString("position", mcp.Description("Where to insert relative to the anchor in mode:\"insert\": \"after\" (default) or \"before\".")),
 		mcp.WithNumber("occurrence", mcp.Description("Which occurrence to replace: 1=first, 2=second, -1=last, -2=second-to-last (default: all)")),
 		mcp.WithNumber("start_line", mcp.Description("First line of the range (1-based, inclusive). Used by mode:\"delete_range\" and mode:\"replace_range\".")),
 		mcp.WithNumber("end_line", mcp.Description("Last line of the range (1-based, inclusive). Used by mode:\"delete_range\" and mode:\"replace_range\".")),
@@ -905,6 +912,7 @@ func registerCoreTools(reg *toolRegistry) {
 				if newRaw, readErr := os.ReadFile(normPath); readErr == nil {
 					newContentStr = string(newRaw)
 				}
+				core.RefreshKnownHashes([]string{normPath})
 			}
 			msg := output.String()
 			return mcp.NewToolResultStructured(attachMessage(
@@ -963,6 +971,7 @@ func registerCoreTools(reg *toolRegistry) {
 				newContentRaw, _ := os.ReadFile(normPath)
 				newContentStr = string(newContentRaw)
 				unifiedDiff = core.RenderDiff(string(oldContentRaw), newContentStr, path, diffFormatArg(args))
+				core.RefreshKnownHashes([]string{normPath})
 			}
 
 			count := 0
@@ -1091,6 +1100,98 @@ func registerCoreTools(reg *toolRegistry) {
 				msg += "\n" + result.StructureWarning
 			}
 			return mcp.NewToolResultStructured(attachMessage(attachParentBackup(editStructured(path, result), engine, result.BackupID), msg), msg), nil
+		}
+
+		// ---- MODE: insert ----
+		if mode == "insert" {
+			anchor := ""
+			position := "after"
+			if args != nil {
+				if a, ok := args["anchor"].(string); ok {
+					anchor = a
+				}
+				if p, ok := args["position"].(string); ok && p != "" {
+					position = p
+				}
+			}
+			if anchor == "" {
+				return mcp.NewToolResultError("anchor is required for mode:\"insert\""), nil
+			}
+			if newText == "" {
+				return mcp.NewToolResultError("new_text (the text to insert) is required for mode:\"insert\""), nil
+			}
+
+			normPath := core.NormalizePath(path)
+			oldContentRaw, _ := os.ReadFile(normPath)
+			oldContentStr := string(oldContentRaw)
+
+			// Same OCC discipline as the default replace branch.
+			hh := fnv.New32a()
+			hh.Write(oldContentRaw)
+			actualHash := fmt.Sprintf("%08x", hh.Sum32())
+
+			expectedHash := ""
+			if args != nil {
+				if eh, ok := args["expected_hash"].(string); ok {
+					expectedHash = eh
+				}
+			}
+			if expectedHash != "" && actualHash != expectedHash {
+				core.SetError(ctx, fmt.Sprintf(
+					"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file before editing.",
+					expectedHash, actualHash))
+				return mcp.NewToolResultError(fmt.Sprintf(
+					"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file with read_file to get the current content_hash, then retry.",
+					expectedHash, actualHash)), nil
+			}
+			autoOCCWarn := ""
+			if expectedHash == "" {
+				if occSignal := core.CheckAutoOCC(normPath, actualHash); occSignal.Status != core.FeedbackOK {
+					core.SetFeedback(ctx, occSignal)
+					if occSignal.BlockOp {
+						return mcp.NewToolResultError(core.FormatFeedback(occSignal,
+							"edit_file blocked: file changed on disk since this session last read it")), nil
+					}
+					autoOCCWarn = "⚠ " + occSignal.Message
+				}
+			}
+
+			result, err := engine.InsertAtAnchor(ctx, path, anchor, newText, position, dryRun)
+			if err != nil {
+				return mcp.NewToolResultError(formatToolError(err)), nil
+			}
+			if !dryRun {
+				core.RefreshKnownHashes([]string{normPath})
+				if result.BackupID != "" {
+					engine.SetCurrentBackupID(path, result.BackupID)
+				}
+			}
+
+			newContentStr := result.ModifiedContent
+			if !dryRun {
+				if newRaw, readErr := os.ReadFile(normPath); readErr == nil {
+					newContentStr = string(newRaw)
+				}
+			}
+			unifiedDiff := core.RenderDiff(oldContentStr, newContentStr, path, diffFormatArg(args))
+			if unifiedDiff != "" {
+				core.SetDiffLines(ctx, strings.Count(unifiedDiff, "\n"))
+			}
+
+			msg := fmt.Sprintf("OK: inserted %s anchor (line %d)", position, result.StartLine)
+			if dryRun {
+				msg = fmt.Sprintf("DRY RUN: would insert %s anchor (line %d) — no changes written to disk", position, result.StartLine)
+			}
+			if result.BackupID != "" && !engine.IsCompactMode() {
+				msg += fmt.Sprintf("\nBackup ID: %s", result.BackupID)
+			}
+			if autoOCCWarn != "" {
+				msg += "\n" + autoOCCWarn
+			}
+			if unifiedDiff != "" {
+				msg += "\n" + unifiedDiff
+			}
+			return mcp.NewToolResultStructured(attachMessage(editStructured(path, result), msg), msg), nil
 		}
 
 		// ---- MODE: replace (default) with optional occurrence ----
@@ -1223,8 +1324,11 @@ func registerCoreTools(reg *toolRegistry) {
 		core.ResetFailedOldText(path, oldText)
 		core.RecordRead(normPath)
 		// New point 4: track our own write so auto-OCC won't flag it as an
-		// external change on the next edit.
-		core.RecordWriteHash(normPath, result.NewHash)
+		// external change on the next edit. Re-read from disk (ground truth)
+		// rather than trusting the in-memory post-edit hash: hooks, autosync
+		// or EOL rewrites between write and rename would otherwise record a
+		// stale baseline (feedback 2026-08-05, BUG 2).
+		core.RefreshKnownHashes([]string{normPath})
 
 		// Update backup chain for undo step-through
 		if result.BackupID != "" {

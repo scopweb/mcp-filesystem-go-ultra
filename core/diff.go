@@ -35,7 +35,10 @@ func DiffStats(oldContent, newContent string) string {
 // (default) diff_format collapses to a summary instead of dumping the full
 // body. Tuned so small, reviewable diffs still print in full while large block
 // deletions (the expensive case in point 1) collapse to anchors + ranges.
-const diffAutoSummaryThreshold = 200
+// Lowered 200 → 40 (feedback 2026-08-05, fricción 4): a full method still
+// prints, but anything bigger defaults to ranges + anchors, saving thousands
+// of tokens per call on large edits. diff_format:"full" remains available.
+const diffAutoSummaryThreshold = 40
 
 // diffSummaryAnchorLines is how many leading/trailing lines of each hunk the
 // summary keeps as anchors so the caller can confirm the right region.
@@ -359,4 +362,38 @@ func splitLines(s string) []string {
 		result[i] = l
 	}
 	return result
+}
+
+// maxDiffMatrixCells bounds the O(m*n) DP matrix of the diff engine
+// (8 bytes/cell). 16M cells ≈ 128 MB transient — covers files up to
+// ~4000×4000 lines. Above that, DiffCounts reports inexact and callers
+// keep the legacy block estimate.
+//
+// NOTE (pre-existing, out of scope): RenderDiff/computeHunks has the same
+// O(m*n) cost and the tool layer calls it on every edit response. A
+// linear-space diff (Hirschberg) is a possible follow-up; not part of
+// this fix.
+const maxDiffMatrixCells = 16_000_000
+
+// CountLines returns the number of lines in s with the same semantics as
+// read_file (bufio.Scanner): a trailing newline does NOT create a phantom
+// empty line, and empty content is 0 lines. Use this everywhere a line count
+// is reported so edit_file/multi_edit agree with read_file footers.
+func CountLines(s string) int {
+	return len(splitLines(s))
+}
+
+// DiffCounts returns the real (added, removed) line counts between oldContent
+// and newContent, computed from the same Myers diff that feeds RenderDiff —
+// identical context lines are NOT counted. If the DP matrix would exceed
+// maxDiffMatrixCells, it falls back to (0, 0, false) so callers can keep
+// their legacy estimate for pathological files.
+func DiffCounts(oldContent, newContent string) (added, removed int, exact bool) {
+	oldLines := splitLines(oldContent)
+	newLines := splitLines(newContent)
+	if len(oldLines)*len(newLines) > maxDiffMatrixCells {
+		return 0, 0, false
+	}
+	a, r := countChanges(oldLines, newLines)
+	return a, r, true
 }

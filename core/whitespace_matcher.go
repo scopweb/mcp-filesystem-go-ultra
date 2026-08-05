@@ -153,7 +153,7 @@ func applyTolerantMatches(content string, matches []WhitespaceMatch, newText str
 			continue
 		}
 		sb.WriteString(content[cursor:m.StartOrig])
-		sb.WriteString(newText)
+		sb.WriteString(preserveBoundaryNewline(content, m.EndOrig, content[m.StartOrig:m.EndOrig], newText))
 		cursor = m.EndOrig
 		applied++
 	}

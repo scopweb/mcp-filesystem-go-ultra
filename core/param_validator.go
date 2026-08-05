@@ -81,6 +81,8 @@ var toolSchemas = map[string]ToolParamSchema{
 		"whole_word":          {ParamBoolean, false},
 		"expected_hash":       {ParamString, false},  // B3: stale-edit protection
 		"tolerant_whitespace": {ParamBoolean, false}, // treat tabs↔4sp, CRLF↔LF as equivalent
+		"anchor":              {ParamString, false},  // mode insert: anchor text (unique match)
+		"position":            {ParamString, false},  // mode insert: "after" (default) | "before"
 	},
 	"list_directory": {
 		"path":          {ParamString, true},

@@ -243,8 +243,9 @@ func registerBatchTools(reg *toolRegistry) {
 			engine.SetCurrentBackupID(path, result.BackupID)
 		}
 		// New point 4: track our own write so auto-OCC won't flag it as an
-		// external change on the next edit.
-		core.RecordWriteHash(core.NormalizePath(path), result.NewHash)
+		// external change on the next edit (disk ground truth — same rationale
+		// as edit_file, feedback 2026-08-05 BUG 2).
+		core.RefreshKnownHashes([]string{core.NormalizePath(path)})
 
 		// Format result (Bug #17: added SkippedEdits and EditDetails)
 		if engine.IsCompactMode() {
@@ -879,6 +880,7 @@ func registerBatchTools(reg *toolRegistry) {
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to restore: %v", err)), nil
 			}
+			core.RefreshKnownHashes(restoredFiles)
 
 			var output strings.Builder
 			output.WriteString("Restore completed successfully\n\n")
@@ -945,6 +947,7 @@ func registerBatchTools(reg *toolRegistry) {
 						} else {
 							engine.ClearBackupID(targetFile)
 						}
+						core.RefreshKnownHashes(restoredFiles)
 
 						var output strings.Builder
 						output.WriteString(fmt.Sprintf("UNDO step — restored from backup %s\n\n", currentBackupID))
@@ -994,6 +997,7 @@ func registerBatchTools(reg *toolRegistry) {
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to restore: %v", err)), nil
 			}
+			core.RefreshKnownHashes(restoredFiles)
 
 			var output strings.Builder
 			output.WriteString(fmt.Sprintf("UNDO completed — restored backup %s\n\n", lastBackup.BackupID))
@@ -1117,6 +1121,7 @@ func registerBatchTools(reg *toolRegistry) {
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to restore: %v", err)), nil
 			}
+			core.RefreshKnownHashes([]string{restoredPath})
 
 			var output strings.Builder
 			output.WriteString("Trash restore completed successfully\n\n")

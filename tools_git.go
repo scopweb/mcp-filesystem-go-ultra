@@ -18,13 +18,13 @@ func registerGitTools(reg *toolRegistry) {
 
 	gitTool := mcp.NewTool("git",
 		mcp.WithTitleAnnotation("Git Version Control"),
-		mcp.WithDescription("git — Git operations: status, diff, log, show, add, commit, restore, branch, init. "+
+		mcp.WithDescription("git — Git operations: status, diff, log, show, add, commit, push, restore, branch, init. "+
 			"Must be run from within a git repository. Related: analyze_operation, edit_file, help."),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true), // restore, branch delete
 		mcp.WithIdempotentHintAnnotation(false), // commit, restore, branch delete are not idempotent
 
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, diff, log, show, add, commit, restore, branch, init")),
+		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, diff, log, show, add, commit, push, restore, branch, init")),
 		mcp.WithString("path", mcp.Description("Working directory or file path (default: auto-detect repo root). If a file path, used as implicit pathspec for diff/log/status.")),
 		mcp.WithArray("paths", mcp.WithStringItems(),
 			mcp.Description("Pathspec: native array of file/dir paths relative to repo root. Limits diff/log/status/add/restore to these paths. Equivalent to 'git <cmd> -- <paths>'.")),
@@ -34,9 +34,10 @@ func registerGitTools(reg *toolRegistry) {
 		mcp.WithString("rev", mcp.Description("Revision or range (e.g. 'HEAD~3', 'abc123..def456', 'main'). diff/log/show.")),
 		mcp.WithBoolean("staged", mcp.Description("diff: compare index vs HEAD (--cached). Default: false.")),
 		mcp.WithString("message", mcp.Description("commit: message text (required for commit)")),
-		mcp.WithString("name", mcp.Description("branch: branch name to create/delete/checkout")),
+		mcp.WithString("name", mcp.Description("branch: branch name to create/delete/checkout. push: branch to push (default: current upstream).")),
+		mcp.WithString("remote", mcp.Description("push: remote name (default: 'origin')")),
 		mcp.WithBoolean("checkout", mcp.Description("branch: with name=true, also switch to new branch (git switch -c). Default: false.")),
-		mcp.WithBoolean("force", mcp.Description("branch delete: true → -D (force). Other actions: ignored.")),
+		mcp.WithBoolean("force", mcp.Description("branch delete: true → -D (force). push: true → --force-with-lease (never plain --force). Other actions: ignored.")),
 	)
 
 	reg.addTool(gitTool, auditWrap(engine, "git", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -48,7 +49,7 @@ func registerGitTools(reg *toolRegistry) {
 		if action == "" {
 			return usageError(
 				"missing 'action' parameter",
-				`git(action:"status")  // or: diff, log, show, add, commit, restore, branch, init`), nil
+				`git(action:"status")  // or: diff, log, show, add, commit, push, restore, branch, init`), nil
 		}
 
 		// Normalize path
@@ -71,7 +72,7 @@ func registerGitTools(reg *toolRegistry) {
 
 		// Check access control
 		if !engine.IsPathAllowed(repoRoot) {
-			return mcp.NewToolResultError("access denied: path outside allowed directories"+engine.AllowedDirsSuffix()), nil
+			return mcp.NewToolResultError("access denied: path outside allowed directories" + engine.AllowedDirsSuffix()), nil
 		}
 
 		if _, hasPaths := args["paths"]; !hasPaths {
@@ -88,7 +89,7 @@ func registerGitTools(reg *toolRegistry) {
 		// force/gate state, rather than depending on each handler checking it
 		// after the gate. Applies to every user-supplied value that reaches git
 		// as a positional argument.
-		for _, f := range []string{"rev", "name"} {
+		for _, f := range []string{"rev", "name", "remote"} {
 			if v, _ := args[f].(string); v != "" {
 				if errRes := rejectOptionLike(f, v); errRes != nil {
 					return errRes, nil
@@ -116,14 +117,16 @@ func registerGitTools(reg *toolRegistry) {
 			return gitAdd(ctx, engine, repoRoot, args)
 		case "commit":
 			return gitCommit(ctx, engine, repoRoot, args)
+		case "push":
+			return gitPush(ctx, engine, repoRoot, args)
 		case "restore":
 			return gitRestore(ctx, engine, repoRoot, args)
 		case "branch":
 			return gitBranch(ctx, engine, repoRoot, args)
 		default:
 			return usageError(
-				fmt.Sprintf("unknown action %q", action),
-				`git(action:"status")  // valid: status, diff, log, show, add, commit, restore, branch, init`), nil
+			fmt.Sprintf("unknown action %q", action),
+			`git(action:"status")  // valid: status, diff, log, show, add, commit, push, restore, branch, init`), nil
 		}
 	}),
 		// Examples for help(tool:"git") — manually curated per docs/git-tool-spec.md §5
@@ -133,6 +136,8 @@ func registerGitTools(reg *toolRegistry) {
 		`git(action:"show", rev:"HEAD", output:"full")`,
 		`git(action:"add", paths:["src/file.php"])`,
 		`git(action:"commit", message:"fix: short description")`,
+		`git(action:"push")`,
+		`git(action:"push", name:"feature/new")`,
 		`git(action:"restore", paths:["file.txt"], staged:true)`,
 		`git(action:"branch", name:"feature/new", checkout:true)`,
 	)
@@ -147,7 +152,7 @@ func gitInit(ctx context.Context, engine *core.UltraFastEngine, path string, arg
 	targetPath = core.NormalizePath(targetPath)
 
 	if !engine.IsPathAllowed(targetPath) {
-		return mcp.NewToolResultError("access denied: path outside allowed directories"+engine.AllowedDirsSuffix()), nil
+		return mcp.NewToolResultError("access denied: path outside allowed directories" + engine.AllowedDirsSuffix()), nil
 	}
 
 	// githooks for init - use pre-create hook context
@@ -906,6 +911,60 @@ func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 	return mcp.NewToolResultText(fmt.Sprintf("Deleted branch: %s", name)), nil
 }
 
+// gitPush pushes commits to a remote.
+//
+// params:
+//   - remote string: remote name (default "origin")
+//   - name   string: branch to push; when given, `--set-upstream` is included
+//     so the first push of a new branch works without extra config
+//   - force  bool:   true → --force-with-lease (never plain --force)
+func gitPush(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	remote, _ := args["remote"].(string)
+	if remote == "" {
+		remote = "origin"
+	}
+	name, _ := args["name"].(string)
+	force, _ := args["force"].(bool)
+
+	hookCtx := &core.HookContext{
+		Event:     core.HookPreWrite,
+		ToolName:  "git",
+		FilePath:  repoRoot,
+		Operation: "push",
+		Metadata:  map[string]interface{}{"git_operation": "push", "remote": remote, "branch": name, "force": force},
+	}
+	if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreWrite, hookCtx); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("git push denied by hook: %v", err)), nil
+	}
+
+	cmdArgs := []string{"push"}
+	if force {
+		cmdArgs = append(cmdArgs, "--force-with-lease")
+	}
+	if name != "" {
+		cmdArgs = append(cmdArgs, "--set-upstream", remote, name)
+	} else {
+		cmdArgs = append(cmdArgs, remote)
+	}
+
+	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	if werr != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("git push failed: %v\n%s", werr, output)), nil
+	}
+
+	hookCtx.Event = core.HookPostWrite
+	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostWrite, hookCtx)
+
+	target := remote
+	if name != "" {
+		target = remote + "/" + name
+	}
+	if engine.IsCompactMode() {
+		return mcp.NewToolResultText(fmt.Sprintf("OK: pushed to %s", target)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Pushed to %s\n%s", target, strings.TrimSpace(output))), nil
+}
+
 // execGitCommand executes a git command in the given directory.
 //
 // Security: arguments are passed straight to the git process via
@@ -963,6 +1022,11 @@ func isDestructiveGitAction(action string, args map[string]any) bool {
 		return false
 	case "commit":
 		return false
+	case "push":
+		// A normal push is not destructive. A force push rewrites remote
+		// history; flagging it here means it only proceeds when the caller
+		// explicitly passed force:true (the gate above rejects otherwise).
+		return getBoolArg(args, "force")
 	}
 	return false
 }

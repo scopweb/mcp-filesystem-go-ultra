@@ -41,9 +41,20 @@ func CalculateChangeImpact(content, oldText, newText string, thresholds RiskThre
 	oldText = normalizeLineEndings(oldText)
 	newText = normalizeLineEndings(newText)
 
+	return calculateChangeImpactFromStats(
+		strings.Count(content, "\n")+1, len(content), strings.Count(content, oldText),
+		oldText, newText, thresholds)
+}
+
+// calculateChangeImpactFromStats builds a ChangeImpact from pre-computed
+// content statistics. Used by the streaming large-file edit path, which
+// gathers the stats in a constant-memory pass and never holds the whole
+// file. oldText/newText must already be LF-normalized; contentLen is the
+// length of the normalized content.
+func calculateChangeImpactFromStats(totalLines, contentLen, occurrences int, oldText, newText string, thresholds RiskThresholds) *ChangeImpact {
 	impact := &ChangeImpact{
-		TotalLines:  len(strings.Split(content, "\n")),
-		Occurrences: strings.Count(content, oldText),
+		TotalLines:  totalLines,
+		Occurrences: occurrences,
 		RiskFactors: []string{},
 	}
 
@@ -68,8 +79,8 @@ func CalculateChangeImpact(content, oldText, newText string, thresholds RiskThre
 	}
 
 	// Calcular porcentaje del archivo afectado
-	if len(content) > 0 {
-		impact.ChangePercentage = (float64(impact.CharactersChanged) / float64(len(content))) * 100.0
+	if contentLen > 0 {
+		impact.ChangePercentage = (float64(impact.CharactersChanged) / float64(contentLen)) * 100.0
 	}
 
 	// Determinar nivel de riesgo

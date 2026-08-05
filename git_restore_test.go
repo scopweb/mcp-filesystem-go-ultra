@@ -27,9 +27,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mcp/filesystem-ultra/cache"
 	"github.com/mcp/filesystem-ultra/core"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // newGitTestEngine returns an UltraFastEngine that allows access to dir.

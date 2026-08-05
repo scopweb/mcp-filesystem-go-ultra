@@ -715,13 +715,10 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 	// style and convert finalContent to match. For new files, leave content as-is
 	// (let the caller decide the EOL style).
 	if existing, statErr := os.Stat(path); statErr == nil && !existing.IsDir() {
-		if existingBytes, readErr := os.ReadFile(path); readErr == nil {
-			existingEOL := detectEOL(string(existingBytes))
-			if existingEOL != "\n" {
-				// Normalize finalContent to LF first (it may already be LF, or carry CRLF
-				// from the LLM), then restore the file's original EOL.
-				finalContent = restoreEOL(normalizeLineEndings(finalContent), existingEOL)
-			}
+		if existingEOL, eolErr := detectFileEOL(path); eolErr == nil && existingEOL != "\n" {
+			// Normalize finalContent to LF first (it may already be LF, or carry CRLF
+			// from the LLM), then restore the file's original EOL.
+			finalContent = restoreEOL(normalizeLineEndings(finalContent), existingEOL)
 		}
 	}
 
