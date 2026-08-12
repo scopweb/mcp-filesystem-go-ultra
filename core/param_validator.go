@@ -257,6 +257,15 @@ var toolSchemas = map[string]ToolParamSchema{
 	},
 }
 
+// benignParams are metadata parameters some clients attach to tool calls
+// (e.g. a human-readable "description" of the edit, sent by opencode/Claude
+// Code style harnesses). They carry no semantics for the engine, so they are
+// accepted and silently ignored instead of failing the whole call — the proxy
+// logs showed ~1 in 5 validation errors came from this single parameter.
+var benignParams = map[string]bool{
+	"description": true,
+}
+
 // ValidateToolParams checks the incoming arguments against the tool's schema.
 // Returns nil if everything is valid, or a list of human-readable errors.
 func ValidateToolParams(toolName string, args map[string]interface{}) []string {
@@ -270,6 +279,9 @@ func ValidateToolParams(toolName string, args map[string]interface{}) []string {
 	// 1. Reject unknown parameters
 	for k := range args {
 		if _, known := schema[k]; !known {
+			if benignParams[k] {
+				continue
+			}
 			errs = append(errs, fmt.Sprintf("unknown parameter %q (valid: %s)", k, knownParamNames(schema)))
 		}
 	}

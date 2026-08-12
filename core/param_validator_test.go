@@ -1,6 +1,7 @@
 package core
 
 import (
+	"os"
 	"testing"
 )
 
@@ -149,6 +150,42 @@ func TestValidateToolParams_Aliases(t *testing.T) {
 	errs := ValidateToolParams("edit_file", args)
 	if len(errs) > 0 {
 		t.Errorf("aliases should be accepted, got: %v", errs)
+	}
+}
+
+func TestValidateToolParams_BenignDescription(t *testing.T) {
+	// "description" is a client-side metadata param (opencode/Claude Code
+	// harnesses attach it) — must be accepted and ignored on every tool.
+	for _, tool := range []string{"edit_file", "multi_edit", "write_file", "read_file"} {
+		args := map[string]interface{}{
+			"path":        "/tmp/test.txt",
+			"description": "fix typo in header",
+		}
+		if tool == "multi_edit" {
+			args["edits_json"] = "[]"
+		}
+		if errs := ValidateToolParams(tool, args); len(errs) > 0 {
+			t.Errorf("%s: description should be ignored, got: %v", tool, errs)
+		}
+	}
+}
+
+func TestRenameWithRetry(t *testing.T) {
+	dir := t.TempDir()
+	src := dir + string(os.PathSeparator) + "src.txt"
+	dst := dir + string(os.PathSeparator) + "dst.txt"
+	if err := os.WriteFile(src, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := renameWithRetry(src, dst); err != nil {
+		t.Fatalf("renameWithRetry failed on uncontended rename: %v", err)
+	}
+	if _, err := os.Stat(dst); err != nil {
+		t.Fatalf("destination missing after rename: %v", err)
+	}
+	// Persistent failure (missing source) must still return an error.
+	if err := renameWithRetry(src, dst); err == nil {
+		t.Fatal("expected error renaming a nonexistent source, got nil")
 	}
 }
 

@@ -149,7 +149,7 @@ func (e *UltraFastEngine) InsertAtAnchor(ctx context.Context, path, anchor, text
 	if err := os.WriteFile(tmpPath, []byte(finalContent), fileMode); err != nil {
 		return nil, fmt.Errorf("error writing temp file: %w", err)
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := renameWithRetry(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
 		return nil, fmt.Errorf("error finalizing insert: %w", err)
 	}

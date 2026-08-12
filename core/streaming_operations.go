@@ -178,8 +178,8 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 	}
 	file.Close()
 
-	// Atomic rename
-	if err := os.Rename(tmpPath, path); err != nil {
+	// Atomic rename (retry past transient Windows locks)
+	if err := renameWithRetry(tmpPath, path); err != nil {
 		return fmt.Errorf("failed to finalize file: %w", err)
 	}
 
@@ -626,7 +626,7 @@ func (e *UltraFastEngine) executeStreamingReplace(ctx context.Context, path, nee
 		return fmt.Errorf("failed to close temp file: %w", err)
 	}
 
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := renameWithRetry(tmpPath, path); err != nil {
 		return fmt.Errorf("failed to finalize file: %w", err)
 	}
 	success = true
