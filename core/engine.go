@@ -742,8 +742,8 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
 
-	// Atomic rename
-	if err := os.Rename(tmpPath, path); err != nil {
+	// Atomic rename (retry past transient Windows locks)
+	if err := renameWithRetry(tmpPath, path); err != nil {
 		os.Remove(tmpPath) // Clean up temp file
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
@@ -814,8 +814,8 @@ func (e *UltraFastEngine) WriteFileBytes(ctx context.Context, path string, data 
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
 
-	// Atomic rename
-	if err := os.Rename(tmpPath, path); err != nil {
+	// Atomic rename (retry past transient Windows locks)
+	if err := renameWithRetry(tmpPath, path); err != nil {
 		os.Remove(tmpPath) // Clean up temp file
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
@@ -848,11 +848,31 @@ func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
 	if err := os.WriteFile(tmpPath, data, mode); err != nil {
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := renameWithRetry(tmpPath, path); err != nil {
 		os.Remove(tmpPath) // best-effort cleanup
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 	return nil
+}
+
+// renameWithRetry retries os.Rename past transient Windows file locks.
+// Antivirus scanners, the search indexer and file watchers (including our own)
+// briefly hold a handle on the destination file, and os.Rename on Windows
+// fails with ERROR_ACCESS_DENIED in that window instead of blocking. The
+// proxy logs showed "error finalizing edit: rename ..." failures from this.
+// Backoff: immediate attempt + 50/100/200/400ms retries (~750ms worst case).
+func renameWithRetry(oldPath, newPath string) error {
+	err := os.Rename(oldPath, newPath)
+	if err == nil {
+		return nil
+	}
+	for _, delay := range []time.Duration{50, 100, 200, 400} {
+		time.Sleep(delay * time.Millisecond)
+		if err = os.Rename(oldPath, newPath); err == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 // ReadFileBytes reads a file and returns its raw bytes.

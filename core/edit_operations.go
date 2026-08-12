@@ -233,8 +233,8 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 		return nil, fmt.Errorf("error writing temp file: %w", err)
 	}
 
-	// Atomic rename
-	if err := os.Rename(tmpPath, path); err != nil {
+	// Atomic rename (retry past transient Windows locks)
+	if err := renameWithRetry(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
 		return nil, fmt.Errorf("error finalizing edit: %w", err)
 	}
@@ -882,7 +882,7 @@ func (e *UltraFastEngine) searchAndReplaceInFile(filePath, pattern, replacement 
 		return 0, err
 	}
 
-	if err := os.Rename(tmpPath, filePath); err != nil {
+	if err := renameWithRetry(tmpPath, filePath); err != nil {
 		os.Remove(tmpPath)
 		return 0, err
 	}
@@ -1641,8 +1641,8 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		return nil, fmt.Errorf("error writing temp file: %w", err)
 	}
 
-	// Atomic rename
-	if err := os.Rename(tmpPath, path); err != nil {
+	// Atomic rename (retry past transient Windows locks)
+	if err := renameWithRetry(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
 		return nil, fmt.Errorf("error finalizing edit: %w", err)
 	}
@@ -1952,8 +1952,8 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 		return nil, fmt.Errorf("error writing temp file: %w", err)
 	}
 
-	// Atomic rename
-	if err := os.Rename(tmpPath, validPath); err != nil {
+	// Atomic rename (retry past transient Windows locks)
+	if err := renameWithRetry(tmpPath, validPath); err != nil {
 		os.Remove(tmpPath)
 		return nil, fmt.Errorf("error finalizing edit: %w", err)
 	}

@@ -1,5 +1,21 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.5.35] - 2026-08-12
+
+### fix(reliability): rename retry past transient Windows locks, benign `description` param, trailing-comma tolerant `edits_json`
+
+Proxy-log driven (`C:\temp\mcp-proxy-logs\proxy.jsonl`, 32.5k calls, mar–ago 2026): three recurring, server-fixable failure patterns accounted for ~12% of all logged errors with a message.
+
+**1. Atomic writes survive transient Windows file locks (`core/engine.go` + 8 call sites).** `os.Rename` on Windows fails with `ERROR_ACCESS_DENIED` when an antivirus scanner, the search indexer, or a file watcher briefly holds the destination — the proxy log showed `error finalizing edit: rename ...` / `failed to rename temp file` failures from exactly this. New `renameWithRetry` helper retries with 50/100/200/400ms backoff (~750ms worst case) and is now used by every temp+rename finalize path: `atomicWriteFile`, `WriteFileContent` (text + bytes), `EditFile`, `MultiEdit`, `ReplaceNthOccurrence`, `SmartEditFile`, insert mode, and both streaming write paths.
+
+**2. `description` is a globally benign parameter (`core/param_validator.go`).** opencode/Claude Code style harnesses attach a human-readable `description` to edit/write calls; the strict validator rejected the whole call for it (~20% of all validation errors in the log, 21 in jul–aug alone). A new `benignParams` set accepts and silently ignores it on every tool. Truly unknown params are still rejected as before.
+
+**3. `multi_edit` recovers from trailing commas in `edits_json` (`tools_batch.go`).** LLM clients frequently emit `{"old_text":"a",}` or `[... ,]` — ~40% of the 36 logged `Invalid edits JSON` errors were this exact shape. New `stripTrailingCommas` helper (string/escape aware, commas inside strings preserved) strips them and the unmarshal is retried once before failing.
+
+**Regression coverage:** `core/param_validator_test.go` gains `TestValidateToolParams_BenignDescription` (4 tools) and `TestRenameWithRetry` (uncontended rename + persistent-failure error path); `strip_trailing_commas_test.go` (new) covers 8 cases including nested, whitespace, comma-inside-string and escaped quotes.
+
+**Verification:** `go build ./...` clean · `go test ./...` PASS (all packages).
+
 ## [Unreleased / 4.5.34] - 2026-08-05
 
 ### fix(edit): boundary-newline preservation, auto-OCC resync, native insert mode, tighter auto diff summary
