@@ -12,7 +12,7 @@ Proxy-log driven (`C:\temp\mcp-proxy-logs\proxy.jsonl`, 32.5k calls, mar–ago 2
 
 **3. `multi_edit` recovers from trailing commas in `edits_json` (`tools_batch.go`).** LLM clients frequently emit `{"old_text":"a",}` or `[... ,]` — ~40% of the 36 logged `Invalid edits JSON` errors were this exact shape. New `stripTrailingCommas` helper (string/escape aware, commas inside strings preserved) strips them and the unmarshal is retried once before failing.
 
-**Regression coverage:** `core/param_validator_test.go` gains `TestValidateToolParams_BenignDescription` (4 tools) and `TestRenameWithRetry` (uncontended rename + persistent-failure error path); `strip_trailing_commas_test.go` (new) covers 8 cases including nested, whitespace, comma-inside-string and escaped quotes.
+**Regression coverage:** `core/param_validator_test.go` gains `TestValidateToolParams_BenignDescription` (4 tools) and `TestRenameWithRetry` (uncontended rename + persistent-failure error path); `strip_trailing_commas_test.go` (new) covers 8 cases including nested, whitespace, comma-inside-string and escaped quotes; `smoke_v4535_fixes_test.go` (new) is end-to-end through the registered handlers — edit with `description`, multi_edit with trailing commas, and an edit under a real 200ms destination lock (no delete-sharing handle) that only succeeds via the retry path.
 
 **Verification:** `go build ./...` clean · `go test ./...` PASS (all packages).
 
