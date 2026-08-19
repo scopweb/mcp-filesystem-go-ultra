@@ -18,6 +18,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/mcp/filesystem-ultra/cache"
 	"github.com/mcp/filesystem-ultra/core"
 )
 
@@ -410,6 +411,43 @@ func TestGitShow_DefaultStat(t *testing.T) {
 	}
 }
 
+// The commit message must NOT count against max_lines: a long message used to
+// eat the whole budget before the diff started.
+func TestGitShow_MessageDoesNotEatMaxLines(t *testing.T) {
+	dir, engine := setupRepoWithFile(t)
+	defer engine.Close()
+
+	// Commit with a 15-line message and a diff larger than max_lines.
+	longMsg := "subject line\n\n" + strings.Repeat("body line\n", 13)
+	writeAndCommit(t, dir, "big.txt", strings.Repeat("aaaaaaaaaa\n", 100), longMsg)
+
+	res, err := gitShow(context.Background(), engine, dir, map[string]interface{}{
+		"action":    "show",
+		"rev":       "HEAD",
+		"output":    "full",
+		"max_lines": 30,
+	})
+	if err != nil {
+		t.Fatalf("gitShow: %v", err)
+	}
+	text := mcpText(t, res)
+
+	// Header: full message present despite max_lines=30.
+	if !strings.Contains(text, "subject line") {
+		t.Errorf("missing commit subject; got: %s", text[:min(300, len(text))])
+	}
+	if got, want := strings.Count(text, "body line"), 13; got != want {
+		t.Errorf("expected %d message body lines (header uncapped by max_lines), got %d", want, got)
+	}
+	// Body: diff present and truncated with footer.
+	if !strings.Contains(text, "diff --git") {
+		t.Errorf("missing diff body; got: %s", text[:min(300, len(text))])
+	}
+	if !strings.Contains(text, "[TRUNCADO:") {
+		t.Errorf("expected TRUNCADO footer for the diff body")
+	}
+}
+
 // ----------------------------------------------------------------------------
 // gitAdd tests
 // ----------------------------------------------------------------------------
@@ -737,6 +775,69 @@ func TestGitStatus_PathsFilter(t *testing.T) {
 	}
 	if strings.Contains(text, "y.txt") {
 		t.Errorf("y.txt should be filtered out; got: %s", text)
+	}
+}
+
+// newCompactGitTestEngine is newGitTestEngine with CompactMode enabled.
+func newCompactGitTestEngine(t *testing.T, dir string) *core.UltraFastEngine {
+	t.Helper()
+	c, err := cache.NewIntelligentCache(50 * 1024 * 1024)
+	if err != nil {
+		t.Fatalf("cache: %v", err)
+	}
+	engine, err := core.NewUltraFastEngine(&core.Config{
+		Cache:        c,
+		AllowedPaths: []string{dir},
+		ParallelOps:  2,
+		CompactMode:  true,
+	})
+	if err != nil {
+		t.Fatalf("engine: %v", err)
+	}
+	return engine
+}
+
+// Compact mode without explicit output → one-line summary (unchanged default).
+func TestGitStatus_CompactDefaultIsSummary(t *testing.T) {
+	dir, _ := setupRepoWithFile(t)
+	engine := newCompactGitTestEngine(t, dir)
+	defer engine.Close()
+	if err := os.WriteFile(dir+"/dirty.txt", []byte("hi\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := gitStatus(context.Background(), engine, dir, map[string]interface{}{
+		"action": "status",
+	})
+	if err != nil {
+		t.Fatalf("gitStatus: %v", err)
+	}
+	text := mcpText(t, res)
+	if !strings.Contains(text, "| dirty") || strings.Contains(text, "dirty.txt") {
+		t.Errorf("expected one-line compact summary; got: %s", text)
+	}
+}
+
+// Compact mode + explicit output → file listing (the escape hatch an agent
+// needs to know WHICH files changed before committing).
+func TestGitStatus_CompactExplicitOutputListsFiles(t *testing.T) {
+	dir, _ := setupRepoWithFile(t)
+	engine := newCompactGitTestEngine(t, dir)
+	defer engine.Close()
+	if err := os.WriteFile(dir+"/dirty.txt", []byte("hi\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, out := range []string{"name-only", "full"} {
+		res, err := gitStatus(context.Background(), engine, dir, map[string]interface{}{
+			"action": "status",
+			"output": out,
+		})
+		if err != nil {
+			t.Fatalf("gitStatus(%s): %v", out, err)
+		}
+		text := mcpText(t, res)
+		if !strings.Contains(text, "dirty.txt") {
+			t.Errorf("output:%s should list dirty.txt even in compact mode; got: %s", out, text)
+		}
 	}
 }
 

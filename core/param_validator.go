@@ -282,7 +282,12 @@ func ValidateToolParams(toolName string, args map[string]interface{}) []string {
 			if benignParams[k] {
 				continue
 			}
-			errs = append(errs, fmt.Sprintf("unknown parameter %q (valid: %s)", k, knownParamNames(schema)))
+			msg := fmt.Sprintf("unknown parameter %q", k)
+			if suggestion := closestParam(k, schema); suggestion != "" {
+				msg += fmt.Sprintf(" (did you mean %q?)", suggestion)
+			}
+			msg += fmt.Sprintf(" (valid: %s)", knownParamNames(schema))
+			errs = append(errs, msg)
 		}
 	}
 
@@ -353,4 +358,51 @@ func knownParamNames(schema ToolParamSchema) string {
 	}
 	sort.Strings(names)
 	return strings.Join(names, ", ")
+}
+
+// closestParam returns the schema parameter with the smallest Levenshtein
+// distance to name, or "" if none is close enough (distance > 2). Used to
+// suggest corrections for typos like "include>" → "include".
+func closestParam(name string, schema ToolParamSchema) string {
+	best := ""
+	bestDist := 3 // strictly less than this threshold wins
+	for k := range schema {
+		if d := levenshtein(name, k); d < bestDist {
+			bestDist = d
+			best = k
+		}
+	}
+	return best
+}
+
+// levenshtein computes the edit distance between a and b.
+func levenshtein(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		cur := make([]int, len(rb)+1)
+		cur[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			cur[j] = min3(cur[j-1]+1, prev[j]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(rb)]
+}
+
+func min3(a, b, c int) int {
+	if a > b {
+		a = b
+	}
+	if a > c {
+		a = c
+	}
+	return a
 }
