@@ -28,7 +28,7 @@ func registerGitTools(reg *toolRegistry) {
 		mcp.WithString("path", mcp.Description("Working directory or file path (default: auto-detect repo root). If a file path, used as implicit pathspec for diff/log/status.")),
 		mcp.WithArray("paths", mcp.WithStringItems(),
 			mcp.Description("Pathspec: native array of file/dir paths relative to repo root. Limits diff/log/status/add/restore to these paths. Equivalent to 'git <cmd> -- <paths>'.")),
-		mcp.WithString("output", mcp.Description("Output format. diff/show: 'stat' (default) | 'name-only' | 'full'. status: 'name-only' (default) | 'full'. log: 'oneline' (default) | 'full'.")),
+		mcp.WithString("output", mcp.Description("Output format. diff/show: 'stat' (default) | 'name-only' | 'full'. status: 'name-only' | 'full' — in compact mode, status without explicit output returns a one-line summary; pass output explicitly (either value) to get the changed-file listing. log: 'oneline' (default) | 'full'.")),
 		mcp.WithNumber("max_lines", mcp.Description("Max output lines before truncation with hint footer (default: 200)")),
 		mcp.WithNumber("limit", mcp.Description("log: max commits to return (default: 10)")),
 		mcp.WithString("rev", mcp.Description("Revision or range (e.g. 'HEAD~3', 'abc123..def456', 'main'). diff/log/show.")),
@@ -188,12 +188,22 @@ func gitInit(ctx context.Context, engine *core.UltraFastEngine, path string, arg
 //   - "full"                → porcelain v1 with branch line AND branch tracking info (porcelain=v2 -b)
 //
 // paths: optional native array; appended after `--` to limit the scope.
+//
+// Compact mode: with no explicit `output` the response is the one-line summary
+// ("repo (branch) | +1 ~2 ?3 | dirty"). An explicitly passed `output` (even the
+// default value "name-only") opts out of the summary and returns the file
+// listing — this is the escape hatch when the agent needs to know WHICH files
+// changed, not just how many.
 func gitStatus(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	output, _ := parseOutputArg(args, "output", "name-only", []string{"name-only", "full"})
 	// parseOutputArg never errors with a valid default, but defensive:
 	if output == "" {
 		output = "name-only"
 	}
+	// Was `output` explicitly passed? In compact mode that opts out of the
+	// one-line summary and returns the porcelain file listing instead.
+	_, outputExplicit := args["output"].(string)
+	maxLines := parseIntArg(args, "max_lines", 200)
 
 	paths, errRes := pathsFromArgs(args)
 	if errRes != nil {
@@ -216,10 +226,10 @@ func gitStatus(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 		return mcp.NewToolResultError(fmt.Sprintf("git status failed: %v\n%s", werr, gitOutput)), nil
 	}
 
-	if engine.IsCompactMode() {
+	if engine.IsCompactMode() && !outputExplicit {
 		return gitStatusCompact(repoRoot, gitOutput)
 	}
-	return mcp.NewToolResultText(gitOutput), nil
+	return mcp.NewToolResultText(truncateOutput(gitOutput, maxLines)), nil
 }
 
 // gitStatusCompact returns a compact one-line status summary
@@ -468,6 +478,11 @@ func gitLog(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 
 // gitShow displays a commit: stat by default, full/Name-only on demand.
 // rev is required; paths optionally scopes the diff shown.
+//
+// The response is split into header (commit metadata + message) and body
+// (stat / name-only / patch). max_lines applies ONLY to the body: the header
+// is always shown in full (defensively capped at showHeaderMaxLines) so a long
+// commit message can no longer eat the diff budget before the patch starts.
 func gitShow(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	rev, _ := args["rev"].(string)
 	if rev == "" {
@@ -490,13 +505,22 @@ func gitShow(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 		return errRes, nil
 	}
 
-	cmdArgs := []string{"show", "--no-ext-diff", rev}
+	// ---- Header: commit metadata + message, never counted against max_lines ----
+	header, herr := execGitCommand(repoRoot, "git", "show", "--no-patch", rev)
+	if herr != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("git show failed: %v\n%s", herr, header)), nil
+	}
+	header = truncateHeader(strings.TrimRight(header, "\n"))
+
+	// ---- Body: stat / name-only / patch, truncated to max_lines ----
+	// --format= suppresses the commit message so it does not appear twice.
+	cmdArgs := []string{"show", "--no-ext-diff", "--format=", rev}
 	switch out {
 	case "stat":
 		cmdArgs = append(cmdArgs, "--stat")
 	case "name-only":
 		cmdArgs = append(cmdArgs, "--name-only")
-		// "full" → plain patch + commit metadata
+		// "full" → plain patch
 	}
 	if len(paths) > 0 {
 		cmdArgs = append(cmdArgs, "--")
@@ -505,16 +529,31 @@ func gitShow(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 		}
 	}
 
-	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	body, werr := execGitCommand(repoRoot, "git", cmdArgs...)
 	if werr != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("git show failed: %v\n%s", werr, output)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("git show failed: %v\n%s", werr, body)), nil
 	}
+	body = strings.TrimLeft(body, "\n")
 
-	if strings.TrimSpace(output) == "" {
-		return mcp.NewToolResultText("No commit data for " + rev), nil
+	if strings.TrimSpace(body) == "" {
+		return mcp.NewToolResultText(header), nil
 	}
+	return mcp.NewToolResultText(header + "\n\n" + truncateOutput(body, maxLines)), nil
+}
 
-	return mcp.NewToolResultText(truncateOutput(output, maxLines)), nil
+// showHeaderMaxLines caps the commit-message header of `git show` so a
+// pathological message cannot blow up the response. Normal messages (<40
+// lines) are unaffected.
+const showHeaderMaxLines = 40
+
+// truncateHeader caps the header at showHeaderMaxLines lines.
+func truncateHeader(header string) string {
+	lines := strings.Split(header, "\n")
+	if len(lines) <= showHeaderMaxLines {
+		return header
+	}
+	return strings.Join(lines[:showHeaderMaxLines], "\n") +
+		fmt.Sprintf("\n[commit message truncated: %d lines total, showing %d]", len(lines), showHeaderMaxLines)
 }
 
 // gitAdd stages files

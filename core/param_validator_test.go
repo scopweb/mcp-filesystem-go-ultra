@@ -30,6 +30,43 @@ func TestValidateToolParams_UnknownParam(t *testing.T) {
 	}
 }
 
+// A near-miss typo should get a "did you mean" suggestion.
+func TestValidateToolParams_UnknownParamSuggestsCorrection(t *testing.T) {
+	args := map[string]interface{}{
+		"path":     "/tmp",
+		"pattern":  "x",
+		"include>": "*.php", // reported typo: user meant "include"
+	}
+	errs := ValidateToolParams("search_files", args)
+	if len(errs) == 0 {
+		t.Fatal("expected error for unknown param, got none")
+	}
+	found := false
+	for _, e := range errs {
+		if strContains(e, `"include>"`) && strContains(e, `did you mean "include"?`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected did-you-mean suggestion for include>, got: %v", errs)
+	}
+}
+
+// A param with no close match gets no suggestion.
+func TestValidateToolParams_UnknownParamNoSuggestionWhenFar(t *testing.T) {
+	args := map[string]interface{}{
+		"path":    "/tmp",
+		"pattern": "x",
+		"zzzz":    true,
+	}
+	errs := ValidateToolParams("search_files", args)
+	for _, e := range errs {
+		if strContains(e, "did you mean") {
+			t.Errorf("unexpected suggestion for distant param: %v", e)
+		}
+	}
+}
+
 func TestValidateToolParams_MissingRequired(t *testing.T) {
 	// edit_file requires "path"
 	args := map[string]interface{}{

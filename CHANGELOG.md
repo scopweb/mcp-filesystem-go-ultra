@@ -1,5 +1,21 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.5.36] - 2026-08-18
+
+### fix(git): status file listing in compact mode, show header outside max_lines, did-you-mean param suggestions
+
+User-feedback driven (real session on a WordPress plugins repo): two friction points in the `git` tool, one UX gap in parameter validation.
+
+**1. `git status` lists files in compact mode when `output` is explicit (`tools_git.go`).** With `--compact-mode`, `git(action:"status")` returned only the one-line summary (`repo (main) | +0 ~17 ?1 | dirty`) and `output:"full"` returned the exact same thing — there was no way to learn WHICH files changed without leaving the plugin for bash. Now an explicitly passed `output` (`"name-only"` or `"full"`) opts out of the summary and returns the porcelain file listing, truncated by `max_lines` (default 200). The summary remains the default when `output` is omitted.
+
+**2. `git show`: commit message no longer eats the diff budget (`tools_git.go`).** `max_lines` used to apply to the whole response, so a long commit message consumed the budget before the patch started. The response is now split into header (commit metadata + message, always complete, defensively capped at 40 lines) and body (stat/name-only/patch), with `max_lines` applying to the body only.
+
+**3. Unknown-param errors suggest the intended name (`core/param_validator.go`).** A typo like `include>` was already rejected by strict validation, but the error only listed the 14 valid names. Near-miss typos (Levenshtein ≤ 2) now get a `did you mean "include"?` hint.
+
+**Regression coverage:** `TestGitStatus_CompactDefaultIsSummary`, `TestGitStatus_CompactExplicitOutputListsFiles`, `TestGitShow_MessageDoesNotEatMaxLines` (15-line message + 100-line diff with max_lines=30), `TestValidateToolParams_UnknownParamSuggestsCorrection`, and `smoke_unknown_param_test.go` — an end-to-end stdio test proving the built binary rejects `include>` on `search_files`.
+
+**Verification:** `go build ./...` clean · `go vet ./...` clean · `go test ./...` PASS (all packages) · smoke E2E PASS.
+
 ## [Unreleased / 4.5.35] - 2026-08-12
 
 ### fix(reliability): rename retry past transient Windows locks, benign `description` param, trailing-comma tolerant `edits_json`
