@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"runtime"
 	"strings"
 
@@ -44,7 +45,7 @@ func DefaultConfiguration() *Configuration {
 		VSCodeAPIEnabled: true,
 		DebugMode:        false,
 		LogLevel:         "info",
-		AllowedPaths:     []string{},       // No restrictions by default
+		AllowedPaths:     []string{},       // Fail-closed at startup unless --insecure-open
 		CompactMode:      false,            // Verbose by default
 		MaxResponseSize:  10 * 1024 * 1024, // 10MB default
 		MaxSearchResults: 1000,             // 1000 results default
@@ -60,7 +61,7 @@ const serverInstructions = `MCP Filesystem Ultra — operates on the real host f
 // serverVersion is the single source of truth for the version reported by
 // --version, the MCP handshake, the help header and the startup logs.
 // Keep in sync with the top CHANGELOG entry.
-const serverVersion = "4.5.38"
+const serverVersion = "4.6.0"
 
 // buildCommit and buildDate are stamped at build time via
 //
@@ -83,7 +84,8 @@ func main() {
 		vsCodeAPI        = flag.Bool("vscode-api", true, "Enable VSCode API integration when available")
 		debugMode        = flag.Bool("debug", false, "Enable debug mode")
 		logLevel         = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
-		allowedPaths     = flag.String("allowed-paths", "", "Comma-separated list of allowed base paths for access control (alternative: pass paths as individual arguments)")
+		allowedPaths     = flag.String("allowed-paths", "", "Comma-separated list of allowed base paths (required unless --insecure-open; alternative: pass paths as positional arguments)")
+		insecureOpen     = flag.Bool("insecure-open", false, "Disable access control (entire disk). Labs only. Default since v4.6.0 is fail-closed.")
 		compactMode      = flag.Bool("compact-mode", false, "Enable compact responses (minimal tokens for Claude Desktop)")
 		maxResponseSize  = flag.String("max-response-size", "10MB", "Maximum response size")
 		maxSearchResults = flag.Int("max-search-results", 1000, "Maximum search results to return")
@@ -160,21 +162,25 @@ func main() {
 	// 1. Single --allowed-paths flag with comma-separated values
 	// 2. Multiple individual path arguments after all flags
 	if *allowedPaths != "" {
-		// Format 1: comma-separated string
-		config.AllowedPaths = strings.Split(*allowedPaths, ",")
-		for i, path := range config.AllowedPaths {
-			config.AllowedPaths[i] = strings.TrimSpace(path)
-		}
-	} else {
-		// Format 2: check for additional arguments as individual paths
-		additionalArgs := flag.Args()
-		if len(additionalArgs) > 0 {
-			config.AllowedPaths = additionalArgs
+		config.AllowedPaths = sanitizeAllowedPaths(strings.Split(*allowedPaths, ","))
+	} else if additionalArgs := flag.Args(); len(additionalArgs) > 0 {
+		config.AllowedPaths = sanitizeAllowedPaths(additionalArgs)
+	}
+
+	// Fail-closed: refuse to start with an open disk unless --insecure-open.
+	// --version already returned. --bench is allowed without a sandbox.
+	if !*benchmark {
+		if err := requireAllowedPaths(config.AllowedPaths, *insecureOpen); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(2)
 		}
 	}
 
 	// Setup logging
 	setupLogging(config)
+	if *insecureOpen {
+		log.Printf("WARNING: --insecure-open: sandbox disabled (entire disk). Labs only.")
+	}
 
 	log.Printf("Starting MCP Filesystem Server Ultra-Fast v%s (commit %s)", serverVersion, buildCommit)
 	log.Printf("Config: Cache=%s, Parallel=%d, Binary=%s, VSCode=%v, Compact=%v",
