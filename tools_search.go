@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -28,8 +29,11 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to directory (WSL or Windows format)")),
-		mcp.WithString("output_format", mcp.Description("Output format: 'compact' (default, token-efficient one-liner), 'json' (structured entries: name, type, size, modified RFC3339), 'tree' (recursive JSON tree)")),
+		mcp.WithString("output_format", mcp.Description("Output format: 'compact' (default), 'json', 'tree' (recursive tree), 'sizes'")),
 		mcp.WithNumber("max_depth", mcp.Description("Recursion depth for output_format:'tree' (default: 2)")),
+		mcp.WithString("exclude", mcp.Description("JSON array or comma-separated globs to skip in tree")),
+		mcp.WithBoolean("respect_ignore", mcp.Description("Honor .gitignore/.cursorignore/.fsultraignore in tree (default: true)")),
+		mcp.WithNumber("max_nodes", mcp.Description("Cap nodes in tree output (default: 500)")),
 	)
 	reg.listDirHandler = auditWrap(engine, "list_directory", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -39,6 +43,9 @@ func registerSearchTools(reg *toolRegistry) {
 
 		outputFormat := ""
 		maxDepth := 2
+		maxNodes := 500
+		respectIgnore := true
+		var exclude []string
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if of, ok := args["output_format"].(string); ok {
 				outputFormat = of
@@ -46,6 +53,18 @@ func registerSearchTools(reg *toolRegistry) {
 			if md, ok := args["max_depth"].(float64); ok && md > 0 {
 				maxDepth = int(md)
 			}
+			if mn, ok := args["max_nodes"].(float64); ok && mn > 0 {
+				maxNodes = int(mn)
+			}
+			if ri, ok := args["respect_ignore"].(bool); ok {
+				respectIgnore = ri
+			}
+			exclude = parseExcludeArg(args["exclude"])
+			if request.Params.Name == "directory_tree" && outputFormat == "" {
+				outputFormat = "tree"
+			}
+		} else if request.Params.Name == "directory_tree" {
+			outputFormat = "tree"
 		}
 
 		var listing string
@@ -53,7 +72,15 @@ func registerSearchTools(reg *toolRegistry) {
 		case "json":
 			listing, err = engine.ListDirectoryJSON(ctx, path)
 		case "tree":
-			listing, err = engine.ListDirectoryTree(ctx, core.NormalizePath(path), maxDepth)
+			format := "json"
+			if request.Params.Name == "directory_tree" {
+				format = "compact"
+			}
+			listing, err = engine.ListDirectoryTreeOpts(ctx, core.NormalizePath(path), core.TreeOpts{
+				MaxDepth: maxDepth, MaxNodes: maxNodes, Exclude: exclude, RespectIgnore: respectIgnore, Format: format,
+			})
+		case "sizes":
+			listing, err = engine.ListDirectoryJSON(ctx, path)
 		default: // "" / "compact" / "text" — current behaviour
 			listing, err = engine.ListDirectoryContent(ctx, path)
 		}
@@ -63,6 +90,32 @@ func registerSearchTools(reg *toolRegistry) {
 		return mcp.NewToolResultText(listing), nil
 	})
 	reg.addTool(listDirTool, reg.listDirHandler)
+
+	dirTreeTool := mcp.NewTool("directory_tree",
+		mcp.WithTitleAnnotation("Directory Tree"),
+		mcp.WithDescription("directory_tree — Recursive compact tree of a directory. Alias of list_directory with output_format=tree. Respects .gitignore. Related: list_directory, search_files, read_file."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Path to directory")),
+		mcp.WithString("output_format", mcp.Description("tree (default compact) or json")),
+		mcp.WithNumber("max_depth", mcp.Description("Recursion depth (default: 2)")),
+		mcp.WithString("exclude", mcp.Description("JSON array or comma-separated globs to skip")),
+		mcp.WithBoolean("respect_ignore", mcp.Description("Honor gitignore-style files (default: true)")),
+		mcp.WithNumber("max_nodes", mcp.Description("Cap nodes (default: 500)")),
+	)
+	reg.addTool(dirTreeTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if of, _ := args["output_format"].(string); of == "" {
+				args["output_format"] = "tree"
+			}
+			request.Params.Arguments = args
+		} else {
+			request.Params.Arguments = map[string]interface{}{"output_format": "tree"}
+		}
+		request.Params.Name = "directory_tree"
+		return reg.listDirHandler(ctx, request)
+	})
 
 	// ============================================================================
 	// 5. search_files — Search files (consolidated: mcp_search + smart_search + advanced_text_search + count_occurrences)
@@ -90,6 +143,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithString("output_format", mcp.Description("Output format. 'text' = verbose with emojis (legacy default), 'json' = structured for AI parsing. If omitted: auto-detect — ripgrep-style 'path:line:content' when ≤5 matches, verbose when more. Pass 'text' explicitly to force the legacy verbose format regardless of match count.")),
 		mcp.WithString("output", mcp.Description("Alias for output_format. Accepts 'text' or 'json'. Legacy values 'content'|'files_with_matches'|'count' are NOT implemented and fall through to the default text branch.")),
 		mcp.WithNumber("max_results", mcp.Description("Maximum number of filenames to return (default: uses engine config; cap recommended for large trees)")),
+		mcp.WithBoolean("no_ignore", mcp.Description("If true, do not honor .gitignore/.cursorignore (default: false)")),
 	)
 	reg.searchFilesHandler = auditWrap(engine, "search_files", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -115,6 +169,7 @@ func registerSearchTools(reg *toolRegistry) {
 		returnLines := false
 		outputFormat := ""     // empty → engine defaults to "auto"; explicit "text" preserves legacy verbose/compact
 		contentIntent := false // content-only params passed → content search implied
+		noIgnore := false
 
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if co, ok := args["count_only"].(bool); ok {
@@ -163,6 +218,9 @@ func registerSearchTools(reg *toolRegistry) {
 			if _, ok := args["context_lines"]; ok {
 				contentIntent = true
 			}
+			if ni, ok := args["no_ignore"].(bool); ok {
+				noIgnore = ni
+			}
 		}
 
 		// v4.5.24 false-negative guards:
@@ -180,7 +238,7 @@ func registerSearchTools(reg *toolRegistry) {
 
 		// Count-only mode: dispatch to CountOccurrences
 		if countOnly {
-			result, err := engine.CountOccurrences(ctx, path, pattern, returnLines, caseSensitive, wholeWord)
+			result, err := engine.CountOccurrences(ctx, path, pattern, returnLines, caseSensitive, wholeWord, noIgnore)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
@@ -195,7 +253,7 @@ func registerSearchTools(reg *toolRegistry) {
 				"path": path, "pattern": pattern,
 				"case_sensitive": caseSensitive, "whole_word": wholeWord,
 				"include_context": includeContext, "context_lines": contextLines,
-				"output_format": outputFormat,
+				"output_format": outputFormat, "no_ignore": noIgnore,
 			}
 			// Forward optional max_results if caller set one (new param v4.5.26)
 			if rawArgs, ok := request.Params.Arguments.(map[string]interface{}); ok {
@@ -218,6 +276,7 @@ func registerSearchTools(reg *toolRegistry) {
 		engineReq := localmcp.CallToolRequest{Arguments: map[string]interface{}{
 			"path": path, "pattern": pattern,
 			"include_content": includeContent, "file_types": fileTypes,
+			"no_ignore": noIgnore,
 		}}
 		// Forward optional max_results (new param v4.5.26) — engine falls back to
 		// config default when absent, so this is purely advisory.
@@ -343,6 +402,44 @@ func registerSearchTools(reg *toolRegistry) {
 // Improvement M1+M2: prevents accidental multi-MB responses that waste tokens
 // (a single 2.28MB search response was observed in the proxy log, costing
 // ~570K output tokens).
+func parseExcludeArg(v interface{}) []string {
+	if v == nil {
+		return nil
+	}
+	switch t := v.(type) {
+	case []interface{}:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				out = append(out, strings.TrimSpace(s))
+			}
+		}
+		return out
+	case []string:
+		return t
+	case string:
+		s := strings.TrimSpace(t)
+		if s == "" {
+			return nil
+		}
+		if strings.HasPrefix(s, "[") {
+			var arr []string
+			if err := json.Unmarshal([]byte(s), &arr); err == nil {
+				return arr
+			}
+		}
+		parts := strings.Split(s, ",")
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
 func capSearchOutput(text string, engine *core.UltraFastEngine) string {
 	maxBytes := core.DefaultMaxSearchOutputBytes
 	if cfg := engine.GetConfig(); cfg != nil && cfg.MaxSearchOutputBytes > 0 {

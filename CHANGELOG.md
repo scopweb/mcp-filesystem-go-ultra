@@ -32,6 +32,14 @@ Client Roots now update the sandbox at runtime. Default `--roots-mode=replace` (
 
 **Verification:** `TestFileURIToPath_*` · `TestMergeAllowedPaths_*` · `TestSetAllowedPaths_SwapsSandbox`.
 
+### feat: gitignore-aware tree + search; `directory_tree` alias
+
+`list_directory(output_format:"tree")` and `search_files` honor `.gitignore`, `.cursorignore`, and `.fsultraignore` by default (`searchSkipDirs` still apply). Escape hatch: `respect_ignore:false` (tree) / `no_ignore:true` (search). Ripgrep drops `--no-ignore` unless `no_ignore` is set.
+
+New tree opts: `exclude`, `max_nodes` (default 500), compact indent tree for the `directory_tree` alias (experimental). JSON tree remains the `list_directory` tree format.
+
+**Verification:** `TestIgnoreMatcher_*` · `TestListDirectoryTree_*` · `TestSmartSearch_RespectsGitignore` · `TestAdvancedTextSearch_NoIgnoreFindsGitignored`.
+
 ## [Unreleased / 4.5.38] - 2026-09-03
 
 ### feat(read_file): displace bash `tail | cut` — max_line_length + head/tail auto-cut

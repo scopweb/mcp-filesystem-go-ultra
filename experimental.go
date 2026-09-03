@@ -35,6 +35,7 @@ import (
 // remove the entry.
 var experimentalFeatures = map[string]string{
 	"list_allowed_directories": "4.6.0",
+	"directory_tree":           "4.6.0",
 }
 
 // isExperimental reports whether featureKey is currently experimental and

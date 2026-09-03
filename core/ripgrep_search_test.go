@@ -34,7 +34,7 @@ func TestRunRipgrepSearch_PatternFlagInjection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	matches, err := engine.RunRipgrepSearch(context.Background(), dir, "--pre=calc", false, false, false, 0)
+	matches, err := engine.RunRipgrepSearch(context.Background(), dir, "--pre=calc", false, false, false, 0, false)
 	if err != nil {
 		t.Fatalf("pattern starting with '-' must not break the search: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestRunRipgrepSearch_DashPattern(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	matches, err := engine.RunRipgrepSearch(context.Background(), dir, "--verbose", false, false, false, 0)
+	matches, err := engine.RunRipgrepSearch(context.Background(), dir, "--verbose", false, false, false, 0, false)
 	if err != nil {
 		t.Fatalf("search for dash-prefixed pattern failed: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestRunRipgrepSearch_SkipDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	matches, err := engine.RunRipgrepSearch(context.Background(), dir, "needle", false, false, false, 0)
+	matches, err := engine.RunRipgrepSearch(context.Background(), dir, "needle", false, false, false, 0, false)
 	if err != nil {
 		t.Fatalf("search failed: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestRunRipgrepSearch_ArgvConstruction(t *testing.T) {
 	}
 
 	// Pattern deliberately hostile: would execute a preprocessor if parsed as a flag.
-	if _, err := engine.RunRipgrepSearch(context.Background(), dir, "--pre=calc", false, false, false, 0); err != nil {
+	if _, err := engine.RunRipgrepSearch(context.Background(), dir, "--pre=calc", false, false, false, 0, false); err != nil {
 		t.Fatalf("RunRipgrepSearch: %v", err)
 	}
 
