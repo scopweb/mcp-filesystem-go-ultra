@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra
 
-**v4.6.0** · Go 1.27.1 · MCP 2025-11-25 · 20 tools (17 core + git + minify_js + help)
+**v4.6.0** · Go 1.27.1 · MCP 2025-11-25 · 21 tools (17 core + git + minify_js + help + list_allowed_directories)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop and Claude Code, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -23,7 +23,7 @@ Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool 
 
 ### Productivity
 
-- **20 tools** — 17 core + `git` + `minify_js` + `help`, consolidated from 59 in v3.x with no loss of functionality
+- **21 tools** — 17 core + `git` + `minify_js` + `help` + `list_allowed_directories`, consolidated from 59 in v3.x with no loss of functionality
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
 - **Hook system** — 16 pre/post events (write, edit, delete, create, move, copy, read, search)
 - **Pipeline system** — 12 actions with conditions, templates, and DAG-based parallel execution; reduces client/server round-trips for multi-step refactors

@@ -114,13 +114,14 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	registerPlatformTools(reg)
 	registerGitTools(reg)
 	registerMinifyTools(reg)
+	registerDiscoveryTools(reg)
 	// Aliases disabled: duplicates add noise to discovery, hurt token budget.
 	// registerAliases(reg)
 	// registerClaudeCodeAliases(reg)
 	// registerSuperTool(reg)
 	registerHelpTool(reg)
 
-	log.Printf("Registered 20 tools (18 core + git + help + minify_js) for v%s — aliases disabled", serverVersion)
+	log.Printf("Registered 21 tools (17 core + git + help + minify_js + list_allowed_directories) for v%s — aliases disabled", serverVersion)
 	return nil
 }
 

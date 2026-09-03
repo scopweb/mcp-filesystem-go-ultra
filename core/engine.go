@@ -1487,6 +1487,25 @@ func (e *UltraFastEngine) GetAllowedPaths() []string {
 	return e.config.AllowedPaths
 }
 
+// ListedAllowedPaths returns absolute, symlink-resolved allowed roots for
+// display (original case preserved — unlike resolvedAllowedPaths, which is
+// lowercased on Windows for containment). Empty means open-access.
+func (e *UltraFastEngine) ListedAllowedPaths() []string {
+	out := make([]string, 0, len(e.config.AllowedPaths))
+	for _, allowed := range e.config.AllowedPaths {
+		baseAbs, err := filepath.Abs(allowed)
+		if err != nil {
+			out = append(out, allowed)
+			continue
+		}
+		if resolved, err := filepath.EvalSymlinks(baseAbs); err == nil {
+			baseAbs = resolved
+		}
+		out = append(out, filepath.Clean(baseAbs))
+	}
+	return out
+}
+
 // ListDirectoryTree returns a recursive JSON tree structure of a directory
 func (e *UltraFastEngine) ListDirectoryTree(ctx context.Context, path string, maxDepth int) (string, error) {
 	path = NormalizePath(path)

@@ -34,8 +34,7 @@ import (
 // violation — graduate them (sweep coverage + optional outputSchema) and
 // remove the entry.
 var experimentalFeatures = map[string]string{
-	// Example (graduated — remove after one release):
-	// "git:implicit-pathspec": "4.5.31",
+	"list_allowed_directories": "4.6.0",
 }
 
 // isExperimental reports whether featureKey is currently experimental and
