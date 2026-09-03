@@ -115,13 +115,14 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	registerGitTools(reg)
 	registerMinifyTools(reg)
 	registerDiscoveryTools(reg)
+	registerPatchTools(reg)
 	// Aliases disabled: duplicates add noise to discovery, hurt token budget.
 	// registerAliases(reg)
 	// registerClaudeCodeAliases(reg)
 	// registerSuperTool(reg)
 	registerHelpTool(reg)
 
-	log.Printf("Registered 22 tools for v%s — aliases disabled except directory_tree", serverVersion)
+	log.Printf("Registered 24 tools for v%s — aliases disabled except directory_tree", serverVersion)
 	return nil
 }
 
@@ -555,6 +556,7 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("content", mcp.Description("Text content to write to the file")),
 		mcp.WithString("content_base64", mcp.Description("Base64-encoded binary content to write")),
 		mcp.WithString("encoding", mcp.Description("Set to \"base64\" when content is base64-encoded")),
+		mcp.WithString("mode", mcp.Description("overwrite (default) or append. append does not trigger rewrite-guard.")),
 	)
 	reg.writeFileHandler = auditWrap(engine, "write_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -576,6 +578,7 @@ func registerCoreTools(reg *toolRegistry) {
 		contentBase64 := ""
 		encoding := ""
 		content := ""
+		writeMode := "overwrite"
 
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if cb, ok := args["content_base64"].(string); ok {
@@ -586,6 +589,9 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			if c, ok := args["content"].(string); ok {
 				content = c
+			}
+			if m, ok := args["mode"].(string); ok && m != "" {
+				writeMode = strings.ToLower(m)
 			}
 		}
 
@@ -644,6 +650,22 @@ func registerCoreTools(reg *toolRegistry) {
 		var existingSize int64
 		if info, statErr := os.Stat(normPath); statErr == nil {
 			existingSize = info.Size()
+		}
+		if writeMode == "append" {
+			if existing, err := os.ReadFile(normPath); err == nil {
+				content = string(existing) + content
+			}
+			err = engine.WriteFileContent(ctx, path, content)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+			}
+			verifiedPath, bytesWritten, writeContentHash, verified := verifyOnDiskWrite(engine, path)
+			if verified {
+				core.RecordWriteHash(normPath, writeContentHash)
+			}
+			msg := fmt.Sprintf("APPENDED %s %s | %dB", diskPrefix(verifiedPath), verifiedPath, bytesWritten)
+			sc := writeStructured(verifiedPath, bytesWritten, writeContentHash, verified)
+			return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
 		}
 		signal := core.CheckWriteOp(path, content, existingSize)
 
