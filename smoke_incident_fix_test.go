@@ -79,7 +79,7 @@ func TestIncidentFix_EndToEndContract(t *testing.T) {
 	s, _ := newIncidentFixServer(t, dir)
 
 	tools := s.ListTools()
-	if got, want := len(tools), 21; got != want {
+	if got, want := len(tools), 22; got != want {
 		t.Errorf("registered tool count = %d, want %d (names=%v)", got, want, toolNames(tools))
 	}
 	for _, banned := range []string{"create_file", "str_replace", "view", "fs"} {

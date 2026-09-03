@@ -156,7 +156,7 @@ func TestCountOccurrences_SkipsMinified(t *testing.T) {
 	engine, dir := createMinifiedSearchTestEngine(t)
 	writeSearchFixture(t, dir)
 
-	count, err := engine.CountOccurrences(context.Background(), dir, "swal", false, true, false)
+	count, err := engine.CountOccurrences(context.Background(), dir, "swal", false, true, false, false)
 	if err != nil {
 		t.Fatalf("CountOccurrences failed: %v", err)
 	}

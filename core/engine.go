@@ -1563,89 +1563,9 @@ func (e *UltraFastEngine) ListedAllowedPaths() []string {
 	return out
 }
 
-// ListDirectoryTree returns a recursive JSON tree structure of a directory
+// ListDirectoryTree returns a recursive JSON tree. Respects gitignore by default.
 func (e *UltraFastEngine) ListDirectoryTree(ctx context.Context, path string, maxDepth int) (string, error) {
-	path = NormalizePath(path)
-
-	if err := e.acquireOperation(ctx, "tree"); err != nil {
-		return "", err
-	}
-	start := time.Now()
-	defer e.releaseOperation("tree", start)
-
-	if !e.IsPathAllowed(path) {
-		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths%s", path, e.AllowedDirsSuffix())
-	}
-
-	type TreeNode struct {
-		Name     string      `json:"name"`
-		Type     string      `json:"type"`
-		Size     int64       `json:"size,omitempty"`
-		Children []*TreeNode `json:"children,omitempty"`
-	}
-
-	var buildTree func(dirPath string, depth int) (*TreeNode, error)
-	buildTree = func(dirPath string, depth int) (*TreeNode, error) {
-		if depth > maxDepth {
-			return nil, nil
-		}
-
-		info, err := os.Stat(dirPath)
-		if err != nil {
-			return nil, err
-		}
-
-		node := &TreeNode{
-			Name: filepath.Base(dirPath),
-			Type: "file",
-			Size: info.Size(),
-		}
-
-		if !info.IsDir() {
-			return node, nil
-		}
-
-		node.Type = "directory"
-		node.Size = 0
-
-		entries, err := os.ReadDir(dirPath)
-		if err != nil {
-			return node, nil
-		}
-
-		node.Children = make([]*TreeNode, 0, len(entries))
-		for _, entry := range entries {
-			childPath := filepath.Join(dirPath, entry.Name())
-			if entry.IsDir() {
-				child, err := buildTree(childPath, depth+1)
-				if err == nil && child != nil {
-					node.Children = append(node.Children, child)
-				}
-			} else {
-				childInfo, err := entry.Info()
-				if err == nil {
-					node.Children = append(node.Children, &TreeNode{
-						Name: entry.Name(),
-						Type: "file",
-						Size: childInfo.Size(),
-					})
-				}
-			}
-		}
-		return node, nil
-	}
-
-	tree, err := buildTree(path, 0)
-	if err != nil {
-		return "", fmt.Errorf("failed to build directory tree: %w", err)
-	}
-
-	data, err := json.MarshalIndent(tree, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal tree: %w", err)
-	}
-
-	return string(data), nil
+	return e.ListDirectoryTreeOpts(ctx, path, TreeOpts{MaxDepth: maxDepth, MaxNodes: 500, RespectIgnore: true, Format: "json"})
 }
 
 // GetMaxResponseSize returns max response size
