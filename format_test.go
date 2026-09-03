@@ -77,3 +77,34 @@ func max(a, b int) int {
 	}
 	return b
 }
+
+func TestTruncateLineWidths_NoOp(t *testing.T) {
+	in := "short\nalso short"
+	if got := truncateLineWidths(in, 0); got != in {
+		t.Errorf("maxLen=0 must be no-op, got %q", got)
+	}
+	if got := truncateLineWidths(in, 100); got != in {
+		t.Errorf("short lines must be unchanged, got %q", got)
+	}
+	if got := truncateLineWidths("", 10); got != "" {
+		t.Errorf("empty must stay empty, got %q", got)
+	}
+}
+
+func TestTruncateLineWidths_CutsAndFooters(t *testing.T) {
+	long := strings.Repeat("x", 50)
+	in := "ok\n" + long + "\nend"
+	got := truncateLineWidths(in, 10)
+	if !strings.Contains(got, "ok\n") {
+		t.Errorf("short line must survive: %q", got)
+	}
+	if strings.Contains(got, long) {
+		t.Errorf("long line must be cut: %q", got)
+	}
+	if !strings.Contains(got, "xxxxxxxxxx…") {
+		t.Errorf("cut line must keep 10 runes plus ellipsis: %q", got)
+	}
+	if !strings.Contains(got, "[truncated 1 line(s) to max_line_length=10]") {
+		t.Errorf("missing footer: %q", got)
+	}
+}

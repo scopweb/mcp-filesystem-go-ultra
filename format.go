@@ -427,6 +427,34 @@ func truncateContent(content string, maxLines int, mode string) string {
 	return strings.Join(result, "\n") + truncMsg
 }
 
+// defaultHeadTailLineLength is the cut -c equivalent applied to head/tail reads
+// when max_line_length is omitted. Stops a single fat log line from blowing
+// the token budget. Full-file and range reads are never auto-cut (edit_file
+// needs exact text). Pass max_line_length:0 to disable on head/tail.
+const defaultHeadTailLineLength = 300
+
+// truncateLineWidths chops each line to maxLen runes (like `cut -c1-N`) and
+// appends a one-line footer when anything was cut. maxLen <= 0 is a no-op.
+func truncateLineWidths(content string, maxLen int) string {
+	if maxLen <= 0 || content == "" {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	cut := 0
+	for i, line := range lines {
+		runes := []rune(line)
+		if len(runes) > maxLen {
+			lines[i] = string(runes[:maxLen]) + "…"
+			cut++
+		}
+	}
+	out := strings.Join(lines, "\n")
+	if cut > 0 {
+		out += fmt.Sprintf("\n[truncated %d line(s) to max_line_length=%d]", cut, maxLen)
+	}
+	return out
+}
+
 // parseReplacementCount extracts the total replacement count from a SearchAndReplace
 // engine response (format: "... Total replacements: N ...").
 func parseReplacementCount(text string) int {

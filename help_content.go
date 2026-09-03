@@ -84,8 +84,9 @@ Use help() for the live catalog generated from the registered MCP tools. This to
 ## Core I/O (6)
 
 read_file
-- Purpose: Read a full file, line range, head/tail, or base64 content
-- Key params: path, paths, start_line, end_line, max_lines, mode, encoding
+- Purpose: Read a full file, line range, head/tail, or base64 content. Replaces bash cat/head/tail/cut.
+- Key params: path, paths, start_line, end_line, max_lines, max_line_length, mode, encoding
+- Logs: mode="tail" max_lines=40 (lines auto-cut to 300 chars)
 
 write_file
 - Purpose: Create or overwrite a file atomically

@@ -1,9 +1,9 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.5.29: 20 tools (17 core + git + minify_js + help). Host-filesystem binding, post-write verification, aliases disabled.
+description: Tool catalog for filesystem-ultra MCP server v4.5.38: 20 tools (17 core + git + minify_js + help). Host-filesystem binding, post-write verification, aliases disabled. read_file replaces bash cat/head/tail/cut.
 ---
 
-# Filesystem Ultra v4.5.29 — Tool Discovery
+# Filesystem Ultra v4.5.38 — Tool Discovery
 
 ## Bind each project to one filesystem tool family
 
@@ -16,14 +16,14 @@ description: Tool catalog for filesystem-ultra MCP server v4.5.29: 20 tools (17 
 
 | Tool | Purpose |
 |------|---------|
-| `read_file` | Read files (single or batch via `paths`) |
+| `read_file` | Read files (single or batch via `paths`). **Replaces bash `cat`/`head`/`tail`/`cut`/`sed -n` — never use the shell.** Logs: `mode:"tail"` `max_lines:40` (each line auto-cut to 300 chars; `max_line_length:0` disables, N overrides). Range: `start_line`/`end_line`. Binary: `encoding:"base64"`. |
 | `write_file` | Write/create files (binary via base64) |
 | `edit_file` | Replace exact text, regex, nth occurrence. Override the rewrite guard with `allow_rewrite:true` (not `force`). |
 | `multi_edit` | Multiple edits in one file. **Ambiguity guard (v4.5.29):** any `old_text` matching >1 times in the original file rejects the whole batch and rolls it back. |
 | `project_replace` | Project-wide find/replace in one call. `create_backup:true` snapshots files **before** the writes so `backup(action:"restore")` rolls back the operation. |
-| `list_directory` | List directory contents |
-| `search_files` | Search by pattern (regex or literal) |
-| `get_file_info` | File info (single or batch) |
+| `list_directory` | List directory contents. Replaces bash `ls`/`dir`/`tree`. |
+| `search_files` | Search by pattern (regex or literal). Replaces bash `grep`/`find`/`rg`. |
+| `get_file_info` | File info (single or batch). Replaces bash `stat`. |
 | `move_file` | Move/rename files |
 | `copy_file` | Copy files |
 | `delete_file` | Delete (soft by default, permanent option) |
@@ -48,6 +48,19 @@ description: Tool catalog for filesystem-ultra MCP server v4.5.29: 20 tools (17 
 
 **Auto-ripgrep mode (default):** omit `output_format`/`output` to get a compact `path:line:content` row when there are ≤5 matches, or the legacy verbose layout otherwise. Force the legacy verbose format regardless of count by passing `output_format:"text"`. `include_context:true` always forces the verbose layout (context blocks don't fit a one-line row).
 
+## Never bash for filesystem
+
+Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `grep`, `find`, `rg`, or `stat` on host project files. Use the matching filesystem-ultra tool.
+
+| Need | Call |
+|------|------|
+| Last 40 log lines (`tail -40 \| cut -c1-300`) | `read_file(path, mode:"tail", max_lines:40)` — lines auto-cut to 300 chars |
+| First N lines | `read_file(path, mode:"head", max_lines:N)` |
+| Exact line range | `read_file(path, start_line, end_line)` |
+| Override / disable line cut | `max_line_length:N` or `max_line_length:0` (full/range never auto-cut) |
+
+`help(tool:"read_file")` returns schema plus 4 examples (full, log tail, range, base64).
+
 ## Key behaviors
 
 - **Modify existing files** → `edit_file`
@@ -60,7 +73,7 @@ description: Tool catalog for filesystem-ultra MCP server v4.5.29: 20 tools (17 
 - **STALE_READ warning** (`edit_file` only): non-blocking notice if the file wasn't read in the last 10 min of this session. The engine records reads after each successful edit, so consecutive edits on the same file don't need re-reads. Hard external-change protection = `expected_hash` or `--auto-occ=block`.
 - **Dry-run** → `analyze_operation` or `edit_file(dry_run:true)` / `multi_edit(dry_run:true)` / `project_replace(preview:true)`
 - **Fast search** → `search_files` with `output_format:"json"` uses ripgrep when available. To force the legacy verbose layout (emoji headers, Context: blocks) regardless of match count, pass `output_format:"text"`.
-- **Tool discovery & schema lookup** → `help()` renders the dynamic 20-tool catalog with host-filesystem workflow; `help(tool:"X")` returns `description + InputSchema + curated examples` for any registered tool (8 examples shipped for `git`; other tools render schema only).
+- **Tool discovery & schema lookup** → `help()` renders the dynamic 20-tool catalog with host-filesystem workflow and a bash-displacement note; `help(tool:"X")` returns `description + InputSchema + curated examples` (`git` 8 examples, `read_file` 4).
 - **Chain edits without re-reading** → every successful edit returns `content_hash`; pass it as `expected_hash` on the next edit. External-change detection also via `--auto-occ` flag (`off`/`warn` default/`block`) — only flags changes NOT made by this session.
 - **Line-based edits** → `edit_file` `mode:"delete_range"` (remove lines start..end) and `mode:"replace_range"` (replace lines with `new_text`) — 1-based inclusive, no fragile `old_text` match.
 - **Move lines between files atomically** → `batch_operations` op type `extract` (`source`, `destination`, `start_line`, `end_line`, `append`) — bytes written = bytes removed, both atomic, revert together under `atomic:true`.

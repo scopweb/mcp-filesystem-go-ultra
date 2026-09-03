@@ -302,18 +302,18 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithTitleAnnotation("Read File"),
 		mcp.WithRawOutputSchema(readFileOutputSchema),
 		mcp.WithDescription("read_file — Read file contents from the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
-			"Use read_file for ALL project files. Never use runtime built-in read tools for files on the host disk; those may target a different sandbox. "+
-			"Use it after host mutations when content matters; get_file_info/list_directory verify existence and size independently. "+
-			"Supports line ranges (start_line/end_line), head/tail mode, base64 for binary. "+
-			"Batch: pass paths (JSON array) to read multiple files in one call. "+
-			"To MODIFY files use edit_file. Related: edit_file, write_file, search_files, multi_edit, batch_operations."),
+			"Replaces bash cat/head/tail/cut/sed -n — NEVER use the shell. "+
+			"Logs: mode=\"tail\" max_lines=40 (each line auto-cut to 300 chars; max_line_length:0 disables). "+
+			"Range: start_line/end_line. Binary: encoding=\"base64\". Batch: paths JSON array. "+
+			"To MODIFY files use edit_file."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("path", mcp.Description("Path to file (WSL or Windows format). Required unless paths is provided.")),
 		mcp.WithString("paths", mcp.Description("JSON array of paths to read multiple files in one call, e.g. '[\"file1.txt\",\"file2.txt\"]'")),
-		mcp.WithNumber("max_lines", mcp.Description("Max lines (optional, 0=all)")),
-		mcp.WithString("mode", mcp.Description("Mode: all, head, tail")),
+		mcp.WithNumber("max_lines", mcp.Description("Max lines (optional, 0=all). With mode=tail/head this is tail -N / head -N.")),
+		mcp.WithNumber("max_line_length", mcp.Description("Max characters per line (cut -c). head/tail default 300. 0=no cut. Use on logs; do not use when you need exact text for edit_file.")),
+		mcp.WithString("mode", mcp.Description("all (default) | head | tail. Logs: mode=tail max_lines=40. Replaces bash tail/head.")),
 		mcp.WithNumber("start_line", mcp.Description("Starting line number (1-indexed) for range read")),
 		mcp.WithNumber("end_line", mcp.Description("Ending line number (inclusive) for range read")),
 		mcp.WithString("encoding", mcp.Description("Set to \"base64\" to read file as base64-encoded binary")),
@@ -385,6 +385,8 @@ func registerCoreTools(reg *toolRegistry) {
 		startLine := 0
 		endLine := 0
 		encoding := ""
+		maxLineLength := 0
+		maxLineLengthSet := false
 
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if ml, ok := args["max_lines"].(float64); ok {
@@ -401,6 +403,10 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			if enc, ok := args["encoding"].(string); ok {
 				encoding = enc
+			}
+			if mll, ok := args["max_line_length"].(float64); ok {
+				maxLineLength = int(mll)
+				maxLineLengthSet = true
 			}
 		}
 
@@ -448,6 +454,9 @@ func registerCoreTools(reg *toolRegistry) {
 			// Point 3: surface the whole-file OCC hash for range reads so the
 			// caller can use edit_file/multi_edit expected_hash without first
 			// pulling the entire file into context.
+			if maxLineLengthSet && maxLineLength > 0 {
+				content = truncateLineWidths(content, maxLineLength)
+			}
 			if contentHash, ok := computeFileOCCHash(core.NormalizePath(path)); ok {
 				core.RecordReadHash(core.NormalizePath(path), contentHash) // new point 4
 				return mcp.NewToolResultStructured(map[string]any{"content": content, "content_hash": contentHash}, content), nil
@@ -498,6 +507,14 @@ func registerCoreTools(reg *toolRegistry) {
 			content = autoTruncateLargeFile(content, path)
 		}
 
+		lineLimit := maxLineLength
+		if !maxLineLengthSet && (mode == "head" || mode == "tail") {
+			lineLimit = defaultHeadTailLineLength
+		}
+		if lineLimit > 0 {
+			content = truncateLineWidths(content, lineLimit)
+		}
+
 		// Annotate lines read for ROI analysis
 		totalLines := strings.Count(content, "\n") + 1
 		core.SetFileLinesTotal(ctx, totalLines)
@@ -512,7 +529,12 @@ func registerCoreTools(reg *toolRegistry) {
 			content,
 		), nil
 	})
-	reg.addTool(readFileTool, reg.readFileHandler)
+	reg.addTool(readFileTool, reg.readFileHandler,
+		`read_file(path:"file.go")`,
+		`read_file(path:"logs/app.txt", mode:"tail", max_lines:40)`,
+		`read_file(path:"file.go", start_line:10, end_line:40)`,
+		`read_file(path:"file.bin", encoding:"base64")`,
+	)
 
 	// ============================================================================
 	// 2. write_file — Write file (consolidated: mcp_write + write_file + create_file + write_base64 + streaming_write + intelligent_write)

@@ -4,7 +4,7 @@ REM  Build script for Windows - MCP Filesystem Ultra (v4+)
 REM  Compiles all production binaries cleanly.
 REM
 REM  IMPORTANT: Run this from the project root.
-REM  Requires: Go 1.26.3 or newer
+REM  Requires: Go 1.27.1 or newer
 REM ============================================================
 
 echo.

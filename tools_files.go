@@ -224,6 +224,7 @@ func registerFileTools(reg *toolRegistry) {
 	fileInfoTool := mcp.NewTool("get_file_info",
 		mcp.WithTitleAnnotation("File Info"),
 		mcp.WithDescription("get_file_info — File/directory metadata (size, permissions, dates) from the real host filesystem. "+
+			"Replaces bash stat — NEVER use the shell. "+
 			"Use it after host mutations to verify existence and actual size independently; runtime-native info tools may inspect a different sandbox. "+
 			"Batch: pass paths (JSON array) to get info for multiple files in one call. Related: read_file, list_directory, search_files."),
 		mcp.WithReadOnlyHintAnnotation(true),

@@ -45,13 +45,14 @@ type ToolParamSchema map[string]ParamDef
 var toolSchemas = map[string]ToolParamSchema{
 	// ---- CORE (5) ----
 	"read_file": {
-		"path":       {ParamString, true},
-		"paths":      {ParamString, false}, // batch: JSON array of paths
-		"max_lines":  {ParamNumber, false},
-		"mode":       {ParamString, false},
-		"start_line": {ParamNumber, false},
-		"end_line":   {ParamNumber, false},
-		"encoding":   {ParamString, false},
+		"path":            {ParamString, true},
+		"paths":           {ParamString, false}, // batch: JSON array of paths
+		"max_lines":       {ParamNumber, false},
+		"max_line_length": {ParamNumber, false}, // cut -c: chars per line (head/tail default 300)
+		"mode":            {ParamString, false},
+		"start_line":      {ParamNumber, false},
+		"end_line":        {ParamNumber, false},
+		"encoding":        {ParamString, false},
 	},
 	"write_file": {
 		"path":           {ParamString, true},
