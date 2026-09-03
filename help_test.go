@@ -56,6 +56,7 @@ func newHelpTestRegistry(t *testing.T, allowedDir string) *toolRegistry {
 	registerGitTools(reg)
 	registerMinifyTools(reg)
 	registerDiscoveryTools(reg)
+	registerPatchTools(reg)
 	registerHelpTool(reg)
 	return reg
 }
@@ -97,7 +98,7 @@ func TestHelp_NoArgs_ListsAllRegisteredTools(t *testing.T) {
 		"get_file_info", "move_file", "copy_file", "delete_file", "create_directory",
 		"search_files", "batch_operations", "backup", "analyze_operation",
 		"wsl", "server_info", "git", "minify_js", "project_replace", "help",
-		"list_allowed_directories", "directory_tree",
+		"list_allowed_directories", "directory_tree", "diff_files", "apply_patch",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("help() missing %q", want)

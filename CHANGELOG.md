@@ -46,6 +46,16 @@ New tree opts: `exclude`, `max_nodes` (default 500), compact indent tree for the
 
 **Verification:** `TestListAllowedDirectories_ReconsultsRoots` · `TestSetAllowedPaths_FlushesCache` · `TestFormatToolError_AccessDeniedEnvelope`.
 
+### feat: Sprint C — `diff_files`, `apply_patch`, `write_file` append
+
+- `diff_files(path_a, path_b)` unified diff + counts; `against:"backup"` vs last session backup.
+- `apply_patch` one-file unified diff, fail-closed (no fuzzy, no multi-file). `dry_run`, `expected_hash` (OCC), rewrite-guard, backup. EOL taken from the destination file. Headers `a/` `b/` matched against `path`.
+- `write_file(mode:"append")` concatenates then atomic write; skips rewrite-guard.
+
+Experimental this cycle (no outputSchema).
+
+**Verification:** `TestApplyUnifiedPatch_*` · `TestApplyPatch_*` · `TestDiffFiles_*` · `TestWriteFile_Append`.
+
 ## [Unreleased / 4.5.38] - 2026-09-03
 
 ### feat(read_file): displace bash `tail | cut` — max_line_length + head/tail auto-cut

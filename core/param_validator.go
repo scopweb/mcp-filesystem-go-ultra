@@ -59,6 +59,21 @@ var toolSchemas = map[string]ToolParamSchema{
 		"content":        {ParamString, false},
 		"content_base64": {ParamString, false},
 		"encoding":       {ParamString, false},
+		"mode":           {ParamString, false},
+	},
+	"diff_files": {
+		"path_a":  {ParamString, false},
+		"path_b":  {ParamString, false},
+		"path":    {ParamString, false},
+		"against": {ParamString, false},
+	},
+	"apply_patch": {
+		"path":          {ParamString, true},
+		"patch":         {ParamString, true},
+		"dry_run":       {ParamBoolean, false},
+		"expected_hash": {ParamString, false},
+		"allow_rewrite": {ParamBoolean, false},
+		"create_backup": {ParamBoolean, false},
 	},
 	"edit_file": {
 		"path":                {ParamString, true},
