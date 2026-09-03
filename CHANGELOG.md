@@ -1,5 +1,42 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.5.38] - 2026-09-03
+
+### feat(read_file): displace bash `tail | cut` — max_line_length + head/tail auto-cut
+
+Claude was falling back to `cd ... && tail -40 file | cut -c1-300` because `read_file` had `mode:tail` but no per-line width cap, and the tool description did not advertise the log-read pattern.
+
+**1. `max_line_length` on `read_file` (`tools_core.go`, `format.go`).** Per-line `cut -c` equivalent. `mode:"head"`/`"tail"` default to **300** chars/line so `read_file(path, mode:"tail", max_lines:40)` matches the common log idiom without extra params. Full-file and range reads are never auto-cut (edit_file needs exact text). Pass `max_line_length:0` to disable; pass N to override. Footer when anything was cut: `[truncated N line(s) to max_line_length=M]`.
+
+**2. Tool descriptions steer away from bash.** `read_file`, `list_directory`, `search_files`, `get_file_info` now say they replace `cat/head/tail/cut/sed`, `ls/dir/tree`, `grep/find/rg`, `stat` — NEVER use the shell. `help(tool:"read_file")` ships 4 examples including the log tail.
+
+**3. Handshake + help() catalog (every client).** `serverInstructions` now says prefer these tools over bash cat/head/tail/cut/ls/grep/find/stat. `help()` catalog has the same rule plus `read_file mode=tail max_lines=40` for logs. First-sentence truncation skips only `e.g.` / `i.e.` (ellipsis `...` is not treated as an abbreviation).
+
+**4. Skill `filesystem-ultra-tools` bumped to v4.5.38** with the log-tail table and the never-bash mapping.
+
+**Verification:** `go test` covering truncateLineWidths, tail auto-cut, explicit N, disable-with-0, full/range not auto-cut, handshake/help bash displacement, e.g. sentence split. Live MCP probe: default tail cut 500→300, `max_line_length:40`, `max_line_length:0` full line.
+
+## [Unreleased / 4.5.37] - 2026-09-02
+
+### chore: Go 1.27.1 toolchain and dependency upgrades
+
+**1. Toolchain upgraded to Go 1.27.1 (`go.mod`).** Language/minimum toolchain directive, CI (`ci.yml` / `release.yml`), README, CLAUDE.md, and `build-windows.bat` now require **1.27.1+**.
+
+**2. Direct and transitive libraries bumped to current releases:**
+
+| Package | From | To |
+|---------|------|-----|
+| `github.com/mark3labs/mcp-go` | v0.54.1 | **v1.0.0** (MCP spec 2026-07-28) |
+| `github.com/allegro/bigcache/v3` | v3.1.0 | **v3.2.0** |
+| `golang.org/x/sync` | v0.21.0 | **v0.22.0** |
+| `golang.org/x/sys` | v0.44.0 | **v0.47.0** |
+| `golang.org/x/text` | v0.37.0 | **v0.41.0** |
+| `github.com/santhosh-tekuri/jsonschema/v6` (indirect) | v6.0.2 | **v6.0.3** |
+
+Unchanged (already latest): `fsnotify` v1.10.1, `ants/v2` v2.12.1, `go-cache` v2.1.0.
+
+**Verification:** `go build ./...` clean · `go mod verify` · `go test ./...` · `govulncheck ./...`.
+
 ## [Unreleased / 4.5.36] - 2026-08-18
 
 ### fix(git): status file listing in compact mode, show header outside max_lines, did-you-mean param suggestions

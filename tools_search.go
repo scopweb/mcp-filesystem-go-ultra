@@ -21,7 +21,8 @@ func registerSearchTools(reg *toolRegistry) {
 	listDirTool := mcp.NewTool("list_directory",
 		mcp.WithTitleAnnotation("List Directory"),
 		mcp.WithDescription("list_directory — List directory contents on the real host filesystem; use it to verify a host creation/edit independently. "+
-			"Runtime-native directory tools may inspect a different sandbox. output_format: 'compact' (default), 'json' (structured entries with name/type/size/modified), 'tree' (recursive JSON tree, use max_depth). "+
+			"Replaces bash ls/dir/tree — NEVER use the shell. "+
+			"output_format: 'compact' (default), 'json' (structured entries with name/type/size/modified), 'tree' (recursive JSON tree, use max_depth). "+
 			"Related: search_files, read_file, edit_file, create_directory, batch_operations."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -71,7 +72,8 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDescription("search_files — Search and find files by name or content. Supports regex, count_only, include_content, include_context. "+
+		mcp.WithDescription("search_files — Search and find files by name or content. Replaces bash grep/find/rg — NEVER use the shell. "+
+			"Supports regex, count_only, include_content, include_context. "+
 			"Default output auto-adapts to match count (ripgrep-style 'path:line:content' for ≤5 matches, verbose with emojis otherwise). "+
 			"Use search_files to find, then edit_file to modify. Related: edit_file, read_file, multi_edit, batch_operations."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Base directory or file (WSL or Windows format)")),

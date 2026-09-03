@@ -379,6 +379,26 @@ func registerSuperTool(reg *toolRegistry) {
 	}))
 }
 
+// firstCatalogSentence returns the first sentence of a tool description for
+// the help() catalog. It skips "e.g." / "i.e." so those abbreviations do not
+// truncate the line.
+func firstCatalogSentence(s string) string {
+	s = strings.TrimSpace(s)
+	for i := 0; i < len(s)-1; i++ {
+		if s[i] != '.' || s[i+1] != ' ' {
+			continue
+		}
+		if i >= 3 {
+			abbr := s[i-3 : i+1]
+			if abbr == "e.g." || abbr == "i.e." {
+				continue
+			}
+		}
+		return s[:i+1]
+	}
+	return s
+}
+
 // renderToolCatalog builds the no-argument help response from the registered
 // tools. Keeping discovery data here prevents the catalog from drifting when a
 // tool is added, removed, or an alias is disabled.
@@ -393,7 +413,8 @@ func renderToolCatalog(reg *toolRegistry) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("# MCP Filesystem Ultra v%s — %d registered tools\n\n", serverVersion, len(names)))
 	sb.WriteString("## Filesystem scope\n")
-	sb.WriteString("These tools operate on the real host filesystem visible to this MCP server. Runtime-native create_file, str_replace, view, or similar tools may target a different sandbox.\n\n")
+	sb.WriteString("These tools operate on the real host filesystem visible to this MCP server. Runtime-native create_file, str_replace, view, or similar tools may target a different sandbox.\n")
+	sb.WriteString("Do not use bash cat/head/tail/cut/ls/dir/grep/find/stat; call the matching tool instead (logs: read_file mode=tail max_lines=40).\n\n")
 	sb.WriteString("## Host project workflow\n")
 	sb.WriteString("1. Bind the project to one filesystem tool family; use filesystem-ultra for host project paths.\n")
 	sb.WriteString("2. After every host mutation, verify independently with get_file_info or list_directory; use read_file when content matters.\n")
@@ -402,10 +423,7 @@ func renderToolCatalog(reg *toolRegistry) string {
 	sb.WriteString("## Registered tools\n")
 	for _, name := range names {
 		registered := all[name]
-		description := strings.TrimSpace(registered.Tool.Description)
-		if idx := strings.Index(description, ". "); idx >= 0 {
-			description = description[:idx+1]
-		}
+		description := firstCatalogSentence(registered.Tool.Description)
 		sb.WriteString(fmt.Sprintf("- `%s` — %s\n", name, description))
 	}
 	sb.WriteString("\nCall help(tool:\"X\") for a tool's schema and curated examples.\n")

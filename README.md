@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra
 
-**v4.5.29** · Go · MCP 2025-11-25 · 20 tools (17 core + git + minify_js + help)
+**v4.5.38** · Go 1.27.1 · MCP 2025-11-25 · 20 tools (17 core + git + minify_js + help)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop and Claude Code, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -29,6 +29,7 @@ Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool 
 - **Pipeline system** — 12 actions with conditions, templates, and DAG-based parallel execution; reduces client/server round-trips for multi-step refactors
 - **Atomic batch operations** — grouped file operations with rollback on failure
 - **Compact mode** — reduced-token responses for high-volume sessions
+- **Log tail without bash** — `read_file(mode:"tail", max_lines:40)` replaces `tail | cut`; each line auto-cut to 300 chars (`max_line_length` to override)
 - **Audit logging** — JSON Lines operation log + metrics snapshots
 - **Dashboard** — separate HTTP binary for real-time metrics, operation log, and backup recovery
 
@@ -55,7 +56,7 @@ build-windows.bat        # default
 build-windows.sh         # Linux/macOS
 ```
 
-Requires Go 1.26.5+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
+Requires Go 1.27.1+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
 
 ```bash
 # Run tests
@@ -174,7 +175,7 @@ For a host project, bind the whole task to the filesystem-ultra family. After ev
 
 | Tool | Description |
 |------|-------------|
-| `read_file` | Read full file, line range (`start_line`/`end_line`), head/tail (`max_lines`+`mode`), or base64 (`encoding:"base64"`) |
+| `read_file` | Read full file, line range (`start_line`/`end_line`), head/tail (`max_lines`+`mode`), or base64. Logs: `mode:"tail"` `max_lines:40` auto-cuts each line to 300 chars (`max_line_length`; `0` disables). Replaces bash `cat`/`head`/`tail`/`cut`. |
 | `write_file` | Create or overwrite a file. Supports text (`content`) and binary (`encoding:"base64"`) |
 | `edit_file` | Find-and-replace with backup and risk assessment. Modes: exact match (default), `search_replace` (all occurrences), `regex` (capture groups), `occurrence:N` (Nth match) |
 | `multi_edit` | Multiple find-and-replace operations on the same file in one call via `edits_json`. v4.5.25+: `diff_format` (auto\|full\|summary\|stat\|none) for the aggregate batch diff |
@@ -353,8 +354,8 @@ tests/
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `github.com/mark3labs/mcp-go` | v0.54.1 | MCP server SDK |
-| `github.com/allegro/bigcache/v3` | v3.1.0 | File content cache |
+| `github.com/mark3labs/mcp-go` | v1.0.0 | MCP server SDK |
+| `github.com/allegro/bigcache/v3` | v3.2.0 | File content cache |
 | `github.com/patrickmn/go-cache` | v2.1.0 | Directory and metadata cache |
 | `github.com/panjf2000/ants/v2` | v2.12.1 | Goroutine pool |
 | `github.com/fsnotify/fsnotify` | v1.10.1 | File system event watching |
@@ -367,7 +368,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest unreleased: v4.5.31 — security hardening, structured-output conformance, stability tiers).
+See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest unreleased: v4.5.38 — read_file tail/cut, Go 1.27.1).
 
 ---
 

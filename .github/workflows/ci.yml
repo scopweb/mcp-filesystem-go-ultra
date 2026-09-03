@@ -14,8 +14,8 @@ on:
     branches: [ main ]
 
 env:
-  # Go 1.26.5: required by go.mod (GO-2026-5856 crypto/tls, GO-2026-4970 os).
-  GO_VERSION: '1.26.5'
+  # Go 1.27.1: required by go.mod.
+  GO_VERSION: '1.27.1'
 
 jobs:
   # ============================================================

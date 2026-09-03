@@ -130,3 +130,93 @@ func TestReadFileHandler_StartEndLine_DoesNotTruncateFile(t *testing.T) {
 		t.Fatalf("file size changed: before=%d after=%d", beforeInfo.Size(), afterInfo.Size())
 	}
 }
+
+func TestReadFileHandler_TailAutoCutsLongLines(t *testing.T) {
+	dir := t.TempDir()
+	reg := buildEditRegistry(t, dir, false)
+	path := filepath.Join(dir, "app.log")
+	long := strings.Repeat("A", 500)
+	if err := os.WriteFile(path, []byte(long), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := callReadFile(t, reg, map[string]interface{}{
+		"path":      path,
+		"mode":      "tail",
+		"max_lines": float64(1),
+	})
+	if result.IsError {
+		t.Fatalf("read_file error: %v", result.Content)
+	}
+	text := resultText(t, result)
+	if strings.Contains(text, long) {
+		t.Fatal("tail must auto-cut lines to 300 chars")
+	}
+	first := strings.SplitN(text, "\n", 2)[0]
+	runes := []rune(first)
+	if len(runes) != 301 || runes[300] != '…' {
+		t.Fatalf("expected 300 runes + ellipsis, got len=%d first=%q", len(runes), first[:min(len(first), 40)])
+	}
+	if !strings.Contains(text, "max_line_length=300") {
+		t.Fatalf("expected auto-cut footer, got:\n%s", text)
+	}
+}
+
+func TestReadFileHandler_MaxLineLengthExplicitAndDisable(t *testing.T) {
+	dir := t.TempDir()
+	reg := buildEditRegistry(t, dir, false)
+	path := filepath.Join(dir, "app.log")
+	long := strings.Repeat("B", 200)
+	if err := os.WriteFile(path, []byte(long), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cut := callReadFile(t, reg, map[string]interface{}{
+		"path":            path,
+		"mode":            "tail",
+		"max_lines":       float64(1),
+		"max_line_length": float64(40),
+	})
+	cutText := resultText(t, cut)
+	if !strings.Contains(cutText, "max_line_length=40") {
+		t.Fatalf("explicit cut missing: %s", cutText)
+	}
+
+	raw := callReadFile(t, reg, map[string]interface{}{
+		"path":            path,
+		"mode":            "tail",
+		"max_lines":       float64(1),
+		"max_line_length": float64(0),
+	})
+	rawText := resultText(t, raw)
+	if !strings.Contains(rawText, long) {
+		t.Fatalf("max_line_length=0 must disable cut, got:\n%s", rawText)
+	}
+	if strings.Contains(rawText, "max_line_length=") {
+		t.Fatalf("disabled cut must not add footer, got:\n%s", rawText)
+	}
+}
+
+func TestReadFileHandler_FullAndRangeDoNotAutoCut(t *testing.T) {
+	dir := t.TempDir()
+	reg := buildEditRegistry(t, dir, false)
+	path := filepath.Join(dir, "wide.go")
+	long := strings.Repeat("C", 400)
+	if err := os.WriteFile(path, []byte(long+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	full := resultText(t, callReadFile(t, reg, map[string]interface{}{"path": path}))
+	if !strings.Contains(full, long) {
+		t.Fatal("full read must not auto-cut (edit_file needs exact text)")
+	}
+
+	ranged := resultText(t, callReadFile(t, reg, map[string]interface{}{
+		"path":       path,
+		"start_line": float64(1),
+		"end_line":   float64(1),
+	}))
+	if !strings.Contains(ranged, long) {
+		t.Fatal("range read must not auto-cut")
+	}
+}

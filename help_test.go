@@ -133,6 +133,23 @@ func TestHelp_DescribesHostFilesystemScope(t *testing.T) {
 	if !strings.Contains(text, "sandbox") {
 		t.Error("help() must warn about runtime-native tools running in a separate sandbox")
 	}
+	if !strings.Contains(text, "Do not use bash") {
+		t.Error("help() must displace bash cat/tail/ls/grep")
+	}
+	if !strings.Contains(text, "mode=tail") {
+		t.Error("help() must advertise the log-tail pattern")
+	}
+}
+
+func TestFirstCatalogSentence_SkipsEgAbbreviation(t *testing.T) {
+	in := "read_file — Read from the real host filesystem (e.g. C:\\, D:\\, /mnt/...). Replaces bash tail."
+	got := firstCatalogSentence(in)
+	if !strings.Contains(got, "/mnt/") {
+		t.Errorf("must not cut at e.g.: %q", got)
+	}
+	if strings.Contains(got, "Replaces bash") {
+		t.Errorf("must still stop at the first real sentence: %q", got)
+	}
 }
 
 func TestHelp_PerTool_StillReturnsSchema(t *testing.T) {
@@ -153,6 +170,9 @@ func TestServerInstructions_IdentifiesHostScopeWithoutImperativeBlock(t *testing
 	}
 	if !strings.Contains(serverInstructions, "help()") {
 		t.Errorf("serverInstructions should point at help() for the catalog: %q", serverInstructions)
+	}
+	if !strings.Contains(serverInstructions, "Prefer these tools over bash") {
+		t.Errorf("serverInstructions should displace bash: %q", serverInstructions)
 	}
 	// The v4.3.6 mitigation removed a long imperative block from serverInstructions
 	// to avoid prompt-injection-style content. The post-v4.5.29 handshake text

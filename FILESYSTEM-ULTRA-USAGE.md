@@ -141,6 +141,7 @@ Leer:
 - múltiples archivos mediante `paths`;
 - un rango de líneas;
 - las primeras o últimas líneas (`head` / `tail`);
+- logs: `mode:"tail"` + `max_lines:40` (cada línea se corta a 300 chars, equivalente a `tail | cut`; `max_line_length:0` lo desactiva);
 - binarios en base64.
 
 Las lecturas individuales completas, por rango o base64 pueden devolver `content_hash` en `structuredContent`. Una lectura batch de varios archivos no proporciona un único hash utilizable para editar todos ellos.
