@@ -45,8 +45,11 @@ func TestListAllowedDirectories_ListsResolvedRoots(t *testing.T) {
 	if !strings.Contains(text, want) {
 		t.Errorf("missing resolved root %q in:\n%s", want, text)
 	}
-	if !strings.Contains(text, "Allowed directories:") {
+	if !strings.Contains(text, "Allowed directories") {
 		t.Errorf("verbose header missing:\n%s", text)
+	}
+	if !strings.Contains(text, "source: cli") {
+		t.Errorf("expected source: cli in:\n%s", text)
 	}
 }
 

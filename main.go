@@ -86,6 +86,7 @@ func main() {
 		logLevel         = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 		allowedPaths     = flag.String("allowed-paths", "", "Comma-separated list of allowed base paths (required unless --insecure-open; alternative: pass paths as positional arguments)")
 		insecureOpen     = flag.Bool("insecure-open", false, "Disable access control (entire disk). Labs only. Default since v4.6.0 is fail-closed.")
+		rootsMode        = flag.String("roots-mode", "replace", "How MCP client Roots combine with CLI paths: replace (default), union, ignore")
 		compactMode      = flag.Bool("compact-mode", false, "Enable compact responses (minimal tokens for Claude Desktop)")
 		maxResponseSize  = flag.String("max-response-size", "10MB", "Maximum response size")
 		maxSearchResults = flag.Int("max-search-results", 1000, "Maximum search results to return")
@@ -242,6 +243,7 @@ func main() {
 		"filesystem-ultra",
 		serverVersion,
 		server.WithToolCapabilities(true), // listChanged=true enables tools/list_changed notifications
+		server.WithRoots(),
 		server.WithLogging(),
 		server.WithInstructions(serverInstructions),
 	)
@@ -250,6 +252,8 @@ func main() {
 	if err := registerTools(s, engine); err != nil {
 		log.Fatalf("Failed to register tools: %v", err)
 	}
+
+	registerRootsSync(s, engine, config.AllowedPaths, core.ParseRootsMode(*rootsMode))
 
 	// Setup graceful shutdown
 	ctx, cancel := context.WithCancel(ctx)
