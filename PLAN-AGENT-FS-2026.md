@@ -4,7 +4,53 @@ Estado base: **v4.5.38**. Objetivo: dejar de ser “un filesystem Go muy bueno�
 
 Principio: **no más tools de write**. Extender handlers, flags y protocolo. Tools nuevas solo si el modelo las busca por nombre o cierran un workflow que hoy no existe.
 
+No toques OCC, backups, rewrite-guard, pipelines ni reabrir 59 tools. v4.6 = el agente deja de adivinar rutas, fail-closed, exploración/edición que los clientes MCP ya esperan.
+
 ---
+
+## Estado vs reflexiones finales (2026-09-03)
+
+Rama `feat/4.6-fail-closed`. A y B **ya están en código**. Lo de Z.ai que **no** adoptamos: tokens-por-lenguaje, `git ls-tree` como walker, tool `refresh_roots`, `subscribe` en v1.
+
+| Decisión nueva | ¿Adoptar? | Qué hay hoy |
+|---|---|---|
+| D1 fail-closed | Sí, hecho | Exit 2 sin CLI y sin `--insecure-open`. Roots llegan **después** del handshake: hace falta CLI (o insecure) para arrancar. Vacío de roots del cliente **no** tumba el proceso ni borra CLI. |
+| D2 roots pisan CLI | Sí, hecho | `--roots-mode=replace` default. `list_allowed` ya pone `source: cli\|roots\|union`. |
+| D3 perfiles strict/ultra | **Aplazar** a post-C | Default `ultra` implícito (22 tools). No bloquea el tag. |
+| D4 nombres canónicos | Parcial | `list_allowed_directories` + `directory_tree` hechos. `diff_files` + `apply_patch` = Sprint C. `read_text_file` **no** reabrir ahora. |
+| D5 schema+sweep **mismo commit** | **No para A/B ya shipped** | `experimental.go` **panics** si una tool experimental declara `outputSchema`. A/B están en esa lista (`4.6.0`). Cambiar la policy a mitad de 4.6.0 rompe CI. **Para C:** o bien (1) `apply_patch`/`diff_files` salen experimentales sin schema (igual que A/B) y gradúan el ciclo siguiente, o (2) se cambia la policy a “schema permitido si hay sweep en el mismo commit” **antes** de C. Recomendación: **(1)** hasta tag 4.6.0; (2) en 4.6.1. |
+| D6 envelope de error unificado | Sí, **antes de C** (A.4) | Hoy: texto + hint `FILESYSTEM MISMATCH?`. No hay `{error:{code,message,path,details,suggestion}}`. No reescribir 22 handlers de golpe: helper + mutadores/lectores de path; códigos nuevos en tools nuevas. |
+| Reconsultar `roots/list` en cada `list_allowed_directories` | Sí, **A.4** | Hoy solo en `initialized` + `list_changed`. Sin `refresh_roots`. El fallback de Z.ai es reconsultar al listar. |
+| Invalidar caché al cambiar roots | Sí, **A.4** | `SetAllowedPaths` no limpia BigCache. |
+| `read_file(paths)` batch parcial | Ya hecho | Un fallo no aborta el lote (`ERROR:` por fichero). Falta array nativo (D, no C). |
+| Tree cache mtime + `sort_by` | No en 4.6.0 | `max_nodes=500` es el backpressure. Perf gate 10k/500 &lt;2s = test opcional, no bloquea C. |
+| `apply_patch` multi best-effort | **No en v1** | Un archivo, fail-closed. Multi = `results[]` más adelante. EOL del fichero destino, no del patch. Headers `a/` `b/` → allowlist, no exigir `C:\`. |
+| Sprint E subscribe | **No en v1** | Coincide: resources `file://` + `listChanged` en 4.7; sin fsnotify por fichero. |
+
+### A.4 — remiendos de protocolo (hacer **antes** de Sprint C)
+
+Pequeño, cierra el “done” de A según el texto nuevo:
+
+1. `list_allowed_directories` llama `RequestRoots` si el ctx tiene sesión (mismo `applyFromClient`). Sin API / error → lista lo que hay; `help()` documenta “vuelve a listar tras cambiar roots”.
+2. `SetAllowedPaths` invalida caché de ficheros (`cache.Invalidate` / wipe de paths que ya no están en el sandbox).
+3. Helper `pathError(code, message, path, details, suggestion)` usado en discovery + próximos handlers de C. Códigos: `NOT_ALLOWED`, `NOT_FOUND`, `OCC_MISMATCH`, `REWRITE_BLOCKED`, `ROOTS_EMPTY`. El resto (`SECRET_DENIED`, `READ_ONLY`, `PATCH_APPLY_FAILED`) se añade con la tool/flag que los dispara.
+4. Tests: segundo `list_allowed` con mock `SessionWithRoots` cambia el listado; envelope en un acceso denied.
+
+**No** cambiar default `max_depth` 2→3 (rompe compact). Alias `directory_tree` ya default 2; documentar, no retocar.
+
+### Orden restante hasta tag v4.6.0
+
+```
+A.4 (reconsulta roots + envelope mínimo + cache)
+  → prueba real Claude Desktop / VS Code
+  → C (diff_files + apply_patch 1-file + write_file append)
+  → tag v4.6.0
+```
+
+D (readonly, denylist, mime/sha256, paths nativo) y E (resources, sin subscribe) **no** bloquean el tag.
+
+---
+
 
 ## 0. Ya ganado — no tocar, no clonar el oficial
 

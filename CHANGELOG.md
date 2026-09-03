@@ -40,6 +40,12 @@ New tree opts: `exclude`, `max_nodes` (default 500), compact indent tree for the
 
 **Verification:** `TestIgnoreMatcher_*` · `TestListDirectoryTree_*` · `TestSmartSearch_RespectsGitignore` · `TestAdvancedTextSearch_NoIgnoreFindsGitignored`.
 
+### feat: A.4 — reconsult roots, error envelope, cache flush
+
+`list_allowed_directories` reconsults `roots/list` when the call has a client session (no `refresh_roots` tool). `SetAllowedPaths` flushes the file/dir cache. Path access-denied errors from MCP handlers use `{error:{code,message,path,suggestion}}` (`NOT_ALLOWED`).
+
+**Verification:** `TestListAllowedDirectories_ReconsultsRoots` · `TestSetAllowedPaths_FlushesCache` · `TestFormatToolError_AccessDeniedEnvelope`.
+
 ## [Unreleased / 4.5.38] - 2026-09-03
 
 ### feat(read_file): displace bash `tail | cut` — max_line_length + head/tail auto-cut

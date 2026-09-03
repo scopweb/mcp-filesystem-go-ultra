@@ -32,3 +32,20 @@ func TestSetAllowedPaths_SwapsSandbox(t *testing.T) {
 		t.Fatalf("listed=%v", listed)
 	}
 }
+
+func TestSetAllowedPaths_FlushesCache(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+	engine := newTestEngine(dir1)
+	defer engine.Close()
+
+	key := filepath.Join(dir1, "cached.txt")
+	engine.cache.SetFile(key, []byte("stale"))
+	if _, hit := engine.cache.GetFile(key); !hit {
+		t.Fatal("expected cache hit before swap")
+	}
+	engine.SetAllowedPaths([]string{dir2}, AllowedSourceRoots)
+	if _, hit := engine.cache.GetFile(key); hit {
+		t.Fatal("sandbox swap must flush file cache")
+	}
+}
