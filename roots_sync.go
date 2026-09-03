@@ -39,8 +39,12 @@ func (r *rootsSync) applyFromClient(ctx context.Context) {
 	log.Printf("sandbox roots applied source=%s count=%d", source, len(merged))
 }
 
+// refreshClientRoots reconsults the MCP client's roots/list when a session is present.
+var refreshClientRoots func(ctx context.Context)
+
 func registerRootsSync(s *server.MCPServer, engine *core.UltraFastEngine, cli []string, mode core.RootsMode) {
 	syncer := &rootsSync{server: s, engine: engine, mode: mode, cli: append([]string(nil), cli...)}
+	refreshClientRoots = syncer.applyFromClient
 	s.AddNotificationHandler("notifications/initialized", func(ctx context.Context, _ mcp.JSONRPCNotification) {
 		syncer.applyFromClient(ctx)
 	})

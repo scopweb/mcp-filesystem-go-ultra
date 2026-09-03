@@ -114,3 +114,81 @@ func TestListAllowedDirectories_ExperimentalPrefix(t *testing.T) {
 		t.Fatal("experimental tool must not declare an outputSchema")
 	}
 }
+
+type mockRootsSession struct {
+	id    string
+	ch    chan mcp.JSONRPCNotification
+	roots []mcp.Root
+}
+
+func (m *mockRootsSession) SessionID() string { return m.id }
+func (m *mockRootsSession) NotificationChannel() chan<- mcp.JSONRPCNotification {
+	return m.ch
+}
+func (m *mockRootsSession) Initialize()       {}
+func (m *mockRootsSession) Initialized() bool { return true }
+func (m *mockRootsSession) ListRoots(_ context.Context, _ mcp.ListRootsRequest) (*mcp.ListRootsResult, error) {
+	return &mcp.ListRootsResult{Roots: m.roots}, nil
+}
+
+func toFileURI(p string) string {
+	abs, _ := filepath.Abs(p)
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	s := filepath.ToSlash(abs)
+	if !strings.HasPrefix(s, "/") {
+		s = "/" + s
+	}
+	return "file://" + s
+}
+
+func TestListAllowedDirectories_ReconsultsRoots(t *testing.T) {
+	cliDir := t.TempDir()
+	rootDir := t.TempDir()
+	t.Cleanup(func() { refreshClientRoots = nil })
+
+	cacheInstance, err := cache.NewIntelligentCache(4 * 1024 * 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := core.NewUltraFastEngine(&core.Config{
+		Cache: cacheInstance, AllowedPaths: []string{cliDir}, ParallelOps: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { engine.Close() })
+
+	s := server.NewMCPServer("test", "0.0.0", server.WithRoots())
+	reg := &toolRegistry{server: s, engine: engine, handlers: make(map[string]toolHandler)}
+	registerDiscoveryTools(reg)
+	registerRootsSync(s, engine, []string{cliDir}, core.RootsReplace)
+
+	first := callListAllowed(t, reg, nil)
+	if !strings.Contains(resultText(t, first), filepath.Base(cliDir)) {
+		t.Fatalf("CLI root missing: %s", resultText(t, first))
+	}
+
+	sess := &mockRootsSession{
+		id: "s1", ch: make(chan mcp.JSONRPCNotification, 4),
+		roots: []mcp.Root{{URI: toFileURI(rootDir)}},
+	}
+	ctx := s.WithContext(context.Background(), sess)
+	h := reg.handlers["list_allowed_directories"]
+	res, err := h(ctx, mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "list_allowed_directories"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(t, res)
+	want, _ := filepath.Abs(rootDir)
+	if resolved, err := filepath.EvalSymlinks(want); err == nil {
+		want = resolved
+	}
+	if !strings.Contains(text, filepath.Clean(want)) {
+		t.Fatalf("expected roots path %q in:\n%s", want, text)
+	}
+	if !strings.Contains(text, "source: roots") {
+		t.Fatalf("expected source: roots:\n%s", text)
+	}
+}

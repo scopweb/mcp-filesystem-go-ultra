@@ -20,7 +20,10 @@ func registerDiscoveryTools(reg *toolRegistry) {
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 	)
-	reg.addTool(tool, auditWrap(engine, "list_allowed_directories", func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	reg.addTool(tool, auditWrap(engine, "list_allowed_directories", func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if refreshClientRoots != nil {
+			refreshClientRoots(ctx)
+		}
 		return mcp.NewToolResultText(formatAllowedDirectories(engine)), nil
 	}),
 		`list_allowed_directories()`,

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mcp/filesystem-ultra/core"
 )
 
 // usageError formats an error response with a usage example, per docs/git-tool-spec.md §4.
@@ -37,6 +38,10 @@ func filesystemMismatchSuffix(err error) string {
 // formatToolError preserves the existing "Error:" prefix while making a known
 // missing path actionable. Non-not-found errors remain byte-identical.
 func formatToolError(err error) string {
+	var pe *core.PathError
+	if errors.As(err, &pe) && pe.Err != nil && strings.Contains(pe.Err.Error(), "access denied") {
+		return pathErrorJSON(errCodeNotAllowed, pe.Error(), pe.Path, nil, "call list_allowed_directories")
+	}
 	return fmt.Sprintf("Error: %v", err) + filesystemMismatchSuffix(err)
 }
 

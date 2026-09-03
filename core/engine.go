@@ -1514,6 +1514,9 @@ func (e *UltraFastEngine) SetAllowedPaths(paths []string, source string) {
 	if e.autoSyncManager != nil {
 		e.autoSyncManager.SetAllowedPaths(e.config.AllowedPaths)
 	}
+	if e.cache != nil {
+		e.cache.Flush()
+	}
 	slog.Info("Allowed paths updated", "count", len(e.config.AllowedPaths), "source", source)
 }
 

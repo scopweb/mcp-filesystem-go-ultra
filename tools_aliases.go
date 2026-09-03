@@ -416,7 +416,7 @@ func renderToolCatalog(reg *toolRegistry) string {
 	sb.WriteString("These tools operate on the real host filesystem visible to this MCP server. Runtime-native create_file, str_replace, view, or similar tools may target a different sandbox.\n")
 	sb.WriteString("Do not use bash cat/head/tail/cut/ls/dir/grep/find/stat; call the matching tool instead (logs: read_file mode=tail max_lines=40).\n\n")
 	sb.WriteString("## Host project workflow\n")
-	sb.WriteString("1. Call list_allowed_directories before the first read to see the sandbox roots.\n")
+	sb.WriteString("1. Call list_allowed_directories before the first read to see the sandbox roots. After the client changes Roots, call it again (no refresh_roots tool).\n")
 	sb.WriteString("2. Bind the project to one filesystem tool family; use filesystem-ultra for host project paths.\n")
 	sb.WriteString("3. After every host mutation, verify independently with get_file_info or list_directory; use read_file when content matters.\n")
 	sb.WriteString("4. If a known file reports 'not found', stop and confirm it with the host reader, then audit recent writes made through the failing tool family before retrying.\n")
