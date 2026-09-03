@@ -34,7 +34,7 @@ func TestExperimental_EntriesWellFormed(t *testing.T) {
 // without ':') name a tool that is actually registered — a typo in the map
 // would silently disable enforcement for that feature.
 func TestExperimental_ToolEntriesAreRegistered(t *testing.T) {
-	reg := buildEditRegistry(t, t.TempDir(), false)
+	reg := newHelpTestRegistry(t, t.TempDir())
 	for key := range experimentalFeatures {
 		if strings.Contains(key, ":") {
 			continue // mode-level entries are informational
@@ -51,7 +51,7 @@ func TestExperimental_SchemaPanics(t *testing.T) {
 	experimentalFeatures["zz_experimental_tool"] = serverVersion
 	defer delete(experimentalFeatures, "zz_experimental_tool")
 
-	reg := buildEditRegistry(t, t.TempDir(), false)
+	reg := newHelpTestRegistry(t, t.TempDir())
 	tool := mcp.NewTool("zz_experimental_tool",
 		mcp.WithDescription("test"),
 		mcp.WithRawOutputSchema(json.RawMessage(`{"type":"object"}`)),

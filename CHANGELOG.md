@@ -16,6 +16,14 @@ Starting with no allowed paths used to expose the entire disk. That is no longer
 
 **Verification:** `TestRequireAllowedPaths_*` · `TestFailClosed_Binary` (no-args exit 2, `--version` ok, `--insecure-open` does not exit 2).
 
+### feat: `list_allowed_directories` (experimental)
+
+Agents call this at startup; the sandbox roots were previously only in CLI flags. Zero-parameter read-only tool. Returns one absolute, symlink-resolved path per line (original case). `--insecure-open` returns `*` plus a warning — never a fake cwd.
+
+No `outputSchema` this cycle (`experimental.go`). Graduates in the next release.
+
+**Verification:** `TestListAllowedDirectories_*` · `help()` catalog includes the tool.
+
 ## [Unreleased / 4.5.38] - 2026-09-03
 
 ### feat(read_file): displace bash `tail | cut` — max_line_length + head/tail auto-cut

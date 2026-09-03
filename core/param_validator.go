@@ -256,6 +256,7 @@ var toolSchemas = map[string]ToolParamSchema{
 	"help": {
 		"topic": {ParamString, false},
 	},
+	"list_allowed_directories": {},
 }
 
 // benignParams are metadata parameters some clients attach to tool calls
