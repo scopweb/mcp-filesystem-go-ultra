@@ -30,6 +30,7 @@ func registerDiscoveryTools(reg *toolRegistry) {
 
 func formatAllowedDirectories(engine *core.UltraFastEngine) string {
 	paths := engine.ListedAllowedPaths()
+	source := engine.AllowedSource()
 	if len(paths) == 0 {
 		if engine.IsCompactMode() {
 			return insecureOpenWarning + "\n*"
@@ -39,5 +40,9 @@ func formatAllowedDirectories(engine *core.UltraFastEngine) string {
 	if engine.IsCompactMode() {
 		return strings.Join(paths, "\n")
 	}
-	return "Allowed directories:\n" + strings.Join(paths, "\n") + "\n"
+	header := "Allowed directories"
+	if source != "" && source != core.AllowedSourceInsecure {
+		header += " (source: " + source + ")"
+	}
+	return header + ":\n" + strings.Join(paths, "\n") + "\n"
 }

@@ -24,6 +24,14 @@ No `outputSchema` this cycle (`experimental.go`). Graduates in the next release.
 
 **Verification:** `TestListAllowedDirectories_*` · `help()` catalog includes the tool.
 
+### feat: MCP Roots (`roots/list` + `list_changed`)
+
+Client Roots now update the sandbox at runtime. Default `--roots-mode=replace` (CLI paths are the startup floor; empty Roots never wipe the sandbox). `--roots-mode=union` merges; `ignore` keeps CLI only.
+
+`file://` URIs (`file:///C:/proj`, `file://wsl.localhost/...`) convert via `core.FileURIToPath`. `SetAllowedPaths` is mutex-safe. `list_allowed_directories` reports `source: cli|roots|union`.
+
+**Verification:** `TestFileURIToPath_*` · `TestMergeAllowedPaths_*` · `TestSetAllowedPaths_SwapsSandbox`.
+
 ## [Unreleased / 4.5.38] - 2026-09-03
 
 ### feat(read_file): displace bash `tail | cut` — max_line_length + head/tail auto-cut
