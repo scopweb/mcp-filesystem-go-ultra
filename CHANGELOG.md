@@ -1,5 +1,21 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.6.0] - 2026-09-03
+
+### breaking: fail-closed without `--allowed-paths`
+
+Starting with no allowed paths used to expose the entire disk. That is no longer the default.
+
+**1. Fail-closed startup (`main.go`, `fail_closed.go`).** If neither `--allowed-paths` nor positional path arguments are given, the process prints a short usage message to stderr and **exits 2**. `--version` and `--bench` are exempt.
+
+**2. `--insecure-open` (labs only).** Restores the previous open-access mode (entire disk, still subject to ADS/RTLO/reserved-name checks). Logs a WARNING at startup. Do not use in production.
+
+**3. Empty entries are ignored.** `--allowed-paths ",,,"` does not count as a root.
+
+**Migration:** Claude Desktop / MCP client configs that omitted paths will fail to start. Add the project directory as a positional arg or `--allowed-paths`.
+
+**Verification:** `TestRequireAllowedPaths_*` · `TestFailClosed_Binary` (no-args exit 2, `--version` ok, `--insecure-open` does not exit 2).
+
 ## [Unreleased / 4.5.38] - 2026-09-03
 
 ### feat(read_file): displace bash `tail | cut` — max_line_length + head/tail auto-cut

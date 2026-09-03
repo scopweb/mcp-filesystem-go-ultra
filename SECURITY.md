@@ -105,7 +105,7 @@ read_file("\\wsl.localhost\Ubuntu\etc\shadow")       → was ALLOWED
 write_file("\\wsl.localhost\Ubuntu\etc\cron.d\x")   → was ALLOWED
 ```
 
-**Fix**: Removed the early-return WSL bypass. WSL paths now undergo the same `resolvedAllowedPaths` containment check as all other paths. When `--allowed-paths` is not configured (open-access mode), WSL paths remain accessible.
+**Fix**: Removed the early-return WSL bypass. WSL paths now undergo the same `resolvedAllowedPaths` containment check as all other paths. Open-access mode (`--insecure-open` since v4.6.0) still allows WSL paths; the default is fail-closed and requires `--allowed-paths`.
 
 **Code change**: `IsPathAllowed()` — removed `if strings.HasPrefix(lowerPath, \`\\wsl.localhost\\`) { return true }` block.
 
@@ -209,7 +209,7 @@ The `git` tool executes Git commands on behalf of the AI. It includes the follow
 | Risk | Severity | Status | Recommendation |
 |------|----------|--------|----------------|
 | Indirect Prompt Injection | HIGH | By design | Use `--allowed-paths` + `pre-read` hooks to block credential files |
-| WSL path enumeration (no AllowedPaths) | MEDIUM | Accepted | Always configure `--allowed-paths` in production |
+| WSL path enumeration (`--insecure-open`) | MEDIUM | Mitigated (v4.6.0 fail-closed) | Do not use `--insecure-open` in production |
 | Hook JSON content injection (file content in HookContext.Content) | LOW | Accepted | Hook scripts should treat HookContext as untrusted input |
 | Batch operations bypass user hooks | MEDIUM | Partially mitigated (2026) | Batch now executes pre/post hooks. Full parity with normal operations is still limited during rollback. |
 | Pipeline regex_transform + large file hooks | LOW-MEDIUM | Partially mitigated (2026) | `regex_transform` now runs pre/post-edit hooks. Content is provided, but StreamingWriteFile for very large files only passes metadata. |
