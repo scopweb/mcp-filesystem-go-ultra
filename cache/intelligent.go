@@ -99,6 +99,13 @@ func NewIntelligentCache(maxSize int64) (*IntelligentCache, error) {
 	return cache, nil
 }
 
+type fileStatMeta struct {
+	Mtime time.Time
+	Size  int64
+}
+
+func fileStatKey(path string) string { return "fstat:" + path }
+
 // GetFile retrieves a file from cache
 func (c *IntelligentCache) GetFile(path string) ([]byte, bool) {
 	c.updateAccessStats()
@@ -118,6 +125,33 @@ func (c *IntelligentCache) GetFile(path string) ([]byte, bool) {
 	return nil, false
 }
 
+// GetFileFresh is GetFile plus a size/mtime check so another process's write
+// is not served from this process's cache (multi-agent / bash).
+func (c *IntelligentCache) GetFileFresh(path string) ([]byte, bool) {
+	cached, hit := c.GetFile(path)
+	if !hit {
+		return nil, false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		c.InvalidateFile(path)
+		return nil, false
+	}
+	if item, ok := c.metaCache.Get(fileStatKey(path)); ok {
+		meta := item.(fileStatMeta)
+		if info.Size() != meta.Size || info.ModTime().After(meta.Mtime) {
+			c.InvalidateFile(path)
+			return nil, false
+		}
+		return cached, true
+	}
+	if int64(len(cached)) != info.Size() {
+		c.InvalidateFile(path)
+		return nil, false
+	}
+	return cached, true
+}
+
 // SetFile stores a file in cache with intelligent size management
 func (c *IntelligentCache) SetFile(path string, content []byte) {
 	c.mu.Lock()
@@ -127,6 +161,11 @@ func (c *IntelligentCache) SetFile(path string, content []byte) {
 	err := c.fileCache.Set(path, content)
 	if err == nil {
 		c.currentSize += int64(len(content)) // Approximate tracking
+		if info, statErr := os.Stat(path); statErr == nil {
+			c.metaCache.Set(fileStatKey(path), fileStatMeta{Mtime: info.ModTime(), Size: info.Size()}, gocache.DefaultExpiration)
+		} else {
+			c.metaCache.Set(fileStatKey(path), fileStatMeta{Mtime: time.Now(), Size: int64(len(content))}, gocache.DefaultExpiration)
+		}
 	}
 }
 
@@ -195,6 +234,7 @@ func (c *IntelligentCache) SetMetadata(key string, value interface{}) {
 // InvalidateFile removes a file from cache
 func (c *IntelligentCache) InvalidateFile(path string) {
 	err := c.fileCache.Delete(path)
+	c.metaCache.Delete(fileStatKey(path))
 	if err == nil {
 		// Approximate size update
 		c.mu.Lock()

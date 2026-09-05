@@ -20,7 +20,7 @@ var diskReadCount atomic.Int64
 // readFileBytesDeduped returns file content from cache or disk, deduplicating
 // concurrent loads for the same path via singleflight.
 func (e *UltraFastEngine) readFileBytesDeduped(ctx context.Context, path string) ([]byte, error) {
-	if cached, hit := e.cache.GetFile(path); hit {
+	if cached, hit := e.cache.GetFileFresh(path); hit {
 		return cached, nil
 	}
 
@@ -30,7 +30,7 @@ func (e *UltraFastEngine) readFileBytesDeduped(ctx context.Context, path string)
 	}
 
 	v, err, _ := readFlight.Do(path, func() (interface{}, error) {
-		if cached, hit := e.cache.GetFile(path); hit {
+		if cached, hit := e.cache.GetFileFresh(path); hit {
 			return readResult{data: cached}, nil
 		}
 

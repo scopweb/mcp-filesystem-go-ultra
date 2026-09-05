@@ -32,7 +32,7 @@ GOOD: search_files -> read_file(start_line/end_line) -> edit_file = 2k tokens
 ## AVAILABLE TOPICS
 Call server_info(action:"help", topic:"...") with:
 - "workflow" - The 4-step efficient workflow
-- "tools"    - Complete list of 21 tools
+- "tools"    - Complete list of 24 tools
 - "read"     - Reading files efficiently
 - "write"    - Writing and creating files
 - "edit"     - Editing files (most important!)
@@ -78,15 +78,19 @@ server_info(action:"stats")
 `)
 
 	case "tools":
-		sb.WriteString(`# COMPLETE TOOL LIST (21 Tools)
+		sb.WriteString(`# COMPLETE TOOL LIST (24 Tools)
 
 Use help() for the live catalog generated from the registered MCP tools. This topic is the compact reference for clients that hide full schemas.
 
-## Discovery (1)
+## Discovery (2)
 
 list_allowed_directories
-- Purpose: Return the sandbox roots. Call before the first read. Zero parameters.
+- Purpose: Return the sandbox roots. Call before the first read. Zero parameters. [EXPERIMENTAL]
 - Key params: (none)
+
+directory_tree
+- Purpose: Compact recursive tree. Alias of list_directory with output_format=tree. Respects .gitignore. [EXPERIMENTAL]
+- Key params: path, max_depth, exclude, respect_ignore, max_nodes
 
 ## Core I/O (6)
 
@@ -96,8 +100,8 @@ read_file
 - Logs: mode="tail" max_lines=40 (lines auto-cut to 300 chars)
 
 write_file
-- Purpose: Create or overwrite a file atomically
-- Key params: path, content, content_base64, encoding
+- Purpose: Create or overwrite a file atomically; mode=append concatenates
+- Key params: path, content, content_base64, encoding, mode
 
 edit_file
 - Purpose: Modify existing files with backup, OCC, risk checks, and diffs
@@ -163,6 +167,16 @@ server_info
 - Purpose: Static help topics, performance stats, and artifact management
 - Key params: action, topic, sub_action, content, path
 
+## Patch (2)
+
+diff_files
+- Purpose: Unified diff between two paths, or a file vs its last backup (against=backup). [EXPERIMENTAL]
+- Key params: path_a, path_b, path, against
+
+apply_patch
+- Purpose: Apply a one-file unified diff. dry_run, expected_hash OCC, rewrite-guard, backup. [EXPERIMENTAL]
+- Key params: path, patch, dry_run, expected_hash, allow_rewrite, create_backup
+
 ## Version Control, JavaScript, and Discovery (3)
 
 git
@@ -178,7 +192,7 @@ help
 - Key params: tool
 
 ## Disabled Names
-Aliases read_text_file, search, edit, write, create_file, directory_tree, View, Edit, Write, Replace, LS, GlobTool, GrepTool and the fs super-tool are NOT registered. A runtime-native tool with one of those names may target a different sandbox; it is not a filesystem-ultra alias.
+Aliases read_text_file, search, edit, write, create_file, View, Edit, Write, Replace, LS, GlobTool, GrepTool and the fs super-tool are NOT registered. directory_tree IS registered (experimental). A runtime-native tool with one of those disabled names may target a different sandbox; it is not a filesystem-ultra alias.
 `)
 
 	case "read":
@@ -226,7 +240,7 @@ write_file("/path/to/file.txt", content="content here")
 write_file("/path/to/image.png", content_base64="iVBOR...")
 
 ## IMPORTANT
-- write_file OVERWRITES the entire file
+- write_file OVERWRITES the entire file unless mode="append"
 - For small changes, use edit_file instead!
 - write_file also creates parent directories automatically
 
@@ -397,9 +411,10 @@ FIXES:
 2. Close any programs using the file
 3. Use list_directory to verify path exists
 
-## "path not found"
-CAUSE: Path format issue (WSL vs Windows)
-FIX: All tools auto-convert paths:
+## "path not found" / NOT_FOUND
+CAUSE: Path missing on the host filesystem visible to this server, or WSL vs Windows format.
+FIX: Call list_allowed_directories; copy the path from list_directory/read_file. Envelope: {"error":{"code":"NOT_FOUND",...}} with FILESYSTEM MISMATCH? suggestion.
+All tools auto-convert paths:
 - /mnt/c/Users/... <-> C:\Users\...
 
 ## "Tool not found: create_file"
@@ -559,7 +574,7 @@ Repeated edits on a broken file make recovery harder.
 Available topics:
 - overview  - Quick start guide
 - workflow  - The 4-step efficient workflow
-- tools     - Complete list of 21 tools
+- tools     - Complete list of 24 tools
 - read      - Reading files efficiently
 - write     - Writing and creating files
 - edit      - Editing files (most important!)
