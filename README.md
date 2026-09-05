@@ -122,6 +122,8 @@ The positional arguments after the flags are the allowed base paths. **Required*
 | `--allowed-paths` | (required) | Comma-separated allowed roots; or pass paths as positional args |
 | `--insecure-open` | off | Labs only: disable the sandbox (entire disk). Fail-closed by default since v4.6.0. |
 | `--roots-mode` | replace | How MCP client Roots combine with CLI paths: `replace`, `union`, `ignore` |
+| `--readonly` | off | Reject mutating tools |
+| `--allow-secrets` | off | Allow `.env` / keys (audited) |
 | `--compact-mode` | off | Reduced-token responses |
 | `--cache-size` | 100MB | In-memory file cache limit |
 | `--parallel-ops` | 2×CPU (max 16) | Max concurrent operations |

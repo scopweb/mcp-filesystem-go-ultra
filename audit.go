@@ -61,6 +61,22 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 			}
 		}
 
+		if engine.IsReadOnly() {
+			args, _ := request.Params.Arguments.(map[string]interface{})
+			if toolIsMutating(tool, args) {
+				entry.DurationMs = time.Since(start).Milliseconds()
+				entry.Status = "error"
+				entry.Error = "READ_ONLY"
+				engine.Audit(*entry)
+				return pathErrorResult(errCodeReadOnly, "server is --readonly", "", nil, "restart without --readonly to mutate"), nil
+			}
+		}
+		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if p, ok := args["path"].(string); ok && engine.AllowSecrets() && core.IsSecretPath(p) {
+				entry.Error = "allow-secrets"
+			}
+		}
+
 		// Point 6b: write an in-flight breadcrumb BEFORE running the handler so a
 		// call interrupted mid-flight still leaves a trace in operations.jsonl.
 		// The final entry below shares the same req_id; a reader correlates by
@@ -150,6 +166,33 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 		engine.Audit(*entry)
 
 		return res, err
+	}
+}
+
+func toolIsMutating(tool string, args map[string]interface{}) bool {
+	switch tool {
+	case "write_file", "edit_file", "multi_edit", "delete_file", "move_file",
+		"copy_file", "create_directory", "batch_operations", "project_replace",
+		"minify_js", "apply_patch", "wsl":
+		return true
+	case "git":
+		a, _ := args["action"].(string)
+		switch a {
+		case "status", "diff", "log", "show", "":
+			return false
+		default:
+			return true
+		}
+	case "backup":
+		a, _ := args["action"].(string)
+		switch a {
+		case "restore", "undo_last", "cleanup", "purge_trash", "restore_trash":
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
 	}
 }
 
