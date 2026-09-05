@@ -722,7 +722,7 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 
 	// Fast path: serve range from cache or deduped full read (files ≤ LargeFileThreshold).
 	if info.Size() <= LargeFileThreshold {
-		if cached, hit := e.cache.GetFile(path); hit {
+		if cached, hit := e.cache.GetFileFresh(path); hit {
 			return extractLineRangeFromBytes(cached, path, startLine, endLine)
 		}
 		content, readErr := e.readFileBytesDeduped(ctx, path)

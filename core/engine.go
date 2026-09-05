@@ -623,7 +623,7 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 	}
 
 	// Try cache first
-	if cached, hit := e.cache.GetFile(path); hit {
+	if cached, hit := e.cache.GetFileFresh(path); hit {
 		if e.config.DebugMode {
 			slog.Debug("Cache hit", "path", path)
 		}
