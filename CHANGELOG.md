@@ -1,5 +1,70 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [Unreleased / 4.6.0] - 2026-09-03
+
+### breaking: fail-closed without `--allowed-paths`
+
+Starting with no allowed paths used to expose the entire disk. That is no longer the default.
+
+**1. Fail-closed startup (`main.go`, `fail_closed.go`).** If neither `--allowed-paths` nor positional path arguments are given, the process prints a short usage message to stderr and **exits 2**. `--version` and `--bench` are exempt.
+
+**2. `--insecure-open` (labs only).** Restores the previous open-access mode (entire disk, still subject to ADS/RTLO/reserved-name checks). Logs a WARNING at startup. Do not use in production.
+
+**3. Empty entries are ignored.** `--allowed-paths ",,,"` does not count as a root.
+
+**Migration:** Claude Desktop / MCP client configs that omitted paths will fail to start. Add the project directory as a positional arg or `--allowed-paths`.
+
+**Verification:** `TestRequireAllowedPaths_*` · `TestFailClosed_Binary` (no-args exit 2, `--version` ok, `--insecure-open` does not exit 2).
+
+### feat: `list_allowed_directories` (experimental)
+
+Agents call this at startup; the sandbox roots were previously only in CLI flags. Zero-parameter read-only tool. Returns one absolute, symlink-resolved path per line (original case). `--insecure-open` returns `*` plus a warning — never a fake cwd.
+
+No `outputSchema` this cycle (`experimental.go`). Graduates in the next release.
+
+**Verification:** `TestListAllowedDirectories_*` · `help()` catalog includes the tool.
+
+### feat: MCP Roots (`roots/list` + `list_changed`)
+
+Client Roots now update the sandbox at runtime. Default `--roots-mode=replace` (CLI paths are the startup floor; empty Roots never wipe the sandbox). `--roots-mode=union` merges; `ignore` keeps CLI only.
+
+`file://` URIs (`file:///C:/proj`, `file://wsl.localhost/...`) convert via `core.FileURIToPath`. `SetAllowedPaths` is mutex-safe. `list_allowed_directories` reports `source: cli|roots|union`.
+
+**Verification:** `TestFileURIToPath_*` · `TestMergeAllowedPaths_*` · `TestSetAllowedPaths_SwapsSandbox`.
+
+### feat: gitignore-aware tree + search; `directory_tree` alias
+
+`list_directory(output_format:"tree")` and `search_files` honor `.gitignore`, `.cursorignore`, and `.fsultraignore` by default (`searchSkipDirs` still apply). Escape hatch: `respect_ignore:false` (tree) / `no_ignore:true` (search). Ripgrep drops `--no-ignore` unless `no_ignore` is set.
+
+New tree opts: `exclude`, `max_nodes` (default 500), compact indent tree for the `directory_tree` alias (experimental). JSON tree remains the `list_directory` tree format.
+
+**Verification:** `TestIgnoreMatcher_*` · `TestListDirectoryTree_*` · `TestSmartSearch_RespectsGitignore` · `TestAdvancedTextSearch_NoIgnoreFindsGitignored`.
+
+### feat: A.4 — reconsult roots, error envelope, cache flush
+
+`list_allowed_directories` reconsults `roots/list` when the call has a client session (no `refresh_roots` tool). `SetAllowedPaths` flushes the file/dir cache. Path access-denied errors from MCP handlers use `{error:{code,message,path,suggestion}}` (`NOT_ALLOWED`).
+
+**Verification:** `TestListAllowedDirectories_ReconsultsRoots` · `TestSetAllowedPaths_FlushesCache` · `TestFormatToolError_AccessDeniedEnvelope`.
+
+### feat: Sprint C — `diff_files`, `apply_patch`, `write_file` append
+
+- `diff_files(path_a, path_b)` unified diff + counts; `against:"backup"` vs last session backup.
+- `apply_patch` one-file unified diff, fail-closed (no fuzzy, no multi-file). `dry_run`, `expected_hash` (OCC), rewrite-guard, backup. EOL taken from the destination file. Headers `a/` `b/` matched against `path`.
+- `write_file(mode:"append")` concatenates then atomic write; skips rewrite-guard.
+
+Experimental this cycle (no outputSchema).
+
+**Verification:** `TestApplyUnifiedPatch_*` · `TestApplyPatch_*` · `TestDiffFiles_*` · `TestWriteFile_Append`.
+
+### feat: Sprint D+E — readonly, secret denylist, file:// resources
+
+- `--readonly` rejects mutating tools (`READ_ONLY`). `git status/diff/log/show` still allowed.
+- Secret denylist (`.env`, `*.pem`, `*.key`, `id_rsa*`, `credentials.json`, …). Direct access denied unless `--allow-secrets` (audited). Search/tree skip secrets.
+- `get_file_info` adds MIME, SHA-256 (files ≤5MB), `token_estimate` (bytes/4).
+- Resource template `file:///{+path}` under the sandbox. `listChanged` on allowlist swap. **No** per-file subscribe.
+
+**Verification:** `TestIsSecretPath` · `TestReadOnly_BlocksWrite` · `TestSecretPath_*` · `TestGetFileInfo_MIMEAndTokens`.
+
 ## [Unreleased / 4.5.38] - 2026-09-03
 
 ### feat(read_file): displace bash `tail | cut` — max_line_length + head/tail auto-cut

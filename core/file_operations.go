@@ -3,9 +3,12 @@ package core
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"os"
 	"path/filepath"
 	"strings"
@@ -693,7 +696,7 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 
 	// Validate path (security + access control)
 	if !e.IsPathAllowed(path) {
-		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths%s", path, e.AllowedDirsSuffix())
+		return "", e.AccessDeniedError("stat", path)
 	}
 
 	// Check if file exists
@@ -831,7 +834,7 @@ func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string,
 
 	// Check if path is allowed (security + access control)
 	if !e.IsPathAllowed(path) {
-		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths%s", path, e.AllowedDirsSuffix())
+		return "", e.AccessDeniedError("stat", path)
 	}
 
 	// Get file info
@@ -852,11 +855,13 @@ func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string,
 		if info.IsDir() {
 			fileType = "dir"
 		}
-		result.WriteString(fmt.Sprintf("%s: %s | %s | %s\n",
+		result.WriteString(fmt.Sprintf("%s: %s | %s | %s | %s | ~%d tok\n",
 			fileType,
 			info.Name(),
 			formatSize(info.Size()),
-			info.ModTime().Format("2006-01-02 15:04:05")))
+			info.ModTime().Format("2006-01-02 15:04:05"),
+			mimeByPath(path),
+			info.Size()/4))
 	} else {
 		// Verbose mode: detailed info
 		result.WriteString(fmt.Sprintf("📄 File Information\n"))
@@ -888,6 +893,16 @@ func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string,
 
 		result.WriteString(fmt.Sprintf("🔐 Permissions: %s\n", info.Mode().String()))
 		result.WriteString(fmt.Sprintf("🕐 Modified: %s\n", info.ModTime().Format("2006-01-02 15:04:05")))
+		if !info.IsDir() {
+			result.WriteString(fmt.Sprintf("📎 MIME: %s\n", mimeByPath(path)))
+			if info.Size() <= 5*1024*1024 {
+				if sum, err := sha256File(path); err == nil {
+					result.WriteString(fmt.Sprintf("🔒 SHA256: %s\n", sum))
+				}
+			}
+			tok := info.Size() / 4
+			result.WriteString(fmt.Sprintf("🔢 token_estimate: %d\n", tok))
+		}
 
 		// Get absolute path
 		absPath, err := filepath.Abs(path)
@@ -899,4 +914,25 @@ func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string,
 	}
 
 	return result.String(), nil
+}
+
+func mimeByPath(path string) string {
+	mt := mime.TypeByExtension(filepath.Ext(path))
+	if mt == "" {
+		return "application/octet-stream"
+	}
+	return mt
+}
+
+func sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }

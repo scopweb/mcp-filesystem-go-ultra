@@ -137,7 +137,7 @@ func TestBug19_CountOccurrences_DirectoryMode(t *testing.T) {
 		}
 	}
 
-	result, err := engine.CountOccurrences(ctx, tempDir, "foo", false, true, false)
+	result, err := engine.CountOccurrences(ctx, tempDir, "foo", false, true, false, false)
 	if err != nil {
 		t.Fatalf("CountOccurrences error: %v", err)
 	}

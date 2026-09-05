@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra
 
-**v4.5.38** · Go 1.27.1 · MCP 2025-11-25 · 20 tools (17 core + git + minify_js + help)
+**v4.6.0** · Go 1.27.1 · MCP 2025-11-25 · 24 tools (17 core + git + minify_js + help + discovery + patch)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop and Claude Code, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -17,13 +17,13 @@ Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool 
 - **Accidental-rewrite guard** (v4.5.10) — blocks `edit_file` calls that look like unintended full-file rewrites
 - **Path security** — symlink-resolved containment via `filepath.Rel`, NTFS ADS blocking, RTLO/zero-width Unicode rejection, Windows reserved names, TOCTOU symlink defense
 - **Risk assessment** — mutations above configurable thresholds are flagged (20% change = MEDIUM, 75% = HIGH by default); HIGH/CRITICAL results include post-edit integrity verification
-- **Access control** — restrict the server to specific directory trees via `--allowed-paths` (also enforced in batch operations)
+- **Access control** — fail-closed: at least one `--allowed-paths` / positional root is required (also enforced in batch operations). `--insecure-open` is labs-only.
 - **Plan mode** — dry-run analysis with diff preview and risk report before applying changes
 - **Structured output** — `outputSchema` + `structuredContent` on the 4 I/O core tools, with a handler-level conformance sweep enforced in CI
 
 ### Productivity
 
-- **20 tools** — 17 core + `git` + `minify_js` + `help`, consolidated from 59 in v3.x with no loss of functionality
+- **24 tools** — 17 core + `git` + `minify_js` + `help` + `list_allowed_directories` + `directory_tree` + `diff_files` + `apply_patch`
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
 - **Hook system** — 16 pre/post events (write, edit, delete, create, move, copy, read, search)
 - **Pipeline system** — 12 actions with conditions, templates, and DAG-based parallel execution; reduces client/server round-trips for multi-step refactors
@@ -113,12 +113,17 @@ Linux:
 }
 ```
 
-The positional arguments after the flags are the allowed base paths. Omitting paths disables access control entirely.
+The positional arguments after the flags are the allowed base paths. **Required** since v4.6.0 (fail-closed). Omitting them exits 2. Labs only: `--insecure-open` disables the sandbox (entire disk).
 
 ### Key flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--allowed-paths` | (required) | Comma-separated allowed roots; or pass paths as positional args |
+| `--insecure-open` | off | Labs only: disable the sandbox (entire disk). Fail-closed by default since v4.6.0. |
+| `--roots-mode` | replace | How MCP client Roots combine with CLI paths: `replace`, `union`, `ignore` |
+| `--readonly` | off | Reject mutating tools |
+| `--allow-secrets` | off | Allow `.env` / keys (audited) |
 | `--compact-mode` | off | Reduced-token responses |
 | `--cache-size` | 100MB | In-memory file cache limit |
 | `--parallel-ops` | 2×CPU (max 16) | Max concurrent operations |
@@ -368,7 +373,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest unreleased: v4.5.38 — read_file tail/cut, Go 1.27.1).
+See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest unreleased: v4.6.0 — fail-closed without `--allowed-paths`).
 
 ---
 

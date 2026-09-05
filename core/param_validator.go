@@ -59,6 +59,21 @@ var toolSchemas = map[string]ToolParamSchema{
 		"content":        {ParamString, false},
 		"content_base64": {ParamString, false},
 		"encoding":       {ParamString, false},
+		"mode":           {ParamString, false},
+	},
+	"diff_files": {
+		"path_a":  {ParamString, false},
+		"path_b":  {ParamString, false},
+		"path":    {ParamString, false},
+		"against": {ParamString, false},
+	},
+	"apply_patch": {
+		"path":          {ParamString, true},
+		"patch":         {ParamString, true},
+		"dry_run":       {ParamBoolean, false},
+		"expected_hash": {ParamString, false},
+		"allow_rewrite": {ParamBoolean, false},
+		"create_backup": {ParamBoolean, false},
 	},
 	"edit_file": {
 		"path":                {ParamString, true},
@@ -86,9 +101,20 @@ var toolSchemas = map[string]ToolParamSchema{
 		"position":            {ParamString, false},  // mode insert: "after" (default) | "before"
 	},
 	"list_directory": {
-		"path":          {ParamString, true},
-		"output_format": {ParamString, false}, // "compact" (default) | "json" | "tree"
-		"max_depth":     {ParamNumber, false}, // recursion depth for "tree"
+		"path":           {ParamString, true},
+		"output_format":  {ParamString, false},
+		"max_depth":      {ParamNumber, false},
+		"exclude":        {ParamString, false},
+		"respect_ignore": {ParamBoolean, false},
+		"max_nodes":      {ParamNumber, false},
+	},
+	"directory_tree": {
+		"path":           {ParamString, true},
+		"output_format":  {ParamString, false},
+		"max_depth":      {ParamNumber, false},
+		"exclude":        {ParamString, false},
+		"respect_ignore": {ParamBoolean, false},
+		"max_nodes":      {ParamNumber, false},
 	},
 	"search_files": {
 		"path":            {ParamString, true},
@@ -105,6 +131,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"output_format":   {ParamString, false},  // "text" or "json"
 		"output":          {ParamString, false},  // alias for output_format
 		"max_results":     {ParamNumber, false},  // cap filenames returned (v4.5.26, fix #3)
+		"no_ignore":       {ParamBoolean, false},
 	},
 
 	// ---- EDIT+ (1) ----
@@ -256,6 +283,7 @@ var toolSchemas = map[string]ToolParamSchema{
 	"help": {
 		"topic": {ParamString, false},
 	},
+	"list_allowed_directories": {},
 }
 
 // benignParams are metadata parameters some clients attach to tool calls

@@ -18,10 +18,11 @@ filesystem-ultra tools operate on the real host filesystem visible to this MCP s
 Runtime-native create_file, str_replace, view, or similar tools may operate in a different sandbox.
 
 ## HOST PROJECT WORKFLOW
-1. Bind each project to one filesystem tool family; use filesystem-ultra for host project paths.
-2. After every host mutation, verify independently with get_file_info or list_directory; use read_file when content matters.
-3. Treat "file not found" for a known file as a possible filesystem mismatch: stop, confirm with the host reader, and audit recent writes made through the failing tool family.
-4. Do not switch tools or retry silently until the mismatch is understood.
+1. Call list_allowed_directories before the first read to see the sandbox roots.
+2. Bind each project to one filesystem tool family; use filesystem-ultra for host project paths.
+3. After every host mutation, verify independently with get_file_info or list_directory; use read_file when content matters.
+4. Treat "file not found" for a known file as a possible filesystem mismatch: stop, confirm with the host reader, and audit recent writes made through the failing tool family.
+5. Do not switch tools or retry silently until the mismatch is understood.
 
 ## THE GOLDEN RULE
 Surgical edits save 98% tokens:
@@ -31,7 +32,7 @@ GOOD: search_files -> read_file(start_line/end_line) -> edit_file = 2k tokens
 ## AVAILABLE TOPICS
 Call server_info(action:"help", topic:"...") with:
 - "workflow" - The 4-step efficient workflow
-- "tools"    - Complete list of 20 tools
+- "tools"    - Complete list of 21 tools
 - "read"     - Reading files efficiently
 - "write"    - Writing and creating files
 - "edit"     - Editing files (most important!)
@@ -77,9 +78,15 @@ server_info(action:"stats")
 `)
 
 	case "tools":
-		sb.WriteString(`# COMPLETE TOOL LIST (20 Tools)
+		sb.WriteString(`# COMPLETE TOOL LIST (21 Tools)
 
 Use help() for the live catalog generated from the registered MCP tools. This topic is the compact reference for clients that hide full schemas.
+
+## Discovery (1)
+
+list_allowed_directories
+- Purpose: Return the sandbox roots. Call before the first read. Zero parameters.
+- Key params: (none)
 
 ## Core I/O (6)
 
@@ -552,7 +559,7 @@ Repeated edits on a broken file make recovery harder.
 Available topics:
 - overview  - Quick start guide
 - workflow  - The 4-step efficient workflow
-- tools     - Complete list of 20 tools
+- tools     - Complete list of 21 tools
 - read      - Reading files efficiently
 - write     - Writing and creating files
 - edit      - Editing files (most important!)

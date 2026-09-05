@@ -45,7 +45,7 @@ func runSmokeCase(t *testing.T, binPath, workdir string, args map[string]any) st
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, binPath)
+	cmd := exec.CommandContext(ctx, binPath, workdir)
 	cmd.Dir = workdir
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
