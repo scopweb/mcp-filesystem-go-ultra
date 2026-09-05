@@ -56,6 +56,15 @@ Experimental this cycle (no outputSchema).
 
 **Verification:** `TestApplyUnifiedPatch_*` · `TestApplyPatch_*` · `TestDiffFiles_*` · `TestWriteFile_Append`.
 
+### feat: Sprint D+E — readonly, secret denylist, file:// resources
+
+- `--readonly` rejects mutating tools (`READ_ONLY`). `git status/diff/log/show` still allowed.
+- Secret denylist (`.env`, `*.pem`, `*.key`, `id_rsa*`, `credentials.json`, …). Direct access denied unless `--allow-secrets` (audited). Search/tree skip secrets.
+- `get_file_info` adds MIME, SHA-256 (files ≤5MB), `token_estimate` (bytes/4).
+- Resource template `file:///{+path}` under the sandbox. `listChanged` on allowlist swap. **No** per-file subscribe.
+
+**Verification:** `TestIsSecretPath` · `TestReadOnly_BlocksWrite` · `TestSecretPath_*` · `TestGetFileInfo_MIMEAndTokens`.
+
 ## [Unreleased / 4.5.38] - 2026-09-03
 
 ### feat(read_file): displace bash `tail | cut` — max_line_length + head/tail auto-cut

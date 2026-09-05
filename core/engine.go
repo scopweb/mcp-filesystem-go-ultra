@@ -58,6 +58,9 @@ type Config struct {
 	// When search_files produces output larger than this, it is truncated with
 	// a marker telling the model to use count_only:true or a narrower path.
 	MaxSearchOutputBytes int
+
+	ReadOnly     bool
+	AllowSecrets bool
 }
 
 // UltraFastEngine implements all filesystem operations with maximum performance
@@ -1217,6 +1220,10 @@ func (e *UltraFastEngine) IsPathAllowed(path string) bool {
 		slog.Debug("Path rejected by security check", "path", path, "reason", err.Error())
 		return false
 	}
+	if IsSecretPath(path) && !e.config.AllowSecrets {
+		slog.Debug("Path rejected as secret", "path", path)
+		return false
+	}
 
 	empty, bases := e.allowedBases()
 	if empty {
@@ -1483,6 +1490,17 @@ func (e *UltraFastEngine) GetHookManager() *HookManager {
 	return e.hookManager
 }
 
+func (e *UltraFastEngine) IsReadOnly() bool {
+	return e.config != nil && e.config.ReadOnly
+}
+
+func (e *UltraFastEngine) AllowSecrets() bool {
+	return e.config != nil && e.config.AllowSecrets
+}
+
+// AllowlistChangedHook is invoked after SetAllowedPaths (MCP resources listChanged).
+var AllowlistChangedHook func()
+
 // GetAllowedPaths returns a copy of the configured allowed paths.
 func (e *UltraFastEngine) GetAllowedPaths() []string {
 	e.allowedMu.RLock()
@@ -1518,6 +1536,9 @@ func (e *UltraFastEngine) SetAllowedPaths(paths []string, source string) {
 		e.cache.Flush()
 	}
 	slog.Info("Allowed paths updated", "count", len(e.config.AllowedPaths), "source", source)
+	if AllowlistChangedHook != nil {
+		AllowlistChangedHook()
+	}
 }
 
 func (e *UltraFastEngine) allowedBases() (empty bool, bases []string) {

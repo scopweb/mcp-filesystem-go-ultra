@@ -195,6 +195,9 @@ func skipWalkDir(name, absPath, walkRoot string, isDir bool, ign *IgnoreMatcher,
 	if absPath == walkRoot {
 		return false
 	}
+	if IsSecretPath(absPath) {
+		return true
+	}
 	if isDir && searchSkipDirs[name] {
 		return true
 	}

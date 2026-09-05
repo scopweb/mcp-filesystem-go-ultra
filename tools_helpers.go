@@ -39,8 +39,13 @@ func filesystemMismatchSuffix(err error) string {
 // missing path actionable. Non-not-found errors remain byte-identical.
 func formatToolError(err error) string {
 	var pe *core.PathError
-	if errors.As(err, &pe) && pe.Err != nil && strings.Contains(pe.Err.Error(), "access denied") {
-		return pathErrorJSON(errCodeNotAllowed, pe.Error(), pe.Path, nil, "call list_allowed_directories")
+	if errors.As(err, &pe) {
+		if core.IsSecretPath(pe.Path) {
+			return pathErrorJSON(errCodeSecretDenied, pe.Error(), pe.Path, nil, "pass --allow-secrets to read (writes still audited)")
+		}
+		if pe.Err != nil && strings.Contains(pe.Err.Error(), "access denied") {
+			return pathErrorJSON(errCodeNotAllowed, pe.Error(), pe.Path, nil, "call list_allowed_directories")
+		}
 	}
 	return fmt.Sprintf("Error: %v", err) + filesystemMismatchSuffix(err)
 }
