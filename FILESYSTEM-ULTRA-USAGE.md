@@ -1,15 +1,16 @@
 # Guía mínima para IAs — filesystem-ultra
 
-Guía de uso operativo del conector MCP **filesystem-ultra v4.5.x**.
+Guía de uso operativo del conector MCP **filesystem-ultra v4.6.0**.
 
-Expone **20 herramientas**: 17 operaciones de filesystem, más `git`, `minify_js` y `help`. Los aliases antiguos y el super-tool `fs` están deshabilitados.
+Expone **24 herramientas**: 17 core + `git` + `minify_js` + `help` + `list_allowed_directories` + `directory_tree` + `diff_files` + `apply_patch`. Los aliases antiguos y el super-tool `fs` están deshabilitados. `directory_tree` sí está registrado (experimental).
 
 ## Reglas obligatorias
 
 1. **Usar una sola familia de herramientas por proyecto.**
+   - Llamar `list_allowed_directories` antes de la primera lectura para ver las raíces del sandbox.
    - Para proyectos accesibles mediante filesystem-ultra, usar sus herramientas para leer, buscar, escribir, editar, listar y borrar.
    - No mezclarlo silenciosamente con herramientas de otro MCP o de un filesystem sandbox.
-   - Si un archivo conocido devuelve `File not found`, comprobar primero que no se está usando otro filesystem.
+   - Si un archivo conocido devuelve `NOT_FOUND` / `File not found`, comprobar primero que no se está usando otro filesystem.
 
 2. **Copiar las rutas exactamente desde `list_directory`, `search_files` o `read_file`.**
    - No reconstruirlas de memoria.
@@ -60,7 +61,8 @@ Usarlo cuando:
 - el archivo no existe;
 - se genera su contenido completo;
 - se reescribe la mayor parte del archivo;
-- se escribe contenido binario en base64.
+- se escribe contenido binario en base64;
+- se concatena al final: `mode:"append"` (no dispara rewrite-guard).
 
 No sustituir una reescritura completa por un `edit_file` con un anchor pequeño.
 
@@ -146,6 +148,10 @@ Leer:
 
 Las lecturas individuales completas, por rango o base64 pueden devolver `content_hash` en `structuredContent`. Una lectura batch de varios archivos no proporciona un único hash utilizable para editar todos ellos.
 
+### `list_allowed_directories`
+
+Cero parámetros. Devuelve las raíces efectivas del sandbox. Llamarla antes de la primera lectura.
+
 ### `list_directory`
 
 Listar contenido de directorios usando caché.
@@ -156,6 +162,18 @@ Formatos útiles:
 - `tree`: árbol recursivo con profundidad controlada.
 
 Usarlo también para copiar rutas con su capitalización exacta.
+
+### `directory_tree`
+
+Árbol compacto (experimental). Equivale a `list_directory` con `output_format:"tree"`. Respeta `.gitignore`. `max_depth` por defecto 2.
+
+### `diff_files`
+
+Diff unificado entre dos rutas (`path_a`, `path_b`) o un archivo contra su último backup (`path` + `against:"backup"`).
+
+### `apply_patch`
+
+Aplicar un unified diff a **un** archivo. Fail-closed: sin fuzzy, sin multi-file. `dry_run:true` previsualiza. `expected_hash` para OCC.
 
 ### `search_files`
 
@@ -279,20 +297,26 @@ Punto de descubrimiento básico del conector. Si el cliente sólo recibe una ins
 
 ```text
 1. Identificar que el proyecto pertenece al filesystem accesible por filesystem-ultra.
-2. Obtener la ruta exacta con list_directory/search_files.
-3. Leer el archivo con read_file y conservar content_hash.
-4. Elegir write_file, edit_file, multi_edit, project_replace o batch_operations.
-5. Hacer dry-run/preview si el impacto es amplio.
-6. Ejecutar pasando expected_hash cuando aplique.
-7. Verificar con get_file_info y, si importa el contenido, read_file.
-8. Conservar backup_id para una posible restauración.
+2. list_allowed_directories — ver raíces del sandbox.
+3. Obtener la ruta exacta con list_directory/directory_tree/search_files.
+4. Leer el archivo con read_file y conservar content_hash.
+5. Elegir write_file, edit_file, multi_edit, apply_patch, project_replace o batch_operations.
+6. Hacer dry-run/preview si el impacto es amplio.
+7. Ejecutar pasando expected_hash cuando aplique.
+8. Verificar con get_file_info y, si importa el contenido, read_file.
+9. Conservar backup_id para una posible restauración.
 ```
 
 ## Resumen de decisión
 
 | Necesidad | Herramienta |
 |---|---|
+| Ver raíces del sandbox | `list_allowed_directories` |
+| Árbol compacto | `directory_tree` |
+| Diff de dos archivos o vs backup | `diff_files` |
+| Aplicar unified diff (1 archivo) | `apply_patch` |
 | Crear o reescribir archivo completo | `write_file` |
+| Concatenar al final | `write_file` `mode:"append"` |
 | Cambio pequeño y localizado | `edit_file` |
 | Varios cambios independientes en un archivo | `multi_edit` |
 | Reemplazo en todo el proyecto | `project_replace` |
