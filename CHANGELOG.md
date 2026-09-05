@@ -81,6 +81,14 @@ Roots apply now runs in a goroutine with a 2s timeout. Empty/error roots still l
 
 **Verification:** `TestRootsSync_InitializedDoesNotBlockStdio` · `TestApplyFromClient_TimesOut`.
 
+### fix: file cache sees other-process writes (multi-agent)
+
+Directory listings already dropped cache on mtime change. File reads did not: agent B's `read_file` after agent A wrote the same path returned stale bytes, so `expected_hash` OCC could not round-trip.
+
+`GetFileFresh` compares size + mtime before serving. E2E: three MCP processes on `C:\temp\fsu-multi-agent` (writer, `--readonly` reviewer, `--auto-occ=block` peer).
+
+**Verification:** `TestReadFileContent_SeesExternalWrite` · `TestE2E_MultiAgent_CTemp`.
+
 ## [Unreleased / 4.5.38] - 2026-09-03
 
 ### feat(read_file): displace bash `tail | cut` — max_line_length + head/tail auto-cut
