@@ -79,7 +79,7 @@ func TestIncidentFix_EndToEndContract(t *testing.T) {
 	s, _ := newIncidentFixServer(t, dir)
 
 	tools := s.ListTools()
-	if got, want := len(tools), 20; got != want {
+	if got, want := len(tools), 24; got != want {
 		t.Errorf("registered tool count = %d, want %d (names=%v)", got, want, toolNames(tools))
 	}
 	for _, banned := range []string{"create_file", "str_replace", "view", "fs"} {
@@ -90,7 +90,7 @@ func TestIncidentFix_EndToEndContract(t *testing.T) {
 
 	helpResult := callServer(t, s, "help", map[string]any{})
 	helpText := textFromResult(t, helpResult)
-	if !strings.Contains(helpText, "read_file") || !strings.Contains(helpText, "git") {
+	if !strings.Contains(helpText, "read_file") || !strings.Contains(helpText, "git") || !strings.Contains(helpText, "list_allowed_directories") {
 		t.Errorf("help() catalog is missing core tools: %q", helpText)
 	}
 	if strings.Contains(helpText, "- `create_file`") {

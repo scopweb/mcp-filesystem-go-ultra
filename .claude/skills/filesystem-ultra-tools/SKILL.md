@@ -1,21 +1,23 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.5.38: 20 tools (17 core + git + minify_js + help). Host-filesystem binding, post-write verification, aliases disabled. read_file replaces bash cat/head/tail/cut.
+description: Tool catalog for filesystem-ultra MCP server v4.6.0: 21 tools (17 core + git + minify_js + help + list_allowed_directories). Host-filesystem binding, post-write verification, aliases disabled. read_file replaces bash cat/head/tail/cut. Call list_allowed_directories before the first read.
 ---
 
-# Filesystem Ultra v4.5.38 — Tool Discovery
+# Filesystem Ultra v4.6.0 — Tool Discovery
 
 ## Bind each project to one filesystem tool family
 
 - `filesystem-ultra` operates on the real host filesystem visible to its MCP server (`C:\...`, host-mounted `/mnt/...`, etc.). Runtime-native `create_file`, `str_replace`, `view`, or similar tools may operate in a different sandbox.
+- Call `list_allowed_directories` before the first read so the sandbox roots are visible.
 - Before the first project read or write, select the family explicitly mapped to that project. For host projects reachable through filesystem-ultra, use only its read/write/edit/list/info/copy/delete tools; reserve native tools for explicit agent scratch work.
 - After every host creation or edit, verify independently with `get_file_info` or `list_directory`; use `read_file` when content matters. A successful write response alone does not prove that a different tool family targeted the host.
 - Treat `File not found` for a known file as a filesystem-mismatch signal: stop, confirm with the host reader, audit recent writes made through the failing family, and understand the mismatch before retrying. Never switch tools silently.
 
-## The 20 tools (17 core + git + minify_js + help)
+## The 21 tools (17 core + git + minify_js + help + list_allowed_directories)
 
 | Tool | Purpose |
 |------|---------|
+| `list_allowed_directories` | Sandbox roots. Call before the first read. Zero parameters. [EXPERIMENTAL] |
 | `read_file` | Read files (single or batch via `paths`). **Replaces bash `cat`/`head`/`tail`/`cut`/`sed -n` — never use the shell.** Logs: `mode:"tail"` `max_lines:40` (each line auto-cut to 300 chars; `max_line_length:0` disables, N overrides). Range: `start_line`/`end_line`. Binary: `encoding:"base64"`. |
 | `write_file` | Write/create files (binary via base64) |
 | `edit_file` | Replace exact text, regex, nth occurrence. Override the rewrite guard with `allow_rewrite:true` (not `force`). |
@@ -35,7 +37,7 @@ description: Tool catalog for filesystem-ultra MCP server v4.5.38: 20 tools (17 
 | `server_info` | Stats, help, artifact capture |
 | `git` | Version control (status, diff, log, **show**, add, commit, restore, branch, init). `paths` is a **native array**; `output` enum (`stat`/`name-only`/`full`); 4-layer guardrail downgrades big full diffs to stat with a top-of-output banner; `rev` replaces `commit_range`/`source`. Errors include a `usage:` line; `help(tool:"git")` returns schema + 8 curated examples. Compact mode: `status` without explicit `output` returns a one-line summary — pass `output:"name-only"` or `"full"` to get the changed-file listing. `show`: `max_lines` applies to the diff body only, the commit header is always complete. |
 | `minify_js` | Pure-Go JS minification, no Node (v4.5.7+) |
-| `help` | Discovery — call first to see all 20 tools |
+| `help` | Discovery — call first to see all 21 tools |
 
 ## search_files ripgrep-compatible params
 

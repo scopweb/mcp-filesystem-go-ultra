@@ -58,6 +58,9 @@ type Config struct {
 	// When search_files produces output larger than this, it is truncated with
 	// a marker telling the model to use count_only:true or a narrower path.
 	MaxSearchOutputBytes int
+
+	ReadOnly     bool
+	AllowSecrets bool
 }
 
 // UltraFastEngine implements all filesystem operations with maximum performance
@@ -117,6 +120,8 @@ type UltraFastEngine struct {
 	// Pre-resolved allowed paths (resolved once at startup via Abs + EvalSymlinks + norm)
 	// Only base allowed paths are cached; target paths are still resolved per-call for security.
 	resolvedAllowedPaths []string
+	allowedMu            sync.RWMutex
+	allowedSource        string
 
 	// Audit logger for operation tracking (nil if --log-dir not set)
 	auditLogger *AuditLogger
@@ -214,8 +219,10 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 	if len(config.AllowedPaths) > 0 {
 		slog.Info("Access control enabled", "allowed_paths_count", len(config.AllowedPaths))
 		engine.resolveAllowedPaths()
+		engine.allowedSource = AllowedSourceCLI
 	} else {
 		slog.Warn("Access control disabled - full filesystem access allowed")
+		engine.allowedSource = AllowedSourceInsecure
 	}
 
 	// Initialize worker pool for parallel operations
@@ -1185,6 +1192,8 @@ Search Operations: %d`,
 // self-diagnosing (issue: Go/Rust variant parity — the error must name the
 // allowed directories so sandbox mismatches are visible without logs).
 func (e *UltraFastEngine) AllowedDirsSuffix() string {
+	e.allowedMu.RLock()
+	defer e.allowedMu.RUnlock()
 	if len(e.config.AllowedPaths) == 0 {
 		return " (rejected by the always-on path security policy; no allowed directories are configured)"
 	}
@@ -1211,16 +1220,14 @@ func (e *UltraFastEngine) IsPathAllowed(path string) bool {
 		slog.Debug("Path rejected by security check", "path", path, "reason", err.Error())
 		return false
 	}
-
-	// 2. When AllowedPaths is not configured, open-access mode — security checks above
-	//    still apply, but containment is not enforced.
-	if len(e.config.AllowedPaths) == 0 {
-		return true
+	if IsSecretPath(path) && !e.config.AllowSecrets {
+		slog.Debug("Path rejected as secret", "path", path)
+		return false
 	}
 
-	// 3. Re-resolve if AllowedPaths changed at runtime (e.g., tests append paths after init)
-	if len(e.resolvedAllowedPaths) != len(e.config.AllowedPaths) {
-		e.resolveAllowedPaths()
+	empty, bases := e.allowedBases()
+	if empty {
+		return true
 	}
 
 	// Resolve to absolute, cleaned paths to prevent traversal and casing issues
@@ -1270,7 +1277,7 @@ func (e *UltraFastEngine) IsPathAllowed(path string) bool {
 
 	targetAbs = norm(targetAbs)
 
-	for _, baseAbs := range e.resolvedAllowedPaths {
+	for _, baseAbs := range bases {
 		// Quick equality check
 		if targetAbs == baseAbs {
 			return true
@@ -1295,7 +1302,8 @@ func (e *UltraFastEngine) IsPathAllowed(path string) bool {
 // configured --allowed-paths roots. Destructive operations (delete, move)
 // must reject these paths to prevent wiping out an entire allowed tree.
 func (e *UltraFastEngine) IsAllowedPathRoot(path string) bool {
-	if len(e.resolvedAllowedPaths) == 0 {
+	empty, bases := e.allowedBases()
+	if empty || len(bases) == 0 {
 		return false
 	}
 
@@ -1316,7 +1324,7 @@ func (e *UltraFastEngine) IsAllowedPathRoot(path string) bool {
 	}
 	targetAbs = norm(targetAbs)
 
-	for _, baseAbs := range e.resolvedAllowedPaths {
+	for _, baseAbs := range bases {
 		if targetAbs == baseAbs {
 			return true
 		}
@@ -1482,94 +1490,106 @@ func (e *UltraFastEngine) GetHookManager() *HookManager {
 	return e.hookManager
 }
 
-// GetAllowedPaths returns the configured allowed paths
-func (e *UltraFastEngine) GetAllowedPaths() []string {
-	return e.config.AllowedPaths
+func (e *UltraFastEngine) IsReadOnly() bool {
+	return e.config != nil && e.config.ReadOnly
 }
 
-// ListDirectoryTree returns a recursive JSON tree structure of a directory
+func (e *UltraFastEngine) AllowSecrets() bool {
+	return e.config != nil && e.config.AllowSecrets
+}
+
+// AllowlistChangedHook is invoked after SetAllowedPaths (MCP resources listChanged).
+var AllowlistChangedHook func()
+
+// GetAllowedPaths returns a copy of the configured allowed paths.
+func (e *UltraFastEngine) GetAllowedPaths() []string {
+	e.allowedMu.RLock()
+	defer e.allowedMu.RUnlock()
+	return append([]string(nil), e.config.AllowedPaths...)
+}
+
+// AllowedSource returns how the current sandbox was set: cli, roots, union, or insecure.
+func (e *UltraFastEngine) AllowedSource() string {
+	e.allowedMu.RLock()
+	defer e.allowedMu.RUnlock()
+	return e.allowedSource
+}
+
+// SetAllowedPaths replaces the sandbox roots at runtime (MCP Roots). Thread-safe.
+func (e *UltraFastEngine) SetAllowedPaths(paths []string, source string) {
+	e.allowedMu.Lock()
+	defer e.allowedMu.Unlock()
+	e.config.AllowedPaths = append([]string(nil), paths...)
+	e.resolveAllowedPaths()
+	if source == "" {
+		if len(paths) == 0 {
+			source = AllowedSourceInsecure
+		} else {
+			source = AllowedSourceCLI
+		}
+	}
+	e.allowedSource = source
+	if e.autoSyncManager != nil {
+		e.autoSyncManager.SetAllowedPaths(e.config.AllowedPaths)
+	}
+	if e.cache != nil {
+		e.cache.Flush()
+	}
+	slog.Info("Allowed paths updated", "count", len(e.config.AllowedPaths), "source", source)
+	if AllowlistChangedHook != nil {
+		AllowlistChangedHook()
+	}
+}
+
+func (e *UltraFastEngine) allowedBases() (empty bool, bases []string) {
+	e.allowedMu.RLock()
+	if len(e.config.AllowedPaths) == 0 {
+		e.allowedMu.RUnlock()
+		return true, nil
+	}
+	if len(e.resolvedAllowedPaths) == len(e.config.AllowedPaths) {
+		bases = append([]string(nil), e.resolvedAllowedPaths...)
+		e.allowedMu.RUnlock()
+		return false, bases
+	}
+	e.allowedMu.RUnlock()
+
+	e.allowedMu.Lock()
+	defer e.allowedMu.Unlock()
+	if len(e.config.AllowedPaths) == 0 {
+		return true, nil
+	}
+	if len(e.resolvedAllowedPaths) != len(e.config.AllowedPaths) {
+		e.resolveAllowedPaths()
+	}
+	return false, append([]string(nil), e.resolvedAllowedPaths...)
+}
+
+// ListedAllowedPaths returns absolute, symlink-resolved allowed roots for
+// display (original case preserved — unlike resolvedAllowedPaths, which is
+// lowercased on Windows for containment). Empty means open-access.
+func (e *UltraFastEngine) ListedAllowedPaths() []string {
+	e.allowedMu.RLock()
+	raw := append([]string(nil), e.config.AllowedPaths...)
+	e.allowedMu.RUnlock()
+	out := make([]string, 0, len(raw))
+	for _, allowed := range raw {
+		baseAbs, err := filepath.Abs(allowed)
+		if err != nil {
+			out = append(out, allowed)
+			continue
+		}
+		if resolved, err := filepath.EvalSymlinks(baseAbs); err == nil {
+			baseAbs = resolved
+		}
+		out = append(out, filepath.Clean(baseAbs))
+	}
+	return out
+}
+
+// ListDirectoryTree returns a recursive JSON tree. Respects gitignore by default.
 func (e *UltraFastEngine) ListDirectoryTree(ctx context.Context, path string, maxDepth int) (string, error) {
-	path = NormalizePath(path)
-
-	if err := e.acquireOperation(ctx, "tree"); err != nil {
-		return "", err
-	}
-	start := time.Now()
-	defer e.releaseOperation("tree", start)
-
-	if !e.IsPathAllowed(path) {
-		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths%s", path, e.AllowedDirsSuffix())
-	}
-
-	type TreeNode struct {
-		Name     string      `json:"name"`
-		Type     string      `json:"type"`
-		Size     int64       `json:"size,omitempty"`
-		Children []*TreeNode `json:"children,omitempty"`
-	}
-
-	var buildTree func(dirPath string, depth int) (*TreeNode, error)
-	buildTree = func(dirPath string, depth int) (*TreeNode, error) {
-		if depth > maxDepth {
-			return nil, nil
-		}
-
-		info, err := os.Stat(dirPath)
-		if err != nil {
-			return nil, err
-		}
-
-		node := &TreeNode{
-			Name: filepath.Base(dirPath),
-			Type: "file",
-			Size: info.Size(),
-		}
-
-		if !info.IsDir() {
-			return node, nil
-		}
-
-		node.Type = "directory"
-		node.Size = 0
-
-		entries, err := os.ReadDir(dirPath)
-		if err != nil {
-			return node, nil
-		}
-
-		node.Children = make([]*TreeNode, 0, len(entries))
-		for _, entry := range entries {
-			childPath := filepath.Join(dirPath, entry.Name())
-			if entry.IsDir() {
-				child, err := buildTree(childPath, depth+1)
-				if err == nil && child != nil {
-					node.Children = append(node.Children, child)
-				}
-			} else {
-				childInfo, err := entry.Info()
-				if err == nil {
-					node.Children = append(node.Children, &TreeNode{
-						Name: entry.Name(),
-						Type: "file",
-						Size: childInfo.Size(),
-					})
-				}
-			}
-		}
-		return node, nil
-	}
-
-	tree, err := buildTree(path, 0)
-	if err != nil {
-		return "", fmt.Errorf("failed to build directory tree: %w", err)
-	}
-
-	data, err := json.MarshalIndent(tree, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal tree: %w", err)
-	}
-
-	return string(data), nil
+	return e.ListDirectoryTreeOpts(ctx, path, TreeOpts{MaxDepth: maxDepth, MaxNodes: 500, RespectIgnore: true, Format: "json"})
 }
 
 // GetMaxResponseSize returns max response size

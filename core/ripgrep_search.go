@@ -72,23 +72,20 @@ type ripgrepMatch struct {
 // Falls back to returning an error if ripgrep is not available or fails.
 // The caller is responsible for passing a validated path that passes IsPathAllowed.
 func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern string,
-	caseSensitive, wholeWord, includeContext bool, contextLines int) ([]SearchMatch, error) {
+	caseSensitive, wholeWord, includeContext bool, contextLines int, noIgnore bool) ([]SearchMatch, error) {
 
 	args := []string{
 		"--json",
 		"--max-filesize=10M",
-		// Parity with the native walk: the native path searches everything
-		// except searchSkipDirs — it does NOT respect .gitignore and DOES
-		// descend into hidden files/dirs. Without these flags ripgrep would
-		// silently skip git-ignored files (e.g. .env) and hidden paths,
-		// returning fewer results than the native fallback.
-		"--no-ignore",
 		"--hidden",
-		// Parity with the native path: do NOT transcode UTF-16 files. The
-		// native search treats BOM'd UTF-16/UTF-32 files as binary and skips
-		// them; ripgrep's default "auto" encoding would happily search them,
-		// returning matches the native path never reports.
 		"--encoding=none",
+	}
+	if noIgnore {
+		args = append(args, "--no-ignore")
+	} else {
+		for _, f := range extraRipgrepIgnoreFiles(path) {
+			args = append(args, "--ignore-file", f)
+		}
 	}
 
 	if !caseSensitive {
