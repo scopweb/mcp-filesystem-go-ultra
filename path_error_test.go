@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"strings"
 	"testing"
 
@@ -36,5 +37,23 @@ func TestFormatToolError_NotFoundUnchangedPrefix(t *testing.T) {
 	got := formatToolError(err)
 	if !strings.HasPrefix(got, "Error: ") {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFormatToolError_NotFoundEnvelope(t *testing.T) {
+	err := &core.PathError{Op: "read", Path: `C:\proj\missing.txt`, Err: fs.ErrNotExist}
+	got := formatToolError(err)
+	var env pathErrorEnvelope
+	if json.Unmarshal([]byte(got), &env) != nil {
+		t.Fatalf("want JSON envelope, got %s", got)
+	}
+	if env.Error.Code != errCodeNotFound {
+		t.Fatalf("code=%q", env.Error.Code)
+	}
+	if env.Error.Path != `C:\proj\missing.txt` {
+		t.Fatalf("path=%q", env.Error.Path)
+	}
+	if !strings.Contains(env.Error.Suggestion, "FILESYSTEM MISMATCH?") {
+		t.Fatalf("suggestion=%q", env.Error.Suggestion)
 	}
 }
