@@ -65,6 +65,22 @@ Experimental this cycle (no outputSchema).
 
 **Verification:** `TestIsSecretPath` · `TestReadOnly_BlocksWrite` · `TestSecretPath_*` · `TestGetFileInfo_MIMEAndTokens`.
 
+### fix: catalog = 24 tools; `NOT_FOUND` envelope on missing paths
+
+Skill, `help(topic:"tools")`, CLAUDE.md and FILESYSTEM-ULTRA-USAGE still advertised 20–21 tools and listed `directory_tree` as disabled. All four now match the 24 registered tools (`list_allowed_directories`, `directory_tree`, `diff_files`, `apply_patch` experimental).
+
+`formatToolError` emits `{error:{code:"NOT_FOUND",...}}` for `fs.ErrNotExist` (same envelope as `NOT_ALLOWED` / `SECRET_DENIED`). Suggestion keeps `FILESYSTEM MISMATCH?`. Other errors still use the `Error:` prefix.
+
+**Verification:** `TestFormatToolError_NotFoundEnvelope` · `TestHelp_NoArgs_ListsAllRegisteredTools` · `TestIncidentFix_EndToEndContract` (count=24).
+
+### fix: Claude Desktop hang on `roots/list` after initialize
+
+`notifications/initialized` called `RequestRoots` synchronously. mcp-go stdio handles that notification on the read loop, so `roots/list` waited for a reply that could never be read. Claude Desktop does not implement `roots/list` (`-32601 Method not found`); `tools/list` sat unanswered until the 30s Cowork/Code timeout.
+
+Roots apply now runs in a goroutine with a 2s timeout. Empty/error roots still leave the CLI sandbox (fail-closed). `list_allowed_directories` still reconsults on the tool worker (safe).
+
+**Verification:** `TestRootsSync_InitializedDoesNotBlockStdio` · `TestApplyFromClient_TimesOut`.
+
 ## [Unreleased / 4.5.38] - 2026-09-03
 
 ### feat(read_file): displace bash `tail | cut` — max_line_length + head/tail auto-cut

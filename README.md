@@ -2,9 +2,9 @@
 
 **v4.6.0** · Go 1.27.1 · MCP 2025-11-25 · 24 tools (17 core + git + minify_js + help + discovery + patch)
 
-A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop and Claude Code, with support for large files, WSL/Windows interoperability, and token-efficient responses.
+A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
-Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are disabled; only the 20 canonical tool names are registered.
+Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are disabled; only the 24 canonical tool names are registered.
 
 ---
 
@@ -113,6 +113,62 @@ Linux:
 }
 ```
 
+### OpenCode
+
+OpenCode does **not** read `claude_desktop_config.json`. Put this in the project `opencode.json` / `opencode.jsonc`, or globally in `~/.config/opencode/opencode.json` (Windows: `%USERPROFILE%\.config\opencode\opencode.json`).
+
+Differences vs Claude: key is `mcp` (not `mcpServers`), `type` is required, `command` is **one array** (binary + flags + paths), and `timeout` defaults to **5s** — too short for a 24-tool `tools/list`. Set `30000`.
+
+Windows (`opencode.json`):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "filesystem-ultra": {
+      "type": "local",
+      "command": [
+        "C:\\path\\to\\filesystem-ultra-v4.exe",
+        "--compact-mode",
+        "--cache-size", "200MB",
+        "--parallel-ops", "8",
+        "--log-level", "error",
+        "--log-dir", "C:\\logs\\mcp-filesystem",
+        "C:\\your\\project\\"
+      ],
+      "enabled": true,
+      "timeout": 30000
+    }
+  }
+}
+```
+
+Linux:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "filesystem-ultra": {
+      "type": "local",
+      "command": [
+        "/path/to/filesystem-ultra",
+        "--compact-mode",
+        "--cache-size", "200MB",
+        "--parallel-ops", "8",
+        "--log-level", "error",
+        "--log-dir", "/home/user/.local/share/mcp-filesystem/logs",
+        "/home/user/projects/"
+      ],
+      "enabled": true,
+      "timeout": 30000
+    }
+  }
+}
+```
+
+Quit and restart OpenCode after saving. Optional: `--roots-mode=ignore` if the client has no MCP Roots.
+
 The positional arguments after the flags are the allowed base paths. **Required** since v4.6.0 (fail-closed). Omitting them exits 2. Labs only: `--insecure-open` disables the sandbox (entire disk).
 
 ### Key flags
@@ -142,7 +198,7 @@ The positional arguments after the flags are the allowed base paths. **Required*
 
 ## Tool Discovery
 
-Claude Desktop uses **lazy tool loading** — it discovers only a few tools per query via semantic search, missing most of the 20 registered tools.
+Claude Desktop uses **lazy tool loading** — it discovers only a few tools per query via semantic search, missing most of the 24 registered tools.
 
 Three layers address this:
 

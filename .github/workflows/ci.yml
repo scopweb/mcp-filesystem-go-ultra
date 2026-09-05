@@ -99,7 +99,7 @@ jobs:
 
       # E2E smoke battery (Fase 2 hardening gate): builds the real binary,
       # launches it over stdio with the strict mcp-go client, and drives all
-      # 20 tools — surfaces the -32600 class (schema tool returning plain
+      # 24 tools — surfaces the -32600 class (schema tool returning plain
       # text) that in-process unit tests cannot see. Lightweight: one binary
       # build + a short battery, safe for the Windows runner memory budget.
       - name: Run E2E smoke battery (strict MCP client)

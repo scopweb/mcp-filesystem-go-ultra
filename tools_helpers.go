@@ -35,11 +35,14 @@ func filesystemMismatchSuffix(err error) string {
 	return "\n→ " + filesystemMismatchHint
 }
 
-// formatToolError preserves the existing "Error:" prefix while making a known
-// missing path actionable. Non-not-found errors remain byte-identical.
+// formatToolError maps path errors to the D6 JSON envelope when the code is
+// known (NOT_ALLOWED, SECRET_DENIED, NOT_FOUND). Other errors keep the
+// existing "Error:" prefix so callers that match on that string stay stable.
 func formatToolError(err error) string {
 	var pe *core.PathError
+	path := ""
 	if errors.As(err, &pe) {
+		path = pe.Path
 		if core.IsSecretPath(pe.Path) {
 			return pathErrorJSON(errCodeSecretDenied, pe.Error(), pe.Path, nil, "pass --allow-secrets to read (writes still audited)")
 		}
@@ -47,7 +50,10 @@ func formatToolError(err error) string {
 			return pathErrorJSON(errCodeNotAllowed, pe.Error(), pe.Path, nil, "call list_allowed_directories")
 		}
 	}
-	return fmt.Sprintf("Error: %v", err) + filesystemMismatchSuffix(err)
+	if errors.Is(err, fs.ErrNotExist) {
+		return pathErrorJSON(errCodeNotFound, err.Error(), path, nil, filesystemMismatchHint)
+	}
+	return fmt.Sprintf("Error: %v", err)
 }
 
 // pathsFromArgs extracts the pathspec from args["paths"] as []string.
