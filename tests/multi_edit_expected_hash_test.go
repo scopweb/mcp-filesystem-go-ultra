@@ -1,4 +1,4 @@
-package main
+package tests
 
 // Regression tests for issue #24 — multi_edit missing OCC stale-read
 // protection (Improvement B3 parity with edit_file).

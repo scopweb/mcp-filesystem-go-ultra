@@ -1,4 +1,4 @@
-package main
+package tests
 
 // Regression tests for issue #21 — multi_edit risk notice displays
 // "0 replacements" instead of the real edit count, and the displayed
