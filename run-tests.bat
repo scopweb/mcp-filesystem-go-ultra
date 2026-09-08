@@ -1,4 +1,7 @@
 @echo off
+echo Running server tests (internal/mcpserver)...
+go test ./internal/... -v
+echo.
 echo Running core tests...
 go test ./core/... -v
 echo.

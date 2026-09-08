@@ -11,7 +11,8 @@ import (
 )
 
 // AuditEntryKey is the context key for passing the audit entry to handlers.
-// Used by auditWrap (main.go) and internal engine code to annotate sub-operations.
+// Used by auditWrap (internal/mcpserver/audit.go) and internal engine code to
+// annotate sub-operations.
 type AuditEntryKey struct{}
 
 // SetFeedback annotates the current audit entry with a feedback signal.
