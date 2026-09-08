@@ -44,7 +44,7 @@ echo   OK: %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe
 REM ------------------------------------------------------------
 REM 3. MCP Proxy (stdio logging proxy with --model / --log-dir support)
 REM    This is the CORRECT way. The old -tags proxy build is dead.
-REM    Output name matches documentation (MCP-PROXY.md).
+REM    Output name matches documentation (doc/MCP-PROXY.md).
 REM ------------------------------------------------------------
 echo.
 echo [3/4] Building %OUT_DIR%\mcp-proxy.exe (logging proxy)...

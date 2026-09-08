@@ -12,10 +12,12 @@
 *.dylib
 *.test
 
-# Intentionally built release binaries (we commit only source)
-filesystem-ultra-v4*
-mcp-proxy*
-filesystem-ultra-v4-dashboard*
+# Intentionally built release binaries (we commit only source).
+# Anchored to the repo root: unanchored patterns also matched docs such as
+# doc/MCP-PROXY.md (git is case-insensitive on Windows). bin/ is ignored below.
+/filesystem-ultra-v4*
+/mcp-proxy*
+/filesystem-ultra-v4-dashboard*
 
 # Legacy / stray binaries
 mcp-filesystem-ultra
@@ -152,6 +154,11 @@ IMPROVEMENTS-1-6.md
 PROTOCOLO-BLINDADO-v2.md
 TOOL-REFERENCE.md
 docs/
+
+# ------------------------------------------------------------
+# Staging area for local files pending manual deletion.
+# ------------------------------------------------------------
+_to_delete/
 
 # ------------------------------------------------------------
 # Note: No legacy media files are kept at project root anymore.
