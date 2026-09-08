@@ -232,7 +232,7 @@ func TestBug20_BatchWithoutEngine_Fails(t *testing.T) {
 // =============================================================================
 // Bug #21 — formatPipelineResult silent failures in compact mode
 // We test that PipelineResult.Results[].Error is populated on failure,
-// which is the data source for the compact formatter fix in main.go.
+// which is the data source for the compact formatter fix in internal/mcpserver.
 // =============================================================================
 
 // TestBug21_FailedStepHasErrorPopulated verifies that when a pipeline step

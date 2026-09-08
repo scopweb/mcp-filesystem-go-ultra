@@ -93,10 +93,10 @@ When built with `embed_rg` tag, these binaries are included:
 
 ```bash
 # Without embedded ripgrep
-go build -ldflags="-s -w" -trimpath -o filesystem-ultra-v4.exe .
+go build -ldflags="-s -w" -trimpath -o filesystem-ultra-v4.exe ./cmd/filesystem-ultra
 
 # With embedded ripgrep
-go build -ldflags="-s -w" -trimpath -tags embed_rg -o filesystem-ultra-v4-embed.exe .
+go build -ldflags="-s -w" -trimpath -tags embed_rg -o filesystem-ultra-v4-embed.exe ./cmd/filesystem-ultra
 ```
 
 ### Downloading Additional Platforms

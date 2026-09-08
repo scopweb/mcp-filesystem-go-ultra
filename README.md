@@ -46,10 +46,10 @@ Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool 
 
 ```bash
 # Build (Windows) — v4 binary
-go build -ldflags="-s -w" -trimpath -o filesystem-ultra-v4.exe .
+go build -ldflags="-s -w" -trimpath -o filesystem-ultra-v4.exe ./cmd/filesystem-ultra
 
 # With ripgrep embedded (~4MB larger)
-go build -ldflags="-s -w" -trimpath -tags embed_rg -o filesystem-ultra-v4-embed.exe .
+go build -ldflags="-s -w" -trimpath -tags embed_rg -o filesystem-ultra-v4-embed.exe ./cmd/filesystem-ultra
 
 # Or use the build scripts
 build-windows.bat        # default
@@ -329,17 +329,27 @@ When `--log-dir` is set on the MCP server, it writes:
 ## Architecture
 
 ```
-main.go                     Entry point — config, CLI flags, server startup
-audit.go                    auditWrap — request normalization + audit logging
-format.go                   Response formatters, parseSize, truncateContent, formatSize
-help_content.go             getHelpContent() — static help text for all topics
-tools_core.go               toolRegistry, registerTools, read_file/write_file/edit_file
-tools_search.go             list_directory, search_files, analyze_operation
-tools_files.go              create_directory, delete_file, move_file, copy_file, get_file_info
-tools_batch.go              multi_edit, batch_operations, backup
-tools_platform.go           wsl, server_info
-tools_aliases.go            Aliases + fs super-tool (disabled), help tool
-tools_git.go                git (9 actions: init, status, diff, log, show, add, commit, restore, branch)
+cmd/
+  filesystem-ultra/
+    main.go                 Process entry point — calls mcpserver.Run()
+  proxy/
+    main.go                 Stdio proxy — logs tool calls, timing, token estimates
+  dashboard/
+    main.go                 HTTP dashboard for logs/metrics/backups
+    static/                 Embedded web UI (go:embed)
+internal/mcpserver/         MCP server: config, tool registration, stdio loop
+                            (tests live here too, next to the code they drive)
+  run.go                    Run() — config, CLI flags, server startup
+  audit.go                  auditWrap — request normalization + audit logging
+  format.go                 Response formatters, parseSize, truncateContent, formatSize
+  help_content.go           getHelpContent() — static help text for all topics
+  tools_search.go           list_directory, search_files, analyze_operation
+  tools_files.go            create_directory, delete_file, move_file, copy_file, get_file_info
+  tools_batch.go            multi_edit, batch_operations, backup
+  tools_platform.go         wsl, server_info
+  tools_aliases.go          Aliases + fs super-tool (disabled), help tool
+  tools_git.go              git (9 actions: init, status, diff, log, show, add, commit, restore, branch)
+  tools_minify.go           minify_js (pure-Go JS minification)
 tools_minify.go             minify_js (pure-Go JS minification)
 core/
   engine.go                 UltraFastEngine — central struct, cache, worker pool, metrics
@@ -373,13 +383,7 @@ core/
   errors.go                 PathError, ValidationError, EditError, PipelineStepError, etc.
 cache/
   intelligent.go            BigCache (files) + go-cache (dirs + metadata)
-cmd/
-  proxy/
-    main.go                 Stdio proxy — logs tool calls, timing, token estimates
-  dashboard/
-    main.go                 HTTP dashboard for logs/metrics/backups
-    static/                 Embedded web UI (go:embed)
-tests/
+tests/                      Black-box suite over the exported core API
   mcp_functions_test.go     Core MCP function tests
   bug5_test.go–bug9_test.go Regression tests
   edit_safety_test.go       Edit safety validation tests
