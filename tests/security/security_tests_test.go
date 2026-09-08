@@ -144,7 +144,7 @@ func TestNoPrivateKeyCommitted(t *testing.T) {
 	}
 
 	checkFiles := []string{
-		"../../main.go",
+		"../../internal/mcpserver/run.go",
 		"../../go.mod",
 		"../../go.sum",
 		"../../core/engine.go",
@@ -176,7 +176,7 @@ func TestNoDangerousImports(t *testing.T) {
 	}
 
 	checkFiles := []string{
-		"../../main.go",
+		"../../internal/mcpserver/run.go",
 		"../../core/engine.go",
 		"../../core/edit_operations.go",
 	}
@@ -196,11 +196,11 @@ func TestNoDangerousImports(t *testing.T) {
 	}
 }
 
-// TestInputValidation checks that main.go properly validates inputs
+// TestInputValidation checks that the server entry point properly validates inputs
 func TestInputValidation(t *testing.T) {
-	content, err := os.ReadFile("../../main.go")
+	content, err := os.ReadFile("../../internal/mcpserver/run.go")
 	if err != nil {
-		t.Fatalf("Failed to read main.go: %v", err)
+		t.Fatalf("Failed to read internal/mcpserver/run.go: %v", err)
 	}
 
 	fileContent := string(content)
@@ -228,9 +228,9 @@ func TestInputValidation(t *testing.T) {
 
 // TestErrorHandling verifies proper error handling
 func TestErrorHandling(t *testing.T) {
-	content, err := os.ReadFile("../../main.go")
+	content, err := os.ReadFile("../../internal/mcpserver/run.go")
 	if err != nil {
-		t.Fatalf("Failed to read main.go: %v", err)
+		t.Fatalf("Failed to read internal/mcpserver/run.go: %v", err)
 	}
 
 	fileContent := string(content)
@@ -258,9 +258,9 @@ func TestErrorHandling(t *testing.T) {
 
 // TestLogSanitization checks that logs don't leak sensitive data
 func TestLogSanitization(t *testing.T) {
-	content, err := os.ReadFile("../../main.go")
+	content, err := os.ReadFile("../../internal/mcpserver/run.go")
 	if err != nil {
-		t.Fatalf("Failed to read main.go: %v", err)
+		t.Fatalf("Failed to read internal/mcpserver/run.go: %v", err)
 	}
 
 	fileContent := string(content)

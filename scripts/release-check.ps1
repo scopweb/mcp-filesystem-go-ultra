@@ -92,7 +92,7 @@ Invoke-Gate "gofmt (changed files)" {
 # is "[Unreleased / X.Y.Z]" while serverVersion still shows the previous
 # release — that is expected. Warn when they match NEITHER pattern sanely.
 Write-Host "`n==> version coherence (info)" -ForegroundColor Cyan
-$serverVersion = (Select-String -Path main.go -Pattern 'const serverVersion = "([^"]+)"').Matches.Groups[1].Value
+$serverVersion = (Select-String -Path internal/mcpserver/run.go -Pattern 'const serverVersion = "([^"]+)"').Matches.Groups[1].Value
 $changelogTop = (Select-String -Path CHANGELOG.md -Pattern '^## \[(?:Unreleased / )?([0-9]+\.[0-9]+\.[0-9]+)\]' | Select-Object -First 1).Matches.Groups[1].Value
 Write-Host "  serverVersion = $serverVersion | CHANGELOG top = $changelogTop"
 if ($changelogTop -ne $serverVersion -and [version]$changelogTop -le [version]$serverVersion) {

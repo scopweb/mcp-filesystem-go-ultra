@@ -32,7 +32,7 @@ func buildServer(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		exe += ".exe"
 	}
-	out, err := exec.Command("go", "build", "-o", exe, "github.com/mcp/filesystem-ultra").CombinedOutput()
+	out, err := exec.Command("go", "build", "-o", exe, "github.com/mcp/filesystem-ultra/cmd/filesystem-ultra").CombinedOutput()
 	if err != nil {
 		t.Fatalf("go build failed: %v\n%s", err, out)
 	}

@@ -13,7 +13,8 @@ set -e
 
 GIT_COMMIT=$(git rev-parse --short HEAD)
 BUILD_DATE=$(date +%Y-%m-%d)
-GO_LDFLAGS="-ldflags=-s -w -X main.buildCommit=$GIT_COMMIT -X main.buildDate=$BUILD_DATE"
+PKG="github.com/mcp/filesystem-ultra/internal/mcpserver"
+GO_LDFLAGS="-ldflags=-s -w -X $PKG.BuildCommit=$GIT_COMMIT -X $PKG.BuildDate=$BUILD_DATE"
 GO_FLAGS="-trimpath"
 
 PLATFORM=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -34,12 +35,12 @@ build_native() {
     # Main server
     echo "[1/4] Building bin/filesystem-ultra-v4 ..."
     rm -f bin/filesystem-ultra-v4
-    go build "$GO_LDFLAGS" $GO_FLAGS -o bin/filesystem-ultra-v4 .
+    go build "$GO_LDFLAGS" $GO_FLAGS -o bin/filesystem-ultra-v4 ./cmd/filesystem-ultra
 
     # Main server + embedded ripgrep (recommended)
     echo "[2/4] Building bin/filesystem-ultra-v4-embed_rg ..."
     rm -f bin/filesystem-ultra-v4-embed_rg
-    go build "$GO_LDFLAGS" $GO_FLAGS -tags embed_rg -o bin/filesystem-ultra-v4-embed_rg .
+    go build "$GO_LDFLAGS" $GO_FLAGS -tags embed_rg -o bin/filesystem-ultra-v4-embed_rg ./cmd/filesystem-ultra
 
     # Proxy (important: built from ./cmd/proxy)
     echo "[3/4] Building bin/mcp-proxy ..."
@@ -74,12 +75,12 @@ build_windows() {
     # Main server (standard)
     echo "[1/4] Building bin/filesystem-ultra-v4.exe ..."
     rm -f bin/filesystem-ultra-v4.exe
-    go build $GO_LDFLAGS $GO_FLAGS -o bin/filesystem-ultra-v4.exe .
+    go build $GO_LDFLAGS $GO_FLAGS -o bin/filesystem-ultra-v4.exe ./cmd/filesystem-ultra
 
     # Main server + embedded ripgrep
     echo "[2/4] Building bin/filesystem-ultra-v4-embed_rg.exe ..."
     rm -f bin/filesystem-ultra-v4-embed_rg.exe
-    go build $GO_LDFLAGS $GO_FLAGS -tags embed_rg -o bin/filesystem-ultra-v4-embed_rg.exe .
+    go build $GO_LDFLAGS $GO_FLAGS -tags embed_rg -o bin/filesystem-ultra-v4-embed_rg.exe ./cmd/filesystem-ultra
 
     # Proxy (correct build)
     echo "[3/4] Building bin/mcp-proxy.exe ..."
