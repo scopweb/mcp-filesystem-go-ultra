@@ -15,7 +15,8 @@ echo.
 
 for /f "delims=" %%i in ('git rev-parse --short HEAD') do set GIT_COMMIT=%%i
 for /f "delims=" %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd"') do set BUILD_DATE=%%i
-set GO_LDFLAGS=-ldflags=-s -w -X main.buildCommit=%GIT_COMMIT% -X main.buildDate=%BUILD_DATE%
+set PKG=github.com/mcp/filesystem-ultra/internal/mcpserver
+set GO_LDFLAGS=-ldflags=-s -w -X %PKG%.BuildCommit=%GIT_COMMIT% -X %PKG%.BuildDate=%BUILD_DATE%
 set GO_FLAGS=-trimpath
 
 REM Output directory - keeps the project root clean
@@ -27,7 +28,7 @@ REM 1. Main server (standard, no embedded ripgrep)
 REM ------------------------------------------------------------
 echo [1/4] Building %OUT_DIR%\filesystem-ultra-v4.exe ...
 if exist %OUT_DIR%\filesystem-ultra-v4.exe del %OUT_DIR%\filesystem-ultra-v4.exe
-go build "%GO_LDFLAGS%" %GO_FLAGS% -o %OUT_DIR%\filesystem-ultra-v4.exe .
+go build "%GO_LDFLAGS%" %GO_FLAGS% -o %OUT_DIR%\filesystem-ultra-v4.exe .\cmd\filesystem-ultra
 if %ERRORLEVEL% neq 0 goto fail
 echo   OK: %OUT_DIR%\filesystem-ultra-v4.exe
 
@@ -37,7 +38,7 @@ REM ------------------------------------------------------------
 echo.
 echo [2/4] Building %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe (with embedded ripgrep)...
 if exist %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe del %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe
-go build "%GO_LDFLAGS%" %GO_FLAGS% -tags embed_rg -o %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe .
+go build "%GO_LDFLAGS%" %GO_FLAGS% -tags embed_rg -o %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe .\cmd\filesystem-ultra
 if %ERRORLEVEL% neq 0 goto fail
 echo   OK: %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe
 
