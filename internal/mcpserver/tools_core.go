@@ -133,6 +133,57 @@ func contentHashBytes(raw []byte) string {
 	return fmt.Sprintf("%08x", h.Sum32())
 }
 
+// enforceEditOCC validates explicit expected_hash and session auto-OCC before
+// any backup or write. Returns (warning, errorResult). If errorResult != nil
+// the caller must return it unchanged.
+func enforceEditOCC(ctx context.Context, path, expectedHash string, content []byte) (string, *mcp.CallToolResult) {
+	actualHash := contentHashBytes(content)
+	if expectedHash != "" && actualHash != expectedHash {
+		core.SetError(ctx, fmt.Sprintf(
+			"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file before editing.",
+			expectedHash, actualHash))
+		return "", mcp.NewToolResultError(fmt.Sprintf(
+			"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file with read_file to get the current content_hash, then retry.",
+			expectedHash, actualHash))
+	}
+	if expectedHash == "" {
+		if occSignal := core.CheckAutoOCC(core.NormalizePath(path), actualHash); occSignal.Status != core.FeedbackOK {
+			core.SetFeedback(ctx, occSignal)
+			if occSignal.BlockOp {
+				return "", mcp.NewToolResultError(core.FormatFeedback(occSignal,
+					"edit_file blocked: file changed on disk since this session last read it"))
+			}
+			return "⚠ " + occSignal.Message, nil
+		}
+	}
+	return "", nil
+}
+
+func formatEditDryRun(path, oldContent, predicted string, replacements int, extra string, args map[string]interface{}) (string, map[string]any) {
+	currentHash := contentHashBytes([]byte(oldContent))
+	predictedHash := contentHashBytes([]byte(predicted))
+	diff := core.RenderDiff(oldContent, predicted, path, diffFormatArg(args))
+	sc := editStructuredFromContents(path, oldContent, oldContent, replacements, 0, 0, "")
+	var b strings.Builder
+	b.WriteString("DRY RUN — No changes made\n")
+	b.WriteString(fmt.Sprintf("File: %s\n", path))
+	if extra != "" {
+		b.WriteString(extra)
+		if !strings.HasSuffix(extra, "\n") {
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString(fmt.Sprintf("current_hash: %s\npredicted_hash: %s\n", currentHash, predictedHash))
+	if diff != "" {
+		b.WriteString(diff)
+		if !strings.HasSuffix(diff, "\n") {
+			b.WriteString("\n")
+		}
+	}
+	msg := b.String()
+	return msg, attachMessage(sc, msg)
+}
+
 // computeFileOCCHash returns the FNV-1a (8 hex) hash of the full file's raw
 // bytes — the same OCC token edit_file / multi_edit validate via expected_hash
 // (they hash os.ReadFile(path)). It reads the whole file from disk so that
@@ -561,7 +612,7 @@ func registerCoreTools(reg *toolRegistry) {
 			"WARNING: To modify/edit existing files use edit_file instead. Related: edit_file, multi_edit, copy_file, batch_operations."),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
-		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path where to write (WSL or Windows format)")),
 		mcp.WithString("content", mcp.Description("Text content to write to the file")),
 		mcp.WithString("content_base64", mcp.Description("Base64-encoded binary content to write")),
@@ -810,7 +861,7 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("patterns_json", mcp.Description("JSON array of patterns for regex mode: [{\"pattern\": \"regex\", \"replacement\": \"$1...\", \"limit\": -1}]. Optional: if omitted in regex mode, pattern + replacement (or new_text) are used as a single transformation.")),
 		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive matching (default: true, for regex mode)")),
 		mcp.WithBoolean("create_backup", mcp.Description("Create backup before transformation (default: true, for regex mode)")),
-		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Supported in modes: replace (default), search_replace, regex. Default: false.")),
+		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Supported in all modes (replace, search_replace, regex, insert, replace_range, delete_range, occurrence). Does not create backups or update the undo chain. Default: false.")),
 		mcp.WithString("diff_format", mcp.Description("Controls how the diff is rendered (point 1). \"\"/\"auto\" (default): full diff when small, else a summary with anchors + ranges to save tokens; \"full\": always the complete unified diff; \"summary\": per-hunk ranges + first/last anchor lines, eliding large bodies (ideal for big block deletions); \"stat\": just \"+added -removed\"; \"none\": no diff.")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false, for occurrence mode)")),
 		// Stale-edit protection: hash returned by the prior read_file call. If the
@@ -836,10 +887,14 @@ func registerCoreTools(reg *toolRegistry) {
 		dryRun := false
 		occurrence := 0
 		tolerantWhitespace := false
+		expectedHash := ""
 
 		if args != nil {
 			if m, ok := args["mode"].(string); ok {
 				mode = m
+			}
+			if eh, ok := args["expected_hash"].(string); ok {
+				expectedHash = eh
 			}
 			if f, ok := args["force"].(bool); ok {
 				force = f
@@ -918,6 +973,12 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 
 			oldContentRaw, _ := os.ReadFile(normPath)
+			autoOCCWarn := ""
+			if warn, blocked := enforceEditOCC(ctx, path, expectedHash, oldContentRaw); blocked != nil {
+				return blocked, nil
+			} else {
+				autoOCCWarn = warn
+			}
 
 			result, err := regexTransform.Transform(ctx, core.RegexTransformConfig{
 				FilePath:      path,
@@ -944,15 +1005,21 @@ func registerCoreTools(reg *toolRegistry) {
 			if result.BackupID != "" {
 				output.WriteString(fmt.Sprintf("Backup ID: %s\n", result.BackupID))
 			}
+			if autoOCCWarn != "" {
+				output.WriteString(autoOCCWarn + "\n")
+			}
 
-			// Add diff preview for dry run
-			if dryRun && result.TransformedContent != "" {
-				newContentStr := result.TransformedContent
-				unifiedDiff := core.RenderDiff(string(oldContentRaw), newContentStr, path, diffFormatArg(args))
-				if unifiedDiff != "" {
-					output.WriteString("\nDiff (DRY RUN - no changes made):\n")
-					output.WriteString(unifiedDiff)
-					output.WriteString("\n")
+			if dryRun {
+				predicted := result.TransformedContent
+				output.WriteString(fmt.Sprintf("current_hash: %s\npredicted_hash: %s\n",
+					contentHashBytes(oldContentRaw), contentHashBytes([]byte(predicted))))
+				if predicted != "" {
+					unifiedDiff := core.RenderDiff(string(oldContentRaw), predicted, path, diffFormatArg(args))
+					if unifiedDiff != "" {
+						output.WriteString("\nDiff (DRY RUN - no changes made):\n")
+						output.WriteString(unifiedDiff)
+						output.WriteString("\n")
+					}
 				}
 			}
 
@@ -998,6 +1065,12 @@ func registerCoreTools(reg *toolRegistry) {
 
 			normPath := core.NormalizePath(path)
 			oldContentRaw, _ := os.ReadFile(normPath)
+			autoOCCWarn := ""
+			if warn, blocked := enforceEditOCC(ctx, path, expectedHash, oldContentRaw); blocked != nil {
+				return blocked, nil
+			} else {
+				autoOCCWarn = warn
+			}
 
 			resp, err := engine.SearchAndReplace(ctx, path, pattern, replacement, false, dryRun)
 			if err != nil {
@@ -1018,10 +1091,16 @@ func registerCoreTools(reg *toolRegistry) {
 			if dryRun {
 				newContentStr = string(oldContentRaw)
 				if re, reErr := regexp.Compile(regexp.QuoteMeta(pattern)); reErr == nil {
-					// Escape $ in replacement (Go interprets $ as capture group reference)
 					safeReplacement := strings.ReplaceAll(replacement, "$", "$$")
 					newContentStr = re.ReplaceAllString(string(oldContentRaw), safeReplacement)
 					unifiedDiff = core.RenderDiff(string(oldContentRaw), newContentStr, path, diffFormatArg(args))
+				}
+				hashFooter := fmt.Sprintf("current_hash: %s\npredicted_hash: %s",
+					contentHashBytes(oldContentRaw), contentHashBytes([]byte(newContentStr)))
+				if unifiedDiff != "" {
+					unifiedDiff = hashFooter + "\n" + unifiedDiff
+				} else {
+					unifiedDiff = hashFooter
 				}
 			} else {
 				newContentRaw, _ := os.ReadFile(normPath)
@@ -1055,11 +1134,17 @@ func registerCoreTools(reg *toolRegistry) {
 				if unifiedDiff != "" {
 					msg += "\n" + unifiedDiff
 				}
+				if autoOCCWarn != "" {
+					msg += "\n" + autoOCCWarn
+				}
 				return mcp.NewToolResultStructured(structured(msg), msg), nil
 			}
 
 			if unifiedDiff != "" {
 				respText += "\nDiff:\n" + unifiedDiff
+			}
+			if autoOCCWarn != "" {
+				respText += "\n" + autoOCCWarn
 			}
 			return mcp.NewToolResultStructured(structured(respText), respText), nil
 		}
@@ -1088,9 +1173,25 @@ func registerCoreTools(reg *toolRegistry) {
 			if startLine == 0 || endLine == 0 {
 				return mcp.NewToolResultError("mode:\"replace_range\" requires start_line and (end_line or line_count) and new_text"), nil
 			}
-			result, rerr := engine.ReplaceLineRange(ctx, path, startLine, endLine, newText)
+			normPath := core.NormalizePath(path)
+			oldContentRaw, _ := os.ReadFile(normPath)
+			autoOCCWarn := ""
+			if warn, blocked := enforceEditOCC(ctx, path, expectedHash, oldContentRaw); blocked != nil {
+				return blocked, nil
+			} else {
+				autoOCCWarn = warn
+			}
+			result, rerr := engine.ReplaceLineRange(ctx, path, startLine, endLine, newText, dryRun)
 			if rerr != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", rerr)), nil
+			}
+			if dryRun {
+				extra := fmt.Sprintf("Would replace lines %d-%d\n", startLine, endLine)
+				if autoOCCWarn != "" {
+					extra += autoOCCWarn + "\n"
+				}
+				msg, sc := formatEditDryRun(path, string(oldContentRaw), result.ModifiedContent, result.ReplacementCount, extra, args)
+				return mcp.NewToolResultStructured(sc, msg), nil
 			}
 			if result.BackupID != "" {
 				engine.SetCurrentBackupID(path, result.BackupID)
@@ -1141,9 +1242,25 @@ func registerCoreTools(reg *toolRegistry) {
 			if startLine == 0 || endLine == 0 {
 				return mcp.NewToolResultError("mode:\"delete_range\" requires start_line and (end_line or line_count)"), nil
 			}
-			_, result, derr := engine.DeleteLineRange(ctx, path, startLine, endLine)
+			normPath := core.NormalizePath(path)
+			oldContentRaw, _ := os.ReadFile(normPath)
+			autoOCCWarn := ""
+			if warn, blocked := enforceEditOCC(ctx, path, expectedHash, oldContentRaw); blocked != nil {
+				return blocked, nil
+			} else {
+				autoOCCWarn = warn
+			}
+			_, result, derr := engine.DeleteLineRange(ctx, path, startLine, endLine, dryRun)
 			if derr != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", derr)), nil
+			}
+			if dryRun {
+				extra := fmt.Sprintf("Would delete lines %d-%d\n", startLine, endLine)
+				if autoOCCWarn != "" {
+					extra += autoOCCWarn + "\n"
+				}
+				msg, sc := formatEditDryRun(path, string(oldContentRaw), result.ModifiedContent, result.ReplacementCount, extra, args)
+				return mcp.NewToolResultStructured(sc, msg), nil
 			}
 			if result.BackupID != "" {
 				engine.SetCurrentBackupID(path, result.BackupID)
@@ -1196,54 +1313,33 @@ func registerCoreTools(reg *toolRegistry) {
 			normPath := core.NormalizePath(path)
 			oldContentRaw, _ := os.ReadFile(normPath)
 			oldContentStr := string(oldContentRaw)
-
-			// Same OCC discipline as the default replace branch.
-			hh := fnv.New32a()
-			hh.Write(oldContentRaw)
-			actualHash := fmt.Sprintf("%08x", hh.Sum32())
-
-			expectedHash := ""
-			if args != nil {
-				if eh, ok := args["expected_hash"].(string); ok {
-					expectedHash = eh
-				}
-			}
-			if expectedHash != "" && actualHash != expectedHash {
-				core.SetError(ctx, fmt.Sprintf(
-					"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file before editing.",
-					expectedHash, actualHash))
-				return mcp.NewToolResultError(fmt.Sprintf(
-					"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file with read_file to get the current content_hash, then retry.",
-					expectedHash, actualHash)), nil
-			}
 			autoOCCWarn := ""
-			if expectedHash == "" {
-				if occSignal := core.CheckAutoOCC(normPath, actualHash); occSignal.Status != core.FeedbackOK {
-					core.SetFeedback(ctx, occSignal)
-					if occSignal.BlockOp {
-						return mcp.NewToolResultError(core.FormatFeedback(occSignal,
-							"edit_file blocked: file changed on disk since this session last read it")), nil
-					}
-					autoOCCWarn = "⚠ " + occSignal.Message
-				}
+			if warn, blocked := enforceEditOCC(ctx, path, expectedHash, oldContentRaw); blocked != nil {
+				return blocked, nil
+			} else {
+				autoOCCWarn = warn
 			}
 
 			result, err := engine.InsertAtAnchor(ctx, path, anchor, newText, position, dryRun)
 			if err != nil {
 				return mcp.NewToolResultError(formatToolError(err)), nil
 			}
-			if !dryRun {
-				core.RefreshKnownHashes([]string{normPath})
-				if result.BackupID != "" {
-					engine.SetCurrentBackupID(path, result.BackupID)
+			if dryRun {
+				extra := fmt.Sprintf("Would insert %s anchor (line %d)\n", position, result.StartLine)
+				if autoOCCWarn != "" {
+					extra += autoOCCWarn + "\n"
 				}
+				msg, sc := formatEditDryRun(path, oldContentStr, result.ModifiedContent, result.ReplacementCount, extra, args)
+				return mcp.NewToolResultStructured(sc, msg), nil
+			}
+			core.RefreshKnownHashes([]string{normPath})
+			if result.BackupID != "" {
+				engine.SetCurrentBackupID(path, result.BackupID)
 			}
 
 			newContentStr := result.ModifiedContent
-			if !dryRun {
-				if newRaw, readErr := os.ReadFile(normPath); readErr == nil {
-					newContentStr = string(newRaw)
-				}
+			if newRaw, readErr := os.ReadFile(normPath); readErr == nil {
+				newContentStr = string(newRaw)
 			}
 			unifiedDiff := core.RenderDiff(oldContentStr, newContentStr, path, diffFormatArg(args))
 			if unifiedDiff != "" {
@@ -1251,9 +1347,6 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 
 			msg := fmt.Sprintf("OK: inserted %s anchor (line %d)", position, result.StartLine)
-			if dryRun {
-				msg = fmt.Sprintf("DRY RUN: would insert %s anchor (line %d) — no changes written to disk", position, result.StartLine)
-			}
 			if result.BackupID != "" && !engine.IsCompactMode() {
 				msg += fmt.Sprintf("\nBackup ID: %s", result.BackupID)
 			}
@@ -1321,9 +1414,25 @@ func registerCoreTools(reg *toolRegistry) {
 				}
 			}
 
-			result, err := engine.ReplaceNthOccurrence(ctx, path, oldText, newText, occurrence, wholeWord)
+			oldContentRaw, _ := os.ReadFile(normPath)
+			autoOCCWarn := ""
+			if warn, blocked := enforceEditOCC(ctx, path, expectedHash, oldContentRaw); blocked != nil {
+				return blocked, nil
+			} else {
+				autoOCCWarn = warn
+			}
+
+			result, err := engine.ReplaceNthOccurrence(ctx, path, oldText, newText, occurrence, wholeWord, dryRun)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+			}
+			if dryRun {
+				extra := fmt.Sprintf("Would replace occurrence #%d\n", occurrence)
+				if autoOCCWarn != "" {
+					extra += autoOCCWarn + "\n"
+				}
+				msg, sc := formatEditDryRun(path, string(oldContentRaw), result.ModifiedContent, result.ReplacementCount, extra, args)
+				return mcp.NewToolResultStructured(sc, msg), nil
 			}
 			core.RecordWriteHash(core.NormalizePath(path), result.NewHash)
 
@@ -1333,52 +1442,20 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			msg := fmt.Sprintf("Successfully replaced occurrence #%d\nLine affected: %d\nConfidence: %s",
 				occurrence, result.LinesAffected, result.MatchConfidence)
+			if autoOCCWarn != "" {
+				msg += "\n" + autoOCCWarn
+			}
 			return mcp.NewToolResultStructured(attachMessage(editStructured(path, result), msg), msg), nil
 		}
 
 		// Default: standard EditFile
-		// Read old content before edit to compute diff
 		oldContentRaw, _ := os.ReadFile(normPath)
 		oldContentStr := string(oldContentRaw)
-
-		// Compute the current on-disk hash once — used by both explicit OCC
-		// (expected_hash, B3) and automatic OCC (new point 4).
-		hh := fnv.New32a()
-		hh.Write(oldContentRaw)
-		actualHash := fmt.Sprintf("%08x", hh.Sum32())
-
-		expectedHash := ""
-		if args != nil {
-			if eh, ok := args["expected_hash"].(string); ok {
-				expectedHash = eh
-			}
-		}
-
-		if expectedHash != "" {
-			// Improvement B3: explicit stale-edit protection. Mismatch → hard
-			// error so the model re-reads instead of silently overwriting.
-			if actualHash != expectedHash {
-				core.SetError(ctx, fmt.Sprintf(
-					"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file before editing.",
-					expectedHash, actualHash))
-				return mcp.NewToolResultError(fmt.Sprintf(
-					"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file with read_file to get the current content_hash, then retry.",
-					expectedHash, actualHash)), nil
-			}
-		}
 		autoOCCWarn := ""
-		if expectedHash == "" {
-			if occSignal := core.CheckAutoOCC(normPath, actualHash); occSignal.Status != core.FeedbackOK {
-				// New point 4: the caller didn't opt into expected_hash, but the
-				// file changed on disk since this session last saw it. Warn by
-				// default; block only when --auto-occ=block.
-				core.SetFeedback(ctx, occSignal)
-				if occSignal.BlockOp {
-					return mcp.NewToolResultError(core.FormatFeedback(occSignal,
-						"edit_file blocked: file changed on disk since this session last read it")), nil
-				}
-				autoOCCWarn = "⚠ " + occSignal.Message
-			}
+		if warn, blocked := enforceEditOCC(ctx, path, expectedHash, oldContentRaw); blocked != nil {
+			return blocked, nil
+		} else {
+			autoOCCWarn = warn
 		}
 
 		result, err := engine.EditFile(ctx, path, oldText, newText, force, dryRun, tolerantWhitespace)
@@ -1392,62 +1469,38 @@ func registerCoreTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(errMsg), nil
 		}
 
-		// Successful edit — reset failure counter and record read
+		if dryRun {
+			extra := fmt.Sprintf("Would change: %d replacement(s)\n", result.ReplacementCount)
+			if result.RiskWarning != "" {
+				extra += result.RiskWarning + "\n"
+			}
+			if autoOCCWarn != "" {
+				extra += autoOCCWarn + "\n"
+			}
+			msg, sc := formatEditDryRun(path, oldContentStr, result.ModifiedContent, result.ReplacementCount, extra, args)
+			return mcp.NewToolResultStructured(sc, msg), nil
+		}
+
 		core.ResetFailedOldText(path, oldText)
 		core.RecordRead(normPath)
-		// New point 4: track our own write so auto-OCC won't flag it as an
-		// external change on the next edit. Re-read from disk (ground truth)
-		// rather than trusting the in-memory post-edit hash: hooks, autosync
-		// or EOL rewrites between write and rename would otherwise record a
-		// stale baseline (feedback 2026-08-05, BUG 2).
 		core.RefreshKnownHashes([]string{normPath})
-
-		// Update backup chain for undo step-through
 		if result.BackupID != "" {
 			engine.SetCurrentBackupID(path, result.BackupID)
 		}
 
-		// Compute unified diff (honors diff_format — point 1)
 		newContentRaw, _ := os.ReadFile(normPath)
 		newContentStr := string(newContentRaw)
 		unifiedDiff := core.RenderDiff(oldContentStr, newContentStr, path, diffFormatArg(args))
-
-		// Annotate audit with diff line count
 		if unifiedDiff != "" {
 			core.SetDiffLines(ctx, strings.Count(unifiedDiff, "\n"))
 		}
 
-		// Collect non-blocking feedback signals
 		editSignal := core.CheckEditOp(path, oldText, fileSize, expectedHash != "")
 		newTextSignal := core.CheckEditNewText(newText, fileSize)
-		// Annotate audit with the most severe signal
 		if editSignal.Status != core.FeedbackOK {
 			core.SetFeedback(ctx, editSignal)
 		} else {
 			core.SetFeedback(ctx, newTextSignal)
-		}
-
-		// Bug #32: dry_run response format
-		if dryRun {
-			// Dry-run leaves the file untouched: the structured payload reports
-			// the CURRENT on-disk state (oldContentStr) with the would-be
-			// replacement count — never a hash that doesn't match disk.
-			sc := editStructuredFromContents(path, oldContentStr, oldContentStr, result.ReplacementCount,
-				strings.Count(oldText, "\n")+1, strings.Count(newText, "\n")+1, "")
-			if engine.IsCompactMode() {
-				msg := fmt.Sprintf("DRY RUN: %d changes would be made", result.ReplacementCount)
-				if result.RiskWarning != "" {
-					msg += result.RiskWarning
-				}
-				msg += "\nNo changes were written to disk"
-				return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
-			}
-			msg := fmt.Sprintf("DRY RUN — No changes made\nFile: %s\nWould change: %d replacement(s)\nMatch confidence: %s\nLines affected: %d",
-				path, result.ReplacementCount, result.MatchConfidence, result.LinesAffected)
-			if result.RiskWarning != "" {
-				msg += result.RiskWarning
-			}
-			return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
 		}
 
 		if engine.IsCompactMode() {

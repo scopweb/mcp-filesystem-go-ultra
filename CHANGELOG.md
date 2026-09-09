@@ -2,6 +2,20 @@
 
 ## [Unreleased / 4.6.0] - 2026-09-03
 
+### fix(reliability): E1 — dry_run, OCC, readonly and search guarantees
+
+Agent-facing tools now honor the guarantees they advertise:
+
+**1. `dry_run` in every `edit_file` mode.** `replace_range`, `delete_range` and `occurrence` used to write (and create backups) even with `dry_run:true`. Simulation is now separated from write: no file bytes, backups or undo-chain updates. The response reports `current_hash` vs `predicted_hash` plus the would-be diff. A later apply on the same version produces the predicted hash.
+
+**2. OCC on every edit path.** `expected_hash` and `--auto-occ=block` now run before backup/hooks on regex, search_replace, replace_range, delete_range, occurrence, `multi_edit` and `apply_patch` (previously only default replace + insert).
+
+**3. `--readonly` closed.** `server_info(action:"artifact", sub_action:"write")` is mutating. `wsl status` / `git branch` listing stay allowed. Annotations: `write_file` is not idempotent (append), `apply_patch`/`backup`/`wsl` are destructive, `server_info` is not read-only.
+
+**4. Typed `SearchOptions`.** `file_types`/`include` apply to content search, ripgrep (`--glob`) and `count_only`. `include:"*.go"` matches. `context_lines:0` returns no context. Schema default for `case_sensitive` matches runtime (`true`).
+
+**Verification:** `TestEditFile_DryRun_PreservesBytesAllModes` · `TestEditFile_DryRun_PredictedMatchesApply` · `TestEditFile_OCC_BlocksAllModes` · `TestEditFile_AutoOCC_Block_RangeAndMultiEdit` · `TestReadOnly_BlocksArtifactWrite_AllowsStatus` · `TestSearchFiles_FileTypesAndCountOnly` · `TestFileMatchesTypeFilter` · `TestReplaceLineRange_DryRunDoesNotWrite`.
+
 ### feat(core): offset+count alternative to `end_line` — `max_lines` / `line_count`
 
 The clearer error message from the previous fix (an explicit `end_line (%d) must be >= start_line (%d) — ...` hint) didn't stop the mistake in practice: an Opencode agent kept hitting it on every call, because it wasn't reading the wrong value, it was using a different — equally legitimate — convention for "a range of lines": offset+count (`start_line` + how many lines), the same shape as Claude Code's own `Read` tool (`offset`/`limit`). Telling it to fix `end_line` doesn't help when it never meant `end_line` to be an absolute line number in the first place.

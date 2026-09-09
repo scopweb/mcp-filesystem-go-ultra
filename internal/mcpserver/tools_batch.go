@@ -229,6 +229,18 @@ func registerBatchTools(reg *toolRegistry) {
 					"\n   (multi_edit will still run — re-read once to silence this warning.)"
 			}
 		}
+		if expectedHash == "" {
+			if raw, rerr := os.ReadFile(normPath); rerr == nil {
+				if occSignal := core.CheckAutoOCC(normPath, contentHashBytes(raw)); occSignal.Status != core.FeedbackOK {
+					core.SetFeedback(ctx, occSignal)
+					if occSignal.BlockOp {
+						return mcp.NewToolResultError(core.FormatFeedback(occSignal,
+							"multi_edit blocked: file changed on disk since this session last read it")), nil
+					}
+					staleWarning += "\n⚠ " + occSignal.Message
+				}
+			}
+		}
 		result, err := engine.MultiEdit(ctx, path, edits, force, dryRun, tolerantWhitespace, expectedHash)
 		if err != nil {
 			// Bug #27: If result is non-nil, this is an atomic rollback — include backup_id and details
@@ -702,7 +714,7 @@ func registerBatchTools(reg *toolRegistry) {
 	backupTool := mcp.NewTool("backup",
 		mcp.WithTitleAnnotation("Backup & Restore"),
 		mcp.WithReadOnlyHintAnnotation(false),
-		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithDescription("backup — Manage backups, restore, and undo. Actions: list, info, compare, cleanup, restore, undo_last, undo_chain, list_trash, restore_trash, purge_trash. "+
 			"Auto-created before every edit_file/multi_edit. Soft-deleted files (delete_file) are managed via list_trash/restore_trash/purge_trash when --backup-dir is set. "+

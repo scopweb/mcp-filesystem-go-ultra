@@ -128,7 +128,7 @@ func countRemovedLines(removed string) int {
 // the file at path, writing atomically and creating a backup (mirroring
 // EditFile). It returns the exact text removed so callers can reuse it; the
 // batch "extract" action relies on this to guarantee written == deleted.
-func (e *UltraFastEngine) DeleteLineRange(ctx context.Context, path string, startLine, endLine int) (removed string, result *EditResult, err error) {
+func (e *UltraFastEngine) DeleteLineRange(ctx context.Context, path string, startLine, endLine int, dryRun bool) (removed string, result *EditResult, err error) {
 	path = NormalizePath(path)
 
 	if err := e.acquireOperation(ctx, "edit"); err != nil {
@@ -158,7 +158,24 @@ func (e *UltraFastEngine) DeleteLineRange(ctx context.Context, path string, star
 		return "", nil, derr
 	}
 
-	// Backup before write (parity with EditFile).
+	removedLines := countRemovedLines(removed)
+	result = &EditResult{
+		ModifiedContent:  remaining,
+		ReplacementCount: 1,
+		MatchConfidence:  "exact",
+		LinesAffected:    removedLines,
+		LinesRemoved:     removedLines,
+		TotalLines:       strings.Count(remaining, "\n") + 1,
+		NewHash:          contentHashFNV(remaining),
+	}
+	if warn := CheckStructureDelta(content, remaining, path); warn != "" {
+		result.StructureWarning = warn
+		SetIntegrityStatus(ctx, "WARNING", warn)
+	}
+	if dryRun {
+		return removed, result, nil
+	}
+
 	var backupID string
 	if e.backupManager != nil {
 		e.backupChainMu.RLock()
@@ -173,6 +190,7 @@ func (e *UltraFastEngine) DeleteLineRange(ctx context.Context, path string, star
 		e.backupChain[path] = backupID
 		e.backupChainMu.Unlock()
 	}
+	result.BackupID = backupID
 
 	fileMode := os.FileMode(0644)
 	if info, statErr := os.Stat(path); statErr == nil {
@@ -182,23 +200,7 @@ func (e *UltraFastEngine) DeleteLineRange(ctx context.Context, path string, star
 		return "", nil, fmt.Errorf("error writing file: %w", werr)
 	}
 	e.invalidateMutatedPath(path)
-
-	removedLines := countRemovedLines(removed)
-	result = &EditResult{
-		ReplacementCount: 1,
-		MatchConfidence:  "exact",
-		LinesAffected:    removedLines,
-		LinesRemoved:     removedLines,
-		TotalLines:       strings.Count(remaining, "\n") + 1,
-		BackupID:         backupID,
-	}
 	// Point 2 / AST-Go: structural check on the resulting file.
-	if warn := CheckStructureDelta(content, remaining, path); warn != "" {
-		result.StructureWarning = warn
-		SetIntegrityStatus(ctx, "WARNING", warn)
-	}
-	// New point 1: post-edit content_hash for re-read-free chaining.
-	result.NewHash = contentHashFNV(remaining)
 	return removed, result, nil
 }
 
@@ -206,7 +208,7 @@ func (e *UltraFastEngine) DeleteLineRange(ctx context.Context, path string, star
 // newText, writing atomically and creating a backup (mirroring DeleteLineRange).
 // It's the line-numbered counterpart to text-match editing — the natural partner
 // to read_file's range output: read lines X..Y, replace exactly those (new point 2).
-func (e *UltraFastEngine) ReplaceLineRange(ctx context.Context, path string, startLine, endLine int, newText string) (result *EditResult, err error) {
+func (e *UltraFastEngine) ReplaceLineRange(ctx context.Context, path string, startLine, endLine int, newText string, dryRun bool) (result *EditResult, err error) {
 	path = NormalizePath(path)
 
 	if err := e.acquireOperation(ctx, "edit"); err != nil {
@@ -236,7 +238,26 @@ func (e *UltraFastEngine) ReplaceLineRange(ctx context.Context, path string, sta
 		return nil, derr
 	}
 
-	// Backup before write (parity with EditFile/DeleteLineRange).
+	removedLines := countRemovedLines(removed)
+	addedLines := countRemovedLines(newText)
+	result = &EditResult{
+		ModifiedContent:  remaining,
+		ReplacementCount: 1,
+		MatchConfidence:  "exact",
+		LinesAffected:    removedLines,
+		LinesRemoved:     removedLines,
+		LinesAdded:       addedLines,
+		TotalLines:       strings.Count(remaining, "\n") + 1,
+		NewHash:          contentHashFNV(remaining),
+	}
+	if warn := CheckStructureDelta(content, remaining, path); warn != "" {
+		result.StructureWarning = warn
+		SetIntegrityStatus(ctx, "WARNING", warn)
+	}
+	if dryRun {
+		return result, nil
+	}
+
 	var backupID string
 	if e.backupManager != nil {
 		e.backupChainMu.RLock()
@@ -251,6 +272,7 @@ func (e *UltraFastEngine) ReplaceLineRange(ctx context.Context, path string, sta
 		e.backupChain[path] = backupID
 		e.backupChainMu.Unlock()
 	}
+	result.BackupID = backupID
 
 	fileMode := os.FileMode(0644)
 	if info, statErr := os.Stat(path); statErr == nil {
@@ -260,24 +282,5 @@ func (e *UltraFastEngine) ReplaceLineRange(ctx context.Context, path string, sta
 		return nil, fmt.Errorf("error writing file: %w", werr)
 	}
 	e.invalidateMutatedPath(path)
-
-	removedLines := countRemovedLines(removed)
-	addedLines := countRemovedLines(newText)
-	result = &EditResult{
-		ReplacementCount: 1,
-		MatchConfidence:  "exact",
-		LinesAffected:    removedLines,
-		LinesRemoved:     removedLines,
-		LinesAdded:       addedLines,
-		TotalLines:       strings.Count(remaining, "\n") + 1,
-		BackupID:         backupID,
-	}
-	// Point 2 / AST-Go: structural check on the resulting file.
-	if warn := CheckStructureDelta(content, remaining, path); warn != "" {
-		result.StructureWarning = warn
-		SetIntegrityStatus(ctx, "WARNING", warn)
-	}
-	// New point 1: post-edit content_hash for re-read-free chaining.
-	result.NewHash = contentHashFNV(remaining)
 	return result, nil
 }

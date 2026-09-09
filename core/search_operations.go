@@ -133,6 +133,7 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 		maxResults = int(mr)
 	}
 	noIgnore, _ := request.Arguments["no_ignore"].(bool)
+	fileTypes := FileTypeFiltersFromArg(request.Arguments["file_types"])
 
 	if path == "" || pattern == "" {
 		return &mcp.CallToolResponse{
@@ -170,7 +171,7 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 		}, nil
 	}
 
-	matches, err := e.performAdvancedTextSearch(ctx, validPath, pattern, caseSensitive, wholeWord, includeContext, contextLines, outputFormat, noIgnore)
+	matches, err := e.performAdvancedTextSearch(ctx, validPath, pattern, caseSensitive, wholeWord, includeContext, contextLines, outputFormat, noIgnore, fileTypes)
 	if err != nil {
 		return &mcp.CallToolResponse{
 			Content: []mcp.TextContent{
@@ -440,19 +441,8 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 			}
 		}
 
-		// Filter by file types if specified
-		if len(fileTypes) > 0 {
-			ext := strings.ToLower(filepath.Ext(currentPath))
-			found := false
-			for _, ft := range fileTypes {
-				if strings.ToLower(ft) == ext {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return nil
-			}
+		if !FileMatchesTypeFilter(currentPath, fileTypes) {
+			return nil
 		}
 
 		// Check filename match
@@ -666,16 +656,20 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 }
 
 // performAdvancedTextSearch implements advanced text search with parallelization
-func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, pattern string, caseSensitive, wholeWord, includeContext bool, contextLines int, outputFormat string, noIgnore bool) ([]SearchMatch, error) {
+func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, pattern string, caseSensitive, wholeWord, includeContext bool, contextLines int, outputFormat string, noIgnore bool, fileTypes []string) ([]SearchMatch, error) {
 	var matchesMu sync.Mutex
 	var matches []SearchMatch
+
+	if includeContext && contextLines <= 0 {
+		includeContext = false
+	}
 
 	// Try ripgrep first when available (5-50× faster than the native walk on
 	// large trees). Offsets (submatches), context lines (-C), and skip-dir
 	// exclusions are parsed for full parity with the native path; on any
 	// ripgrep failure we fall through to the native implementation.
 	if e.ripgrepAvailable {
-		rgMatches, rgErr := e.RunRipgrepSearch(ctx, path, pattern, caseSensitive, wholeWord, includeContext, contextLines, noIgnore)
+		rgMatches, rgErr := e.RunRipgrepSearch(ctx, path, pattern, caseSensitive, wholeWord, includeContext, contextLines, noIgnore, fileTypes)
 		if rgErr == nil {
 			return rgMatches, nil
 		}
@@ -712,6 +706,9 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 			return nil
 		}
 		if d.IsDir() {
+			return nil
+		}
+		if !FileMatchesTypeFilter(currentPath, fileTypes) {
 			return nil
 		}
 
@@ -964,14 +961,28 @@ func isTextCandidate(path string) bool {
 
 // CountOccurrences counts occurrences of a pattern in a file and optionally returns line numbers
 func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern string, returnLines bool, caseSensitive bool, wholeWord bool, noIgnore bool) (string, error) {
+	return e.CountOccurrencesOpts(ctx, SearchOptions{
+		Path: path, Pattern: pattern, ReturnLines: returnLines,
+		CaseSensitive: caseSensitive, WholeWord: wholeWord, NoIgnore: noIgnore,
+	})
+}
+
+// CountOccurrencesOpts is the typed entry point; FileTypes are applied to
+// directory walks and to a single-file target (mismatch → zero matches).
+func (e *UltraFastEngine) CountOccurrencesOpts(ctx context.Context, opts SearchOptions) (string, error) {
 	if err := e.acquireOperation(ctx, "count"); err != nil {
 		return "", err
 	}
 	start := time.Now()
 	defer e.releaseOperation("count", start)
 
-	// Normalize WSL/Windows paths
-	path = NormalizePath(path)
+	path := NormalizePath(opts.Path)
+	pattern := opts.Pattern
+	returnLines := opts.ReturnLines
+	caseSensitive := opts.CaseSensitive
+	wholeWord := opts.WholeWord
+	noIgnore := opts.NoIgnore
+	fileTypes := opts.FileTypes
 
 	validPath, err := e.validatePath(path)
 	if err != nil {
@@ -1012,12 +1023,12 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 		regexPattern, _ = e.CompileRegex(litPattern)
 	}
 
-	// Directory mode: count across all text files in directory
 	if info.IsDir() {
-		return e.countOccurrencesInDir(ctx, validPath, pattern, regexPattern, returnLines, noIgnore)
+		return e.countOccurrencesInDir(ctx, validPath, pattern, regexPattern, returnLines, noIgnore, fileTypes)
 	}
-
-	// Single file mode
+	if !FileMatchesTypeFilter(validPath, fileTypes) {
+		return "0 matches", nil
+	}
 	return e.countOccurrencesInFile(validPath, pattern, regexPattern, returnLines)
 }
 
@@ -1092,7 +1103,7 @@ func (e *UltraFastEngine) countOccurrencesInFile(filePath, pattern string, regex
 }
 
 // countOccurrencesInDir counts occurrences across all text files in a directory
-func (e *UltraFastEngine) countOccurrencesInDir(ctx context.Context, dirPath, pattern string, regexPattern *regexp.Regexp, returnLines bool, noIgnore bool) (string, error) {
+func (e *UltraFastEngine) countOccurrencesInDir(ctx context.Context, dirPath, pattern string, regexPattern *regexp.Regexp, returnLines bool, noIgnore bool, fileTypes []string) (string, error) {
 	type fileCount struct {
 		path  string
 		count int
@@ -1121,6 +1132,9 @@ func (e *UltraFastEngine) countOccurrencesInDir(ctx context.Context, dirPath, pa
 			return nil
 		}
 		if skipWalkDir(d.Name(), path, dirPath, false, ign, noIgnore) {
+			return nil
+		}
+		if !FileMatchesTypeFilter(path, fileTypes) {
 			return nil
 		}
 		if !isTextCandidate(path) || isMinifiedFile(path) {

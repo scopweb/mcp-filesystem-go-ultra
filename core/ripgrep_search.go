@@ -72,7 +72,7 @@ type ripgrepMatch struct {
 // Falls back to returning an error if ripgrep is not available or fails.
 // The caller is responsible for passing a validated path that passes IsPathAllowed.
 func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern string,
-	caseSensitive, wholeWord, includeContext bool, contextLines int, noIgnore bool) ([]SearchMatch, error) {
+	caseSensitive, wholeWord, includeContext bool, contextLines int, noIgnore bool, fileTypes []string) ([]SearchMatch, error) {
 
 	args := []string{
 		"--json",
@@ -111,6 +111,9 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 	// source maps which are also single-line JSON blobs.)
 	for _, pat := range searchMinifiedPatterns {
 		args = append(args, "--glob", "!**/"+pat)
+	}
+	for _, g := range FileTypeGlobsForRipgrep(fileTypes) {
+		args = append(args, "--glob", g)
 	}
 
 	// `-e` forces the next argument to be parsed as the pattern even when it

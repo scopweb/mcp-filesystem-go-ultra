@@ -84,7 +84,7 @@ func registerPatchTools(reg *toolRegistry) {
 		mcp.WithTitleAnnotation("Apply Patch"),
 		mcp.WithDescription("apply_patch — Apply a unified diff to one file. dry_run previews. expected_hash for OCC. Fail-closed: no fuzzy match, one file per call. Related: diff_files, edit_file, backup."),
 		mcp.WithReadOnlyHintAnnotation(false),
-		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Destination file")),
 		mcp.WithString("patch", mcp.Required(), mcp.Description("Unified diff")),
@@ -147,6 +147,16 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 			return pathErrorResult(errCodeOCCMismatch, "content hash != expected_hash", path, map[string]string{
 				"expected_hash": expectedHash, "actual_hash": actualHash,
 			}, "call read_file and retry with actual_hash"), nil
+		}
+		if expectedHash == "" && !isNew {
+			if occSignal := core.CheckAutoOCC(path, actualHash); occSignal.Status != core.FeedbackOK {
+				core.SetFeedback(ctx, occSignal)
+				if occSignal.BlockOp {
+					return pathErrorResult(errCodeOCCMismatch, occSignal.Message, path, map[string]string{
+						"actual_hash": actualHash,
+					}, "re-read the file with read_file, then retry"), nil
+				}
+			}
 		}
 
 		newContent, err := core.ApplyUnifiedPatch(string(oldRaw), patch)

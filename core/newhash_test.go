@@ -39,7 +39,7 @@ func TestDeleteLineRange_SetsNewHash(t *testing.T) {
 	}
 	engine := newTestEngine(dir)
 
-	_, res, err := engine.DeleteLineRange(context.Background(), path, 2, 3)
+	_, res, err := engine.DeleteLineRange(context.Background(), path, 2, 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}

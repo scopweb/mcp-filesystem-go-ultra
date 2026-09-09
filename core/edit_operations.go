@@ -205,6 +205,10 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 
 	// Bug #32: dry_run returns result without writing to disk
 	if dryRun {
+		predicted := restoreEOL(result.ModifiedContent, originalEOL)
+		result.ModifiedContent = predicted
+		result.NewHash = contentHashFNV(predicted)
+		result.TotalLines = CountLines(predicted)
 		if impact.IsRisky {
 			result.RiskWarning = impact.FormatRiskNotice("", path)
 		}
@@ -1812,7 +1816,7 @@ func truncateText(s string, n int) string {
 // ReplaceNthOccurrence replaces a specific occurrence of a pattern in a file
 // occurrence: -1 for last, 1 for first, 2 for second, etc.
 // wholeWord: if true, only match whole words
-func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, pattern, replacement string, occurrence int, wholeWord bool) (*EditResult, error) {
+func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, pattern, replacement string, occurrence int, wholeWord bool, dryRun bool) (*EditResult, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 	// Acquire semaphore
@@ -1847,18 +1851,19 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 		return nil, fmt.Errorf("occurrence cannot be 0 (use -1 for last, 1 for first, etc.)")
 	}
 
-	// Create backup
-	backupPath, err := e.createBackup(validPath)
-	if err != nil {
-		return nil, fmt.Errorf("could not create backup: %w", err)
-	}
-	defer func() {
-		if backupPath != "" {
-			os.Remove(backupPath)
+	var backupPath string
+	if !dryRun {
+		backupPath, err = e.createBackup(validPath)
+		if err != nil {
+			return nil, fmt.Errorf("could not create backup: %w", err)
 		}
-	}()
+		defer func() {
+			if backupPath != "" {
+				os.Remove(backupPath)
+			}
+		}()
+	}
 
-	// Read file
 	content, err := os.ReadFile(validPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
@@ -1943,48 +1948,40 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 	// Join back
 	newContent := strings.Join(lines, "\n")
 
-	// Restore original EOL style before writing (Bug #33: EOL preservation)
 	newContent = restoreEOL(newContent, originalEOL)
 
-	// Write modified content atomically
-	tmpPath := validPath + ".tmp." + fmt.Sprintf("%d", time.Now().UnixNano())
-	if err := os.WriteFile(tmpPath, []byte(newContent), info.Mode()); err != nil {
-		return nil, fmt.Errorf("error writing temp file: %w", err)
-	}
+	if !dryRun {
+		tmpPath := validPath + ".tmp." + fmt.Sprintf("%d", time.Now().UnixNano())
+		if err := os.WriteFile(tmpPath, []byte(newContent), info.Mode()); err != nil {
+			return nil, fmt.Errorf("error writing temp file: %w", err)
+		}
+		if err := renameWithRetry(tmpPath, validPath); err != nil {
+			os.Remove(tmpPath)
+			return nil, fmt.Errorf("error finalizing edit: %w", err)
+		}
+		e.invalidateMutatedPath(validPath)
 
-	// Atomic rename (retry past transient Windows locks)
-	if err := renameWithRetry(tmpPath, validPath); err != nil {
-		os.Remove(tmpPath)
-		return nil, fmt.Errorf("error finalizing edit: %w", err)
-	}
-
-	// Invalidate cache
-	e.invalidateMutatedPath(validPath)
-
-	// Execute post-edit hooks
-	workingDir, _ := os.Getwd()
-	hookCtx := &HookContext{
-		Event:      HookPostEdit,
-		ToolName:   "replace_nth_occurrence",
-		FilePath:   validPath,
-		Operation:  "replace_nth",
-		OldContent: string(content),
-		NewContent: newContent,
-		Timestamp:  time.Now(),
-		WorkingDir: workingDir,
-		Metadata: map[string]interface{}{
-			"pattern":     pattern,
-			"replacement": replacement,
-			"occurrence":  occurrence,
-			"line_number": targetMatch.lineIdx + 1,
-		},
-	}
-
-	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostEdit, hookCtx)
-
-	// Auto-sync to Windows if enabled (async, non-blocking)
-	if e.autoSyncManager != nil {
-		_ = e.autoSyncManager.AfterEdit(validPath)
+		workingDir, _ := os.Getwd()
+		hookCtx := &HookContext{
+			Event:      HookPostEdit,
+			ToolName:   "replace_nth_occurrence",
+			FilePath:   validPath,
+			Operation:  "replace_nth",
+			OldContent: string(content),
+			NewContent: newContent,
+			Timestamp:  time.Now(),
+			WorkingDir: workingDir,
+			Metadata: map[string]interface{}{
+				"pattern":     pattern,
+				"replacement": replacement,
+				"occurrence":  occurrence,
+				"line_number": targetMatch.lineIdx + 1,
+			},
+		}
+		_, _ = e.hookManager.ExecuteHooks(ctx, HookPostEdit, hookCtx)
+		if e.autoSyncManager != nil {
+			_ = e.autoSyncManager.AfterEdit(validPath)
+		}
 	}
 
 	added, removed, exact := DiffCounts(string(content), newContent)
