@@ -89,6 +89,37 @@ Directory listings already dropped cache on mtime change. File reads did not: ag
 
 **Verification:** `TestReadFileContent_SeesExternalWrite` · `TestE2E_MultiAgent_CTemp`.
 
+### refactor(layout): server package moved out of the repo root
+
+The root held 53 `.go` files in `package main` — 22 application files and 31 test files — which is what made the tree unreadable, not tests mixed with code. In Go, a test lives in the same directory and package as the code it exercises, and these tests drive unexported identifiers (`requireAllowedPaths`, `formatToolError`, the tool handlers), so they cannot be relocated to a `tests/` folder without exporting dozens of symbols for no reason. Moving the whole package out of the root fixes the actual problem and keeps each test next to its code.
+
+```
+cmd/filesystem-ultra/main.go   process entry point, nothing else
+internal/mcpserver/            the server: 22 sources + 31 tests
+```
+
+Named `mcpserver`, not `server`: 11 files import `github.com/mark3labs/mcp-go/server`, so a package of our own called `server` would make `server.MCPServer` refer to the SDK from inside our own package — legal Go, needlessly confusing.
+
+**Breaking for contributors:** build with `go build ./cmd/filesystem-ultra` — **not** `go build .`, which now compiles the module root (no `main` package) into an object file instead of an executable. `-ldflags -X` targets are now `github.com/mcp/filesystem-ultra/internal/mcpserver.BuildCommit` / `.BuildDate`.
+
+**Verification:** `go build ./...` clean · `go vet ./...` clean · `go test ./...` PASS (all packages, unchanged behavior — package-only move).
+
+### refactor(tests): `tests/` package named for what it is
+
+`tests/` held 41 test files declaring `package main` without a `func main`. It compiled, but the name claimed a command that does not exist and made the directory look like a second entry point. It is a black-box suite over the exported core API, so it is now `package tests`. Package clause only — no test logic touched; a line-anchored `^package main$` match left the 7 fixtures that build Go source with raw string literals starting `package main` untouched.
+
+**Verification:** `go test ./tests/...` PASS.
+
+### chore(repo): tidy root — docs to `doc/`, local notes to `docs/`, stray binaries out
+
+Root held 11 markdown files, three stale `.exe` duplicates of `bin/`, and an unrelated `.pptx`. Split by what git actually tracks: tracked docs (`MCP-PROXY.md`, `FILESYSTEM-ULTRA-USAGE.md`) move to a new tracked `doc/` directory (`docs/` cannot hold them — it has been gitignored on purpose since 2026-07-04, so moving tracked files there would have silently dropped them from the repo); untracked local notes move into the already-ignored `docs/` tree; stale root binaries and the stray `.pptx` move to `_to_delete/` (gitignored) for manual removal, since `bin/` already holds the current builds.
+
+`.gitignore`: release-binary patterns anchored to the repo root — unanchored, `mcp-proxy*` also matched `doc/MCP-PROXY.md` (git is case-insensitive on Windows checkouts).
+
+### docs(layout): point docs, scripts and skill files at the new layout
+
+Follow-up to the package move — `README.md` and `.claude/skills/filesystem-ultra-tools/ripgrep-reference.md` told readers to build with `go build ... .`, which now compiles the module root and emits an object file instead of an executable (the same trap `TestFailClosed_Binary` guards against); both now build `./cmd/filesystem-ultra`. `scripts/security/vulnerability_scan.bat` grepped `main.go` for unsafe imports, hardcoded credentials, and error handling, silently reporting "no findings" against a file that no longer exists at that path — repointed at `internal/mcpserver/`.
+
 ## [Unreleased / 4.5.38] - 2026-09-03
 
 ### feat(read_file): displace bash `tail | cut` — max_line_length + head/tail auto-cut
