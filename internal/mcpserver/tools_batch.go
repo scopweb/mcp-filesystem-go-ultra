@@ -279,20 +279,27 @@ func registerBatchTools(reg *toolRegistry) {
 		// plain-text results on schema-declared tools ("Tool execution failed").
 		if dryRun {
 			diffText := core.RenderDiff(result.OriginalContent, result.FinalContent, path, diffFormat)
+			currentHash := contentHashBytes([]byte(result.OriginalContent))
+			predictedHash := contentHashBytes([]byte(result.FinalContent))
+			linesNote := result.LinesAffected
+			if linesNote <= 0 {
+				linesNote = core.CountLines(result.OriginalContent)
+			}
 			if engine.IsCompactMode() {
 				msg := fmt.Sprintf("DRY RUN: %d edits would be applied, %d lines affected",
-					result.SuccessfulEdits, result.LinesAffected)
+					result.SuccessfulEdits, linesNote)
 				if result.RiskWarning != "" {
 					msg += result.RiskWarning
 				}
+				msg += fmt.Sprintf("\ncurrent_hash: %s\npredicted_hash: %s", currentHash, predictedHash)
 				if diffText != "" {
 					msg += "\n" + diffText
 				}
 				msg += "\nNo changes were written to disk"
 				return mcp.NewToolResultStructured(attachMessage(multiEditStructured(path, result), msg), msg), nil
 			}
-			msg := fmt.Sprintf("DRY RUN — No changes made\nFile: %s\nWould apply: %d edits\nLines affected: %d",
-				path, result.SuccessfulEdits, result.LinesAffected)
+			msg := fmt.Sprintf("DRY RUN — No changes made\nFile: %s\nWould apply: %d edits\nLines affected: %d\ncurrent_hash: %s\npredicted_hash: %s",
+				path, result.SuccessfulEdits, linesNote, currentHash, predictedHash)
 			if result.RiskWarning != "" {
 				msg += result.RiskWarning
 			}

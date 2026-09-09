@@ -281,3 +281,82 @@ func TestSearchFiles_FileTypesAndCountOnly(t *testing.T) {
 		t.Fatalf("context_lines:0 must not return context, got:\n%s", noCtx)
 	}
 }
+
+func TestEditFile_SearchReplace_DryRunCountAndHeader(t *testing.T) {
+	dir := t.TempDir()
+	reg := buildEditRegistry(t, dir, false)
+	path := filepath.Join(dir, "sr.txt")
+	original := "line 1\nline 2\nline 3\nline 4\nline 5\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	res := callEdit(t, reg, map[string]interface{}{
+		"path": path, "mode": "search_replace", "pattern": "line", "replacement": "LINE", "dry_run": true,
+	})
+	if res.IsError {
+		t.Fatalf("dry_run errored: %s", resultText(t, res))
+	}
+	text := resultText(t, res)
+	if !strings.Contains(text, "DRY RUN — No changes made") {
+		t.Fatalf("want unified dry-run header, got:\n%s", text)
+	}
+	if !strings.Contains(text, "Would change: 5 replacement(s)") {
+		t.Fatalf("want 5 replacements, got:\n%s", text)
+	}
+	m, ok := res.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatal("missing structured content")
+	}
+	switch n := m["replacements"].(type) {
+	case int:
+		if n != 5 {
+			t.Fatalf("structured replacements=%d, want 5", n)
+		}
+	case float64:
+		if n != 5 {
+			t.Fatalf("structured replacements=%v, want 5", n)
+		}
+	default:
+		t.Fatalf("replacements type %T", n)
+	}
+	if string(fileBytes(t, path)) != original {
+		t.Fatal("dry_run wrote the file")
+	}
+}
+
+func TestMultiEdit_DryRun_HashesAndLineCount(t *testing.T) {
+	dir := t.TempDir()
+	reg := newHelpTestRegistry(t, dir)
+	path := filepath.Join(dir, "me.txt")
+	original := "alpha\nbeta\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	h := reg.handlers["multi_edit"]
+	res, err := h(context.Background(), mcp.CallToolRequest{Params: mcp.CallToolParams{
+		Name: "multi_edit",
+		Arguments: map[string]interface{}{
+			"path": path, "dry_run": true,
+			"edits_json": `[{"old_text":"alpha\n","new_text":"ALPHA\n"}]`,
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError {
+		t.Fatalf("multi_edit dry_run: %s", resultText(t, res))
+	}
+	text := resultText(t, res)
+	if !strings.Contains(text, "current_hash:") || !strings.Contains(text, "predicted_hash:") {
+		t.Fatalf("missing hashes:\n%s", text)
+	}
+	if strings.Contains(text, "Lines affected: 3") {
+		t.Fatalf("trailing newline counted as a line:\n%s", text)
+	}
+	if !strings.Contains(text, "Lines affected: 1") && !strings.Contains(text, "1 lines affected") {
+		t.Fatalf("want 1 line affected (not phantom), got:\n%s", text)
+	}
+	if string(fileBytes(t, path)) != original {
+		t.Fatal("dry_run wrote the file")
+	}
+}

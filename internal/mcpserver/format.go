@@ -459,7 +459,7 @@ func truncateLineWidths(content string, maxLen int) string {
 // engine response (format: "... Total replacements: N ...").
 func parseReplacementCount(text string) int {
 	for _, line := range strings.Split(text, "\n") {
-		if strings.Contains(line, "Total replacements:") {
+		if strings.Contains(line, "Total replacements:") || strings.Contains(line, "Would-be replacements:") {
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 {
 				var n int
