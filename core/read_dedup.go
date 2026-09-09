@@ -97,11 +97,8 @@ func (e *UltraFastEngine) invalidateMutatedPath(path string) {
 // extractLineRangeFromBytes builds the same response shape as ReadFileRange's
 // scanner path, including the footer with real total line count.
 func extractLineRangeFromBytes(content []byte, path string, startLine, endLine int) (string, error) {
-	if startLine < 1 {
-		return "", fmt.Errorf("start_line must be >= 1, got %d", startLine)
-	}
-	if endLine < startLine {
-		return "", fmt.Errorf("end_line (%d) must be >= start_line (%d)", endLine, startLine)
+	if err := ValidateLineRange(startLine, endLine); err != nil {
+		return "", err
 	}
 
 	var result strings.Builder
