@@ -141,6 +141,26 @@ func TestValidateToolParams_GitPathsNativeArray(t *testing.T) {
 	}
 }
 
+func TestValidateToolParams_GitFetchAndBranchDeleteParams(t *testing.T) {
+	args := map[string]interface{}{
+		"action": "fetch",
+		"remote": "origin",
+		"prune":  true,
+	}
+	if errs := ValidateToolParams("git", args); len(errs) > 0 {
+		t.Errorf("git fetch params should be accepted, got: %v", errs)
+	}
+	args = map[string]interface{}{
+		"action": "branch",
+		"name":   "old",
+		"delete": true,
+		"force":  true,
+	}
+	if errs := ValidateToolParams("git", args); len(errs) > 0 {
+		t.Errorf("git branch delete params should be accepted, got: %v", errs)
+	}
+}
+
 func TestValidateToolParams_GitPathsWrongType(t *testing.T) {
 	args := map[string]interface{}{
 		"action": "add",

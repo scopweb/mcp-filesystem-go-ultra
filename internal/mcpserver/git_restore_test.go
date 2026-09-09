@@ -11,8 +11,8 @@ package mcpserver
 //   1. gitRestore — staged unstage, working-tree discard, --source with/without
 //      paths, dry-run diff preview, option-like source rejection
 //   2. gitAdd     — option-injection blocked for paths and single-path
-//   3. gitBranch  — safe `-d` works without `force`; `force:true` escalates
-//      to `-D`; option-like branch_name rejected
+//   3. gitBranch  — delete requires delete:true; -d without force; force
+//      escalates to `-D`; name+force without delete does not delete
 //   4. rejectOptionLike — unit test for the guard helper itself
 //
 // These tests are intentionally hermetic: each one initializes its own repo
@@ -462,7 +462,7 @@ func TestBranch_DeleteMerged(t *testing.T) {
 	res, err := gitBranch(context.Background(), engine, dir, map[string]interface{}{
 		"action": "branch",
 		"name":   "feature",
-		// no force → -d
+		"delete": true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -494,6 +494,7 @@ func TestBranch_DeleteUnmergedRequiresForce(t *testing.T) {
 	res, err := gitBranch(context.Background(), engine, dir, map[string]interface{}{
 		"action": "branch",
 		"name":   "diverged",
+		"delete": true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -509,6 +510,7 @@ func TestBranch_DeleteUnmergedRequiresForce(t *testing.T) {
 	res, err = gitBranch(context.Background(), engine, dir, map[string]interface{}{
 		"action": "branch",
 		"name":   "diverged",
+		"delete": true,
 		"force":  true,
 	})
 	if err != nil {
@@ -524,6 +526,35 @@ func TestBranch_DeleteUnmergedRequiresForce(t *testing.T) {
 
 // TestBranch_OptionLikeRejected verifies rejectOptionLike inside gitBranch
 // catches a branch name that begins with "-".
+func TestBranch_ForceWithoutDeleteDoesNotDelete(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	engine := newGitTestEngine(t, dir)
+	defer engine.Close()
+	f := filepath.Join(dir, "f.txt")
+	writeFile(t, f, "main\n")
+	commitAll(t, dir, "main commit")
+	mustGit(t, dir, "branch", "keep-me")
+
+	res, err := gitBranch(context.Background(), engine, dir, map[string]interface{}{
+		"action": "branch",
+		"name":   "keep-me",
+		"force":  true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected already-exists error, got success: %s", firstText(res))
+	}
+	if !strings.Contains(firstText(res), "already exists") {
+		t.Fatalf("expected already exists, got: %s", firstText(res))
+	}
+	if !strings.Contains(mustGit(t, dir, "branch", "-a"), "keep-me") {
+		t.Fatal("branch was deleted without delete:true")
+	}
+}
+
 func TestBranch_OptionLikeRejected(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)

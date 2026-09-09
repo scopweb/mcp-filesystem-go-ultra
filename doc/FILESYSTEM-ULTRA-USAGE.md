@@ -259,8 +259,10 @@ Herramienta única para operaciones Git:
 - `show`;
 - `add`;
 - `commit`;
+- `push`;
+- `fetch` (`prune:true` drops stale remote-tracking refs);
 - `restore`;
-- `branch`.
+- `branch` (delete requires `delete:true`; `force:true` only escalates `-d` → `-D`).
 
 Reglas mínimas:
 - pasar una ruta situada dentro del repositorio;

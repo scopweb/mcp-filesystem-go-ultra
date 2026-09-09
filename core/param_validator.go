@@ -235,8 +235,11 @@ var toolSchemas = map[string]ToolParamSchema{
 		"staged":    {ParamBoolean, false},
 		"message":   {ParamString, false},
 		"name":      {ParamString, false},  // branch: list when empty
-		"checkout":  {ParamBoolean, false}, // branch: true → git switch -c
-		"force":     {ParamBoolean, false}, // branch delete: true → -D
+		"checkout":  {ParamBoolean, false}, // branch: true → git switch
+		"delete":    {ParamBoolean, false}, // branch: true → git branch -d (required to delete)
+		"force":     {ParamBoolean, false}, // branch: with delete, true → -D; push: --force-with-lease
+		"remote":    {ParamString, false},  // push/fetch: remote name (default origin)
+		"prune":     {ParamBoolean, false}, // fetch: true → --prune
 	},
 
 	// ---- ALIASES ----
