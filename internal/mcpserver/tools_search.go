@@ -134,7 +134,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithBoolean("include_content", mcp.Description("Include file content search (default: false)")),
 		mcp.WithString("file_types", mcp.Description("Comma-separated file extensions (e.g., '.go,.txt')")),
 		mcp.WithString("include", mcp.Description("Glob pattern to filter files — alias for file_types (e.g., '*.go', '**/*.ts')")),
-		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive search (default: false)")),
+		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive search (default: true)")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false)")),
 		mcp.WithBoolean("include_context", mcp.Description("Include context lines (default: false)")),
 		mcp.WithNumber("context_lines", mcp.Description("Number of context lines (default: 3)")),
@@ -236,9 +236,11 @@ func registerSearchTools(reg *toolRegistry) {
 			}
 		}
 
-		// Count-only mode: dispatch to CountOccurrences
 		if countOnly {
-			result, err := engine.CountOccurrences(ctx, path, pattern, returnLines, caseSensitive, wholeWord, noIgnore)
+			result, err := engine.CountOccurrencesOpts(ctx, core.SearchOptions{
+				Path: path, Pattern: pattern, FileTypes: core.FileTypeFiltersFromArg(fileTypes),
+				ReturnLines: returnLines, CaseSensitive: caseSensitive, WholeWord: wholeWord, NoIgnore: noIgnore,
+			})
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
@@ -254,6 +256,7 @@ func registerSearchTools(reg *toolRegistry) {
 				"case_sensitive": caseSensitive, "whole_word": wholeWord,
 				"include_context": includeContext, "context_lines": contextLines,
 				"output_format": outputFormat, "no_ignore": noIgnore,
+				"file_types":     fileTypes,
 			}
 			// Forward optional max_results if caller set one (new param v4.5.26)
 			if rawArgs, ok := request.Params.Arguments.(map[string]interface{}); ok {

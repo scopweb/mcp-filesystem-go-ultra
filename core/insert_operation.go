@@ -95,6 +95,10 @@ func (e *UltraFastEngine) InsertAtAnchor(ctx context.Context, path, anchor, text
 	}
 
 	if dryRun {
+		predicted := restoreEOL(newContent, originalEOL)
+		result.ModifiedContent = predicted
+		result.NewHash = contentHashFNV(predicted)
+		result.TotalLines = CountLines(predicted)
 		return result, nil
 	}
 

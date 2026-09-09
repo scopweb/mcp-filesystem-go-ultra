@@ -20,8 +20,8 @@ func registerPlatformTools(reg *toolRegistry) {
 	wslTool := mcp.NewTool("wsl",
 		mcp.WithTitleAnnotation("WSL Integration"),
 		mcp.WithReadOnlyHintAnnotation(false),
-		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithDescription("wsl — WSL/Windows file sync and path conversion. Actions: sync, status, autosync_config, autosync_status. "+
 			"Related: read_file, edit_file, copy_file, search_files."),
 		mcp.WithString("action", mcp.Description("Action: sync (default), status, autosync_config, autosync_status")),
@@ -344,9 +344,9 @@ func registerPlatformTools(reg *toolRegistry) {
 	// ============================================================================
 	serverInfoTool := mcp.NewTool("server_info",
 		mcp.WithTitleAnnotation("Server Info"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithDescription("server_info — Server help, performance stats, and artifact capture. Actions: help, stats, artifact. "+
 			"Related: edit_file, search_files, batch_operations, backup, analyze_operation."),
 		mcp.WithString("action", mcp.Description("Action: help (default), stats, artifact")),

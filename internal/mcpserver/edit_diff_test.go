@@ -176,8 +176,15 @@ func TestEditFile_DryRun_NoDiff(t *testing.T) {
 	if !strings.Contains(strings.ToUpper(text), "DRY RUN") {
 		t.Error("response must indicate DRY RUN")
 	}
-	if strings.Contains(text, "--- a/") {
-		t.Error("dry-run must NOT contain a diff (no changes were applied)")
+	if !strings.Contains(text, "current_hash:") || !strings.Contains(text, "predicted_hash:") {
+		t.Errorf("dry-run must distinguish current vs predicted hash, got:\n%s", text)
+	}
+	after, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != original {
+		t.Fatal("dry-run must not change the file")
 	}
 }
 

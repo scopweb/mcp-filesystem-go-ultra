@@ -173,13 +173,26 @@ func toolIsMutating(tool string, args map[string]interface{}) bool {
 	switch tool {
 	case "write_file", "edit_file", "multi_edit", "delete_file", "move_file",
 		"copy_file", "create_directory", "batch_operations", "project_replace",
-		"minify_js", "apply_patch", "wsl":
+		"minify_js", "apply_patch":
 		return true
+	case "wsl":
+		a, _ := args["action"].(string)
+		switch a {
+		case "status", "autosync_status":
+			return false
+		default:
+			return true
+		}
 	case "git":
 		a, _ := args["action"].(string)
 		switch a {
 		case "status", "diff", "log", "show", "":
 			return false
+		case "branch":
+			name, _ := args["name"].(string)
+			del, _ := args["delete"].(bool)
+			co, _ := args["checkout"].(bool)
+			return name != "" || del || co
 		default:
 			return true
 		}
@@ -191,6 +204,10 @@ func toolIsMutating(tool string, args map[string]interface{}) bool {
 		default:
 			return false
 		}
+	case "server_info":
+		a, _ := args["action"].(string)
+		sub, _ := args["sub_action"].(string)
+		return a == "artifact" && sub == "write"
 	default:
 		return false
 	}

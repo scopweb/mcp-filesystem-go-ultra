@@ -70,7 +70,7 @@ func TestReplaceLineRange_EndToEnd(t *testing.T) {
 	}
 	engine := newTestEngine(dir)
 
-	res, err := engine.ReplaceLineRange(context.Background(), path, 2, 3, "X\nY\n")
+	res, err := engine.ReplaceLineRange(context.Background(), path, 2, 3, "X\nY\n", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,5 +80,36 @@ func TestReplaceLineRange_EndToEnd(t *testing.T) {
 	}
 	if want := contentHashFNV(string(raw)); res.NewHash != want {
 		t.Errorf("NewHash = %s, want %s (hash of file on disk)", res.NewHash, want)
+	}
+}
+
+func TestReplaceLineRange_DryRunDoesNotWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	original := "a\nb\nc\nd\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	engine := newTestEngine(dir)
+	res, err := engine.ReplaceLineRange(context.Background(), path, 2, 3, "X\nY\n", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if string(raw) != original {
+		t.Fatalf("dry_run wrote %q", raw)
+	}
+	if res.BackupID != "" {
+		t.Fatalf("dry_run created backup %s", res.BackupID)
+	}
+	if res.NewHash != contentHashFNV("a\nX\nY\nd\n") {
+		t.Fatalf("predicted hash = %s", res.NewHash)
+	}
+	applied, err := engine.ReplaceLineRange(context.Background(), path, 2, 3, "X\nY\n", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applied.NewHash != res.NewHash {
+		t.Fatalf("apply hash %s != dry_run hash %s", applied.NewHash, res.NewHash)
 	}
 }
