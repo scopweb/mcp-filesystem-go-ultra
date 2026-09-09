@@ -713,11 +713,8 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 	}
 
 	// Validate line numbers
-	if startLine < 1 {
-		return "", fmt.Errorf("start_line must be >= 1, got %d", startLine)
-	}
-	if endLine < startLine {
-		return "", fmt.Errorf("end_line (%d) must be >= start_line (%d)", endLine, startLine)
+	if err := ValidateLineRange(startLine, endLine); err != nil {
+		return "", err
 	}
 
 	// Fast path: serve range from cache or deduped full read (files ≤ LargeFileThreshold).

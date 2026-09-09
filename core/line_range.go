@@ -18,6 +18,26 @@ import (
 // closes that gap: the SAME computed slice is what the batch "extract" action
 // writes to the destination and removes from the source.
 
+// ValidateLineRange checks that startLine/endLine describe a well-formed
+// 1-based inclusive line range, shared by every range-based read/edit path
+// (ReadFileRange, extractLineRangeFromBytes, ComputeLineRangeDeletion,
+// ComputeLineRangeReplacement).
+//
+// end_line is an ABSOLUTE line number, not a line count — the recurring
+// mistake is passing it as "how many lines" (e.g. start_line:115, end_line:50
+// meaning "50 lines from 115"), which inverts the range. The error spells out
+// the fix instead of just rejecting the input, since a bare "must be >=" reads
+// as a validation quirk rather than the actual cause.
+func ValidateLineRange(startLine, endLine int) error {
+	if startLine < 1 {
+		return fmt.Errorf("start_line must be >= 1, got %d", startLine)
+	}
+	if endLine < startLine {
+		return fmt.Errorf("end_line (%d) must be >= start_line (%d) — end_line is an absolute line number, not a line count; for N lines starting at start_line, use end_line = start_line + N - 1", endLine, startLine)
+	}
+	return nil
+}
+
 // ComputeLineRangeDeletion splits content into lines (preserving exact bytes,
 // including each line's terminator) and returns the text of lines
 // [startLine, endLine] (1-based, inclusive) together with the content that
@@ -34,11 +54,8 @@ func ComputeLineRangeDeletion(content string, startLine, endLine int) (removed, 
 	if total == 0 {
 		return "", "", fmt.Errorf("file is empty: nothing to extract")
 	}
-	if startLine < 1 {
-		return "", "", fmt.Errorf("start_line must be >= 1, got %d", startLine)
-	}
-	if endLine < startLine {
-		return "", "", fmt.Errorf("end_line (%d) must be >= start_line (%d)", endLine, startLine)
+	if err := ValidateLineRange(startLine, endLine); err != nil {
+		return "", "", err
 	}
 	if startLine > total {
 		return "", "", fmt.Errorf("start_line %d is beyond end of file (%d lines)", startLine, total)
@@ -70,11 +87,8 @@ func ComputeLineRangeReplacement(content string, startLine, endLine int, newText
 	if total == 0 {
 		return "", "", fmt.Errorf("file is empty: nothing to replace")
 	}
-	if startLine < 1 {
-		return "", "", fmt.Errorf("start_line must be >= 1, got %d", startLine)
-	}
-	if endLine < startLine {
-		return "", "", fmt.Errorf("end_line (%d) must be >= start_line (%d)", endLine, startLine)
+	if err := ValidateLineRange(startLine, endLine); err != nil {
+		return "", "", err
 	}
 	if startLine > total {
 		return "", "", fmt.Errorf("start_line %d is beyond end of file (%d lines)", startLine, total)
