@@ -197,6 +197,69 @@ func TestReadFileHandler_MaxLineLengthExplicitAndDisable(t *testing.T) {
 	}
 }
 
+// TestReadFileHandler_StartLineMaxLinesCount covers the offset+count
+// alternative to start_line/end_line: start_line + max_lines (no end_line)
+// mirrors Claude Code's own Read tool (offset/limit) for agents that treat
+// "end_line" as a line count instead of an absolute line number — the
+// mistake that used to produce an inverted-range error.
+func TestReadFileHandler_StartLineMaxLinesCount(t *testing.T) {
+	dir := t.TempDir()
+	reg := buildEditRegistry(t, dir, false)
+
+	const totalLines = 200
+	path := filepath.Join(dir, "range_count.go")
+	var b strings.Builder
+	for i := 1; i <= totalLines; i++ {
+		fmt.Fprintf(&b, "line %d\n", i)
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// start_line:15, max_lines:36 must equal start_line:15, end_line:50
+	// (36 lines: 15..50 inclusive).
+	countResult := callReadFile(t, reg, map[string]interface{}{
+		"path":       path,
+		"start_line": float64(15),
+		"max_lines":  float64(36),
+	})
+	if countResult.IsError {
+		t.Fatalf("read_file (start_line+max_lines) returned error: %v", countResult.Content)
+	}
+	absResult := callReadFile(t, reg, map[string]interface{}{
+		"path":       path,
+		"start_line": float64(15),
+		"end_line":   float64(50),
+	})
+	if absResult.IsError {
+		t.Fatalf("read_file (start_line+end_line) returned error: %v", absResult.Content)
+	}
+	if resultText(t, countResult) != resultText(t, absResult) {
+		t.Fatalf("start_line+max_lines must produce the same body as the equivalent start_line+end_line\ncount:\n%s\nabs:\n%s",
+			resultText(t, countResult), resultText(t, absResult))
+	}
+
+	// The previously-reported failure mode: start_line:628-style large offset
+	// with a small max_lines count must NOT hit the inverted-range error.
+	small := callReadFile(t, reg, map[string]interface{}{
+		"path":       path,
+		"start_line": float64(160),
+		"max_lines":  float64(30),
+	})
+	if small.IsError {
+		t.Fatalf("start_line:160, max_lines:30 must not error: %v", small.Content)
+	}
+	text := resultText(t, small)
+	for _, n := range []int{160, 189} {
+		if !regexp.MustCompile(fmt.Sprintf(`(?m)^line %d$`, n)).MatchString(text) {
+			t.Fatalf("expected line %d in body:\n%s", n, text)
+		}
+	}
+	if regexp.MustCompile(`(?m)^line 190$`).MatchString(strings.SplitN(text, "\n\n[Lines ", 2)[0]) {
+		t.Fatalf("start_line:160, max_lines:30 must stop at line 189, got line 190 in body:\n%s", text)
+	}
+}
+
 func TestReadFileHandler_FullAndRangeDoNotAutoCut(t *testing.T) {
 	dir := t.TempDir()
 	reg := buildEditRegistry(t, dir, false)

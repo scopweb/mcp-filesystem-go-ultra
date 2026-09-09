@@ -306,18 +306,18 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithDescription("read_file — Read file contents from the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
 			"Replaces bash cat/head/tail/cut/sed -n — NEVER use the shell. "+
 			"Logs: mode=\"tail\" max_lines=40 (each line auto-cut to 300 chars; max_line_length:0 disables). "+
-			"Range: start_line/end_line. Binary: encoding=\"base64\". Batch: paths JSON array. "+
+			"Range: start_line/end_line (absolute, inclusive) OR start_line/max_lines (count). Binary: encoding=\"base64\". Batch: paths JSON array. "+
 			"To MODIFY files use edit_file."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("path", mcp.Description("Path to file (WSL or Windows format). Required unless paths is provided.")),
 		mcp.WithString("paths", mcp.Description("JSON array of paths to read multiple files in one call, e.g. '[\"file1.txt\",\"file2.txt\"]'")),
-		mcp.WithNumber("max_lines", mcp.Description("Max lines (optional, 0=all). With mode=tail/head this is tail -N / head -N.")),
+		mcp.WithNumber("max_lines", mcp.Description("Max lines (optional, 0=all). With mode=tail/head this is tail -N / head -N. With start_line set and end_line omitted, this is a LINE COUNT from start_line (offset+count range read, e.g. start_line:100, max_lines:50 reads lines 100-149) — use this instead of guessing end_line when you only know how many lines you want.")),
 		mcp.WithNumber("max_line_length", mcp.Description("Max characters per line (cut -c). head/tail default 300. 0=no cut. Use on logs; do not use when you need exact text for edit_file.")),
 		mcp.WithString("mode", mcp.Description("all (default) | head | tail. Logs: mode=tail max_lines=40. Replaces bash tail/head.")),
-		mcp.WithNumber("start_line", mcp.Description("Starting line number (1-indexed) for range read")),
-		mcp.WithNumber("end_line", mcp.Description("Ending line number (inclusive) for range read")),
+		mcp.WithNumber("start_line", mcp.Description("Starting line number (1-indexed) for range read. Pair with end_line (absolute line number) OR max_lines (line count) — not both.")),
+		mcp.WithNumber("end_line", mcp.Description("Ending line number for range read — an ABSOLUTE line number, not a count of lines. If you know how many lines you want instead of where they end, use max_lines with start_line and omit end_line.")),
 		mcp.WithString("encoding", mcp.Description("Set to \"base64\" to read file as base64-encoded binary")),
 	)
 	reg.readFileHandler = auditWrap(engine, "read_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -437,7 +437,16 @@ func registerCoreTools(reg *toolRegistry) {
 
 		// Range read mode: read specific line range
 		if startLine > 0 && endLine == 0 {
-			endLine = 999999
+			if maxLines > 0 {
+				// offset+count convention (start_line + max_lines, no end_line) —
+				// mirrors Claude Code's own Read tool (offset/limit). Added
+				// because agents that treat "end_line" as a count instead of an
+				// absolute line number were hitting an inverted-range error
+				// (end_line < start_line) instead of getting what they meant.
+				endLine = startLine + maxLines - 1
+			} else {
+				endLine = 999999
+			}
 		}
 		if endLine > 0 && startLine == 0 {
 			startLine = 1
@@ -535,6 +544,7 @@ func registerCoreTools(reg *toolRegistry) {
 		`read_file(path:"file.go")`,
 		`read_file(path:"logs/app.txt", mode:"tail", max_lines:40)`,
 		`read_file(path:"file.go", start_line:10, end_line:40)`,
+		`read_file(path:"file.go", start_line:100, max_lines:50)`, // lines 100-149 — count instead of absolute end_line
 		`read_file(path:"file.bin", encoding:"base64")`,
 	)
 
@@ -786,12 +796,13 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("new_str", mcp.Description("Alias for new_text")),
 		mcp.WithBoolean("force", mcp.Description("Force the operation through the risk-threshold check (CRITICAL risk). A safety backup is always created. Note: force does NOT bypass the accidental-rewrite guard — use allow_rewrite for that. Default: false.")),
 		mcp.WithBoolean("allow_rewrite", mcp.Description("Bypass ONLY the accidental full-file rewrite guard (small old_text + large new_text with file content remaining). Prefer write_file for a real full-file rewrite; set allow_rewrite:true only when you genuinely want edit semantics on a near-total rewrite. A safety backup is created. Default: false.")),
-		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\", \"delete_range\" (remove lines start_line..end_line), \"replace_range\" (replace lines start_line..end_line with new_text), \"insert\" (insert new_text before/after anchor without replacing anything)")),
+		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\", \"delete_range\" (remove lines start_line..end_line, or start_line+line_count), \"replace_range\" (replace lines start_line..end_line, or start_line+line_count, with new_text), \"insert\" (insert new_text before/after anchor without replacing anything)")),
 		mcp.WithString("anchor", mcp.Description("Anchor text for mode:\"insert\". Must match exactly once in the file. The anchor is preserved; new_text is inserted on its own line(s).")),
 		mcp.WithString("position", mcp.Description("Where to insert relative to the anchor in mode:\"insert\": \"after\" (default) or \"before\".")),
 		mcp.WithNumber("occurrence", mcp.Description("Which occurrence to replace: 1=first, 2=second, -1=last, -2=second-to-last (default: all)")),
-		mcp.WithNumber("start_line", mcp.Description("First line of the range (1-based, inclusive). Used by mode:\"delete_range\" and mode:\"replace_range\".")),
-		mcp.WithNumber("end_line", mcp.Description("Last line of the range (1-based, inclusive). Used by mode:\"delete_range\" and mode:\"replace_range\".")),
+		mcp.WithNumber("start_line", mcp.Description("First line of the range (1-based, inclusive). Used by mode:\"delete_range\" and mode:\"replace_range\". Pair with end_line (absolute) OR line_count (count) — not both.")),
+		mcp.WithNumber("end_line", mcp.Description("Last line of the range — an ABSOLUTE line number, not a count of lines. Used by mode:\"delete_range\" and mode:\"replace_range\". If you know how many lines instead of where they end, use line_count with start_line and omit end_line.")),
+		mcp.WithNumber("line_count", mcp.Description("Number of lines from start_line, as an alternative to end_line. Used by mode:\"delete_range\" and mode:\"replace_range\" — e.g. start_line:100, line_count:50 targets lines 100-149.")),
 		// search_replace mode params
 		mcp.WithString("pattern", mcp.Description("Regex or literal pattern. In search_replace mode: literal pattern, all occurrences. In regex mode: regex pattern (synthesized into a single-pattern transformation if patterns_json is not provided).")),
 		mcp.WithString("replacement", mcp.Description("Replacement text. Used in search_replace mode, and in regex mode when pattern is provided without patterns_json.")),
@@ -1055,7 +1066,7 @@ func registerCoreTools(reg *toolRegistry) {
 
 		// ---- MODE: replace_range ----
 		if mode == "replace_range" {
-			startLine, endLine := 0, 0
+			startLine, endLine, lineCount := 0, 0, 0
 			if args != nil {
 				if sl, ok := args["start_line"].(float64); ok {
 					startLine = int(sl)
@@ -1063,9 +1074,19 @@ func registerCoreTools(reg *toolRegistry) {
 				if el, ok := args["end_line"].(float64); ok {
 					endLine = int(el)
 				}
+				if lc, ok := args["line_count"].(float64); ok {
+					lineCount = int(lc)
+				}
+			}
+			if startLine > 0 && endLine == 0 && lineCount > 0 {
+				// offset+count convention (start_line + line_count, no end_line) —
+				// see read_file's start_line+max_lines for the same idea. Agents
+				// that treat end_line as a count get a correct path here instead
+				// of an inverted range.
+				endLine = startLine + lineCount - 1
 			}
 			if startLine == 0 || endLine == 0 {
-				return mcp.NewToolResultError("mode:\"replace_range\" requires start_line and end_line (1-based, inclusive) and new_text"), nil
+				return mcp.NewToolResultError("mode:\"replace_range\" requires start_line and (end_line or line_count) and new_text"), nil
 			}
 			result, rerr := engine.ReplaceLineRange(ctx, path, startLine, endLine, newText)
 			if rerr != nil {
@@ -1102,7 +1123,7 @@ func registerCoreTools(reg *toolRegistry) {
 
 		// ---- MODE: delete_range ----
 		if mode == "delete_range" {
-			startLine, endLine := 0, 0
+			startLine, endLine, lineCount := 0, 0, 0
 			if args != nil {
 				if sl, ok := args["start_line"].(float64); ok {
 					startLine = int(sl)
@@ -1110,9 +1131,15 @@ func registerCoreTools(reg *toolRegistry) {
 				if el, ok := args["end_line"].(float64); ok {
 					endLine = int(el)
 				}
+				if lc, ok := args["line_count"].(float64); ok {
+					lineCount = int(lc)
+				}
+			}
+			if startLine > 0 && endLine == 0 && lineCount > 0 {
+				endLine = startLine + lineCount - 1
 			}
 			if startLine == 0 || endLine == 0 {
-				return mcp.NewToolResultError("mode:\"delete_range\" requires start_line and end_line (1-based, inclusive)"), nil
+				return mcp.NewToolResultError("mode:\"delete_range\" requires start_line and (end_line or line_count)"), nil
 			}
 			_, result, derr := engine.DeleteLineRange(ctx, path, startLine, endLine)
 			if derr != nil {
