@@ -128,6 +128,14 @@ Root held 11 markdown files, three stale `.exe` duplicates of `bin/`, and an unr
 
 Follow-up to the package move — `README.md` and `.claude/skills/filesystem-ultra-tools/ripgrep-reference.md` told readers to build with `go build ... .`, which now compiles the module root and emits an object file instead of an executable (the same trap `TestFailClosed_Binary` guards against); both now build `./cmd/filesystem-ultra`. `scripts/security/vulnerability_scan.bat` grepped `main.go` for unsafe imports, hardcoded credentials, and error handling, silently reporting "no findings" against a file that no longer exists at that path — repointed at `internal/mcpserver/`.
 
+### fix(core): inverted line range says *why* — `end_line` is absolute, not a count
+
+`read_file(start_line, end_line)` and `edit_file` modes `delete_range` / `replace_range` take a 1-based **inclusive absolute** range. Agents recurringly pass `end_line` as a line count (`start_line:115, end_line:50` meaning "50 lines from 115"), which inverts the range and used to fail with a bare `end_line (50) must be >= start_line (115)` — reads as a validation quirk, not the actual mistake. Observed against this server from an Opencode session.
+
+The same check was duplicated verbatim in 4 places (`ReadFileRange`, `extractLineRangeFromBytes`, `ComputeLineRangeDeletion`, `ComputeLineRangeReplacement`). Now a single `core.ValidateLineRange`, and the error spells out the fix: `end_line is an absolute line number, not a line count; for N lines starting at start_line, use end_line = start_line + N - 1`. Message text only — no change to which inputs are accepted.
+
+**Verification:** `go test ./core/... ./tests/... ./internal/mcpserver/...` PASS (no test or doc depended on the old string).
+
 ## [Unreleased / 4.5.38] - 2026-09-03
 
 ### feat(read_file): displace bash `tail | cut` — max_line_length + head/tail auto-cut
