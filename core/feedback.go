@@ -102,7 +102,35 @@ func SetAutoOCCMode(mode string) {
 }
 
 // RecordRead marks a file as recently read (resets stale-read detection).
+func newSessionState() *sessionState {
+	return &sessionState{
+		failedOldText: make(map[string]map[string]int),
+		lastRead:      make(map[string]time.Time),
+		knownHash:     make(map[string]string),
+		staleWarned:   make(map[string]bool),
+	}
+}
+
+func (e *UltraFastEngine) occState() *sessionState {
+	if e == nil {
+		return globalSession
+	}
+	id := e.CurrentSessionID()
+	e.occMu.Lock()
+	defer e.occMu.Unlock()
+	if e.occBySession == nil {
+		e.occBySession = make(map[string]*sessionState)
+	}
+	s := e.occBySession[id]
+	if s == nil {
+		s = newSessionState()
+		e.occBySession[id] = s
+	}
+	return s
+}
+
 func RecordRead(path string) {
+	path = CanonicalOCCKey(path)
 	globalSession.mu.Lock()
 	defer globalSession.mu.Unlock()
 	globalSession.lastRead[path] = time.Now()
@@ -113,14 +141,23 @@ func RecordRead(path string) {
 // read, and refreshes its last-seen timestamp. Together with RecordWriteHash
 // this is the "known hash" auto-OCC compares against (new point 4).
 func RecordReadHash(path, hash string) {
-	if hash == "" {
+	recordReadHashOn(globalSession, path, hash)
+}
+
+func (e *UltraFastEngine) RecordReadHash(path, hash string) {
+	recordReadHashOn(e.occState(), path, hash)
+}
+
+func recordReadHashOn(st *sessionState, path, hash string) {
+	if hash == "" || st == nil {
 		return
 	}
-	globalSession.mu.Lock()
-	defer globalSession.mu.Unlock()
-	globalSession.knownHash[path] = hash
-	globalSession.lastRead[path] = time.Now()
-	delete(globalSession.staleWarned, path)
+	path = CanonicalOCCKey(path)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.knownHash[path] = hash
+	st.lastRead[path] = time.Now()
+	delete(st.staleWarned, path)
 }
 
 // RecordWriteHash records the content_hash of a file AFTER the session wrote or
@@ -129,19 +166,29 @@ func RecordReadHash(path, hash string) {
 // external-change warning. By tracking the session's own writes, auto-OCC only
 // fires on changes the session did not make.
 func RecordWriteHash(path, hash string) {
-	if hash == "" {
+	recordWriteHashOn(globalSession, path, hash)
+}
+
+func (e *UltraFastEngine) RecordWriteHash(path, hash string) {
+	recordWriteHashOn(e.occState(), path, hash)
+}
+
+func recordWriteHashOn(st *sessionState, path, hash string) {
+	if hash == "" || st == nil {
 		return
 	}
-	globalSession.mu.Lock()
-	defer globalSession.mu.Unlock()
-	globalSession.knownHash[path] = hash
-	globalSession.lastRead[path] = time.Now()
+	path = CanonicalOCCKey(path)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.knownHash[path] = hash
+	st.lastRead[path] = time.Now()
 }
 
 // InvalidateKnownHash drops the auto-OCC baseline for a path (e.g. after a file
 // is deleted or moved away). A later edit then has no baseline and won't warn,
 // rather than comparing against a hash that no longer applies.
 func InvalidateKnownHash(path string) {
+	path = CanonicalOCCKey(path)
 	globalSession.mu.Lock()
 	defer globalSession.mu.Unlock()
 	delete(globalSession.knownHash, path)
@@ -183,13 +230,22 @@ func RefreshKnownHashes(paths []string) {
 // "block". Returns OK() otherwise. This complements explicit expected_hash: it
 // catches lost updates even when the caller did not opt into OCC.
 func CheckAutoOCC(path, diskHash string) *FeedbackSignal {
-	if autoOCCMode == "off" || diskHash == "" {
+	return checkAutoOCCOn(globalSession, path, diskHash)
+}
+
+func (e *UltraFastEngine) CheckAutoOCC(path, diskHash string) *FeedbackSignal {
+	return checkAutoOCCOn(e.occState(), path, diskHash)
+}
+
+func checkAutoOCCOn(st *sessionState, path, diskHash string) *FeedbackSignal {
+	if autoOCCMode == "off" || diskHash == "" || st == nil {
 		return OK()
 	}
-	globalSession.mu.Lock()
-	known, hasKnown := globalSession.knownHash[path]
-	lastRead, hasRead := globalSession.lastRead[path]
-	globalSession.mu.Unlock()
+	path = CanonicalOCCKey(path)
+	st.mu.Lock()
+	known, hasKnown := st.knownHash[path]
+	lastRead, hasRead := st.lastRead[path]
+	st.mu.Unlock()
 
 	if !hasKnown || !hasRead || time.Since(lastRead) > 10*time.Minute {
 		return OK()

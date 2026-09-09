@@ -241,6 +241,7 @@ func registerBatchTools(reg *toolRegistry) {
 				}
 			}
 		}
+		ctx = core.WithExpectedHash(ctx, expectedHash)
 		result, err := engine.MultiEdit(ctx, path, edits, force, dryRun, tolerantWhitespace, expectedHash)
 		if err != nil {
 			// Bug #27: If result is non-nil, this is an atomic rollback — include backup_id and details

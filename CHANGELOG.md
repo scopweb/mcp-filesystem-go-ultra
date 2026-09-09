@@ -2,6 +2,14 @@
 
 ## [Unreleased / 4.6.0] - 2026-09-03
 
+### feat(reliability): E2 — file transaction, path locks, coherent snapshots
+
+Mutations share one pipeline: resolve/authorize → per-path lock (in-process + cooperating processes) → snapshot (bytes+hash) → OCC under the lock → backup of that snapshot → write → cache/OCC update → unlock. Nested ops on a path already held do not re-lock. Waits are cancelable via context.
+
+`apply_patch` no longer treats every read error as “new file”. Auto-OCC keys are canonical (Windows case-folded) and scoped per engine session.
+
+**Verification:** `TestConcurrentEdit_OCCConflict` · `TestPathLock_IndependentParallel` · `TestPathLock_Cancel` · `TestReadSnapshot_HashMatchesBytes` · `TestBeginFileTxn_MissingVsPermission` · `TestNestedTxn_NoDeadlock`.
+
 ### fix(reliability): E1 — dry_run, OCC, readonly and search guarantees
 
 Agent-facing tools now honor the guarantees they advertise:

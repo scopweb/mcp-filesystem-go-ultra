@@ -918,6 +918,7 @@ func registerCoreTools(reg *toolRegistry) {
 				newText = nt
 			}
 		}
+		ctx = core.WithExpectedHash(ctx, expectedHash)
 
 		// ---- MODE: regex ----
 		if mode == "regex" {

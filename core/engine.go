@@ -140,6 +140,11 @@ type UltraFastEngine struct {
 	// Ripgrep support: detected once at startup for high-performance search
 	ripgrepAvailable bool
 	ripgrepVersion   string
+
+	pathLocks *pathLockManager
+
+	occMu        sync.Mutex
+	occBySession map[string]*sessionState
 }
 
 const sessionInactivityTimeout = 5 * time.Minute
@@ -199,7 +204,9 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 		cache:       config.Cache,
 		metrics:     &PerformanceMetrics{},
 		semaphore:   make(chan struct{}, config.ParallelOps),
-		backupChain: make(map[string]string),
+		backupChain:  make(map[string]string),
+		pathLocks:    newPathLockManager(),
+		occBySession: make(map[string]*sessionState),
 	}
 
 	// Initialize buffer pool for memory-efficient I/O operations
@@ -695,6 +702,13 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 		return &ContextError{Op: "write_file", Details: "operation cancelled before write"}
 	}
 
+	ctx, txn, err := e.BeginFileTxn(ctx, path, true)
+	if err != nil {
+		return err
+	}
+	defer txn.Release()
+	path = txn.Snapshot().Path
+
 	// Execute pre-write hooks
 	workingDir, _ := os.Getwd()
 	hookCtx := &HookContext{
@@ -735,28 +749,9 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	// Atomic write using temp file with secure random name
-	tmpPath := path + ".tmp." + secureRandomSuffix()
-
-	// Preserve original file permissions if file exists, otherwise use 0644
-	fileMode := os.FileMode(0644)
-	if info, err := os.Stat(path); err == nil {
-		fileMode = info.Mode()
+	if _, err := txn.Commit(ctx, []byte(finalContent), false, "write_file", "write_file"); err != nil {
+		return err
 	}
-
-	// Write to temporary file
-	if err := os.WriteFile(tmpPath, []byte(finalContent), fileMode); err != nil {
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	// Atomic rename (retry past transient Windows locks)
-	if err := renameWithRetry(tmpPath, path); err != nil {
-		os.Remove(tmpPath) // Clean up temp file
-		return fmt.Errorf("failed to rename temp file: %w", err)
-	}
-
-	// Invalidate cache
-	e.invalidateMutatedPath(path)
 
 	// Execute post-write hooks
 	hookCtx.Event = HookPostWrite
