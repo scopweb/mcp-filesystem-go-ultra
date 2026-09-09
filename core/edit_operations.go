@@ -1457,7 +1457,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		currentContent = editResult.ModifiedContent
 		result.SuccessfulEdits++
 		totalReplacements += int64(editResult.ReplacementCount)
-		totalLinesAffected += editResult.LinesAffected
+		totalLinesAffected += CountLines(edit.OldText) * editResult.ReplacementCount
 		// Track line range for clickable link annotation
 		if editResult.StartLine > 0 {
 			if firstStartLine == 0 || editResult.StartLine < firstStartLine {
@@ -1468,8 +1468,8 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 			}
 		}
 		// Accumulate diff stats per edit
-		oldLines := strings.Count(edit.OldText, "\n") + 1
-		newLines := strings.Count(edit.NewText, "\n") + 1
+		oldLines := CountLines(edit.OldText)
+		newLines := CountLines(edit.NewText)
 		totalLinesRemoved += oldLines * editResult.ReplacementCount
 		totalLinesAdded += newLines * editResult.ReplacementCount
 

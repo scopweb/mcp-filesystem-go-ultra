@@ -1091,18 +1091,18 @@ func registerCoreTools(reg *toolRegistry) {
 			var newContentStr string
 			if dryRun {
 				newContentStr = string(oldContentRaw)
+				count := 0
 				if re, reErr := regexp.Compile(regexp.QuoteMeta(pattern)); reErr == nil {
+					count = len(re.FindAllString(string(oldContentRaw), -1))
 					safeReplacement := strings.ReplaceAll(replacement, "$", "$$")
 					newContentStr = re.ReplaceAllString(string(oldContentRaw), safeReplacement)
-					unifiedDiff = core.RenderDiff(string(oldContentRaw), newContentStr, path, diffFormatArg(args))
 				}
-				hashFooter := fmt.Sprintf("current_hash: %s\npredicted_hash: %s",
-					contentHashBytes(oldContentRaw), contentHashBytes([]byte(newContentStr)))
-				if unifiedDiff != "" {
-					unifiedDiff = hashFooter + "\n" + unifiedDiff
-				} else {
-					unifiedDiff = hashFooter
+				extra := fmt.Sprintf("Would change: %d replacement(s)\n", count)
+				if autoOCCWarn != "" {
+					extra += autoOCCWarn + "\n"
 				}
+				msg, sc := formatEditDryRun(path, string(oldContentRaw), newContentStr, count, extra, args)
+				return mcp.NewToolResultStructured(sc, msg), nil
 			} else {
 				newContentRaw, _ := os.ReadFile(normPath)
 				newContentStr = string(newContentRaw)
