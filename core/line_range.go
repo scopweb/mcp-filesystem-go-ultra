@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 )
@@ -140,18 +139,13 @@ func (e *UltraFastEngine) DeleteLineRange(ctx context.Context, path string, star
 	if err := ctx.Err(); err != nil {
 		return "", nil, fmt.Errorf("operation cancelled: %w", err)
 	}
-	if !e.IsPathAllowed(path) {
-		return "", nil, e.AccessDeniedError("delete_range", path)
+	ctx, txn, berr := e.BeginFileTxn(ctx, path, false)
+	if berr != nil {
+		return "", nil, berr
 	}
-	if err := e.validateEditableFile(path); err != nil {
-		return "", nil, fmt.Errorf("file validation failed: %w", err)
-	}
-
-	contentBytes, rerr := os.ReadFile(path)
-	if rerr != nil {
-		return "", nil, fmt.Errorf("error reading file: %w", rerr)
-	}
-	content := string(contentBytes)
+	defer txn.Release()
+	path = txn.Snapshot().Path
+	content := string(txn.Snapshot().Bytes)
 
 	removed, remaining, derr := ComputeLineRangeDeletion(content, startLine, endLine)
 	if derr != nil {
@@ -175,32 +169,12 @@ func (e *UltraFastEngine) DeleteLineRange(ctx context.Context, path string, star
 	if dryRun {
 		return removed, result, nil
 	}
-
-	var backupID string
-	if e.backupManager != nil {
-		e.backupChainMu.RLock()
-		previousBackupID := e.backupChain[path]
-		e.backupChainMu.RUnlock()
-		backupID, err = e.backupManager.CreateBackupWithContextAndParent(path, "delete_range",
-			fmt.Sprintf("Delete lines %d-%d", startLine, endLine), previousBackupID)
-		if err != nil {
-			return "", nil, fmt.Errorf("could not create backup: %w", err)
-		}
-		e.backupChainMu.Lock()
-		e.backupChain[path] = backupID
-		e.backupChainMu.Unlock()
+	backupID, err := txn.Commit(ctx, []byte(remaining), false, "delete_range",
+		fmt.Sprintf("Delete lines %d-%d", startLine, endLine))
+	if err != nil {
+		return "", nil, err
 	}
 	result.BackupID = backupID
-
-	fileMode := os.FileMode(0644)
-	if info, statErr := os.Stat(path); statErr == nil {
-		fileMode = info.Mode()
-	}
-	if werr := atomicWriteFile(path, []byte(remaining), fileMode); werr != nil {
-		return "", nil, fmt.Errorf("error writing file: %w", werr)
-	}
-	e.invalidateMutatedPath(path)
-	// Point 2 / AST-Go: structural check on the resulting file.
 	return removed, result, nil
 }
 
@@ -220,18 +194,13 @@ func (e *UltraFastEngine) ReplaceLineRange(ctx context.Context, path string, sta
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("operation cancelled: %w", err)
 	}
-	if !e.IsPathAllowed(path) {
-		return nil, e.AccessDeniedError("replace_range", path)
+	ctx, txn, berr := e.BeginFileTxn(ctx, path, false)
+	if berr != nil {
+		return nil, berr
 	}
-	if err := e.validateEditableFile(path); err != nil {
-		return nil, fmt.Errorf("file validation failed: %w", err)
-	}
-
-	contentBytes, rerr := os.ReadFile(path)
-	if rerr != nil {
-		return nil, fmt.Errorf("error reading file: %w", rerr)
-	}
-	content := string(contentBytes)
+	defer txn.Release()
+	path = txn.Snapshot().Path
+	content := string(txn.Snapshot().Bytes)
 
 	removed, remaining, derr := ComputeLineRangeReplacement(content, startLine, endLine, newText)
 	if derr != nil {
@@ -257,30 +226,11 @@ func (e *UltraFastEngine) ReplaceLineRange(ctx context.Context, path string, sta
 	if dryRun {
 		return result, nil
 	}
-
-	var backupID string
-	if e.backupManager != nil {
-		e.backupChainMu.RLock()
-		previousBackupID := e.backupChain[path]
-		e.backupChainMu.RUnlock()
-		backupID, err = e.backupManager.CreateBackupWithContextAndParent(path, "replace_range",
-			fmt.Sprintf("Replace lines %d-%d", startLine, endLine), previousBackupID)
-		if err != nil {
-			return nil, fmt.Errorf("could not create backup: %w", err)
-		}
-		e.backupChainMu.Lock()
-		e.backupChain[path] = backupID
-		e.backupChainMu.Unlock()
+	backupID, err := txn.Commit(ctx, []byte(remaining), false, "replace_range",
+		fmt.Sprintf("Replace lines %d-%d", startLine, endLine))
+	if err != nil {
+		return nil, err
 	}
 	result.BackupID = backupID
-
-	fileMode := os.FileMode(0644)
-	if info, statErr := os.Stat(path); statErr == nil {
-		fileMode = info.Mode()
-	}
-	if werr := atomicWriteFile(path, []byte(remaining), fileMode); werr != nil {
-		return nil, fmt.Errorf("error writing file: %w", werr)
-	}
-	e.invalidateMutatedPath(path)
 	return result, nil
 }

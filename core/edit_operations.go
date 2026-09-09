@@ -105,20 +105,16 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 		return nil, fmt.Errorf("operation cancelled: %w", err)
 	}
 
-	// Check if path is allowed (security + access control)
-	if !e.IsPathAllowed(path) {
-		return nil, e.AccessDeniedError("edit", path)
-	}
-
-	// Validate file
-	if err := e.validateEditableFile(path); err != nil {
-		return nil, fmt.Errorf("file validation failed: %w", err)
-	}
-
-	// Read current content
-	content, err := os.ReadFile(path)
+	ctx, txn, err := e.BeginFileTxn(ctx, path, false)
 	if err != nil {
-		return nil, fmt.Errorf("error reading file: %w", err)
+		return nil, err
+	}
+	defer txn.Release()
+	snap := txn.Snapshot()
+	path = snap.Path
+	content := snap.Bytes
+	if int64(len(content)) > 50*1024*1024 {
+		return nil, fmt.Errorf("file too large for editing")
 	}
 
 	// Detect original EOL style to preserve it on write (Bug #33: EOL preservation)
@@ -136,28 +132,7 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 	// Calculate change impact for risk assessment
 	impact := CalculateChangeImpact(string(content), oldText, newText, e.riskThresholds)
 
-	// Create persistent backup BEFORE blocking decision (Bug #16)
-	// Ensures backup exists even for blocked CRITICAL operations
-	// Skip backup creation in dry_run mode (Bug #32: dry_run must not modify anything)
 	var backupID string
-	if e.backupManager != nil && !dryRun {
-		// Get previous backup ID from chain for linked undo
-		e.backupChainMu.RLock()
-		previousBackupID := e.backupChain[path]
-		e.backupChainMu.RUnlock()
-
-		backupID, err = e.backupManager.CreateBackupWithContextAndParent(path, "edit_file",
-			fmt.Sprintf("Edit: %d occurrences, %.1f%% change, risk=%s",
-				impact.Occurrences, impact.ChangePercentage, impact.RiskLevel), previousBackupID)
-		if err != nil {
-			return nil, fmt.Errorf("could not create backup: %w", err)
-		}
-
-		// Update backup chain with new backup ID
-		e.backupChainMu.Lock()
-		e.backupChain[path] = backupID
-		e.backupChainMu.Unlock()
-	}
 
 	// Bug #22: edit_file NEVER blocks — backup is already created, data is safe.
 	// Blocking wastes tokens (Claude Desktop must resend the full old_text with force:true).
@@ -221,33 +196,14 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 		finalContent = hookResult.ModifiedContent
 	}
 
-	// Restore original EOL style before writing (Bug #33: EOL preservation)
 	finalContent = restoreEOL(finalContent, originalEOL)
 
-	// Write modified content atomically with secure random temp name
-	tmpPath := path + ".tmp." + secureRandomSuffix()
-
-	// Preserve original file permissions
-	fileMode := os.FileMode(0644)
-	if info, statErr := os.Stat(path); statErr == nil {
-		fileMode = info.Mode()
+	backupID, err = txn.Commit(ctx, []byte(finalContent), false, "edit_file",
+		fmt.Sprintf("Edit: %d occurrences, %.1f%% change, risk=%s",
+			impact.Occurrences, impact.ChangePercentage, impact.RiskLevel))
+	if err != nil {
+		return nil, err
 	}
-
-	if err := os.WriteFile(tmpPath, []byte(finalContent), fileMode); err != nil {
-		return nil, fmt.Errorf("error writing temp file: %w", err)
-	}
-
-	// Atomic rename (retry past transient Windows locks)
-	if err := renameWithRetry(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return nil, fmt.Errorf("error finalizing edit: %w", err)
-	}
-
-	// Invalidate cache
-	e.invalidateMutatedPath(path)
-
-	// DO NOT remove backup - keep it persistent for recovery
-	// (old behavior: os.Remove(backupPath) - removed for Bug10 fix)
 
 	// Execute post-edit hooks
 	hookCtx.Event = HookPostEdit
@@ -1280,39 +1236,15 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
-	// Check if path is allowed (security + access control)
-	if !e.IsPathAllowed(path) {
-		return nil, e.AccessDeniedError("multi_edit", path)
-	}
-
-	// Validate file
-	if err := e.validateEditableFile(path); err != nil {
-		return nil, fmt.Errorf("file validation failed: %w", err)
-	}
-
-	// Read current content once
-	content, err := os.ReadFile(path)
+	ctx = WithExpectedHash(ctx, expectedHash)
+	ctx, txn, err := e.BeginFileTxn(ctx, path, false)
 	if err != nil {
-		return nil, fmt.Errorf("error reading file: %w", err)
+		return nil, err
 	}
+	defer txn.Release()
+	path = txn.Snapshot().Path
+	content := txn.Snapshot().Bytes
 	originalContent := string(content)
-
-	// Bug #24: OCC stale-edit protection for batch edits (parity with EditFile).
-	// When expectedHash is non-empty, the consumer is asserting that the file's
-	// current FNV-1a must match the hash they captured from a prior read_file.
-	// If the file changed since (concurrent write, external editor, another
-	// agent), reject the entire batch with the same error string edit_file
-	// uses, so a consumer that retries on "stale edit:" works the same way
-	// for both tools. Empty expectedHash disables the check (backward
-	// compatible with all existing callers that don't pass it).
-	if expectedHash != "" {
-		h := fnv.New32a()
-		h.Write(content)
-		actualHash := fmt.Sprintf("%08x", h.Sum32())
-		if actualHash != expectedHash {
-			return nil, fmt.Errorf("stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file with read_file to get the current content_hash, then retry.", expectedHash, actualHash)
-		}
-	}
 
 	// Detect original EOL style to preserve it on write (Bug #33: EOL preservation)
 	originalEOL := detectEOL(originalContent)
@@ -1372,26 +1304,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	}
 	aggregateImpact := calculateMultiEditImpact(originalContent, simContent, edits, e.riskThresholds)
 
-	// Create persistent backup BEFORE blocking decision (Bug #16)
-	// Skip backup creation in dry_run mode (Bug #32)
 	var backupID string
-	if e.backupManager != nil && !dryRun {
-		// Get previous backup ID from chain for linked undo
-		e.backupChainMu.RLock()
-		previousBackupID := e.backupChain[path]
-		e.backupChainMu.RUnlock()
-
-		backupID, err = e.backupManager.CreateBackupWithContextAndParent(path, "multi_edit",
-			fmt.Sprintf("MultiEdit: %d edits, risk=%s", len(edits), aggregateImpact.RiskLevel), previousBackupID)
-		if err != nil {
-			return nil, fmt.Errorf("could not create backup: %w", err)
-		}
-
-		// Update backup chain with new backup ID
-		e.backupChainMu.Lock()
-		e.backupChain[path] = backupID
-		e.backupChainMu.Unlock()
-	}
 
 	// Bug #22: multi_edit NEVER blocks — backup is already created, data is safe.
 	// Blocking wastes tokens (Claude Desktop must resend the full old_text with force:true).
@@ -1632,29 +1545,11 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	// Restore original EOL style before writing (Bug #33: EOL preservation)
 	finalContent = restoreEOL(finalContent, originalEOL)
 
-	// Write modified content atomically with secure random temp name
-	tmpPath := path + ".tmp." + secureRandomSuffix()
-
-	// Preserve original file permissions
-	fileMode := os.FileMode(0644)
-	if info, statErr := os.Stat(path); statErr == nil {
-		fileMode = info.Mode()
+	backupID, err = txn.Commit(ctx, []byte(finalContent), false, "multi_edit",
+		fmt.Sprintf("MultiEdit: %d edits, risk=%s", len(edits), aggregateImpact.RiskLevel))
+	if err != nil {
+		return nil, err
 	}
-
-	if err := os.WriteFile(tmpPath, []byte(finalContent), fileMode); err != nil {
-		return nil, fmt.Errorf("error writing temp file: %w", err)
-	}
-
-	// Atomic rename (retry past transient Windows locks)
-	if err := renameWithRetry(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return nil, fmt.Errorf("error finalizing edit: %w", err)
-	}
-
-	// Invalidate cache
-	e.invalidateMutatedPath(path)
-
-	// DO NOT remove backup - keep it persistent for recovery (Bug #16)
 
 	// Execute post-edit hooks (Bug #17 — parity with EditFile)
 	hookCtx.Event = HookPostEdit

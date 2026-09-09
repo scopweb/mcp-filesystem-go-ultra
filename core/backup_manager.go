@@ -174,6 +174,57 @@ func (bm *BackupManager) CreateBackupWithContextAndParent(path string, operation
 	return backupID, nil
 }
 
+// CreateBackupFromBytes stores snapshot bytes as the backup of path so the
+// backup is the version actually replaced (not a later disk re-read).
+func (bm *BackupManager) CreateBackupFromBytes(path string, data []byte, mode os.FileMode, operation, userContext, previousBackupID string) (string, error) {
+	bm.mutex.Lock()
+	defer bm.mutex.Unlock()
+
+	if mode == 0 {
+		mode = 0600
+	}
+	backupID := generateBackupID()
+	backupBaseDir := filepath.Join(bm.backupDir, backupID)
+	backupFilesDir := filepath.Join(backupBaseDir, "files")
+	if err := os.MkdirAll(backupFilesDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create backup directory: %w", err)
+	}
+	fileName := filepath.Base(path)
+	backupFilePath := filepath.Join(backupFilesDir, fileName)
+	if err := os.WriteFile(backupFilePath, data, mode); err != nil {
+		os.RemoveAll(backupBaseDir)
+		return "", fmt.Errorf("failed to write backup: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	hash := hex.EncodeToString(sum[:])
+	mtime := time.Now()
+	if info, err := os.Stat(path); err == nil {
+		mtime = info.ModTime()
+	}
+	metadata := BackupMetadata{
+		OriginalPath: path,
+		BackupPath:   filepath.Join("files", fileName),
+		Size:         int64(len(data)),
+		Hash:         hash,
+		ModifiedTime: mtime,
+	}
+	backupInfo := BackupInfo{
+		BackupID:         backupID,
+		PreviousBackupID: previousBackupID,
+		Timestamp:        time.Now(),
+		Operation:        operation,
+		UserContext:      userContext,
+		Files:            []BackupMetadata{metadata},
+		TotalSize:        int64(len(data)),
+	}
+	if err := bm.saveBackupMetadata(backupBaseDir, &backupInfo); err != nil {
+		os.RemoveAll(backupBaseDir)
+		return "", fmt.Errorf("failed to save metadata: %w", err)
+	}
+	bm.metadataCache[backupID] = &backupInfo
+	return backupID, nil
+}
+
 // CreateBatchBackup crea un backup de múltiples archivos
 func (bm *BackupManager) CreateBatchBackup(paths []string, operation string, userContext string) (string, error) {
 	bm.mutex.Lock()

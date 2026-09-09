@@ -38,6 +38,7 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 			RequestID: newRequestID(),
 		}
 		ctx = context.WithValue(ctx, core.AuditEntryKey{}, entry)
+		ctx = core.WithSessionID(ctx, engine.CurrentSessionID())
 
 		// Run normalizer on arguments
 		if normalizer := engine.GetNormalizer(); normalizer != nil {

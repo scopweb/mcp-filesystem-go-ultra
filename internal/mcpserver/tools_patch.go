@@ -132,14 +132,27 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 			}, "+++ header must match path (a/ b/ prefixes ok)"), nil
 		}
 
-		oldRaw, readErr := os.ReadFile(path)
-		isNew := readErr != nil
-		if strings.Contains(core.PatchHeaderPath(parsed.OldFile), "dev/null") {
-			isNew = true
-			oldRaw = nil
+		ctx = core.WithExpectedHash(ctx, expectedHash)
+		allowMissing := strings.Contains(core.PatchHeaderPath(parsed.OldFile), "dev/null")
+		ctx, txn, txnErr := engine.BeginFileTxn(ctx, path, allowMissing)
+		if txnErr != nil {
+			if occ, ok := txnErr.(*core.OCCMismatchError); ok {
+				return pathErrorResult(errCodeOCCMismatch, "content hash != expected_hash", path, map[string]string{
+					"expected_hash": occ.Expected, "actual_hash": occ.Actual,
+				}, "call read_file and retry with actual_hash"), nil
+			}
+			return mcp.NewToolResultError(formatToolError(txnErr)), nil
 		}
-		if !isNew && readErr != nil {
-			return mcp.NewToolResultError(formatToolError(readErr)), nil
+		defer txn.Release()
+		snap := txn.Snapshot()
+		path = snap.Path
+		oldRaw := snap.Bytes
+		isNew := !snap.Exists
+		if allowMissing {
+			isNew = true
+			if !snap.Exists {
+				oldRaw = nil
+			}
 		}
 
 		actualHash := contentHashBytes(oldRaw)
@@ -177,15 +190,11 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 		}
 
 		var backupID string
-		if createBackup && !isNew && engine.GetBackupManager() != nil {
-			prev := engine.GetCurrentBackupID(path)
-			backupID, _ = engine.GetBackupManager().CreateBackupWithContextAndParent(path, "apply_patch", "", prev)
-			if backupID != "" {
-				engine.SetCurrentBackupID(path, backupID)
-			}
+		if !createBackup {
+			txn.SkipBackup()
 		}
-
-		if err := engine.WriteFileContent(ctx, path, newContent); err != nil {
+		backupID, err = txn.Commit(ctx, []byte(newContent), false, "apply_patch", "")
+		if err != nil {
 			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
 		_, _, hash, verified := verifyOnDiskWrite(engine, path)

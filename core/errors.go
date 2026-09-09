@@ -3,6 +3,16 @@ package core
 import "fmt"
 
 // PathError represents an error that occurred during a path operation
+// OCCMismatchError is a stale-edit conflict detected under the file lock.
+type OCCMismatchError struct {
+	Expected string
+	Actual   string
+}
+
+func (e *OCCMismatchError) Error() string {
+	return fmt.Sprintf("stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file with read_file to get the current content_hash, then retry.", e.Expected, e.Actual)
+}
+
 type PathError struct {
 	Op   string // Operation (e.g., "read", "write", "stat")
 	Path string // The path that caused the error

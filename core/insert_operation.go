@@ -27,12 +27,6 @@ func (e *UltraFastEngine) InsertAtAnchor(ctx context.Context, path, anchor, text
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("operation cancelled: %w", err)
 	}
-	if !e.IsPathAllowed(path) {
-		return nil, e.AccessDeniedError("insert", path)
-	}
-	if err := e.validateEditableFile(path); err != nil {
-		return nil, fmt.Errorf("file validation failed: %w", err)
-	}
 	if anchor == "" {
 		return nil, fmt.Errorf("anchor cannot be empty")
 	}
@@ -40,10 +34,13 @@ func (e *UltraFastEngine) InsertAtAnchor(ctx context.Context, path, anchor, text
 		return nil, fmt.Errorf("position must be \"after\" or \"before\"")
 	}
 
-	raw, err := os.ReadFile(path)
+	ctx, txn, err := e.BeginFileTxn(ctx, path, false)
 	if err != nil {
-		return nil, fmt.Errorf("error reading file: %w", err)
+		return nil, err
 	}
+	defer txn.Release()
+	path = txn.Snapshot().Path
+	raw := txn.Snapshot().Bytes
 	originalEOL := detectEOL(string(raw))
 	content := normalizeLineEndings(string(raw))
 	anchorN := normalizeLineEndings(anchor)
@@ -102,24 +99,6 @@ func (e *UltraFastEngine) InsertAtAnchor(ctx context.Context, path, anchor, text
 		return result, nil
 	}
 
-	// Persistent backup with chain, same convention as EditFile.
-	var backupID string
-	if e.backupManager != nil {
-		e.backupChainMu.RLock()
-		previousBackupID := e.backupChain[path]
-		e.backupChainMu.RUnlock()
-
-		backupID, err = e.backupManager.CreateBackupWithContextAndParent(path, "edit_file",
-			fmt.Sprintf("Insert %s anchor: %d lines", position, strings.Count(textN, "\n")+1), previousBackupID)
-		if err != nil {
-			return nil, fmt.Errorf("could not create backup: %w", err)
-		}
-		e.backupChainMu.Lock()
-		e.backupChain[path] = backupID
-		e.backupChainMu.Unlock()
-	}
-	result.BackupID = backupID
-
 	workingDir, _ := os.Getwd()
 	hookCtx := &HookContext{
 		Event:      HookPreEdit,
@@ -145,19 +124,12 @@ func (e *UltraFastEngine) InsertAtAnchor(ctx context.Context, path, anchor, text
 	}
 	finalContent = restoreEOL(finalContent, originalEOL)
 
-	tmpPath := path + ".tmp." + secureRandomSuffix()
-	fileMode := os.FileMode(0644)
-	if info, statErr := os.Stat(path); statErr == nil {
-		fileMode = info.Mode()
+	backupID, err := txn.Commit(ctx, []byte(finalContent), false, "edit_file",
+		fmt.Sprintf("Insert %s anchor: %d lines", position, strings.Count(textN, "\n")+1))
+	if err != nil {
+		return nil, err
 	}
-	if err := os.WriteFile(tmpPath, []byte(finalContent), fileMode); err != nil {
-		return nil, fmt.Errorf("error writing temp file: %w", err)
-	}
-	if err := renameWithRetry(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return nil, fmt.Errorf("error finalizing insert: %w", err)
-	}
-	e.invalidateMutatedPath(path)
+	result.BackupID = backupID
 
 	hookCtx.Event = HookPostEdit
 	hookCtx.NewContent = finalContent
