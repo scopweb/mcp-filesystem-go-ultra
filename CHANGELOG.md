@@ -2,6 +2,14 @@
 
 ## [Unreleased / 4.6.0] - 2026-09-03
 
+### feat(core): offset+count alternative to `end_line` — `max_lines` / `line_count`
+
+The clearer error message from the previous fix (an explicit `end_line (%d) must be >= start_line (%d) — ...` hint) didn't stop the mistake in practice: an Opencode agent kept hitting it on every call, because it wasn't reading the wrong value, it was using a different — equally legitimate — convention for "a range of lines": offset+count (`start_line` + how many lines), the same shape as Claude Code's own `Read` tool (`offset`/`limit`). Telling it to fix `end_line` doesn't help when it never meant `end_line` to be an absolute line number in the first place.
+
+`read_file` now accepts `start_line` + `max_lines` (the existing head/tail param, reused) with `end_line` omitted: `start_line:100, max_lines:50` reads lines 100-149, computed as `start_line + max_lines - 1`. `edit_file` modes `delete_range` / `replace_range` gain a new `line_count` param with the same meaning (`start_line:10, line_count:6` → lines 10-15). Neither changes the strict `start_line`/`end_line` contract — both are additive, explicit alternatives; a caller that still gets `end_line` wrong still gets the clear error from the previous fix.
+
+**Verification:** `TestReadFileHandler_StartLineMaxLinesCount` (equivalence with the matching `start_line`/`end_line` call, plus the exact reported failure shape — large `start_line`, small count — no longer errors) · `TestEditFile_DeleteRange_LineCountMatchesEndLine` · `TestEditFile_ReplaceRange_LineCountMatchesEndLine` · `TestEditFile_DeleteRange_RequiresEndLineOrLineCount` · `go build ./...` clean · `go vet ./...` clean.
+
 ### fix(git): branch delete is explicit; fetch+prune
 
 `git(action:"branch", name:"X")` used to **delete** X if the branch already existed. `force:true` looked like create-force but ran `-D`. Delete now requires `delete:true`; `force` only escalates `-d` → `-D`. Existing name without delete returns `already exists` (or switches with `checkout:true`).

@@ -85,8 +85,9 @@ var toolSchemas = map[string]ToolParamSchema{
 		"allow_rewrite":       {ParamBoolean, false}, // point 5: bypass rewrite guard only (not force)
 		"mode":                {ParamString, false},
 		"occurrence":          {ParamNumber, false},
-		"start_line":          {ParamNumber, false}, // point 4: mode delete_range
-		"end_line":            {ParamNumber, false}, // point 4: mode delete_range
+		"start_line":          {ParamNumber, false}, // point 4: mode delete_range/replace_range
+		"end_line":            {ParamNumber, false}, // point 4: mode delete_range/replace_range
+		"line_count":          {ParamNumber, false}, // alt to end_line: start_line + line_count, mode delete_range/replace_range
 		"pattern":             {ParamString, false},
 		"replacement":         {ParamString, false},
 		"patterns_json":       {ParamString, false},
