@@ -348,7 +348,7 @@ internal/mcpserver/         MCP server: config, tool registration, stdio loop
   tools_batch.go            multi_edit, batch_operations, backup
   tools_platform.go         wsl, server_info
   tools_aliases.go          Aliases + fs super-tool (disabled), help tool
-  tools_git.go              git (9 actions: init, status, diff, log, show, add, commit, restore, branch)
+   tools_git.go              git (11 actions: init, status, diff, log, show, add, commit, push, fetch, restore, branch)
   tools_minify.go           minify_js (pure-Go JS minification)
 tools_minify.go             minify_js (pure-Go JS minification)
 core/

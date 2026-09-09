@@ -18,13 +18,13 @@ func registerGitTools(reg *toolRegistry) {
 
 	gitTool := mcp.NewTool("git",
 		mcp.WithTitleAnnotation("Git Version Control"),
-		mcp.WithDescription("git — Git operations: status, diff, log, show, add, commit, push, restore, branch, init. "+
+		mcp.WithDescription("git — Git operations: status, diff, log, show, add, commit, push, fetch, restore, branch, init. "+
 			"Must be run from within a git repository. Related: analyze_operation, edit_file, help."),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true), // restore, branch delete
 		mcp.WithIdempotentHintAnnotation(false), // commit, restore, branch delete are not idempotent
 
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, diff, log, show, add, commit, push, restore, branch, init")),
+		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, diff, log, show, add, commit, push, fetch, restore, branch, init")),
 		mcp.WithString("path", mcp.Description("Working directory or file path (default: auto-detect repo root). If a file path, used as implicit pathspec for diff/log/status.")),
 		mcp.WithArray("paths", mcp.WithStringItems(),
 			mcp.Description("Pathspec: native array of file/dir paths relative to repo root. Limits diff/log/status/add/restore to these paths. Equivalent to 'git <cmd> -- <paths>'.")),
@@ -34,10 +34,12 @@ func registerGitTools(reg *toolRegistry) {
 		mcp.WithString("rev", mcp.Description("Revision or range (e.g. 'HEAD~3', 'abc123..def456', 'main'). diff/log/show.")),
 		mcp.WithBoolean("staged", mcp.Description("diff: compare index vs HEAD (--cached). Default: false.")),
 		mcp.WithString("message", mcp.Description("commit: message text (required for commit)")),
-		mcp.WithString("name", mcp.Description("branch: branch name to create/delete/checkout. push: branch to push (default: current upstream).")),
-		mcp.WithString("remote", mcp.Description("push: remote name (default: 'origin')")),
-		mcp.WithBoolean("checkout", mcp.Description("branch: with name=true, also switch to new branch (git switch -c). Default: false.")),
-		mcp.WithBoolean("force", mcp.Description("branch delete: true → -D (force). push: true → --force-with-lease (never plain --force). Other actions: ignored.")),
+		mcp.WithString("name", mcp.Description("branch: branch name to create/switch/delete. push: branch to push (default: current upstream).")),
+		mcp.WithString("remote", mcp.Description("push/fetch: remote name (default: 'origin'). Named remotes only — not a URL.")),
+		mcp.WithBoolean("checkout", mcp.Description("branch: switch to name (creates with git switch -c if missing). Default: false.")),
+		mcp.WithBoolean("delete", mcp.Description("branch: true → delete name (git branch -d). Required to delete; name alone never deletes.")),
+		mcp.WithBoolean("force", mcp.Description("branch: with delete:true, true → -D (else -d). push: true → --force-with-lease (never plain --force). Other actions: ignored.")),
+		mcp.WithBoolean("prune", mcp.Description("fetch: true → --prune (drop stale remote-tracking refs). Default: false.")),
 	)
 
 	reg.addTool(gitTool, auditWrap(engine, "git", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -49,7 +51,7 @@ func registerGitTools(reg *toolRegistry) {
 		if action == "" {
 			return usageError(
 				"missing 'action' parameter",
-				`git(action:"status")  // or: diff, log, show, add, commit, push, restore, branch, init`), nil
+				`git(action:"status")  // or: diff, log, show, add, commit, push, fetch, restore, branch, init`), nil
 		}
 
 		// Normalize path
@@ -119,14 +121,16 @@ func registerGitTools(reg *toolRegistry) {
 			return gitCommit(ctx, engine, repoRoot, args)
 		case "push":
 			return gitPush(ctx, engine, repoRoot, args)
+		case "fetch":
+			return gitFetch(ctx, engine, repoRoot, args)
 		case "restore":
 			return gitRestore(ctx, engine, repoRoot, args)
 		case "branch":
 			return gitBranch(ctx, engine, repoRoot, args)
 		default:
 			return usageError(
-			fmt.Sprintf("unknown action %q", action),
-			`git(action:"status")  // valid: status, diff, log, show, add, commit, push, restore, branch, init`), nil
+				fmt.Sprintf("unknown action %q", action),
+				`git(action:"status")  // valid: status, diff, log, show, add, commit, push, fetch, restore, branch, init`), nil
 		}
 	}),
 		// Examples for help(tool:"git") — manually curated per docs/git-tool-spec.md §5
@@ -138,8 +142,10 @@ func registerGitTools(reg *toolRegistry) {
 		`git(action:"commit", message:"fix: short description")`,
 		`git(action:"push")`,
 		`git(action:"push", name:"feature/new")`,
+		`git(action:"fetch", prune:true)`,
 		`git(action:"restore", paths:["file.txt"], staged:true)`,
 		`git(action:"branch", name:"feature/new", checkout:true)`,
+		`git(action:"branch", name:"old", delete:true)`,
 	)
 }
 
@@ -839,16 +845,13 @@ func extractCommitHash(output string) string {
 	return ""
 }
 
-// gitBranch: list (default), create (+checkout switch), or delete.
+// gitBranch: list (default), create, switch, or delete.
 //
 // params:
 //   - name     branch name; absence → list mode
-//   - checkout bool; if true with name, also `git switch -c <name>` (create+switch)
-//   - force    bool; delete only — true escalates -d → -D
-//
-// Decision: `gitBranch` itself dispatches based on presence of `name` (list vs create/delete)
-// and whether the branch already exists (delete) or not (create). Pre-existing audit doc
-// gates `-d` vs `-D` on `force` (security audit 2026-07-02); preserved.
+//   - checkout bool; switch to name (git switch -c if missing)
+//   - delete   bool; required to delete — name alone never deletes
+//   - force    bool; with delete:true, escalates -d → -D
 func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	name, _ := args["name"].(string)
 	if name != "" {
@@ -856,11 +859,16 @@ func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 			return errRes, nil
 		}
 	}
-	checkout, _ := args["checkout"].(bool)
-	force, _ := args["force"].(bool)
+	checkout := getBoolArg(args, "checkout")
+	force := getBoolArg(args, "force")
+	del := getBoolArg(args, "delete")
 
-	// ---- LIST (default, no name) ----
 	if name == "" {
+		if del {
+			return usageError(
+				"branch delete requires name",
+				`git(action:"branch", name:"feature/old", delete:true)`), nil
+		}
 		output, werr := execGitCommand(repoRoot, "git", "branch", "-a")
 		if werr != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("git branch failed: %v\n%s", werr, output)), nil
@@ -879,48 +887,68 @@ func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 		return mcp.NewToolResultText(output), nil
 	}
 
-	// ---- CREATE (name does not exist yet) ----
-	// Check existence cheaply: `git show-ref --verify refs/heads/<name>` exits non-zero if missing.
-	existsOut, existsErr := execGitCommand(repoRoot, "git", "show-ref", "--verify", "--quiet", "refs/heads/"+name)
-	branchExists := existsErr == nil && strings.TrimSpace(existsOut) == ""
-
-	if !branchExists {
-		hookCtx := &core.HookContext{
-			Event:     core.HookPreCreate,
-			ToolName:  "git",
-			FilePath:  repoRoot,
-			Operation: "branch-create",
-			Metadata:  map[string]interface{}{"git_operation": "branch-create", "branch": name, "checkout": checkout},
-		}
-		if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreCreate, hookCtx); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("git branch create denied: %v", err)), nil
-		}
-
-		var cmdArgs []string
-		var label string
-		if checkout {
-			// `git switch -c <name>` — create AND switch in one go
-			cmdArgs = []string{"switch", "-c", name}
-			label = "created and switched to"
-		} else {
-			cmdArgs = []string{"branch", name}
-			label = "created branch"
-		}
-		output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
-		if werr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("git branch create failed: %v\n%s", werr, output)), nil
-		}
-
-		hookCtx.Event = core.HookPostCreate
-		engine.GetHookManager().ExecuteHooks(ctx, core.HookPostCreate, hookCtx)
-
-		if engine.IsCompactMode() {
-			return mcp.NewToolResultText(fmt.Sprintf("OK: %s %s", label, name)), nil
-		}
-		return mcp.NewToolResultText(fmt.Sprintf("%s: %s", label, name)), nil
+	if del && checkout {
+		return usageError(
+			"cannot combine delete and checkout",
+			`git(action:"branch", name:"feature/old", delete:true)`), nil
 	}
 
-	// ---- DELETE (branch already exists) ----
+	_, existsErr := execGitCommand(repoRoot, "git", "show-ref", "--verify", "--quiet", "refs/heads/"+name)
+	branchExists := existsErr == nil
+
+	if del {
+		if !branchExists {
+			return usageError(
+				fmt.Sprintf("branch %q does not exist", name),
+				`git(action:"branch")  // list branches`), nil
+		}
+		return gitBranchDelete(ctx, engine, repoRoot, name, force)
+	}
+
+	if branchExists {
+		if checkout {
+			return gitBranchSwitch(ctx, engine, repoRoot, name)
+		}
+		return usageError(
+			fmt.Sprintf("branch %q already exists", name),
+			`git(action:"branch", name:"feature/old", checkout:true)  // switch; delete:true to delete (-d); delete:true force:true for -D`), nil
+	}
+
+	hookCtx := &core.HookContext{
+		Event:     core.HookPreCreate,
+		ToolName:  "git",
+		FilePath:  repoRoot,
+		Operation: "branch-create",
+		Metadata:  map[string]interface{}{"git_operation": "branch-create", "branch": name, "checkout": checkout},
+	}
+	if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreCreate, hookCtx); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("git branch create denied: %v", err)), nil
+	}
+
+	var cmdArgs []string
+	var label string
+	if checkout {
+		cmdArgs = []string{"switch", "-c", name}
+		label = "created and switched to"
+	} else {
+		cmdArgs = []string{"branch", name}
+		label = "created branch"
+	}
+	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	if werr != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("git branch create failed: %v\n%s", werr, output)), nil
+	}
+
+	hookCtx.Event = core.HookPostCreate
+	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostCreate, hookCtx)
+
+	if engine.IsCompactMode() {
+		return mcp.NewToolResultText(fmt.Sprintf("OK: %s %s", label, name)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("%s: %s", label, name)), nil
+}
+
+func gitBranchDelete(ctx context.Context, engine *core.UltraFastEngine, repoRoot, name string, force bool) (*mcp.CallToolResult, error) {
 	hookCtx := &core.HookContext{
 		Event:     core.HookPreDelete,
 		ToolName:  "git",
@@ -948,6 +976,80 @@ func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 		return mcp.NewToolResultText(fmt.Sprintf("OK: deleted branch %s", name)), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Deleted branch: %s", name)), nil
+}
+
+func gitBranchSwitch(ctx context.Context, engine *core.UltraFastEngine, repoRoot, name string) (*mcp.CallToolResult, error) {
+	hookCtx := &core.HookContext{
+		Event:     core.HookPreWrite,
+		ToolName:  "git",
+		FilePath:  repoRoot,
+		Operation: "branch-switch",
+		Metadata:  map[string]interface{}{"git_operation": "branch-switch", "branch": name},
+	}
+	if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreWrite, hookCtx); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("git switch denied: %v", err)), nil
+	}
+	output, werr := execGitCommand(repoRoot, "git", "switch", name)
+	if werr != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("git switch failed: %v\n%s", werr, output)), nil
+	}
+	hookCtx.Event = core.HookPostWrite
+	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostWrite, hookCtx)
+	if engine.IsCompactMode() {
+		return mcp.NewToolResultText(fmt.Sprintf("OK: switched to %s", name)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("switched to: %s", name)), nil
+}
+
+// gitFetch updates remote-tracking refs. prune:true adds --prune (drops stale
+// remote-tracking branches). Named remotes only — not a URL. No merge/pull.
+func gitFetch(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	remote, _ := args["remote"].(string)
+	if remote == "" {
+		remote = "origin"
+	}
+	if errRes := rejectOptionLike("remote", remote); errRes != nil {
+		return errRes, nil
+	}
+	prune := getBoolArg(args, "prune")
+
+	hookCtx := &core.HookContext{
+		Event:     core.HookPreWrite,
+		ToolName:  "git",
+		FilePath:  repoRoot,
+		Operation: "fetch",
+		Metadata:  map[string]interface{}{"git_operation": "fetch", "remote": remote, "prune": prune},
+	}
+	if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreWrite, hookCtx); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("git fetch denied by hook: %v", err)), nil
+	}
+
+	cmdArgs := []string{"fetch"}
+	if prune {
+		cmdArgs = append(cmdArgs, "--prune")
+	}
+	cmdArgs = append(cmdArgs, remote)
+
+	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	if werr != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("git fetch failed: %v\n%s", werr, output)), nil
+	}
+
+	hookCtx.Event = core.HookPostWrite
+	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostWrite, hookCtx)
+
+	label := remote
+	if prune {
+		label += " (prune)"
+	}
+	if engine.IsCompactMode() {
+		return mcp.NewToolResultText(fmt.Sprintf("OK: fetched %s", label)), nil
+	}
+	out := strings.TrimSpace(output)
+	if out == "" {
+		return mcp.NewToolResultText(fmt.Sprintf("Fetched %s", label)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Fetched %s\n%s", label, out)), nil
 }
 
 // gitPush pushes commits to a remote.
@@ -1054,10 +1156,8 @@ func isDestructiveGitAction(action string, args map[string]any) bool {
 		}
 		return true
 	case "branch":
-		// branch delete is NOT gated here: `git branch -d` is safe by design
-		// (git refuses to delete an unmerged branch). Escalation to the unsafe
-		// `-D` is controlled by force inside gitBranch. Gating -d behind force
-		// would be backwards — it would force every delete into the -D path.
+		// Delete is opt-in via delete:true. `git branch -d` is safe by design
+		// (git refuses unmerged). Escalation to `-D` is force inside gitBranch.
 		return false
 	case "commit":
 		return false

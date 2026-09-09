@@ -180,8 +180,8 @@ apply_patch
 ## Version Control, JavaScript, and Discovery (3)
 
 git
-- Purpose: Safe Git status, diff, log, show, add, commit, restore, branch, and init actions
-- Key params: action, path, paths, output, rev, max_lines
+- Purpose: Safe Git status, diff, log, show, add, commit, push, fetch, restore, branch, and init actions
+- Key params: action, path, paths, output, rev, max_lines, delete, prune, remote
 
 minify_js
 - Purpose: Pure-Go JavaScript minification without Node

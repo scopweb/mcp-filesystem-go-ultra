@@ -672,6 +672,7 @@ func TestGitBranch_DeleteForce(t *testing.T) {
 	res, err := gitBranch(context.Background(), engine, dir, map[string]interface{}{
 		"action": "branch",
 		"name":   "ephemeral",
+		"delete": true,
 		"force":  true,
 	})
 	if err != nil {
@@ -680,6 +681,127 @@ func TestGitBranch_DeleteForce(t *testing.T) {
 	text := mcpText(t, res)
 	if !strings.Contains(text, "Deleted") && !strings.Contains(text, "OK") {
 		t.Errorf("expected delete confirmation; got: %s", text)
+	}
+}
+
+func TestGitBranch_CheckoutExisting(t *testing.T) {
+	dir, engine := setupRepoWithFile(t)
+	defer engine.Close()
+	if _, err := gitBranch(context.Background(), engine, dir, map[string]interface{}{
+		"action": "branch",
+		"name":   "other",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	res, err := gitBranch(context.Background(), engine, dir, map[string]interface{}{
+		"action":   "branch",
+		"name":     "other",
+		"checkout": true,
+	})
+	if err != nil {
+		t.Fatalf("switch: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("expected switch, got error: %s", mcpText(t, res))
+	}
+	revCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	revCmd.Dir = dir
+	revOut, _ := revCmd.CombinedOutput()
+	if strings.TrimSpace(string(revOut)) != "other" {
+		t.Errorf("expected HEAD on other; got: %s", revOut)
+	}
+}
+
+func TestGitFetch_LocalRemoteAndPrune(t *testing.T) {
+	parent := t.TempDir()
+	bare := filepath.Join(parent, "bare.git")
+	local := filepath.Join(parent, "local")
+	if err := os.Mkdir(bare, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(local, 0755); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, bare, "init", "--bare", "-q")
+	initGitRepo(t, local)
+	writeFile(t, filepath.Join(local, "f.txt"), "v1\n")
+	commitAll(t, local, "init")
+	mustGit(t, local, "remote", "add", "origin", filepath.ToSlash(bare))
+	mustGit(t, local, "config", "fetch.prune", "false")
+	mustGit(t, local, "config", "remote.origin.prune", "false")
+	mustGit(t, local, "push", "-q", "-u", "origin", "HEAD")
+	mustGit(t, local, "branch", "stale")
+	mustGit(t, local, "push", "-q", "origin", "stale")
+
+	engine := newGitTestEngine(t, parent)
+	defer engine.Close()
+
+	res, err := gitFetch(context.Background(), engine, local, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("gitFetch: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("fetch failed: %s", mcpText(t, res))
+	}
+	if !strings.Contains(mustGit(t, local, "branch", "-r"), "origin/stale") {
+		t.Fatal("expected origin/stale after fetch")
+	}
+
+	mustGit(t, bare, "branch", "-D", "stale")
+
+	res, err = gitFetch(context.Background(), engine, local, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("fetch failed: %s", mcpText(t, res))
+	}
+	if !strings.Contains(mustGit(t, local, "branch", "-r"), "origin/stale") {
+		t.Fatal("origin/stale should remain without prune")
+	}
+
+	res, err = gitFetch(context.Background(), engine, local, map[string]interface{}{"prune": true})
+	if err != nil {
+		t.Fatalf("fetch prune: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("fetch --prune failed: %s", mcpText(t, res))
+	}
+	if strings.Contains(mustGit(t, local, "branch", "-r"), "origin/stale") {
+		t.Fatal("origin/stale should be gone after prune")
+	}
+}
+
+func TestGitFetch_Dispatched(t *testing.T) {
+	parent := t.TempDir()
+	bare := filepath.Join(parent, "bare.git")
+	local := filepath.Join(parent, "local")
+	if err := os.Mkdir(bare, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(local, 0755); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, bare, "init", "--bare", "-q")
+	initGitRepo(t, local)
+	writeFile(t, filepath.Join(local, "f.txt"), "v1\n")
+	commitAll(t, local, "init")
+	mustGit(t, local, "remote", "add", "origin", filepath.ToSlash(bare))
+	mustGit(t, local, "push", "-q", "-u", "origin", "HEAD")
+
+	engine := newGitTestEngine(t, parent)
+	defer engine.Close()
+	handler := newRegisteredGitHandler(engine)
+	res := callRegisteredGit(t, handler, map[string]interface{}{
+		"action": "fetch",
+		"path":   local,
+		"prune":  true,
+	})
+	if res.IsError {
+		t.Fatalf("dispatched fetch failed: %s", mcpText(t, res))
+	}
+	if !strings.Contains(mcpText(t, res), "fetch") && !strings.Contains(mcpText(t, res), "Fetched") && !strings.Contains(mcpText(t, res), "OK") {
+		t.Errorf("unexpected fetch response: %s", mcpText(t, res))
 	}
 }
 

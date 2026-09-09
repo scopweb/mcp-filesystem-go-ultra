@@ -2,6 +2,14 @@
 
 ## [Unreleased / 4.6.0] - 2026-09-03
 
+### fix(git): branch delete is explicit; fetch+prune
+
+`git(action:"branch", name:"X")` used to **delete** X if the branch already existed. `force:true` looked like create-force but ran `-D`. Delete now requires `delete:true`; `force` only escalates `-d` → `-D`. Existing name without delete returns `already exists` (or switches with `checkout:true`).
+
+New action `fetch` (named remotes only). `prune:true` → `git fetch --prune`. No pull/merge. `remote` is now accepted by the param validator (it was already in the MCP schema).
+
+**Verification:** `TestBranch_ForceWithoutDeleteDoesNotDelete` · `TestGitBranch_CheckoutExisting` · `TestGitFetch_LocalRemoteAndPrune` · `TestGitFetch_Dispatched`.
+
 ### breaking: fail-closed without `--allowed-paths`
 
 Starting with no allowed paths used to expose the entire disk. That is no longer the default.
