@@ -156,6 +156,77 @@ func TestBeginFileTxn_MissingVsPermission(t *testing.T) {
 	}
 }
 
+func assertLockFree(t *testing.T, engine *UltraFastEngine, path string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, txn, err := engine.BeginFileTxn(ctx, path, true)
+	if err != nil {
+		t.Fatalf("lock not released: %v", err)
+	}
+	txn.Release()
+}
+
+func TestFileTxn_ErrorPathsReleaseLock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	body := "hello\n"
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	engine := newTestEngine(dir)
+	defer engine.Close()
+
+	t.Run("occ", func(t *testing.T) {
+		ctx := WithExpectedHash(context.Background(), "deadbeef")
+		_, txn, err := engine.BeginFileTxn(ctx, path, false)
+		if err == nil {
+			txn.Release()
+			t.Fatal("expected OCC mismatch")
+		}
+		if _, ok := err.(*OCCMismatchError); !ok {
+			t.Fatalf("want OCCMismatchError, got %T %v", err, err)
+		}
+		assertLockFree(t, engine, path)
+	})
+
+	t.Run("missing", func(t *testing.T) {
+		missing := filepath.Join(dir, "gone.txt")
+		_, txn, err := engine.BeginFileTxn(context.Background(), missing, false)
+		if err == nil {
+			txn.Release()
+			t.Fatal("expected missing")
+		}
+		assertLockFree(t, engine, missing)
+	})
+
+	t.Run("edit_no_match", func(t *testing.T) {
+		_, err := engine.EditFile(context.Background(), path, "NOPE", "x", false, false, false)
+		if err == nil {
+			t.Fatal("expected edit miss")
+		}
+		assertLockFree(t, engine, path)
+	})
+
+	t.Run("commit_write_fail", func(t *testing.T) {
+		ctx, txn, err := engine.BeginFileTxn(context.Background(), path, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Remove(path)
+		if err := os.Mkdir(path, 0755); err != nil {
+			txn.Release()
+			t.Fatal(err)
+		}
+		_, err = txn.Commit(ctx, []byte("new\n"), false, "test", "")
+		txn.Release()
+		if err == nil {
+			t.Fatal("expected commit write fail")
+		}
+		assertLockFree(t, engine, filepath.Join(dir, "other.txt"))
+	})
+}
+
 func TestNestedTxn_NoDeadlock(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "n.txt")

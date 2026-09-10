@@ -6,3 +6,4 @@ import "os"
 
 func tryLockFile(f *os.File) error { return nil }
 func unlockFile(f *os.File) error  { return nil }
+func isLockBusy(err error) bool    { return false }

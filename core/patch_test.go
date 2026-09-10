@@ -36,6 +36,16 @@ func TestApplyUnifiedPatch_CRLFPreserved(t *testing.T) {
 	}
 }
 
+func TestApplyUnifiedPatch_SmokeWrongContext(t *testing.T) {
+	old := "real line\n"
+	patch := "--- a/patch.txt\n+++ b/patch.txt\n@@ -1,1 +1,1 @@\n-WRONG CONTEXT\n+patched line\n"
+	if _, err := ApplyUnifiedPatch(old, patch); err == nil {
+		t.Fatal("expected mismatch")
+	} else if !strings.Contains(err.Error(), "mismatch") {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestApplyUnifiedPatch_ContextMismatch(t *testing.T) {
 	old := "alpha\nbeta\n"
 	patch := `--- a/f.txt

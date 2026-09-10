@@ -206,6 +206,11 @@ func acquireIPCLock(ctx context.Context, canon string) (func(), error) {
 				_ = unlockFile(f)
 				_ = f.Close()
 			}, nil
+		} else if !isLockBusy(err) {
+			// Permanent error (bad handle, ACL, …): fail-open like OpenFile,
+			// never spin. A busy lock is the only case that retries.
+			_ = f.Close()
+			return func() {}, nil
 		}
 		select {
 		case <-ctx.Done():

@@ -60,6 +60,26 @@ func TestEditFile_DryRun_PreservesBytesAllModes(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("one_line_trailing_nl", func(t *testing.T) {
+		one := filepath.Join(dir, "one.txt")
+		if err := os.WriteFile(one, []byte("v1\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		res := callEdit(t, reg, map[string]interface{}{
+			"path": one, "old_text": "v1", "new_text": "v2", "dry_run": true,
+		})
+		if res.IsError {
+			t.Fatalf("dry_run errored: %s", resultText(t, res))
+		}
+		text := resultText(t, res)
+		if !strings.Contains(text, "(1 lines") {
+			t.Fatalf("risk note must say 1 lines for \"v1\\n\", got:\n%s", text)
+		}
+		if strings.Contains(text, "(2 lines") {
+			t.Fatalf("trailing newline must not count as a line, got:\n%s", text)
+		}
+	})
 }
 
 func TestEditFile_DryRun_PredictedMatchesApply(t *testing.T) {

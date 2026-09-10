@@ -3,6 +3,7 @@
 package core
 
 import (
+	"errors"
 	"os"
 
 	"golang.org/x/sys/windows"
@@ -18,4 +19,8 @@ func tryLockFile(f *os.File) error {
 func unlockFile(f *os.File) error {
 	var ol windows.Overlapped
 	return windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, &ol)
+}
+
+func isLockBusy(err error) bool {
+	return errors.Is(err, windows.ERROR_LOCK_VIOLATION) || errors.Is(err, windows.ERROR_IO_PENDING)
 }
