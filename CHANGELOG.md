@@ -10,6 +10,14 @@ Mutations share one pipeline: resolve/authorize → per-path lock (in-process + 
 
 **Verification:** `TestConcurrentEdit_OCCConflict` · `TestPathLock_IndependentParallel` · `TestPathLock_Cancel` · `TestReadSnapshot_HashMatchesBytes` · `TestBeginFileTxn_MissingVsPermission` · `TestNestedTxn_NoDeadlock`.
 
+### fix(e2): apply_patch mismatch returns; lock released; CountLines in risk note
+
+`apply_patch` with a hunk whose context does not match must error (not hang, not treat as new file). IPC path locks no longer spin forever on a permanent `tryLockFile` error (fail-open, same as OpenFile). Error paths (OCC, missing file, hunk mismatch, commit write fail) release the path lock so a later `edit_file` on the same path proceeds. Cross-process lock contention is covered by `TestE2E_LockContention_TwoProcesses`.
+
+`edit_file` risk note line count uses `CountLines` (trailing newline is not a phantom line): `"v1\n"` → `1 lines`.
+
+**Verification:** `TestApplyPatch_ContextMismatch_ReleasesLock` · `TestApplyPatch_MissingFile_NotNewFile` · `TestApplyPatch_NewFileFromDevNull` · `TestApplyUnifiedPatch_SmokeWrongContext` · `TestFileTxn_ErrorPathsReleaseLock` · `TestEditFile_DryRun_PreservesBytesAllModes/one_line_trailing_nl` · `TestE2E_LockContention_TwoProcesses`.
+
 ### fix(reliability): E1 — dry_run, OCC, readonly and search guarantees
 
 Agent-facing tools now honor the guarantees they advertise:

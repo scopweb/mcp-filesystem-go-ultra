@@ -42,7 +42,7 @@ func CalculateChangeImpact(content, oldText, newText string, thresholds RiskThre
 	newText = normalizeLineEndings(newText)
 
 	return calculateChangeImpactFromStats(
-		strings.Count(content, "\n")+1, len(content), strings.Count(content, oldText),
+		CountLines(content), len(content), strings.Count(content, oldText),
 		oldText, newText, thresholds)
 }
 

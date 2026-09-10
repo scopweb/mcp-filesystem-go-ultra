@@ -284,3 +284,61 @@ func TestE2E_MultiAgent_CTemp(t *testing.T) {
 		t.Fatalf("writer did not see peer edit: %s", seen)
 	}
 }
+
+func TestE2E_LockContention_TwoProcesses(t *testing.T) {
+	exe := buildServer(t)
+	workDir := t.TempDir()
+	shared := filepath.Join(workDir, "contend.txt")
+	if err := os.WriteFile(shared, []byte("LOCKTEST\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a := startClient(t, exe, workDir)
+	b := startClient(t, exe, workDir)
+
+	type outcome struct {
+		name  string
+		isErr bool
+		hang  bool
+		err   error
+	}
+	ch := make(chan outcome, 2)
+	run := func(name string, c *client.Client, neu string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		req := mcp.CallToolRequest{}
+		req.Params.Name = "edit_file"
+		req.Params.Arguments = map[string]any{
+			"path": shared, "old_text": "LOCKTEST", "new_text": neu,
+		}
+		res, err := c.CallTool(ctx, req)
+		if err != nil {
+			ch <- outcome{name: name, hang: ctx.Err() != nil, err: err}
+			return
+		}
+		ch <- outcome{name: name, isErr: res.IsError}
+	}
+	go run("a", a, "FROM_A")
+	go run("b", b, "FROM_B")
+
+	var got [2]outcome
+	for i := 0; i < 2; i++ {
+		got[i] = <-ch
+		if got[i].hang || got[i].err != nil {
+			t.Errorf("%s hung or transport error: hang=%v err=%v", got[i].name, got[i].hang, got[i].err)
+		}
+	}
+	raw, _ := os.ReadFile(shared)
+	s := string(raw)
+	if s != "FROM_A\n" && s != "FROM_B\n" {
+		t.Fatalf("corrupt or mixed write: %q", s)
+	}
+	ok := 0
+	for _, o := range got {
+		if !o.isErr && o.err == nil && !o.hang {
+			ok++
+		}
+	}
+	if ok != 1 {
+		t.Fatalf("want exactly one winner (cross-process lock), got %d successes; file=%q", ok, s)
+	}
+}

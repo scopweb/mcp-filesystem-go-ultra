@@ -3,6 +3,7 @@
 package core
 
 import (
+	"errors"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -14,4 +15,8 @@ func tryLockFile(f *os.File) error {
 
 func unlockFile(f *os.File) error {
 	return unix.Flock(int(f.Fd()), unix.LOCK_UN)
+}
+
+func isLockBusy(err error) bool {
+	return errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN)
 }
