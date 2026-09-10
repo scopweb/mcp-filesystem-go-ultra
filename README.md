@@ -86,6 +86,7 @@ Add to your `claude_desktop_config.json`:
         "--parallel-ops", "8",
         "--log-level", "error",
         "--log-dir", "C:\\logs\\mcp-filesystem",
+        "--roots-mode", "union",
         "C:\\your\\project\\"
       ]
     }
@@ -106,6 +107,7 @@ Linux:
         "--parallel-ops", "8",
         "--log-level", "error",
         "--log-dir", "/home/user/.local/share/mcp-filesystem/logs",
+        "--roots-mode", "union",
         "/home/user/projects/"
       ]
     }
@@ -134,6 +136,7 @@ Windows (`opencode.json`):
         "--parallel-ops", "8",
         "--log-level", "error",
         "--log-dir", "C:\\logs\\mcp-filesystem",
+        "--roots-mode", "union",
         "C:\\your\\project\\"
       ],
       "enabled": true,
@@ -158,6 +161,7 @@ Linux:
         "--parallel-ops", "8",
         "--log-level", "error",
         "--log-dir", "/home/user/.local/share/mcp-filesystem/logs",
+        "--roots-mode", "union",
         "/home/user/projects/"
       ],
       "enabled": true,
@@ -167,9 +171,17 @@ Linux:
 }
 ```
 
-Quit and restart OpenCode after saving. Optional: `--roots-mode=ignore` if the client has no MCP Roots.
+Quit and restart OpenCode after saving.
 
-The positional arguments after the flags are the allowed base paths. **Required** since v4.6.0 (fail-closed). Omitting them exits 2. Labs only: `--insecure-open` disables the sandbox (entire disk).
+**`--roots-mode` for OpenCode.** Default is `replace`: OpenCode sends the current workspace as MCP Roots and **replaces** the entire CLI allowlist with that one folder. A config with many paths will look correct on disk, but `list_allowed_directories` will only show the workspace.
+
+| Mode | Effect |
+|------|--------|
+| `replace` (default) | Client Roots replace the CLI list. OpenCode → only the workspace. |
+| `union` | CLI paths **plus** the workspace. Use this when the allowlist must survive. |
+| `ignore` | CLI list only; client Roots are ignored. |
+
+Allowed paths: positional args after the flags, **or** one `--allowed-paths` with comma-separated values. Do **not** repeat `--allowed-paths=` (Go `flag.String` keeps the last value only; that pattern is for filesystem-ultra-rust / clap). **Required** since v4.6.0 (fail-closed). Omitting them exits 2. Labs only: `--insecure-open` disables the sandbox (entire disk).
 
 ### Key flags
 
