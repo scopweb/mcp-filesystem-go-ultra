@@ -34,6 +34,8 @@ import (
 // violation — graduate them (sweep coverage + optional outputSchema) and
 // remove the entry.
 var experimentalFeatures = map[string]string{
+	"batch_operations:e3-v1":   "4.6.0",
+	"pipeline:e3-v1":           "4.6.0",
 	"list_allowed_directories": "4.6.0",
 	"directory_tree":           "4.6.0",
 	"diff_files":               "4.6.0",

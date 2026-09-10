@@ -116,6 +116,13 @@ func (t *FileTxn) Commit(ctx context.Context, newBytes []byte, dryRun bool, back
 		return "", err
 	}
 	path := t.snap.Path
+	current, readErr := recoverySnapshot(path)
+	if readErr != nil {
+		return "", readErr
+	}
+	if current.Exists != t.snap.Exists || (current.Exists && current.Hash != t.snap.Hash) {
+		return "", fmt.Errorf("write conflict: %s changed since snapshot", path)
+	}
 	if t.snap.Exists && !t.skipBackup && t.engine.backupManager != nil {
 		t.engine.backupChainMu.RLock()
 		prev := t.engine.backupChain[path]
@@ -135,6 +142,10 @@ func (t *FileTxn) Commit(ctx context.Context, newBytes []byte, dryRun bool, back
 	if err := atomicWriteFile(path, newBytes, mode); err != nil {
 		return backupID, fmt.Errorf("error writing file: %w", err)
 	}
+	after := FileSnapshot{Path: path, Canon: t.snap.Canon, Exists: true, Hash: contentHashFNV(string(newBytes)), Mode: mode}
+	journalFrom(ctx).record(t.snap, after)
+	t.snap = after
+	t.snap.Bytes = append([]byte(nil), newBytes...)
 	t.engine.invalidateMutatedPath(path)
 	t.engine.RecordWriteHash(path, contentHashFNV(string(newBytes)))
 	return backupID, nil

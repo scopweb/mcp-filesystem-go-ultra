@@ -27,6 +27,11 @@ func (e *UltraFastEngine) RenameFile(ctx context.Context, oldPath, newPath strin
 
 	start := time.Now()
 	defer e.releaseOperation("rename", start)
+	ctx, finish, lockErr := e.beginRecoverableAction(ctx, []string{oldPath, newPath})
+	if lockErr != nil {
+		return lockErr
+	}
+	defer finish()
 
 	// Check if both paths are allowed (security + access control)
 	if !e.IsPathAllowed(oldPath) {
@@ -100,6 +105,11 @@ func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) (*Sof
 
 	start := time.Now()
 	defer e.releaseOperation("softdelete", start)
+	ctx, finish, lockErr := e.beginRecoverableAction(ctx, []string{path})
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	defer finish()
 
 	// Check if path is allowed (security + access control)
 	if !e.IsPathAllowed(path) {
@@ -504,6 +514,11 @@ func (e *UltraFastEngine) CopyFile(ctx context.Context, sourcePath, destPath str
 
 	start := time.Now()
 	defer e.releaseOperation("copy", start)
+	ctx, finish, lockErr := e.beginRecoverableAction(ctx, []string{sourcePath, destPath})
+	if lockErr != nil {
+		return lockErr
+	}
+	defer finish()
 
 	// Check if both paths are allowed (security + access control)
 	if !e.IsPathAllowed(sourcePath) {

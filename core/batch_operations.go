@@ -65,11 +65,13 @@ func (op *FileOperation) UnmarshalJSON(data []byte) error {
 
 // BatchRequest representa una solicitud de operaciones en batch
 type BatchRequest struct {
-	Operations   []FileOperation `json:"operations"`
-	Atomic       bool            `json:"atomic"`        // Si es true, se hace rollback en caso de error
-	CreateBackup bool            `json:"create_backup"` // Crear backup antes de ejecutar
-	ValidateOnly bool            `json:"validate_only"` // Solo validar, no ejecutar
-	Force        bool            `json:"force"`         // Bypass risk validation warnings
+	OperationID   string          `json:"operation_id,omitempty"`
+	RetryContract string          `json:"retry_contract,omitempty"`
+	Operations    []FileOperation `json:"operations"`
+	Atomic        bool            `json:"atomic"`        // Si es true, se hace rollback en caso de error
+	CreateBackup  bool            `json:"create_backup"` // Crear backup antes de ejecutar
+	ValidateOnly  bool            `json:"validate_only"` // Solo validar, no ejecutar
+	Force         bool            `json:"force"`         // Bypass risk validation warnings
 }
 
 // BatchResult representa el resultado de ejecutar un batch
@@ -81,6 +83,8 @@ type BatchResult struct {
 	Results        []OperationResult `json:"results"`
 	BackupPath     string            `json:"backup_path,omitempty"`
 	BackupID       string            `json:"backup_id,omitempty"` // New: ID from BackupManager
+	RollbackStatus string            `json:"rollback_status,omitempty"`
+	RollbackErrors []string          `json:"rollback_errors,omitempty"`
 	RollbackDone   bool              `json:"rollback_done"`
 	ExecutionTime  string            `json:"execution_time"`
 	ValidationOnly bool              `json:"validation_only"`
@@ -171,107 +175,7 @@ func (m *BatchOperationManager) executeHooksForOperation(ctx context.Context, ev
 
 // ExecuteBatch ejecuta un batch de operaciones
 func (m *BatchOperationManager) ExecuteBatch(request BatchRequest) BatchResult {
-	startTime := time.Now()
-
-	result := BatchResult{
-		TotalOps:       len(request.Operations),
-		Results:        make([]OperationResult, 0, len(request.Operations)),
-		ValidationOnly: request.ValidateOnly,
-	}
-
-	// Paso 1: Validar todas las operaciones
-	validationErrors := m.validateOperations(request.Operations)
-	if len(validationErrors) > 0 {
-		result.Success = false
-		result.Errors = validationErrors
-		result.ExecutionTime = time.Since(startTime).String()
-		return result
-	}
-
-	// Si solo es validación, retornar aquí
-	if request.ValidateOnly {
-		result.Success = true
-		result.ExecutionTime = time.Since(startTime).String()
-		for i, op := range request.Operations {
-			result.Results = append(result.Results, OperationResult{
-				Index:   i,
-				Type:    op.Type,
-				Path:    op.Path,
-				Success: true,
-			})
-		}
-		return result
-	}
-
-	// Paso 2: Crear backup si se solicita
-	if request.CreateBackup {
-		backupPath, err := m.createBackup(request.Operations)
-		if err != nil {
-			result.Success = false
-			result.Errors = []string{fmt.Sprintf("Failed to create backup: %v", err)}
-			result.ExecutionTime = time.Since(startTime).String()
-			return result
-		}
-		result.BackupPath = backupPath
-		m.currentBackup = backupPath
-	}
-
-	// Paso 3: Ejecutar operaciones
-	rollbackInfo := make([]rollbackData, 0, len(request.Operations))
-
-	for i, op := range request.Operations {
-		opResult := OperationResult{
-			Index: i,
-			Type:  op.Type,
-			Path:  op.Path,
-		}
-
-		// Guardar información para rollback
-		var rbData rollbackData
-		if request.Atomic {
-			rbData = m.prepareRollback(op)
-		}
-
-		// Ejecutar operación
-		err := m.executeOperation(op, &opResult)
-
-		if err != nil {
-			opResult.Success = false
-			opResult.Error = err.Error()
-			result.FailedOps++
-
-			// Si es atómico y falla, hacer rollback
-			if request.Atomic {
-				result.RollbackDone = true
-				m.rollback(rollbackInfo)
-				result.Success = false
-				result.Errors = []string{fmt.Sprintf("Operation %d failed, rollback completed: %v", i, err)}
-				result.Results = append(result.Results, opResult)
-				result.ExecutionTime = time.Since(startTime).String()
-				return result
-			}
-		} else {
-			opResult.Success = true
-			result.CompletedOps++
-			if request.Atomic {
-				rollbackInfo = append(rollbackInfo, rbData)
-			}
-		}
-
-		result.Results = append(result.Results, opResult)
-	}
-
-	result.Success = result.FailedOps == 0
-	result.ExecutionTime = time.Since(startTime).String()
-
-	// New point 4 fix: refresh the auto-OCC baseline for files this batch wrote,
-	// so a later edit_file isn't falsely flagged as an external change (the batch
-	// is the session's own modification).
-	if result.Success {
-		m.refreshKnownHashes(request.Operations)
-	}
-
-	return result
+	return m.ExecuteBatchContext(context.Background(), request)
 }
 
 // refreshKnownHashes updates the auto-OCC baseline for files modified by a batch.
@@ -556,7 +460,7 @@ func (m *BatchOperationManager) createBackup(operations []FileOperation) (string
 
 	// Crear directorio de backup con timestamp
 	timestamp := time.Now().Format("20060102-150405")
-	backupID := fmt.Sprintf("batch-%s", timestamp)
+	backupID := fmt.Sprintf("batch-%s-%s", timestamp, secureRandomSuffix())
 	backupPath := filepath.Join(m.getBackupDir(), backupID)
 
 	if err := os.MkdirAll(backupPath, 0755); err != nil {
@@ -623,7 +527,9 @@ func (m *BatchOperationManager) createBackup(operations []FileOperation) (string
 
 	// Registrar en el cache del backup manager si está disponible
 	if m.backupManager != nil {
+		m.backupManager.mutex.Lock()
 		m.backupManager.metadataCache[backupID] = &info
+		m.backupManager.mutex.Unlock()
 	}
 
 	// Limpiar backups antiguos
@@ -633,31 +539,33 @@ func (m *BatchOperationManager) createBackup(operations []FileOperation) (string
 }
 
 // executeOperation ejecuta una operación individual
-func (m *BatchOperationManager) executeOperation(op FileOperation, result *OperationResult) error {
+func (m *BatchOperationManager) executeOperationContext(ctx context.Context, op FileOperation, result *OperationResult) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	switch op.Type {
 	case "write":
-		return m.executeWrite(op, result)
+		return m.executeWrite(ctx, op, result)
 	case "edit":
-		return m.executeEdit(op, result)
+		return m.executeEdit(ctx, op, result)
 	case "search_and_replace":
-		return m.executeSearchAndReplace(op, result)
+		return m.executeSearchAndReplace(ctx, op, result)
 	case "move":
-		return m.executeMove(op, result)
+		return m.executeMove(ctx, op, result)
 	case "copy":
-		return m.executeCopy(op, result)
+		return m.executeCopy(ctx, op, result)
 	case "delete":
-		return m.executeDelete(op, result)
+		return m.executeDelete(ctx, op, result)
 	case "create_dir":
-		return m.executeCreateDir(op, result)
+		return m.executeCreateDir(ctx, op, result)
 	case "extract":
-		return m.executeExtract(op, result)
+		return m.executeExtract(ctx, op, result)
 	default:
 		return fmt.Errorf("unknown operation type: %s", op.Type)
 	}
 }
 
-func (m *BatchOperationManager) executeWrite(op FileOperation, result *OperationResult) error {
-	ctx := context.Background()
+func (m *BatchOperationManager) executeWrite(ctx context.Context, op FileOperation, result *OperationResult) error {
 
 	// Pre-write hook (respects user hooks even in batch mode)
 	if err := m.executeHooksForOperation(ctx, HookPreWrite, op); err != nil {
@@ -667,11 +575,7 @@ func (m *BatchOperationManager) executeWrite(op FileOperation, result *Operation
 	// Point 6a: atomic write (temp file + rename) instead of a direct
 	// os.WriteFile, so a batch interrupted mid-write never leaves a partial
 	// file. Preserve the existing file mode when overwriting.
-	fileMode := os.FileMode(0644)
-	if info, statErr := os.Stat(op.Path); statErr == nil {
-		fileMode = info.Mode()
-	}
-	if err := atomicWriteFile(op.Path, []byte(op.Content), fileMode); err != nil {
+	if err := m.commitBytes(ctx, op.Path, []byte(op.Content)); err != nil {
 		return err
 	}
 
@@ -691,8 +595,7 @@ func (m *BatchOperationManager) executeWrite(op FileOperation, result *Operation
 // source) workflow. Both writes are atomic (temp + rename); the batch's
 // prepareRollback captured both files' prior state so an enclosing atomic batch
 // can revert a partial extract.
-func (m *BatchOperationManager) executeExtract(op FileOperation, result *OperationResult) error {
-	ctx := context.Background()
+func (m *BatchOperationManager) executeExtract(ctx context.Context, op FileOperation, result *OperationResult) error {
 
 	if err := m.executeHooksForOperation(ctx, HookPreEdit, op); err != nil {
 		return fmt.Errorf("pre-extract hook denied batch extract: %w", err)
@@ -713,8 +616,10 @@ func (m *BatchOperationManager) executeExtract(op FileOperation, result *Operati
 	if op.Append {
 		if existing, rerr := os.ReadFile(op.Destination); rerr == nil {
 			destContent = append(existing, []byte(removed)...)
-		} else {
+		} else if os.IsNotExist(rerr) {
 			destContent = []byte(removed)
+		} else {
+			return rerr
 		}
 	} else {
 		destContent = []byte(removed)
@@ -722,19 +627,11 @@ func (m *BatchOperationManager) executeExtract(op FileOperation, result *Operati
 
 	// Write destination first, then update source. If the source update fails,
 	// the enclosing atomic batch rolls back both files.
-	destMode := os.FileMode(0644)
-	if info, statErr := os.Stat(op.Destination); statErr == nil {
-		destMode = info.Mode()
-	}
-	if err := atomicWriteFile(op.Destination, destContent, destMode); err != nil {
+	if err := m.commitBytes(ctx, op.Destination, destContent); err != nil {
 		return fmt.Errorf("extract: writing destination %s: %w", op.Destination, err)
 	}
 
-	srcMode := os.FileMode(0644)
-	if info, statErr := os.Stat(op.Source); statErr == nil {
-		srcMode = info.Mode()
-	}
-	if err := atomicWriteFile(op.Source, []byte(remaining), srcMode); err != nil {
+	if err := m.commitBytes(ctx, op.Source, []byte(remaining)); err != nil {
 		return fmt.Errorf("extract: updating source %s: %w", op.Source, err)
 	}
 
@@ -748,8 +645,7 @@ func (m *BatchOperationManager) executeExtract(op FileOperation, result *Operati
 	return nil
 }
 
-func (m *BatchOperationManager) executeEdit(op FileOperation, result *OperationResult) error {
-	ctx := context.Background()
+func (m *BatchOperationManager) executeEdit(ctx context.Context, op FileOperation, result *OperationResult) error {
 
 	// Pre-edit hook
 	if err := m.executeHooksForOperation(ctx, HookPreEdit, op); err != nil {
@@ -786,7 +682,7 @@ func (m *BatchOperationManager) executeEdit(op FileOperation, result *OperationR
 		finalContent = original[:idx] + preserveBoundaryNewline(original, matchEnd, op.OldText, op.NewText) + original[matchEnd:]
 	}
 
-	err = os.WriteFile(op.Path, []byte(finalContent), 0644)
+	err = m.commitBytes(ctx, op.Path, []byte(finalContent))
 	if err != nil {
 		return err
 	}
@@ -801,8 +697,7 @@ func (m *BatchOperationManager) executeEdit(op FileOperation, result *OperationR
 	return nil
 }
 
-func (m *BatchOperationManager) executeSearchAndReplace(op FileOperation, result *OperationResult) error {
-	ctx := context.Background()
+func (m *BatchOperationManager) executeSearchAndReplace(ctx context.Context, op FileOperation, result *OperationResult) error {
 
 	// Pre-write style hook for search_and_replace (treated as edit/write)
 	if err := m.executeHooksForOperation(ctx, HookPreWrite, op); err != nil {
@@ -816,9 +711,15 @@ func (m *BatchOperationManager) executeSearchAndReplace(op FileOperation, result
 	if info, statErr := os.Stat(op.Path); statErr == nil {
 		sizeBefore = info.Size()
 	}
-	replacements, err := m.engine.searchAndReplaceInFile(op.Path, op.OldText, op.NewText, true, false)
+	content, err := os.ReadFile(op.Path)
 	if err != nil {
 		return err
+	}
+	replacements := strings.Count(string(content), op.OldText)
+	if replacements > 0 {
+		if err := m.commitBytes(ctx, op.Path, []byte(strings.ReplaceAll(string(content), op.OldText, op.NewText))); err != nil {
+			return err
+		}
 	}
 	if replacements == 0 {
 		return fmt.Errorf("pattern '%s' not found in %s", op.OldText, op.Path)
@@ -835,8 +736,7 @@ func (m *BatchOperationManager) executeSearchAndReplace(op FileOperation, result
 	return nil
 }
 
-func (m *BatchOperationManager) executeMove(op FileOperation, result *OperationResult) error {
-	ctx := context.Background()
+func (m *BatchOperationManager) executeMove(ctx context.Context, op FileOperation, result *OperationResult) error {
 
 	if err := m.executeHooksForOperation(ctx, HookPreMove, op); err != nil {
 		return fmt.Errorf("pre-move hook denied batch move: %w", err)
@@ -858,8 +758,7 @@ func (m *BatchOperationManager) executeMove(op FileOperation, result *OperationR
 	return nil
 }
 
-func (m *BatchOperationManager) executeCopy(op FileOperation, result *OperationResult) error {
-	ctx := context.Background()
+func (m *BatchOperationManager) executeCopy(ctx context.Context, op FileOperation, result *OperationResult) error {
 
 	if err := m.executeHooksForOperation(ctx, HookPreCopy, op); err != nil {
 		return fmt.Errorf("pre-copy hook denied batch copy: %w", err)
@@ -881,8 +780,7 @@ func (m *BatchOperationManager) executeCopy(op FileOperation, result *OperationR
 	return nil
 }
 
-func (m *BatchOperationManager) executeDelete(op FileOperation, result *OperationResult) error {
-	ctx := context.Background()
+func (m *BatchOperationManager) executeDelete(ctx context.Context, op FileOperation, result *OperationResult) error {
 
 	// Pre-delete hook
 	if err := m.executeHooksForOperation(ctx, HookPreDelete, op); err != nil {
@@ -907,8 +805,7 @@ func (m *BatchOperationManager) executeDelete(op FileOperation, result *Operatio
 	return nil
 }
 
-func (m *BatchOperationManager) executeCreateDir(op FileOperation, result *OperationResult) error {
-	ctx := context.Background()
+func (m *BatchOperationManager) executeCreateDir(ctx context.Context, op FileOperation, result *OperationResult) error {
 
 	if err := m.executeHooksForOperation(ctx, HookPreCreate, op); err != nil {
 		return fmt.Errorf("pre-create hook denied batch create_dir: %w", err)

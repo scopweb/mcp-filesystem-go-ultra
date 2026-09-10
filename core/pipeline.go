@@ -41,8 +41,18 @@ func NewPipelineExecutor(engine *UltraFastEngine) *PipelineExecutor {
 }
 
 // Execute executes a complete pipeline
-func (pe *PipelineExecutor) Execute(ctx context.Context, request PipelineRequest) (*PipelineResult, error) {
+func (pe *PipelineExecutor) execute(ctx context.Context, request PipelineRequest) (out *PipelineResult, execErr error) {
 	startTime := time.Now()
+	journal := &mutationJournal{}
+	if !request.DryRun {
+		ctx = context.WithValue(ctx, journalKey{}, journal)
+	}
+	defer func() {
+		if out != nil && !out.Success && request.StopOnError && !request.DryRun {
+			out.RollbackStatus, out.RollbackErrors = journal.rollback(ctx, pe.engine)
+			out.RollbackPerformed = out.RollbackStatus == "complete"
+		}
+	}()
 
 	// Step 1: Validate request
 	if err := request.Validate(); err != nil {
@@ -153,25 +163,6 @@ func (pe *PipelineExecutor) Execute(ctx context.Context, request PipelineRequest
 		if err != nil || !stepResult.Success {
 			allSuccess = false
 			if request.StopOnError {
-				// Rollback if we have a backup
-				if backupID != "" && !request.DryRun {
-					if rollbackErr := pe.rollback(ctx, backupID); rollbackErr == nil {
-						return &PipelineResult{
-							Name:              request.Name,
-							Success:           false,
-							TotalSteps:        len(request.Steps),
-							CompletedSteps:    i,
-							Results:           results,
-							BackupID:          backupID,
-							FilesAffected:     pipelineCtx.GetAffectedFiles(),
-							TotalEdits:        totalEdits,
-							RollbackPerformed: true,
-							DryRun:            request.DryRun,
-							TotalDuration:     time.Since(startTime),
-						}, fmt.Errorf("pipeline failed at step %d, rolled back", i+1)
-					}
-				}
-
 				return &PipelineResult{
 					Name:           request.Name,
 					Success:        false,
@@ -198,9 +189,7 @@ func (pe *PipelineExecutor) Execute(ctx context.Context, request PipelineRequest
 
 	// Determine overall success
 	finalSuccess := allSuccess
-	if !request.StopOnError && completedSteps > 0 {
-		finalSuccess = true // At least some steps succeeded
-	}
+	// Partial success must remain an aggregate failure.
 
 	// New point 4: refresh the auto-OCC baseline for files this pipeline wrote
 	// (skip dry-run — nothing changed), so the session's own pipeline edits
@@ -234,6 +223,15 @@ func (pe *PipelineExecutor) executeStep(ctx context.Context, step PipelineStep, 
 		Success: false,
 	}
 
+	if err := ctx.Err(); err != nil {
+		result.Error = err.Error()
+		return result, err
+	}
+	if destructiveActions[step.Action] && !dryRun && pe.engine.IsReadOnly() {
+		err := fmt.Errorf("readonly: pipeline mutation denied")
+		result.Error = err.Error()
+		return result, err
+	}
 	// Evaluate condition (skip if false)
 	if step.Condition != nil {
 		shouldRun, reason := EvaluateCondition(step.Condition, pipelineCtx, pe.engine)
@@ -790,7 +788,9 @@ func (pe *PipelineExecutor) executeRegexTransform(ctx context.Context, step Pipe
 			if hookResult.ModifiedContent != "" {
 				originalContent = hookResult.ModifiedContent
 				// Write the hook-modified content so the transformer will see it
-				_ = pe.engine.WriteFileContent(ctx, normalizedPath, originalContent)
+				if err := pe.engine.WriteFileContent(ctx, normalizedPath, originalContent); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -973,13 +973,6 @@ func (pe *PipelineExecutor) executeDelete(ctx context.Context, step PipelineStep
 
 // hasDestructiveSteps checks if any steps modify/delete files
 func (pe *PipelineExecutor) hasDestructiveSteps(steps []PipelineStep) bool {
-	destructiveActions := map[string]bool{
-		"edit":            true,
-		"multi_edit":      true,
-		"regex_transform": true,
-		"delete":          true,
-		"rename":          true,
-	}
 
 	for _, step := range steps {
 		if destructiveActions[step.Action] {
@@ -1065,41 +1058,16 @@ func (pe *PipelineExecutor) assessPipelineRisk(filesAffected []string, totalEdit
 	return "LOW"
 }
 
-// rollback restores files from backup
-//
-// Note on hooks: We now attempt to fire post-edit / post-write hooks on the
-// restored files so that user hooks (formatting, logging, etc.) have a chance
-// to react to the rollback. This is best-effort.
+// rollback uses the mutation journal, never an unconditional backup restore.
 func (pe *PipelineExecutor) rollback(ctx context.Context, backupID string) error {
-	if backupID == "" {
-		return fmt.Errorf("no backup ID provided")
+	j := journalFrom(ctx)
+	if j == nil {
+		return fmt.Errorf("no recovery journal")
 	}
-
-	restoredFiles, _, err := pe.engine.backupManager.RestoreBackup(backupID, "", false)
-	if err != nil {
-		return err
+	status, failures := j.rollback(ctx, pe.engine)
+	if status != "complete" {
+		return fmt.Errorf("rollback %s: %v", status, failures)
 	}
-
-	// Best-effort: fire post-hooks for restored files so user policies can react
-	if pe.engine.hookManager != nil && pe.engine.hookManager.IsEnabled() {
-		workingDir, _ := os.Getwd()
-		for _, f := range restoredFiles {
-			hookCtx := &HookContext{
-				Event:      HookPostEdit, // treat restore as a post-edit for hook purposes
-				ToolName:   "pipeline_rollback",
-				FilePath:   f,
-				Operation:  "rollback",
-				Timestamp:  time.Now(),
-				WorkingDir: workingDir,
-				Metadata: map[string]interface{}{
-					"backup_id": backupID,
-					"via":       "pipeline_rollback",
-				},
-			}
-			_, _ = pe.engine.hookManager.ExecuteHooks(ctx, HookPostEdit, hookCtx)
-		}
-	}
-
 	return nil
 }
 
@@ -1132,6 +1100,9 @@ func (pe *PipelineExecutor) performSmartSearchInternal(ctx context.Context, path
 
 	// Walk directory
 	err := filepath.Walk(normalizedPath, func(filePath string, info os.FileInfo, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if walkErr != nil {
 			return nil // Skip errors
 		}
@@ -1213,9 +1184,7 @@ func (pe *PipelineExecutor) executeParallelPath(ctx context.Context, request Pip
 	overallRisk := pe.assessPipelineRisk(affectedFiles, totalEdits)
 
 	finalSuccess := allSuccess
-	if !request.StopOnError && completedSteps > 0 {
-		finalSuccess = true
-	}
+	// Partial success must remain an aggregate failure.
 
 	// New point 4: refresh the auto-OCC baseline for files this pipeline wrote
 	// (skip dry-run), so the session's own pipeline edits aren't later flagged
@@ -1237,12 +1206,6 @@ func (pe *PipelineExecutor) executeParallelPath(ctx context.Context, request Pip
 		DryRun:           request.DryRun,
 		Verbose:          request.Verbose,
 		TotalDuration:    time.Since(startTime),
-	}
-
-	if err != nil && request.StopOnError && backupID != "" && !request.DryRun {
-		if rollbackErr := pe.rollback(ctx, backupID); rollbackErr == nil {
-			pResult.RollbackPerformed = true
-		}
 	}
 
 	return pResult, err
@@ -1302,10 +1265,12 @@ func (pe *PipelineExecutor) ExecuteParallel(ctx context.Context, request Pipelin
 				idx := idx // capture
 				step := request.Steps[idx]
 
-				pe.engine.workerPool.Submit(func() {
+				if err := pe.engine.workerPool.Submit(func() {
 					stepResult, stepErr := pe.executeStep(ctx, step, pipelineCtx, request.DryRun, request.Force)
 					ch <- indexedResult{idx: idx, result: stepResult, err: stepErr}
-				})
+				}); err != nil {
+					ch <- indexedResult{idx: idx, result: StepResult{StepID: step.ID, Action: step.Action, Error: err.Error()}, err: err}
+				}
 			}
 
 			// Collect results

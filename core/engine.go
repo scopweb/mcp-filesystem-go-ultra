@@ -65,8 +65,9 @@ type Config struct {
 
 // UltraFastEngine implements all filesystem operations with maximum performance
 type UltraFastEngine struct {
-	config *Config
-	cache  *cache.IntelligentCache
+	operationRetries operationRetries
+	config           *Config
+	cache            *cache.IntelligentCache
 
 	// Performance monitoring
 	metrics *PerformanceMetrics
@@ -200,10 +201,10 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 	}
 
 	engine := &UltraFastEngine{
-		config:      config,
-		cache:       config.Cache,
-		metrics:     &PerformanceMetrics{},
-		semaphore:   make(chan struct{}, config.ParallelOps),
+		config:       config,
+		cache:        config.Cache,
+		metrics:      &PerformanceMetrics{},
+		semaphore:    make(chan struct{}, config.ParallelOps),
 		backupChain:  make(map[string]string),
 		pathLocks:    newPathLockManager(),
 		occBySession: make(map[string]*sessionState),

@@ -109,6 +109,9 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 	// Discover files
 	var matchedFiles []string
 	err := filepath.Walk(path, func(filePath string, info os.FileInfo, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if walkErr != nil {
 			return nil // Skip errors
 		}
@@ -258,6 +261,14 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 		result.BackupID = backupID
 	}
 
+	journal := &mutationJournal{}
+	ctx = context.WithValue(ctx, journalKey{}, journal)
+	ctx, unlock, lockErr := e.coordinateFiles(ctx, filesWithMatches)
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	defer unlock()
+
 	// Process files
 	type fileResult struct {
 		path     string
@@ -296,17 +307,14 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 			return nil
 		}
 
-		// Write back atomically without re-entering the engine semaphore held by
-		// ProjectReplace. Refresh every cache surface and the session OCC baseline
-		// before another tool can verify or edit the file.
-		fileMode := os.FileMode(0644)
-		if info, statErr := os.Stat(f); statErr == nil {
-			fileMode = info.Mode()
-		}
-		if err := atomicWriteFile(f, []byte(newContent), fileMode); err != nil {
+		txCtx, txn, err := e.BeginFileTxn(ctx, f, false)
+		if err != nil {
 			return err
 		}
-		e.invalidateMutatedPath(f)
+		defer txn.Release()
+		if _, err := txn.Commit(txCtx, []byte(newContent), false, "project_replace", ""); err != nil {
+			return err
+		}
 		RecordWriteHash(NormalizePath(f), contentHashFNV(newContent))
 
 		mu.Lock()
@@ -349,7 +357,8 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 		}
 	}
 	if firstProcessErr != nil {
-		return nil, fmt.Errorf("project replace failed: %w", firstProcessErr)
+		status, failures := journal.rollback(ctx, e)
+		return nil, fmt.Errorf("project replace failed (%s): %w %v", status, firstProcessErr, failures)
 	}
 
 	// Populate result
