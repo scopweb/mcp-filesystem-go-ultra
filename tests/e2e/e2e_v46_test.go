@@ -285,6 +285,81 @@ func TestE2E_MultiAgent_CTemp(t *testing.T) {
 	}
 }
 
+// Exercise the registered handler AND the JSON-RPC stdio response path. An
+// in-process handler test cannot detect a response lost at the transport layer.
+// FSU_E2E_SERVER_BINARY optionally selects an already-built release executable
+// for the same smoke test; CI builds the real server from source by default.
+func TestE2E_ApplyPatch_ContextMismatch(t *testing.T) {
+	exe := os.Getenv("FSU_E2E_SERVER_BINARY")
+	if exe == "" {
+		exe = buildServer(t)
+	}
+	for _, audited := range []bool{false, true} {
+		name := "default"
+		if audited {
+			name = "compact-audit"
+		}
+		t.Run(name, func(t *testing.T) {
+			workDir := t.TempDir()
+			path := filepath.Join(workDir, "patch.txt")
+			if err := os.WriteFile(path, []byte("real line\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"--backup-dir", t.TempDir()}
+			if audited {
+				args = append(args, "--compact-mode", "--log-dir", t.TempDir())
+			}
+			args = append(args, workDir)
+			c := startClient(t, exe, args...)
+
+			// Use a fresh deadline per request; timeout must fail rather than
+			// leave the suite waiting forever for an unreturned tool response.
+			invoke := func(name string, args map[string]any) *mcp.CallToolResult {
+				t.Helper()
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				req := mcp.CallToolRequest{Params: mcp.CallToolParams{Name: name, Arguments: args}}
+				start := time.Now()
+				res, err := c.CallTool(ctx, req)
+				if err != nil {
+					t.Fatalf("%s did not return a tool result within 5s: %v", name, err)
+				}
+				t.Logf("%s returned in %s: %s", name, time.Since(start), textOf(t, res))
+				return res
+			}
+			patch := "--- a/patch.txt\n+++ b/patch.txt\n@@ -1,1 +1,1 @@\n-WRONG CONTEXT\n+patched line\n"
+			res := invoke("apply_patch", map[string]any{"path": path, "patch": patch})
+			text := textOf(t, res)
+			if !res.IsError || !strings.Contains(text, "PATCH_APPLY_FAILED") || !strings.Contains(text, "mismatch") {
+				t.Fatalf("expected context mismatch tool error, got: %s", text)
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil || string(raw) != "real line\n" {
+				t.Fatalf("failed patch changed file: %q, %v", raw, err)
+			}
+			if res := invoke("server_info", map[string]any{"action": "stats"}); res.IsError {
+				t.Fatalf("stats after mismatch: %s", textOf(t, res))
+			}
+			if res := invoke("edit_file", map[string]any{"path": path, "old_text": "real line", "new_text": "edited"}); res.IsError {
+				t.Fatalf("edit after mismatch: %s", textOf(t, res))
+			}
+			raw, err = os.ReadFile(path)
+			if err != nil || string(raw) != "edited\n" {
+				t.Fatalf("edit after mismatch did not reach disk: %q, %v", raw, err)
+			}
+			// A valid patch on the same session/path must still work as well.
+			valid := strings.Replace(patch, "WRONG CONTEXT", "edited", 1)
+			if res := invoke("apply_patch", map[string]any{"path": path, "patch": valid}); res.IsError {
+				t.Fatalf("valid patch after mismatch: %s", textOf(t, res))
+			}
+			raw, err = os.ReadFile(path)
+			if err != nil || string(raw) != "patched line\n" {
+				t.Fatalf("valid patch did not reach disk: %q, %v", raw, err)
+			}
+		})
+	}
+}
+
 func TestE2E_LockContention_TwoProcesses(t *testing.T) {
 	exe := buildServer(t)
 	workDir := t.TempDir()
