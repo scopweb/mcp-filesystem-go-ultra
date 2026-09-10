@@ -2,6 +2,16 @@
 
 ## [Unreleased / 4.6.0] - 2026-09-03
 
+### feat(reliability): E3 — batches, pipelines, rollback and retries
+
+Mutating batches, pipelines, `project_replace` and batch rename use the E2 path-lock + snapshot core. `atomic` means recover-on-error for the current process, not a crash-durable transaction. Rollback is a mutation journal (`complete` / `partial` / `failed`) that refuses to overwrite a later writer. Cancellation stops pending work; recovery of already applied work is not cancelled.
+
+Opt-in retries: `operation_id` + `retry_contract:"e3-v1"` (process-local, 24h tombstones, server-lifetime prefix). Same id+args returns the stored result; same id+different args is rejected; ids from a prior process are rejected. Not advertised as durable across restart.
+
+**Limits:** atomic `create_dir` is rejected (byte snapshots cannot recover a tree). Retry receipts are in-memory only.
+
+**Verification:** `TestE3BatchRollbackRestoresOverwrittenCopy` · `TestE3JournalPreservesLaterWriter` · `TestE3PipelineFailureAndCancellation` · `TestE3PipelinePartialIsFailure` · `TestE3PipelineCopyRecovery` · `TestE3RetryConcurrentMismatchExpiryAndRestart` · `TestE3BatchRetryDoesNotAppendTwice` · `TestE3PipelineRollbackWithoutBackup` · `TestE3BatchRenameStopsAndRestores`.
+
 ### feat(reliability): E2 — file transaction, path locks, coherent snapshots
 
 Mutations share one pipeline: resolve/authorize → per-path lock (in-process + cooperating processes) → snapshot (bytes+hash) → OCC under the lock → backup of that snapshot → write → cache/OCC update → unlock. Nested ops on a path already held do not re-lock. Waits are cancelable via context.

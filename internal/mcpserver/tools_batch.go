@@ -156,20 +156,20 @@ func registerBatchTools(reg *toolRegistry) {
 				}
 				sanitized = buf.String()
 			}
-		if err := json.Unmarshal([]byte(sanitized), &edits); err != nil {
-			// LLMs frequently emit trailing commas ({"a":1,}]). Strip them and
-			// retry once before failing — proxy logs showed ~40% of invalid
-			// edits_json errors were this exact pattern.
-			recovered := false
-			if stripped := stripTrailingCommas(sanitized); stripped != sanitized {
-				if retryErr := json.Unmarshal([]byte(stripped), &edits); retryErr == nil {
-					recovered = true
+			if err := json.Unmarshal([]byte(sanitized), &edits); err != nil {
+				// LLMs frequently emit trailing commas ({"a":1,}]). Strip them and
+				// retry once before failing — proxy logs showed ~40% of invalid
+				// edits_json errors were this exact pattern.
+				recovered := false
+				if stripped := stripTrailingCommas(sanitized); stripped != sanitized {
+					if retryErr := json.Unmarshal([]byte(stripped), &edits); retryErr == nil {
+						recovered = true
+					}
+				}
+				if !recovered {
+					return mcp.NewToolResultError(fmt.Sprintf("Invalid edits JSON: %v", err)), nil
 				}
 			}
-			if !recovered {
-				return mcp.NewToolResultError(fmt.Sprintf("Invalid edits JSON: %v", err)), nil
-			}
-		}
 		} else if args != nil {
 			// Defense-in-depth: normalizer should convert raw arrays to JSON string,
 			// but keep fallback for edge cases
@@ -471,8 +471,8 @@ func registerBatchTools(reg *toolRegistry) {
 			"Use batch_operations for ALL batch/atomic operations on the host disk — never use the runtime's built-in tools for host paths. "+
 			"Supports pipelines, rename, dry_run, rollback on error. Params: request_json, pipeline_json, or rename_json. "+
 			"Related: edit_file (single edit), multi_edit (multi-edit one file), search_files, backup."),
-		mcp.WithString("request_json", mcp.Description("JSON with operations array and options. Fields: operations (array), atomic (bool), create_backup (bool), validate_only (bool). Operation types: write, edit, search_and_replace, copy, move, delete, create_dir, extract. extract fields: source, destination, start_line, end_line, append (bool).")),
-		mcp.WithString("pipeline_json", mcp.Description("JSON-encoded pipeline definition with name, steps, and optional flags (dry_run, force, stop_on_error, create_backup, verbose, parallel)")),
+		mcp.WithString("request_json", mcp.Description("JSON with operations array and options. Fields: operations (array), atomic (bool; recover on error, not crash-durable), create_backup (bool), validate_only (bool), operation_id + retry_contract:\"e3-v1\" (opt-in, process-local 24h receipts; prefix from the current server lifetime). Operation types: write, edit, search_and_replace, copy, move, delete, create_dir, extract. extract fields: source, destination, start_line, end_line, append (bool). atomic create_dir is rejected.")),
+		mcp.WithString("pipeline_json", mcp.Description("JSON-encoded pipeline definition with name, steps, and optional flags (dry_run, force, stop_on_error, create_backup, verbose, parallel, operation_id, retry_contract:\"e3-v1\"). Rollback is journal-based (complete/partial/failed); it does not blindly restore backups over later writers.")),
 		mcp.WithString("rename_json", mcp.Description("JSON with batch rename parameters. Fields: path, mode, find, replace, prefix, suffix, pattern, extension, start_number, padding, recursive, file_pattern, preview, case_sensitive")),
 	)
 	reg.addTool(batchOpsTool, auditWrap(engine, "batch_operations", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -550,7 +550,7 @@ func registerBatchTools(reg *toolRegistry) {
 		batchManager := core.NewBatchOperationManager("", 10)
 		batchManager.SetBackupManager(engine.GetBackupManager())
 		batchManager.SetEngine(engine)
-		result := batchManager.ExecuteBatch(batchReq)
+		result := batchManager.ExecuteBatchContext(ctx, batchReq)
 
 		resultText := formatBatchResult(result)
 

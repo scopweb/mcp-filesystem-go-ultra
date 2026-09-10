@@ -11,15 +11,17 @@ import (
 
 // PipelineRequest represents a multi-step file transformation pipeline
 type PipelineRequest struct {
-	Name         string         `json:"name"`               // Required: pipeline name
-	StopOnError  bool           `json:"stop_on_error"`      // Default: true - stop on first error
-	DryRun       bool           `json:"dry_run"`            // Default: false - preview changes without applying
-	CreateBackup bool           `json:"create_backup"`      // Default: true if destructive steps present
-	Force        bool           `json:"force"`              // Bypass risk warnings
-	Verbose      bool           `json:"verbose"`            // Return intermediate data (contents, per-file counts)
-	Parallel     bool           `json:"parallel,omitempty"` // Enable parallel execution via DAG scheduling
-	Steps        []PipelineStep `json:"steps"`              // Pipeline steps to execute
-	validated    bool           // Internal: validation cache
+	OperationID   string         `json:"operation_id,omitempty"`
+	RetryContract string         `json:"retry_contract,omitempty"`
+	Name          string         `json:"name"`               // Required: pipeline name
+	StopOnError   bool           `json:"stop_on_error"`      // Default: true - stop on first error
+	DryRun        bool           `json:"dry_run"`            // Default: false - preview changes without applying
+	CreateBackup  bool           `json:"create_backup"`      // Default: true if destructive steps present
+	Force         bool           `json:"force"`              // Bypass risk warnings
+	Verbose       bool           `json:"verbose"`            // Return intermediate data (contents, per-file counts)
+	Parallel      bool           `json:"parallel,omitempty"` // Enable parallel execution via DAG scheduling
+	Steps         []PipelineStep `json:"steps"`              // Pipeline steps to execute
+	validated     bool           // Internal: validation cache
 }
 
 // PipelineStep represents a single operation in the pipeline.
@@ -93,6 +95,8 @@ type PipelineResult struct {
 	OverallRiskLevel  string        `json:"overall_risk_level,omitempty"`
 	FilesAffected     []string      `json:"files_affected,omitempty"`
 	TotalEdits        int           `json:"total_edits,omitempty"`
+	RollbackStatus    string        `json:"rollback_status,omitempty"`
+	RollbackErrors    []string      `json:"rollback_errors,omitempty"`
 	RollbackPerformed bool          `json:"rollback_performed,omitempty"`
 }
 

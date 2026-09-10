@@ -146,6 +146,9 @@ func formatBatchResult(result core.BatchResult) string {
 		sb.WriteString(fmt.Sprintf("  Backup created: %s\n", result.BackupPath))
 	}
 
+	if result.RollbackStatus != "" {
+		sb.WriteString(fmt.Sprintf("Rollback: %s\n%v\n", result.RollbackStatus, result.RollbackErrors))
+	}
 	if result.RollbackDone {
 		sb.WriteString("\nRollback performed - all changes reverted\n")
 	}
@@ -212,6 +215,9 @@ func formatPipelineResult(result *core.PipelineResult, compact bool) string {
 				errorInfo = " | rolled back"
 			}
 		}
+		if result.RollbackStatus != "" {
+			errorInfo += fmt.Sprintf(" | rollback:%s %v", result.RollbackStatus, result.RollbackErrors)
+		}
 		return fmt.Sprintf("%s: %d/%d steps | %d files | %d edits%s%s",
 			status, result.CompletedSteps, result.TotalSteps,
 			len(result.FilesAffected), result.TotalEdits, riskInfo, errorInfo)
@@ -240,7 +246,9 @@ func formatPipelineResult(result *core.PipelineResult, compact bool) string {
 		output.WriteString(fmt.Sprintf("Backup: %s\n", result.BackupID))
 	}
 
-	if result.RollbackPerformed {
+	if result.RollbackStatus != "" {
+		output.WriteString(fmt.Sprintf("Rollback: %s\n%v\n", result.RollbackStatus, result.RollbackErrors))
+	} else if result.RollbackPerformed {
 		output.WriteString("Rollback: performed\n")
 	}
 

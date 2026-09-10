@@ -126,6 +126,7 @@ func (s *PipelineScheduler) BuildExecutionPlan(steps []PipelineStep) ([][]int, e
 
 // destructiveActions are actions that modify files
 var destructiveActions = map[string]bool{
+	"copy":            true,
 	"edit":            true,
 	"multi_edit":      true,
 	"regex_transform": true,

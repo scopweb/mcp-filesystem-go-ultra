@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
+
 	"time"
 )
 
@@ -130,7 +130,25 @@ func (e *UltraFastEngine) BatchRenameFiles(ctx context.Context, request BatchRen
 		return nil, fmt.Errorf("cannot proceed: %d naming conflicts detected. Use preview mode to review", len(conflicts))
 	}
 
-	e.executeRenameOperations(operations, result)
+	paths := make([]string, 0, len(operations)*2)
+	for _, op := range operations {
+		if !op.Skipped {
+			paths = append(paths, op.OldPath, op.NewPath)
+		}
+	}
+	journal := &mutationJournal{}
+	ctx = context.WithValue(ctx, journalKey{}, journal)
+	ctx, unlock, err := e.coordinateFiles(ctx, paths)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	e.executeRenameOperations(ctx, operations, result)
+	if !result.Success {
+		if status, failures := journal.rollback(ctx, e); status != "complete" {
+			result.Errors = append(result.Errors, failures...)
+		}
+	}
 
 	result.ExecutionTime = time.Since(start).String()
 	return result, nil
@@ -429,49 +447,45 @@ func (e *UltraFastEngine) generateNewName(oldName string, index int, req *BatchR
 	}
 }
 
-// executeRenameOperations executes the rename operations with parallel processing
-func (e *UltraFastEngine) executeRenameOperations(operations []RenameOperation, result *BatchRenameResult) {
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-
-	// Process operations in parallel using worker pool
+// executeRenameOperations runs under the complete path set's coordination.
+func (e *UltraFastEngine) executeRenameOperations(ctx context.Context, operations []RenameOperation, result *BatchRenameResult) {
 	for i := range operations {
-		if operations[i].Skipped {
-			mu.Lock()
+		op := &operations[i]
+		if op.Skipped {
 			result.SkippedCount++
-			mu.Unlock()
 			continue
 		}
-
-		wg.Add(1)
-		op := &operations[i]
-
-		e.workerPool.Submit(func() {
-			defer wg.Done()
-
-			err := os.Rename(op.OldPath, op.NewPath)
-
-			mu.Lock()
-			defer mu.Unlock()
-
-			if err != nil {
-				op.Success = false
-				op.Error = err.Error()
-				result.ErrorCount++
-				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", op.OldName, err))
-			} else {
-				op.Success = true
-				result.RenamedCount++
-
-				// Invalidate cache for old and new paths
-				e.invalidateFileReadCache(op.OldPath)
-				e.invalidateFileReadCache(op.NewPath)
+		err := ctx.Err()
+		var finish func()
+		if err == nil {
+			ctx, finish, err = e.beginRecoverableAction(ctx, []string{op.OldPath, op.NewPath})
+		}
+		if err == nil {
+			if _, statErr := os.Lstat(op.NewPath); statErr == nil {
+				err = fmt.Errorf("destination already exists: %s", op.NewPath)
+			} else if !os.IsNotExist(statErr) {
+				err = statErr
 			}
-		})
+		}
+		if err == nil {
+			err = os.Rename(op.OldPath, op.NewPath)
+		}
+		if finish != nil {
+			finish()
+		}
+		if err != nil {
+			op.Error = err.Error()
+			result.ErrorCount++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", op.OldName, err))
+			break
+		}
+		op.Success = true
+		result.RenamedCount++
+		e.invalidateMutatedPath(op.OldPath)
+		e.invalidateMutatedPath(op.NewPath)
+		InvalidateKnownHash(op.OldPath)
+		refreshKnownHashPath(op.NewPath)
 	}
-
-	wg.Wait()
-
 	result.Success = result.ErrorCount == 0
 }
 
