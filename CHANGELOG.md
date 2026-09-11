@@ -2,6 +2,12 @@
 
 ## [Unreleased / 4.6.0] - 2026-09-03
 
+### feat(reliability): E5 — structured results, actionable errors, truncation
+
+Structured `outputSchema` for `search_files`, `list_directory`, `batch_operations` and `backup`. `read_file` now reports `path`, `status`, `truncated`, actual range and per-file batch results. Edits/writes include `status` (`applied`/`simulated`) plus dry-run `current_hash`/`predicted_hash`. Errors use a JSON envelope with `retryable` (false when a write may have been applied or the same arguments cannot succeed). Empty search is `status:empty` with `isError=false`; per-item batch failures are not hidden in a global success. Text fallbacks stay byte-identical for clients that ignore `structuredContent`.
+
+**Verification:** `TestE5_*` · `TestOutputSchema_HandlerSweep` (search/list/batch/backup) · `TestPathErrorJSON_Envelope`.
+
 ### feat(reliability): E4.1 — unified tool contract
 
 One `ToolContract` per tool (params, enums, AnyOf, examples, read/write/mixed classification). `ValidateToolParams`, `help(tool:)`, and `--readonly` mutation gating consume it. MCP `tools_*.go` remains the wire schema; tests assert registered properties ⊆ contract.

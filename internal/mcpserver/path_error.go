@@ -15,6 +15,7 @@ const (
 	errCodeSecretDenied   = "SECRET_DENIED"
 	errCodeReadOnly       = "READ_ONLY"
 	errCodePatchFailed    = "PATCH_APPLY_FAILED"
+	errCodeInvalidParams  = "INVALID_PARAMS"
 )
 
 type pathErrorBody struct {
@@ -23,6 +24,7 @@ type pathErrorBody struct {
 	Path       string            `json:"path,omitempty"`
 	Details    map[string]string `json:"details,omitempty"`
 	Suggestion string            `json:"suggestion,omitempty"`
+	Retryable  bool              `json:"retryable"`
 }
 
 type pathErrorEnvelope struct {
@@ -31,7 +33,12 @@ type pathErrorEnvelope struct {
 
 func pathErrorJSON(code, message, path string, details map[string]string, suggestion string) string {
 	env := pathErrorEnvelope{Error: pathErrorBody{
-		Code: code, Message: message, Path: path, Details: details, Suggestion: suggestion,
+		Code:       code,
+		Message:    message,
+		Path:       path,
+		Details:    details,
+		Suggestion: suggestion,
+		Retryable:  retryableForCode(code),
 	}}
 	b, err := json.Marshal(env)
 	if err != nil {

@@ -113,7 +113,7 @@ func multiEditStructured(path string, r *core.MultiEditResult) map[string]any {
 	if r.Integrity != nil {
 		m["integrity"] = r.Integrity.Verification
 	}
-	return m
+	return markApplied(m)
 }
 
 // registerBatchTools registers multi_edit, batch_operations, backup
@@ -289,7 +289,7 @@ func registerBatchTools(reg *toolRegistry) {
 					msg += "\n" + diffText
 				}
 				msg += "\nNo changes were written to disk"
-				return mcp.NewToolResultStructured(attachMessage(multiEditStructured(path, result), msg), msg), nil
+				return mcp.NewToolResultStructured(attachMessage(markSimulated(multiEditStructured(path, result), currentHash, predictedHash), msg), msg), nil
 			}
 			msg := fmt.Sprintf("DRY RUN — No changes made\nFile: %s\nWould apply: %d edits\nLines affected: %d\ncurrent_hash: %s\npredicted_hash: %s",
 				path, result.SuccessfulEdits, linesNote, currentHash, predictedHash)
@@ -299,7 +299,7 @@ func registerBatchTools(reg *toolRegistry) {
 			if diffText != "" {
 				msg += "\n" + diffText
 			}
-			return mcp.NewToolResultStructured(attachMessage(multiEditStructured(path, result), msg), msg), nil
+			return mcp.NewToolResultStructured(attachMessage(markSimulated(multiEditStructured(path, result), currentHash, predictedHash), msg), msg), nil
 		}
 
 		// Update backup chain for undo step-through
@@ -456,6 +456,7 @@ func registerBatchTools(reg *toolRegistry) {
 	// ============================================================================
 	batchOpsTool := mcp.NewTool("batch_operations",
 		mcp.WithTitleAnnotation("Batch Operations"),
+		mcp.WithRawOutputSchema(batchOperationsOutputSchema),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
@@ -528,12 +529,7 @@ func registerBatchTools(reg *toolRegistry) {
 			}
 
 			responseText := formatPipelineResult(result, engine.IsCompactMode())
-
-			if !result.Success {
-				return mcp.NewToolResultError(responseText), nil
-			}
-
-			return mcp.NewToolResultText(responseText), nil
+			return structuredOrError(result.Success, batchFromPipeline(result, responseText), responseText), nil
 		}
 
 		if hasRename {
@@ -543,10 +539,7 @@ func registerBatchTools(reg *toolRegistry) {
 			}
 
 			resultText := core.FormatBatchRenameResult(result, engine.IsCompactMode())
-			if !result.Success && !result.Preview {
-				return mcp.NewToolResultError(resultText), nil
-			}
-			return mcp.NewToolResultText(resultText), nil
+			return structuredOrError(result.Success || result.Preview, batchFromRename(result, resultText), resultText), nil
 		}
 
 		if batchReq.Operations == nil || len(batchReq.Operations) == 0 {
@@ -559,12 +552,7 @@ func registerBatchTools(reg *toolRegistry) {
 		result := batchManager.ExecuteBatchContext(ctx, batchReq)
 
 		resultText := formatBatchResult(result)
-
-		if !result.Success {
-			return mcp.NewToolResultError(resultText), nil
-		}
-
-		return mcp.NewToolResultText(resultText), nil
+		return structuredOrError(result.Success, batchFromResult(result, resultText), resultText), nil
 	}))
 
 	// ============================================================================
@@ -727,6 +715,7 @@ func registerBatchTools(reg *toolRegistry) {
 	// ============================================================================
 	backupTool := mcp.NewTool("backup",
 		mcp.WithTitleAnnotation("Backup & Restore"),
+		mcp.WithRawOutputSchema(backupOutputSchema),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
@@ -806,7 +795,7 @@ func registerBatchTools(reg *toolRegistry) {
 				output.WriteString("Use backup(action:\"info\", backup_id:\"...\") for detailed information\n")
 			}
 
-			return mcp.NewToolResultText(output.String()), nil
+			return backupResult(action, output.String(), map[string]any{"items": backupItems(backups)}), nil
 
 		case "info":
 			backupID, err := request.RequireString("backup_id")
@@ -841,7 +830,7 @@ func registerBatchTools(reg *toolRegistry) {
 
 			output.WriteString(fmt.Sprintf("\nBackup Location: %s\n", engine.GetBackupManager().GetBackupPath(backupID)))
 
-			return mcp.NewToolResultText(output.String()), nil
+			return backupResult(action, output.String(), map[string]any{"backup_id": backupID}), nil
 
 		case "compare":
 			backupID, err := request.RequireString("backup_id")
@@ -864,7 +853,7 @@ func registerBatchTools(reg *toolRegistry) {
 				return mcp.NewToolResultError(fmt.Sprintf("Comparison failed: %v", err)), nil
 			}
 
-			return mcp.NewToolResultText(diff), nil
+			return backupResult(action, diff, map[string]any{"backup_id": backupID}), nil
 
 		case "cleanup":
 			olderThanDays := 7
@@ -896,7 +885,7 @@ func registerBatchTools(reg *toolRegistry) {
 				output.WriteString(fmt.Sprintf("Freed: %s\n", core.FormatSize(freedSpace)))
 			}
 
-			return mcp.NewToolResultText(output.String()), nil
+			return backupResult(action, output.String(), nil), nil
 
 		case "restore":
 			backupID, err := request.RequireString("backup_id")
@@ -929,7 +918,8 @@ func registerBatchTools(reg *toolRegistry) {
 					return mcp.NewToolResultError(fmt.Sprintf("Failed to compare: %v", err)), nil
 				}
 
-				return mcp.NewToolResultText(fmt.Sprintf("Preview - Changes to be restored:\n\n%s", diff)), nil
+				previewText := fmt.Sprintf("Preview - Changes to be restored:\n\n%s", diff)
+				return backupResult(action, previewText, map[string]any{"backup_id": backupID}), nil
 			}
 
 			// Dry run for full restore preview
@@ -949,7 +939,7 @@ func registerBatchTools(reg *toolRegistry) {
 						file.OriginalPath, file.Size, file.Hash[:8]))
 				}
 				output.WriteString("\nRun without dry_run:true to execute restore")
-				return mcp.NewToolResultText(output.String()), nil
+				return backupResult(action, output.String(), nil), nil
 			}
 
 			// Actual restore
@@ -971,7 +961,7 @@ func registerBatchTools(reg *toolRegistry) {
 				output.WriteString(fmt.Sprintf("UNDO this restore: backup(action:\"restore\", backup_id:\"%s\")\n", preRestoreID))
 			}
 
-			return mcp.NewToolResultText(output.String()), nil
+			return backupResult(action, output.String(), nil), nil
 
 		case "undo_last":
 			// Check for dry_run / preview first
@@ -1015,7 +1005,7 @@ func registerBatchTools(reg *toolRegistry) {
 								output.WriteString("\nNo more undo available after this step\n")
 							}
 							output.WriteString("\nRun without preview/dry_run to execute undo\n")
-							return mcp.NewToolResultText(output.String()), nil
+							return backupResult(action, output.String(), nil), nil
 						}
 
 						// Update chain
@@ -1039,7 +1029,7 @@ func registerBatchTools(reg *toolRegistry) {
 						} else {
 							output.WriteString("\nNo more undo available — reached earliest backup in chain\n")
 						}
-						return mcp.NewToolResultText(output.String()), nil
+						return backupResult(action, output.String(), nil), nil
 					}
 					// Fall through to old behavior if error
 				}
@@ -1066,7 +1056,7 @@ func registerBatchTools(reg *toolRegistry) {
 					output.WriteString(fmt.Sprintf("   - %s\n", file.OriginalPath))
 				}
 				output.WriteString("\nRun without preview/dry_run to restore these files\n")
-				return mcp.NewToolResultText(output.String()), nil
+				return backupResult(action, output.String(), nil), nil
 			}
 
 			// Restore the last backup
@@ -1089,7 +1079,7 @@ func registerBatchTools(reg *toolRegistry) {
 				output.WriteString(fmt.Sprintf("REDO (re-apply): backup(action:\"restore\", backup_id:\"%s\")\n", preRestoreID))
 			}
 			output.WriteString("\nA backup of the current state was created before restoring\n")
-			return mcp.NewToolResultText(output.String()), nil
+			return backupResult(action, output.String(), nil), nil
 
 		case "undo_chain":
 			// Show the undo chain for a file
@@ -1106,7 +1096,8 @@ func registerBatchTools(reg *toolRegistry) {
 
 			currentBackupID := engine.GetCurrentBackupID(targetFile)
 			if currentBackupID == "" {
-				return mcp.NewToolResultText(fmt.Sprintf("No undo chain found for %s\nNo edits have been tracked for this file in this session.", targetFile)), nil
+				emptyChain := fmt.Sprintf("No undo chain found for %s\nNo edits have been tracked for this file in this session.", targetFile)
+				return backupResult(action, emptyChain, nil), nil
 			}
 
 			var output strings.Builder
@@ -1137,7 +1128,7 @@ func registerBatchTools(reg *toolRegistry) {
 			}
 
 			output.WriteString("\nUse backup(action:\"undo_last\", file_path:\"...\") to step backward\n")
-			return mcp.NewToolResultText(output.String()), nil
+			return backupResult(action, output.String(), nil), nil
 
 		case "list_trash":
 			// Enumerate soft-deleted files in the trash (only works when
@@ -1184,7 +1175,7 @@ func registerBatchTools(reg *toolRegistry) {
 				output.WriteString("Use backup(action:\"restore_trash\", sd_id:\"...\") to restore\n")
 				output.WriteString("Use backup(action:\"purge_trash\", older_than_days:N) to permanently delete old entries\n")
 			}
-			return mcp.NewToolResultText(output.String()), nil
+			return backupResult(action, output.String(), nil), nil
 
 		case "restore_trash":
 			// Restore a soft-deleted file by its SD-ID. Validates the SD-ID
@@ -1204,7 +1195,7 @@ func registerBatchTools(reg *toolRegistry) {
 			output.WriteString("Trash restore completed successfully\n\n")
 			output.WriteString(fmt.Sprintf("Restored from trash: %s\n", sdID))
 			output.WriteString(fmt.Sprintf("File: %s\n", restoredPath))
-			return mcp.NewToolResultText(output.String()), nil
+			return backupResult(action, output.String(), nil), nil
 
 		case "purge_trash":
 			// Permanently delete trash entries older than olderThanDays.
@@ -1235,7 +1226,7 @@ func registerBatchTools(reg *toolRegistry) {
 				output.WriteString(fmt.Sprintf("Deleted: %d trash entry/entries\n", deletedCount))
 				output.WriteString(fmt.Sprintf("Freed: %s\n", core.FormatSize(freedSpace)))
 			}
-			return mcp.NewToolResultText(output.String()), nil
+			return backupResult(action, output.String(), nil), nil
 
 		default:
 			return mcp.NewToolResultError(fmt.Sprintf("Unknown action: %s. Valid: list, info, compare, cleanup, restore, undo_last, undo_chain, list_trash, restore_trash, purge_trash", action)), nil

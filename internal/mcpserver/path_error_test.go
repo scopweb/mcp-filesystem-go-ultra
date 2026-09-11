@@ -19,6 +19,9 @@ func TestPathErrorJSON_Envelope(t *testing.T) {
 	if env.Error.Code != errCodeNotAllowed || env.Error.Path != `C:\x` {
 		t.Fatalf("%+v", env)
 	}
+	if env.Error.Retryable {
+		t.Fatal("NOT_ALLOWED must not be retryable")
+	}
 }
 
 func TestFormatToolError_AccessDeniedEnvelope(t *testing.T) {

@@ -332,6 +332,10 @@ func TestAllSchemas_PropertiesHaveDescription(t *testing.T) {
 		{"write_file", writeFileOutputSchema},
 		{"edit_file", editFileOutputSchema},
 		{"multi_edit", multiEditOutputSchema},
+		{"search_files", searchFilesOutputSchema},
+		{"list_directory", listDirectoryOutputSchema},
+		{"batch_operations", batchOperationsOutputSchema},
+		{"backup", backupOutputSchema},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
