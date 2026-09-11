@@ -35,3 +35,32 @@ func TestE41_HelpServesContractExamples(t *testing.T) {
 		t.Fatalf("help(git) missing examples:\n%s", resultText(t, git))
 	}
 }
+
+func TestE41_ArrayItemsAreObjects(t *testing.T) {
+	reg := newHelpTestRegistry(t, t.TempDir())
+	tools := reg.server.ListTools()
+	multi, ok := tools["multi_edit"]
+	if !ok {
+		t.Fatal("multi_edit missing")
+	}
+	edits, ok := multi.Tool.InputSchema.Properties["edits"].(map[string]any)
+	if !ok {
+		t.Fatalf("edits schema %T", multi.Tool.InputSchema.Properties["edits"])
+	}
+	items, _ := edits["items"].(map[string]any)
+	if items["type"] != "object" {
+		t.Fatalf("edits.items want object, got %#v", edits["items"])
+	}
+	edit, ok := tools["edit_file"]
+	if !ok {
+		t.Fatal("edit_file missing")
+	}
+	patterns, ok := edit.Tool.InputSchema.Properties["patterns"].(map[string]any)
+	if !ok {
+		t.Fatalf("patterns schema %T", edit.Tool.InputSchema.Properties["patterns"])
+	}
+	pitems, _ := patterns["items"].(map[string]any)
+	if pitems["type"] != "object" {
+		t.Fatalf("patterns.items want object, got %#v", patterns["items"])
+	}
+}

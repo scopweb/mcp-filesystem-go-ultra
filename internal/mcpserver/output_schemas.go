@@ -14,12 +14,13 @@ var readFileOutputSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
     "content": {"type": "string", "description": "File body (possibly truncated; truncation is annotated inline and via truncated)"},
-    "content_hash": {"type": "string", "description": "FNV-1a 8-hex hash of the FULL file on disk. Pass as expected_hash on a subsequent edit_file/multi_edit to detect concurrent external changes (OCC). Absent on multi-file reads."},
+    "content_hash": {"type": "string", "description": "FNV-1a 8-hex hash of the FULL file bytes from the same snapshot as content. Pass as expected_hash on a subsequent edit. On batch reads this field is omitted at the top level; each files[] entry has its own content_hash."},
     "path": {"type": "string", "description": "Canonical path actually read (single-file reads)"},
     "status": {"type": "string", "description": "ok | partial | truncated | failed"},
     "truncated": {"type": "boolean", "description": "True when the returned body is not the full file (range/head/tail/auto-cap/line-width)"},
-    "start_line": {"type": "integer", "description": "First line of a range/head/tail read (1-based)"},
-    "end_line": {"type": "integer", "description": "Last line of a range read (1-based, inclusive)"},
+    "start_line": {"type": "integer", "description": "First line of a range/head/tail read (1-based, actual)"},
+    "end_line": {"type": "integer", "description": "Last line returned (1-based, inclusive, clamped to file length)"},
+    "total_lines": {"type": "integer", "description": "Total lines in the full file"},
     "files": {"type": "array", "description": "Per-file results for batch reads (paths). Item errors are listed here; status=partial when mixed.", "items": {"type": "object"}},
     "continuation": {"type": "object", "description": "How to read the rest when truncated (start_line + hint)"}
   },

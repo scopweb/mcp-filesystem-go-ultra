@@ -73,6 +73,13 @@ func engineTextIsError(text string) bool {
 }
 
 func readStructured(path, content, hash string, truncated bool, startLine, endLine int, files []map[string]any) map[string]any {
+	return readStructuredMeta(path, content, hash, readProjection{
+		Truncated: truncated, StartLine: startLine, EndLine: endLine,
+	}, files)
+}
+
+func readStructuredMeta(path, content, hash string, proj readProjection, files []map[string]any) map[string]any {
+	truncated := proj.Truncated
 	status := statusOK
 	if truncated {
 		status = statusTruncated
@@ -101,18 +108,21 @@ func readStructured(path, content, hash string, truncated bool, startLine, endLi
 	if hash != "" {
 		m["content_hash"] = hash
 	}
-	if startLine > 0 {
-		m["start_line"] = startLine
+	if proj.StartLine > 0 {
+		m["start_line"] = proj.StartLine
 	}
-	if endLine > 0 {
-		m["end_line"] = endLine
+	if proj.EndLine > 0 {
+		m["end_line"] = proj.EndLine
+	}
+	if proj.TotalLines > 0 {
+		m["total_lines"] = proj.TotalLines
 	}
 	if len(files) > 0 {
 		m["files"] = files
 	}
-	if truncated && startLine == 0 {
+	if truncated && proj.ContinueAt > 0 {
 		m["continuation"] = map[string]any{
-			"start_line": autoTruncateLargeFileLines + 1,
+			"start_line": proj.ContinueAt,
 			"hint":       "use start_line/end_line (or mode:head/tail) to read the rest; do not re-read the whole file",
 		}
 	}
@@ -143,6 +153,25 @@ func listStructured(path, format, text string, entries []map[string]any, truncat
 		m["continuation"] = "Raise max_nodes/max_depth or narrow the path; the listing was capped."
 	}
 	return m
+}
+
+func searchStructuredFromOutcome(out core.SearchOutcome, scope map[string]any, extraTrunc bool) map[string]any {
+	matches := make([]map[string]any, 0, len(out.Matches))
+	for _, m := range out.Matches {
+		hit := map[string]any{"path": m.File}
+		if m.LineNumber > 0 {
+			hit["line"] = m.LineNumber
+		}
+		if m.Line != "" {
+			hit["text"] = m.Line
+		}
+		matches = append(matches, hit)
+	}
+	count := out.MatchCount
+	if count == 0 {
+		count = len(out.Matches)
+	}
+	return searchStructured(out.Text, scope, matches, count, out.Truncated || extraTrunc)
 }
 
 func searchStructured(text string, scope map[string]any, matches []map[string]any, matchCount int, truncated bool) map[string]any {

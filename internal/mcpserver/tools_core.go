@@ -413,7 +413,7 @@ func registerCoreTools(reg *toolRegistry) {
 			anyOK, anyFail := false, false
 			for i, p := range paths {
 				p = core.NormalizePath(p)
-				content, err := engine.ReadFileContent(ctx, p)
+				snap, err := engine.ReadFileSnapshot(ctx, p)
 				if i > 0 {
 					results.WriteString("\n")
 				}
@@ -425,14 +425,14 @@ func registerCoreTools(reg *toolRegistry) {
 					entry["error"] = err.Error()
 				} else {
 					anyOK = true
+					content := string(snap.Bytes)
 					results.WriteString(content)
 					if !strings.HasSuffix(content, "\n") {
 						results.WriteString("\n")
 					}
 					entry["content"] = content
-					if h, ok := computeFileOCCHash(p); ok {
-						entry["content_hash"] = h
-					}
+					entry["content_hash"] = snap.Hash
+					core.RecordReadHash(p, snap.Hash)
 				}
 				files = append(files, entry)
 			}
@@ -477,124 +477,56 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 		}
 
-		// Base64 mode: read binary file as base64
+		snap, err := engine.ReadFileSnapshot(ctx, path)
+		if err != nil {
+			return mcp.NewToolResultError(formatToolError(err)), nil
+		}
+		contentHash := snap.Hash
+		normPath := core.NormalizePath(path)
+		core.RecordReadHash(normPath, contentHash)
+
 		if encoding == "base64" {
-			encoded, originalSize, err := engine.ReadBase64(ctx, path)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
-			}
+			encoded := base64.StdEncoding.EncodeToString(snap.Bytes)
 			var body string
 			if engine.IsCompactMode() {
 				body = encoded
 			} else {
-				body = fmt.Sprintf("# File: %s (%d bytes)\n# Base64 encoded:\n%s", path, originalSize, encoded)
-			}
-			contentHash := ""
-			if h, ok := computeFileOCCHash(core.NormalizePath(path)); ok {
-				contentHash = h
-				core.RecordReadHash(core.NormalizePath(path), contentHash)
+				body = fmt.Sprintf("# File: %s (%d bytes)\n# Base64 encoded:\n%s", path, len(snap.Bytes), encoded)
 			}
 			return mcp.NewToolResultStructured(readStructured(resolveAbsForResponse(path), body, contentHash, false, 0, 0, nil), body), nil
 		}
 
-		// Range read mode: read specific line range
 		if startLine > 0 && endLine == 0 {
 			if maxLines > 0 {
-				// offset+count convention (start_line + max_lines, no end_line) —
-				// mirrors Claude Code's own Read tool (offset/limit). Added
-				// because agents that treat "end_line" as a count instead of an
-				// absolute line number were hitting an inverted-range error
-				// (end_line < start_line) instead of getting what they meant.
 				endLine = startLine + maxLines - 1
 			} else {
-				endLine = 999999
+				endLine = 1<<30 - 1
 			}
+			maxLines = 0
+			mode = "all"
 		}
 		if endLine > 0 && startLine == 0 {
 			startLine = 1
-		}
-		if startLine > 0 && endLine > 0 {
-			content, err := engine.ReadFileRange(ctx, path, startLine, endLine)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
-			}
-			linesRead := endLine - startLine + 1
-			core.SetLinesRead(ctx, linesRead)
-			// Approximate total lines from file size (avg 50 chars/line)
-			if info, err2 := os.Stat(path); err2 == nil && info.Size() > 0 {
-				core.SetFileLinesTotal(ctx, int(info.Size()/50)+1)
-			}
-			// Point 3: surface the whole-file OCC hash for range reads so the
-			// caller can use edit_file/multi_edit expected_hash without first
-			// pulling the entire file into context.
-			if maxLineLengthSet && maxLineLength > 0 {
-				content = truncateLineWidths(content, maxLineLength)
-			}
-			contentHash := ""
-			if h, ok := computeFileOCCHash(core.NormalizePath(path)); ok {
-				contentHash = h
-				core.RecordReadHash(core.NormalizePath(path), contentHash)
-			}
-			return mcp.NewToolResultStructured(readStructured(resolveAbsForResponse(path), content, contentHash, contentWasTruncated(content), startLine, endLine, nil), content), nil
+			maxLines = 0
+			mode = "all"
 		}
 
-		// Default: read full file
-		content, err := engine.ReadFileContent(ctx, path)
-		if err != nil {
-			return mcp.NewToolResultError(formatToolError(err)), nil
-		}
-
-		// Record read for stale-read detection in feedback system
-		core.RecordRead(core.NormalizePath(path))
-
-		// Compute FNV-1a content hash (8 hex chars). The hash is the OCC token
-		// (Improvement B3) — the model can echo it back via edit_file /
-		// multi_edit expected_hash to detect stale reads and prevent lost
-		// updates under concurrent writes.
-		//
-		// Bug B1 fix (#23): the hash is no longer appended as a `# content_hash:`
-		// line at the end of the response body. That trailer was visually
-		// indistinguishable from legitimate Markdown content (same `# comment`
-		// syntax), so consumers — human or AI — copied it as an `old_text`
-		// anchor in `edit_file` / `multi_edit`, got `no matches found`, and
-		// for `multi_edit` (atomic) the whole batch rolled back. The hash is
-		// now returned as a structured response field, so it never appears
-		// as content. Clients that understand `structuredContent` read it
-		// from there; clients that don't see only the file body.
-		//
-		// Hash is computed on the ORIGINAL content (before truncation) so
-		// it remains a valid OCC token against the file on disk regardless
-		// of how much of the body we return to the consumer.
-		h := fnv.New32a()
-		h.Write([]byte(content))
-		contentHash := fmt.Sprintf("%08x", h.Sum32())
-		core.RecordReadHash(core.NormalizePath(path), contentHash) // new point 4: track for auto-OCC
-
-		// Apply truncation if explicitly requested
-		if maxLines > 0 || mode != "all" {
-			content = truncateContent(content, maxLines, mode)
-		} else {
-			// Auto-truncate large files so the model always knows the real total
-			// even when Claude Desktop silently truncates the MCP response.
-			content = autoTruncateLargeFile(content, path)
-		}
+		core.RecordRead(normPath)
 
 		lineLimit := maxLineLength
 		if !maxLineLengthSet && (mode == "head" || mode == "tail") {
 			lineLimit = defaultHeadTailLineLength
 		}
-		if lineLimit > 0 {
-			content = truncateLineWidths(content, lineLimit)
+		proj := projectRead(string(snap.Bytes), path, startLine, endLine, maxLines, mode, lineLimit)
+		core.SetFileLinesTotal(ctx, proj.TotalLines)
+		if proj.EndLine >= proj.StartLine && proj.StartLine > 0 {
+			core.SetLinesRead(ctx, proj.EndLine-proj.StartLine+1)
+		} else {
+			core.SetLinesRead(ctx, proj.TotalLines)
 		}
-
-		// Annotate lines read for ROI analysis
-		totalLines := strings.Count(content, "\n") + 1
-		core.SetFileLinesTotal(ctx, totalLines)
-		core.SetLinesRead(ctx, totalLines)
-
 		return mcp.NewToolResultStructured(
-			readStructured(resolveAbsForResponse(path), content, contentHash, contentWasTruncated(content), 0, 0, nil),
-			content,
+			readStructuredMeta(resolveAbsForResponse(path), proj.Text, contentHash, proj, nil),
+			proj.Text,
 		), nil
 	})
 	reg.addTool(readFileTool, reg.readFileHandler,
@@ -864,7 +796,16 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("pattern", mcp.Description("Regex or literal pattern. In search_replace mode: literal pattern, all occurrences. In regex mode: regex pattern (synthesized into a single-pattern transformation if patterns_json is not provided).")),
 		mcp.WithString("replacement", mcp.Description("Replacement text. Used in search_replace mode, and in regex mode when pattern is provided without patterns_json.")),
 		// regex mode params
-		mcp.WithArray("patterns", mcp.Description("Native array of regex patterns: [{\"pattern\":\"regex\",\"replacement\":\"$1\",\"limit\":-1}]. Legacy adapter: patterns_json.")),
+		mcp.WithArray("patterns", mcp.Description("Native array of regex patterns: [{\"pattern\":\"regex\",\"replacement\":\"$1\",\"limit\":-1}]. Legacy adapter: patterns_json."),
+			mcp.Items(map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"pattern":     map[string]any{"type": "string"},
+					"replacement": map[string]any{"type": "string"},
+					"limit":       map[string]any{"type": "number"},
+				},
+				"required": []string{"pattern"},
+			})),
 		mcp.WithString("patterns_json", mcp.Description("JSON array of patterns for regex mode: [{\"pattern\": \"regex\", \"replacement\": \"$1...\", \"limit\": -1}]. Optional: if omitted in regex mode, pattern (with replacement/new_text) or native patterns is used.")),
 		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive matching (default: true, for regex mode)")),
 		mcp.WithBoolean("create_backup", mcp.Description("Create backup before transformation (default: true, for regex mode)")),
