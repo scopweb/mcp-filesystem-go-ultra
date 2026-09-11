@@ -4,7 +4,7 @@
 
 **Alcance:** MCP Filesystem Ultra v4.6.0. Seis fases, empezando por errores de comportamiento y terminando con evolución del contrato y evaluación con agentes reales.
 
-**Estado:** E1–E3 implantadas. Siguiente: **E4**.
+**Estado:** E1–E4 (incl. 4.1) implantadas. Siguiente: **E5**.
 
 ---
 

@@ -211,13 +211,13 @@ func TestPerformIntelligentEdit_TolerantMode(t *testing.T) {
 	// Without tolerant: exact match must fail (tab ≠ 4 spaces). The
 	// leading-only fallback in OPTIMIZATION 7 also fails because the
 	// tab is not line-leading.
-	_, err := engine.performIntelligentEdit(content, "call(a,    b);", "call(a,REPLACED);", false)
+	_, err := engine.performIntelligentEdit(content, "call(a,    b);", "call(a,REPLACED);", false, false)
 	if err == nil {
 		t.Errorf("expected error in non-tolerant mode (tab in middle of line), got nil")
 	}
 
 	// With tolerant: should succeed and preserve the surrounding bytes.
-	res, err := engine.performIntelligentEdit(content, "call(a,    b);", "call(a,REPLACED);", true)
+	res, err := engine.performIntelligentEdit(content, "call(a,    b);", "call(a,REPLACED);", true, false)
 	if err != nil {
 		t.Fatalf("tolerant mode failed: %v", err)
 	}

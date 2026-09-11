@@ -109,7 +109,7 @@ edit_file
 
 multi_edit
 - Purpose: Apply multiple exact replacements to one file atomically
-- Key params: path, edits_json, diff_format, dry_run, expected_hash
+- Key params: path, edits (native array) or edits_json, diff_format, dry_run, expected_hash, strict, expected_matches
 
 list_directory
 - Purpose: List directory contents

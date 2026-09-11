@@ -63,6 +63,7 @@ type EditResult struct {
 	Integrity        *FileIntegrityResult // Auto-verification result for HIGH/CRITICAL edits
 	StructureWarning string               // Non-blocking warning when an edit introduces a delimiter imbalance ({}/()/[]) — point 2
 	NewHash          string               // FNV-1a content_hash of the file AFTER this edit — lets callers chain expected_hash without re-reading (new point 1)
+	MatchMethod      string               // E4: exact | tolerant_whitespace | fallback | regex | occurrence | search_replace | range | insert
 }
 
 // SearchMatch represents a text search match
@@ -169,13 +170,19 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 		}
 	}
 
-	// Perform intelligent edit
-	result, err := e.performIntelligentEdit(string(content), oldText, newText, tolerantWhitespace)
+	policy := editPolicyFrom(ctx)
+	result, err := e.performIntelligentEdit(string(content), oldText, newText, tolerantWhitespace, policy.Strict)
 	if err != nil {
 		if contextWarning != "" {
 			return nil, fmt.Errorf("edit failed: %w (context hint: %s)", err, contextWarning)
 		}
 		return nil, fmt.Errorf("edit failed: %w", err)
+	}
+	if result.MatchMethod == "" {
+		result.MatchMethod = "fallback"
+	}
+	if err := policy.checkMatchCount(string(content), oldText, result.ReplacementCount); err != nil {
+		return nil, err
 	}
 
 	// Bug #32: dry_run returns result without writing to disk
@@ -431,7 +438,7 @@ func (e *UltraFastEngine) createBackup(path string) (string, error) {
 // Useful when files have mixed indentation (e.g., tabs and spaces from
 // different editors) and a literal byte-exact match against a pattern typed
 // with spaces would otherwise fail.
-func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText string, tolerantWhitespace bool) (*EditResult, error) {
+func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText string, tolerantWhitespace bool, strict bool) (*EditResult, error) {
 	if oldText == "" {
 		return nil, fmt.Errorf("old_text cannot be empty")
 	}
@@ -473,14 +480,16 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 					ModifiedContent:  newContent,
 					ReplacementCount: applied,
 					MatchConfidence:  "high",
+					MatchMethod:      "tolerant_whitespace",
 					LinesAffected:    linesAffected,
 					StartLine:        startLine,
 					EndLine:          endLine,
 				}, nil
 			}
 		}
-		// Tolerant matching found nothing — fall through to the rest of the
-		// fallbacks (regex, literal escapes, flexible pattern, etc.).
+		if strict {
+			return nil, formatMatchCountError(content, oldText, 0, 1)
+		}
 	}
 
 	// OPTIMIZATION 1: Fast path for exact match (most common case - ~80% of edits)
@@ -530,10 +539,15 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 			ModifiedContent:  sb.String(),
 			ReplacementCount: replacements,
 			MatchConfidence:  "high",
+			MatchMethod:      "exact",
 			LinesAffected:    linesAffected,
 			StartLine:        startLine,
 			EndLine:          endLine,
 		}, nil
+	}
+
+	if strict {
+		return nil, formatMatchCountError(content, oldText, 0, 1)
 	}
 
 	// OPTIMIZATION 2: Pre-compute normalized variants once
@@ -1297,7 +1311,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		if edit.OldText == "" {
 			continue
 		}
-		simResult, simErr := e.performIntelligentEdit(simContent, edit.OldText, edit.NewText, tolerantWhitespace)
+		simResult, simErr := e.performIntelligentEdit(simContent, edit.OldText, edit.NewText, tolerantWhitespace, editPolicyFrom(ctx).Strict)
 		if simErr == nil && simResult.ReplacementCount > 0 {
 			simContent = simResult.ModifiedContent
 		}
@@ -1379,9 +1393,13 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		// and the model has no way to know it fanned out. Refuse the edit
 		// before performIntelligentEdit is called and surface the count.
 		ambiguity := countOccurrencesTolerant(currentContent, edit.OldText, tolerantWhitespace)
-		if ambiguity > 1 {
+		wantMatches := 1
+		if em := editPolicyFrom(ctx).ExpectedMatches; em != nil {
+			wantMatches = *em
+		}
+		if ambiguity != wantMatches && (ambiguity > 1 || editPolicyFrom(ctx).Strict || editPolicyFrom(ctx).ExpectedMatches != nil) {
 			detail.Status = EditStatusAmbiguous
-			detail.Error = fmt.Sprintf("ambiguous match: old_text for edit %d matches %d times (expected 1). Quote more surrounding context, pass tolerant_whitespace:false with an occurrence:1 single edit_file, or split into separate writes", i+1, ambiguity)
+			detail.Error = formatMatchCountError(currentContent, edit.OldText, ambiguity, wantMatches).Error()
 			result.FailedEdits++
 			result.Errors = append(result.Errors, fmt.Sprintf("edit %d: %s", i+1, detail.Error))
 			if result.MatchConfidence == "high" {
@@ -1393,7 +1411,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 
 		// Apply this edit (forward tolerantWhitespace so the batch honors the
 		// flag end-to-end: validation, ambiguity count, simulation and apply)
-		editResult, editErr := e.performIntelligentEdit(currentContent, edit.OldText, edit.NewText, tolerantWhitespace)
+		editResult, editErr := e.performIntelligentEdit(currentContent, edit.OldText, edit.NewText, tolerantWhitespace, editPolicyFrom(ctx).Strict)
 		if editErr != nil || editResult.ReplacementCount == 0 {
 			// Check "already_present" / "ambiguous" (Bug #27 fix)
 			// Compare against originalContent to determine if old_text was actually in the file.

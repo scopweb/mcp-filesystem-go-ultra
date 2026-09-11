@@ -438,9 +438,8 @@ func renderToolCatalog(reg *toolRegistry) string {
 //   - help(tool:"git") → schema + description + examples for that tool
 //
 // The per-tool output is generated from the registered mcp.Tool schema and
-// the optional examples map populated by addTool(..., examples...). Currently
-// only the git tool ships with curated examples; other tools render schema
-// only (still useful for an LLM discovering them).
+// the optional examples map populated by addTool(..., examples...) or the
+// E4.1 ToolContract when addTool is called without examples.
 func registerHelpTool(reg *toolRegistry) {
 	helpTool := mcp.NewTool("help",
 		mcp.WithTitleAnnotation("Server Help"),

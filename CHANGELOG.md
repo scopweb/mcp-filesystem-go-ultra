@@ -2,6 +2,20 @@
 
 ## [Unreleased / 4.6.0] - 2026-09-03
 
+### feat(reliability): E4.1 — unified tool contract
+
+One `ToolContract` per tool (params, enums, AnyOf, examples, read/write/mixed classification). `ValidateToolParams`, `help(tool:)`, and `--readonly` mutation gating consume it. MCP `tools_*.go` remains the wire schema; tests assert registered properties ⊆ contract.
+
+**Verification:** `TestContract_CoversSchemaRegistry` · `TestContract_IsMutating` · `TestContract_Examples` · `TestE41_RegisteredSchemaSubsetOfContract` · `TestE41_HelpServesContractExamples`.
+
+### feat(reliability): E4 — native inputs, contract validation, optional strict match
+
+Native arrays/objects for `paths`, `edits`, `patterns`, `request`, `pipeline`, `rename`. Legacy `*_json` (and JSON-string `paths`) stay as adapters. Both forms together are accepted only when they decode identically; otherwise the call is rejected with the field names. Invalid enums (`mode`, `encoding`, `diff_format`, …) and incompatible combinations (`end_line`+`max_lines`, mixed batch families) error instead of being ignored.
+
+Opt-in `strict` disables implicit edit fallbacks. `expected_matches` requires an exact match count and lists candidate line numbers on mismatch. Successful edits report `match_method`.
+
+**Verification:** `TestE4_InvalidEnumRejected` · `TestE4_NativePathsAccepted` · `TestE4_EditsOrEditsJSON` · `TestE4_NativePathsEquivalentToJSON` · `TestE4_NativeEditsEquivalentToJSON` · `TestE4_ConflictingEditsRejected` · `TestE4_InvalidModeNotSilent` · `TestE4_StrictNoFallbackAndExpectedMatches` · `TestE4_NativeBatchRequest`.
+
 ### feat(reliability): E3 — batches, pipelines, rollback and retries
 
 Mutating batches, pipelines, `project_replace` and batch rename use the E2 path-lock + snapshot core. `atomic` means recover-on-error for the current process, not a crash-durable transaction. Rollback is a mutation journal (`complete` / `partial` / `failed`) that refuses to overwrite a later writer. Cancellation stops pending work; recovery of already applied work is not cancelled.
@@ -10,7 +24,7 @@ Opt-in retries: `operation_id` + `retry_contract:"e3-v1"` (process-local, 24h to
 
 **Limits:** atomic `create_dir` is rejected (byte snapshots cannot recover a tree). Retry receipts are in-memory only.
 
-**Verification:** `TestE3BatchRollbackRestoresOverwrittenCopy` · `TestE3JournalPreservesLaterWriter` · `TestE3PipelineFailureAndCancellation` · `TestE3PipelinePartialIsFailure` · `TestE3PipelineCopyRecovery` · `TestE3RetryConcurrentMismatchExpiryAndRestart` · `TestE3BatchRetryDoesNotAppendTwice` · `TestE3PipelineRollbackWithoutBackup` · `TestE3BatchRenameStopsAndRestores`.
+**Verification:** `TestE3BatchRollbackRestoresOverwrittenCopy` · `TestE3JournalPreservesLaterWriter` · `TestE3PipelineFailureAndCancellation` · `TestE3PipelinePartialIsFailure` · `TestE3PipelineCopyRecovery` · `TestE3RetryConcurrentMismatchExpiryAndRestart` · `TestE3BatchRetryDoesNotAppendTwice` · `TestE3PipelineRollbackWithoutBackup` · `TestE3BatchRenameStopsAndRestores` · `TestE3_Handler_*` · `TestE2E_E3_*`.
 
 ### fix(proxy): reap stale hashes, Job Object lifetime, per-call timeout
 
@@ -4682,6 +4696,6 @@ Estimated speedup for multiple edits:
 
 ---
 
-**Current Version**: 4.5.2
-**Last Updated**: 2026-05-27
+**Current Version**: 4.6.0
+**Last Updated**: 2026-09-11
 **Status**: Production Ready

@@ -81,7 +81,7 @@ func TestMultiEdit_AmbiguousRefusesThreeOccurrences(t *testing.T) {
 	edits := `[{"old_text":"X","new_text":"Y"}]`
 	result := callMultiEditHandler(t, reg, path, edits, nil)
 	body := resultText(t, result)
-	if !strings.Contains(body, "matches 3 times") {
+	if !strings.Contains(body, "3 time") {
 		t.Errorf("ambiguous-match error must report the count, got %q", body)
 	}
 

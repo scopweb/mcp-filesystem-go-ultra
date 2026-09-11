@@ -51,6 +51,42 @@ func stripTrailingCommas(s string) string {
 	return buf.String()
 }
 
+func sanitizeEditsJSON(s string) string {
+	var buf strings.Builder
+	inString := false
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if escaped {
+			buf.WriteByte(ch)
+			escaped = false
+			continue
+		}
+		if ch == '\\' && inString {
+			buf.WriteByte(ch)
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			inString = !inString
+		}
+		if ch == '\n' && inString {
+			buf.WriteString("\\n")
+			continue
+		}
+		if ch == '\r' && inString {
+			buf.WriteString("\\r")
+			continue
+		}
+		if ch == '\t' && inString {
+			buf.WriteString("\\t")
+			continue
+		}
+		buf.WriteByte(ch)
+	}
+	return buf.String()
+}
+
 // multiEditStructured builds the structured payload for a multi_edit response
 // (new point 3), mirroring editStructured for the single-edit path.
 func multiEditStructured(path string, r *core.MultiEditResult) map[string]any {
@@ -99,12 +135,15 @@ func registerBatchTools(reg *toolRegistry) {
 			"Atomically applies all replacements. Auto-backup with undo. "+
 			"Related: edit_file (single edit), read_file, search_files, batch_operations."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
-		mcp.WithString("edits_json", mcp.Required(), mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]. Also accepts old_str/new_str and old_string/new_string as aliases.")),
+		mcp.WithArray("edits", mcp.Description("Native array of edits: [{\"old_text\":\"...\",\"new_text\":\"...\"}, ...]. Legacy adapter: edits_json.")),
+		mcp.WithString("edits_json", mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]. Also accepts old_str/new_str and old_string/new_string as aliases. Provide edits or edits_json, not conflicting both.")),
 		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 		mcp.WithBoolean("tolerant_whitespace", mcp.Description("Apply tolerant_whitespace semantics to all edits in the batch (1 tab = 4 spaces, CRLF = LF). Default: false.")),
 		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Default: false.")),
 		mcp.WithString("diff_format", mcp.Description("Controls how the aggregate diff of the whole batch is rendered (parity with edit_file): \"\"/\"auto\" (default): full diff when small, else summary with anchors; \"full\": complete unified diff; \"summary\": per-hunk ranges + anchor lines; \"stat\": just \"+added -removed\"; \"none\": no diff (previous behaviour).")),
 		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash returned by the last full read_file (range and batch reads don't return it). If the file's current hash doesn't match, the multi_edit is rejected so the model can re-read first. Same OCC token as edit_file (Improvement B3), atomic over the whole batch.")),
+		mcp.WithBoolean("strict", mcp.Description("Opt-in strict matching: no implicit fallbacks. Default: false.")),
+		mcp.WithNumber("expected_matches", mcp.Description("If set, each old_text must match exactly this many times.")),
 	)
 	reg.addTool(multiEditTool, auditWrap(engine, "multi_edit", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -112,82 +151,24 @@ func registerBatchTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
 		}
 
-		// Accept edits_json as string (normal) or as raw JSON array (Claude Desktop sometimes sends this)
-		var edits []core.MultiEditOperation
 		args, _ := request.Params.Arguments.(map[string]interface{})
-
-		editsJSON, strErr := request.RequireString("edits_json")
-		if strErr == nil {
-			// Bug #26: Claude Desktop sends literal newlines inside JSON string values.
-			// json.Unmarshal rejects raw \n in strings — fix by escaping them.
-			sanitized := editsJSON
-			{
-				var buf strings.Builder
-				inString := false
-				escaped := false
-				for i := 0; i < len(sanitized); i++ {
-					ch := sanitized[i]
-					if escaped {
-						buf.WriteByte(ch)
-						escaped = false
-						continue
-					}
-					if ch == '\\' && inString {
-						buf.WriteByte(ch)
-						escaped = true
-						continue
-					}
-					if ch == '"' {
-						inString = !inString
-					}
-					if ch == '\n' && inString {
-						buf.WriteString("\\n")
-						continue
-					}
-					if ch == '\r' && inString {
-						buf.WriteString("\\r")
-						continue
-					}
-					if ch == '\t' && inString {
-						buf.WriteString("\\t")
-						continue
-					}
-					buf.WriteByte(ch)
-				}
-				sanitized = buf.String()
-			}
-			if err := json.Unmarshal([]byte(sanitized), &edits); err != nil {
-				// LLMs frequently emit trailing commas ({"a":1,}]). Strip them and
-				// retry once before failing — proxy logs showed ~40% of invalid
-				// edits_json errors were this exact pattern.
-				recovered := false
-				if stripped := stripTrailingCommas(sanitized); stripped != sanitized {
-					if retryErr := json.Unmarshal([]byte(stripped), &edits); retryErr == nil {
-						recovered = true
-					}
-				}
-				if !recovered {
-					return mcp.NewToolResultError(fmt.Sprintf("Invalid edits JSON: %v", err)), nil
+		editsJSON := ""
+		if args != nil {
+			if s, ok := args["edits_json"].(string); ok {
+				editsJSON = sanitizeEditsJSON(s)
+				if stripped := stripTrailingCommas(editsJSON); stripped != editsJSON {
+					editsJSON = stripped
 				}
 			}
-		} else if args != nil {
-			// Defense-in-depth: normalizer should convert raw arrays to JSON string,
-			// but keep fallback for edge cases
-			if rawEdits, ok := args["edits_json"]; ok {
-				rawBytes, err := json.Marshal(rawEdits)
-				if err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("Invalid edits_json: %v", err)), nil
-				}
-				if err := json.Unmarshal(rawBytes, &edits); err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("Invalid edits JSON: %v", err)), nil
-				}
-			} else {
-				return mcp.NewToolResultError("edits_json is required"), nil
-			}
-		} else {
-			return mcp.NewToolResultError(fmt.Sprintf("Invalid edits_json: %v", strErr)), nil
 		}
-
+		var nativeEdits any
+		if args != nil {
+			nativeEdits = args["edits"]
+		}
+		edits, err := core.DecodeDual[[]core.MultiEditOperation](nativeEdits, editsJSON, "edits", "edits_json")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 		if len(edits) == 0 {
 			return mcp.NewToolResultError("edits array cannot be empty"), nil
 		}
@@ -212,6 +193,18 @@ func registerBatchTools(reg *toolRegistry) {
 				expectedHash = eh
 			}
 		}
+		strict := false
+		var expectedMatches *int
+		if args != nil {
+			if s, ok := args["strict"].(bool); ok {
+				strict = s
+			}
+			if em, ok := args["expected_matches"].(float64); ok {
+				n := int(em)
+				expectedMatches = &n
+			}
+		}
+		ctx = core.WithEditPolicy(ctx, core.EditPolicy{Strict: strict, ExpectedMatches: expectedMatches})
 
 		// Execute multi-edit
 		// Fix #4 (v4.5.26): emit a non-blocking [STALE_READ] hint if no
@@ -469,17 +462,20 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithDescription("batch_operations — Execute atomic file operations (write, edit, search_and_replace, copy, move, delete, create_dir, extract) on the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
 			"extract moves lines [start_line,end_line] from source to destination atomically (bytes written == bytes deleted). "+
 			"Use batch_operations for ALL batch/atomic operations on the host disk — never use the runtime's built-in tools for host paths. "+
-			"Supports pipelines, rename, dry_run, rollback on error. Params: request_json, pipeline_json, or rename_json. "+
+			"Supports pipelines, rename, dry_run, rollback on error. Native objects: request, pipeline, rename (legacy adapters: request_json, pipeline_json, rename_json). "+
 			"Related: edit_file (single edit), multi_edit (multi-edit one file), search_files, backup."),
+		mcp.WithObject("request", mcp.Description("Native batch request object. Legacy adapter: request_json."), mcp.AdditionalProperties(true)),
 		mcp.WithString("request_json", mcp.Description("JSON with operations array and options. Fields: operations (array), atomic (bool; recover on error, not crash-durable), create_backup (bool), validate_only (bool), operation_id + retry_contract:\"e3-v1\" (opt-in, process-local 24h receipts; prefix from the current server lifetime). Operation types: write, edit, search_and_replace, copy, move, delete, create_dir, extract. extract fields: source, destination, start_line, end_line, append (bool). atomic create_dir is rejected.")),
+		mcp.WithObject("pipeline", mcp.Description("Native pipeline object. Legacy adapter: pipeline_json."), mcp.AdditionalProperties(true)),
 		mcp.WithString("pipeline_json", mcp.Description("JSON-encoded pipeline definition with name, steps, and optional flags (dry_run, force, stop_on_error, create_backup, verbose, parallel, operation_id, retry_contract:\"e3-v1\"). Rollback is journal-based (complete/partial/failed); it does not blindly restore backups over later writers.")),
+		mcp.WithObject("rename", mcp.Description("Native batch rename object. Legacy adapter: rename_json."), mcp.AdditionalProperties(true)),
 		mcp.WithString("rename_json", mcp.Description("JSON with batch rename parameters. Fields: path, mode, find, replace, prefix, suffix, pattern, extension, start_number, padding, recursive, file_pattern, preview, case_sensitive")),
 	)
 	reg.addTool(batchOpsTool, auditWrap(engine, "batch_operations", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		pipelineJSON := ""
 		renameJSON := ""
 		requestJSON := ""
-
+		var nativePipeline, nativeRename, nativeRequest any
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if pj, ok := args["pipeline_json"].(string); ok {
 				pipelineJSON = pj
@@ -490,14 +486,40 @@ func registerBatchTools(reg *toolRegistry) {
 			if rq, ok := args["request_json"].(string); ok {
 				requestJSON = rq
 			}
+			nativePipeline = args["pipeline"]
+			nativeRename = args["rename"]
+			nativeRequest = args["request"]
+		}
+		pipelineReq, hasPipeline, err := core.DecodeDualOptional[core.PipelineRequest](nativePipeline, pipelineJSON, "pipeline", "pipeline_json")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		batchRenameReq, hasRename, err := core.DecodeDualOptional[core.BatchRenameRequest](nativeRename, renameJSON, "rename", "rename_json")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		batchReq, hasRequest, err := core.DecodeDualOptional[core.BatchRequest](nativeRequest, requestJSON, "request", "request_json")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		families := 0
+		if hasPipeline {
+			families++
+		}
+		if hasRename {
+			families++
+		}
+		if hasRequest {
+			families++
+		}
+		if families > 1 {
+			return mcp.NewToolResultError("incompatible batch payload: provide only one of request/request_json, pipeline/pipeline_json, or rename/rename_json"), nil
+		}
+		if families == 0 {
+			return mcp.NewToolResultError("One of request, request_json, pipeline, pipeline_json, rename, or rename_json is required"), nil
 		}
 
-		// If pipeline_json is provided, dispatch to pipeline executor
-		if pipelineJSON != "" {
-			var pipelineReq core.PipelineRequest
-			if err := json.Unmarshal([]byte(pipelineJSON), &pipelineReq); err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Invalid pipeline JSON: %v", err)), nil
-			}
+		if hasPipeline {
 
 			executor := core.NewPipelineExecutor(engine)
 			result, err := executor.Execute(ctx, pipelineReq)
@@ -514,13 +536,7 @@ func registerBatchTools(reg *toolRegistry) {
 			return mcp.NewToolResultText(responseText), nil
 		}
 
-		// If rename_json is provided, dispatch to batch rename
-		if renameJSON != "" {
-			var batchRenameReq core.BatchRenameRequest
-			if err := json.Unmarshal([]byte(renameJSON), &batchRenameReq); err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Invalid rename JSON: %v", err)), nil
-			}
-
+		if hasRename {
 			result, err := engine.BatchRenameFiles(ctx, batchRenameReq)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Batch rename error: %v", err)), nil
@@ -531,16 +547,6 @@ func registerBatchTools(reg *toolRegistry) {
 				return mcp.NewToolResultError(resultText), nil
 			}
 			return mcp.NewToolResultText(resultText), nil
-		}
-
-		// Default: existing batch operations via request_json
-		if requestJSON == "" {
-			return mcp.NewToolResultError("One of request_json, pipeline_json, or rename_json is required"), nil
-		}
-
-		var batchReq core.BatchRequest
-		if err := json.Unmarshal([]byte(requestJSON), &batchReq); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Invalid request JSON: %v", err)), nil
 		}
 
 		if batchReq.Operations == nil || len(batchReq.Operations) == 0 {

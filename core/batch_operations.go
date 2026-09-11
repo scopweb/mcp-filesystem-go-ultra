@@ -663,7 +663,7 @@ func (m *BatchOperationManager) executeEdit(ctx context.Context, op FileOperatio
 
 	// Use performIntelligentEdit when engine is available
 	if m.engine != nil {
-		editResult, editErr := m.engine.performIntelligentEdit(original, op.OldText, op.NewText, false)
+		editResult, editErr := m.engine.performIntelligentEdit(original, op.OldText, op.NewText, false, false)
 		if editErr != nil || editResult.ReplacementCount == 0 {
 			return fmt.Errorf("old_text not found in file: %s. "+
 				"ALWAYS read the file with read_file BEFORE editing. "+
