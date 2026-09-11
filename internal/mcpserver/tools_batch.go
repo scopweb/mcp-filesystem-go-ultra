@@ -135,13 +135,22 @@ func registerBatchTools(reg *toolRegistry) {
 			"Atomically applies all replacements. Auto-backup with undo. "+
 			"Related: edit_file (single edit), read_file, search_files, batch_operations."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file to edit")),
-		mcp.WithArray("edits", mcp.Description("Native array of edits: [{\"old_text\":\"...\",\"new_text\":\"...\"}, ...]. Legacy adapter: edits_json.")),
+		mcp.WithArray("edits", mcp.Description("Native array of edits: [{\"old_text\":\"...\",\"new_text\":\"...\"}, ...]. Legacy adapter: edits_json."),
+			mcp.Items(map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"old_text": map[string]any{"type": "string"},
+					"new_text": map[string]any{"type": "string"},
+					"old_str":  map[string]any{"type": "string"},
+					"new_str":  map[string]any{"type": "string"},
+				},
+			})),
 		mcp.WithString("edits_json", mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]. Also accepts old_str/new_str and old_string/new_string as aliases. Provide edits or edits_json, not conflicting both.")),
 		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 		mcp.WithBoolean("tolerant_whitespace", mcp.Description("Apply tolerant_whitespace semantics to all edits in the batch (1 tab = 4 spaces, CRLF = LF). Default: false.")),
 		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Default: false.")),
 		mcp.WithString("diff_format", mcp.Description("Controls how the aggregate diff of the whole batch is rendered (parity with edit_file): \"\"/\"auto\" (default): full diff when small, else summary with anchors; \"full\": complete unified diff; \"summary\": per-hunk ranges + anchor lines; \"stat\": just \"+added -removed\"; \"none\": no diff (previous behaviour).")),
-		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash returned by the last full read_file (range and batch reads don't return it). If the file's current hash doesn't match, the multi_edit is rejected so the model can re-read first. Same OCC token as edit_file (Improvement B3), atomic over the whole batch.")),
+		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash from the last read_file (full, range, head/tail, base64, and per-file batch entries). If the file's current hash doesn't match, the multi_edit is rejected so the model can re-read first. Same OCC token as edit_file, atomic over the whole batch.")),
 		mcp.WithBoolean("strict", mcp.Description("Opt-in strict matching: no implicit fallbacks. Default: false.")),
 		mcp.WithNumber("expected_matches", mcp.Description("If set, each old_text must match exactly this many times.")),
 	)
@@ -167,7 +176,7 @@ func registerBatchTools(reg *toolRegistry) {
 		}
 		edits, err := core.DecodeDual[[]core.MultiEditOperation](nativeEdits, editsJSON, "edits", "edits_json")
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return pathErrorResult(errCodeInvalidParams, err.Error(), path, nil, "pass edits as an array of objects {old_text, new_text}"), nil
 		}
 		if len(edits) == 0 {
 			return mcp.NewToolResultError("edits array cannot be empty"), nil

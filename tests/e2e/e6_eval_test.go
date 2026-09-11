@@ -188,8 +188,8 @@ func TestE2E_E6_AgentEval(t *testing.T) {
 		case float64:
 			n = int(v)
 		}
-		if n == 0 {
-			t.Fatalf("expected Marker hits: %#v", sc)
+		if n != 6 {
+			t.Fatalf("expected 6 Marker hits, got %d: %#v", n, sc)
 		}
 	}))
 

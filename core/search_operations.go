@@ -81,7 +81,11 @@ func (e *UltraFastEngine) SmartSearch(ctx context.Context, request mcp.CallToolR
 		}, nil
 	}
 
-	results, err := e.performSmartSearch(ctx, validPath, pattern, includeContent, fileTypes, noIgnore)
+	maxResults := e.config.MaxSearchResults
+	if mr, ok := request.Arguments["max_results"].(float64); ok && mr > 0 {
+		maxResults = int(mr)
+	}
+	out, err := e.performSmartSearchOutcome(ctx, validPath, pattern, includeContent, fileTypes, noIgnore, maxResults)
 	if err != nil {
 		return &mcp.CallToolResponse{
 			Content: []mcp.TextContent{
@@ -96,7 +100,7 @@ func (e *UltraFastEngine) SmartSearch(ctx context.Context, request mcp.CallToolR
 
 	return &mcp.CallToolResponse{
 		Content: []mcp.TextContent{
-			{Text: results},
+			{Text: out.Text},
 		},
 	}, nil
 }
@@ -342,6 +346,65 @@ func formatSearchMatchesJSON(matches []SearchMatch, pattern, path string, totalB
 	return buf.String()
 }
 
+func (e *UltraFastEngine) formatAdvancedSearchOutput(matches []SearchMatch, pattern, path, outputFormat string, includeContext bool, totalBeforeCap, maxResults int, truncated bool) string {
+	if outputFormat == "json" {
+		return formatSearchMatchesJSON(matches, pattern, path, totalBeforeCap, maxResults)
+	}
+	_ = truncated
+	var result strings.Builder
+	maxToShow := maxResults
+	if maxToShow <= 0 || maxToShow > len(matches) {
+		maxToShow = len(matches)
+	}
+	const ripgrepThreshold = 5
+	useRipgrep := outputFormat == "auto" && !includeContext && len(matches) <= ripgrepThreshold
+	if useRipgrep {
+		result.WriteString(formatSearchMatchesRipgrep(matches, maxToShow))
+	} else if e.config.CompactMode && outputFormat != "text" {
+		result.WriteString(fmt.Sprintf("%d matches", len(matches)))
+		if len(matches) > 20 {
+			result.WriteString(" (first 20)")
+			maxToShow = 20
+		}
+		result.WriteString("\n")
+		if includeContext {
+			for i := 0; i < maxToShow; i++ {
+				match := matches[i]
+				result.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd, match.Line))
+				for _, ctxLine := range match.Context {
+					result.WriteString(fmt.Sprintf("  | %s\n", ctxLine))
+				}
+			}
+		} else {
+			for i := 0; i < maxToShow; i++ {
+				match := matches[i]
+				result.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd, match.Line))
+			}
+		}
+		if len(matches) > maxToShow {
+			result.WriteString(fmt.Sprintf(" ... (%d more)", len(matches)-maxToShow))
+		}
+	} else {
+		result.WriteString(fmt.Sprintf("🔍 Found %d matches for pattern '%s':\n\n", len(matches), pattern))
+		for i := 0; i < maxToShow; i++ {
+			match := matches[i]
+			result.WriteString(fmt.Sprintf("📁 %s:%d [%d:%d]\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd))
+			result.WriteString(fmt.Sprintf("   %s\n", match.Line))
+			if includeContext && len(match.Context) > 0 {
+				result.WriteString("   Context:\n")
+				for _, contextLine := range match.Context {
+					result.WriteString(fmt.Sprintf("   │ %s\n", contextLine))
+				}
+			}
+			result.WriteString("\n")
+		}
+		if len(matches) > maxToShow {
+			result.WriteString(fmt.Sprintf("⚠️ Showing %d of %d matches. Use more specific pattern.\n", maxToShow, len(matches)))
+		}
+	}
+	return result.String()
+}
+
 // jsonString escapes a string for JSON
 func jsonString(s string) string {
 	b, _ := json.Marshal(s)
@@ -374,16 +437,18 @@ func formatSearchMatchesRipgrep(matches []SearchMatch, maxToShow int) string {
 }
 
 // performSmartSearch
-func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern string, includeContent bool, fileTypes []string, noIgnore bool) (string, error) {
+func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, pattern string, includeContent bool, fileTypes []string, noIgnore bool, maxResults int) (SearchOutcome, error) {
 	// Check context before starting
 	if err := ctx.Err(); err != nil {
-		return "", &ContextError{Op: "search", Details: "operation cancelled before start"}
+		return SearchOutcome{}, &ContextError{Op: "search", Details: "operation cancelled before start"}
 	}
 
 	var resultsMu sync.Mutex
 	var results []string
 	var contentMatches []SearchMatch
-	maxResults := e.config.MaxSearchResults
+	if maxResults <= 0 {
+		maxResults = e.config.MaxSearchResults
+	}
 
 	// Compile regex pattern (uses engine cache to avoid repeated compilation)
 	// For glob patterns (*, ?), use filepath.Match instead to avoid regex misinterpretation
@@ -475,8 +540,9 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 
 		return nil
 	})
+	walkCapped := walkErr == errWalkStop
 	if walkErr != nil && walkErr != errWalkStop && !errors.Is(walkErr, context.Canceled) && !errors.Is(walkErr, context.DeadlineExceeded) {
-		return "", walkErr
+		return SearchOutcome{}, walkErr
 	}
 
 	// Second pass: parallel content search using worker pool
@@ -636,23 +702,32 @@ func (e *UltraFastEngine) performSmartSearch(ctx context.Context, path, pattern 
 	}
 
 	if len(results) == 0 && len(contentMatches) == 0 {
+		text := fmt.Sprintf("🔍 No matches found for pattern '%s' in %s", pattern, path)
 		if !includeContent {
-			// v4.5.24: be explicit that file CONTENTS were not searched — the
-			// generic message caused callers to read this as a content-search miss.
-			return fmt.Sprintf("🔍 No filename matches for pattern '%s' in %s (filename-only search — file contents were NOT searched; pass include_content:true to search inside files)", pattern, path), nil
+			text = fmt.Sprintf("🔍 No filename matches for pattern '%s' in %s (filename-only search — file contents were NOT searched; pass include_content:true to search inside files)", pattern, path)
 		}
-		return fmt.Sprintf("🔍 No matches found for pattern '%s' in %s", pattern, path), nil
+		return SearchOutcome{Text: text, Matches: []SearchMatch{}, FilenameOnly: !includeContent, Truncated: walkCapped}, nil
 	}
 
-	if totalResults >= e.config.MaxSearchResults {
+	truncated := walkCapped
+	if totalResults >= maxResults {
+		truncated = true
 		if e.config.CompactMode {
-			resultBuilder.WriteString(fmt.Sprintf(" (limited to %d)", e.config.MaxSearchResults))
+			resultBuilder.WriteString(fmt.Sprintf(" (limited to %d)", maxResults))
 		} else {
-			resultBuilder.WriteString(fmt.Sprintf("\n⚠️ Results limited to %d. Use more specific pattern.\n", e.config.MaxSearchResults))
+			resultBuilder.WriteString(fmt.Sprintf("\n⚠️ Results limited to %d. Use more specific pattern.\n", maxResults))
 		}
 	}
 
-	return resultBuilder.String(), nil
+	hits := hitsFromFilenameResults(results)
+	hits = append(hits, contentMatches...)
+	return SearchOutcome{
+		Text:         resultBuilder.String(),
+		Matches:      hits,
+		MatchCount:   len(hits),
+		Truncated:    truncated,
+		FilenameOnly: !includeContent,
+	}, nil
 }
 
 // performAdvancedTextSearch implements advanced text search with parallelization

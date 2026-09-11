@@ -585,38 +585,38 @@ func (e *UltraFastEngine) releaseOperation(opType string, start time.Time) {
 
 // ReadFileContent implements ultra-fast file reading with intelligent caching
 func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (string, error) {
-	// Check context before starting
+	snap, err := e.ReadFileSnapshot(ctx, path)
+	if err != nil {
+		return "", err
+	}
+	return string(snap.Bytes), nil
+}
+
+// ReadFileSnapshot returns file bytes and hash from one authorized read.
+func (e *UltraFastEngine) ReadFileSnapshot(ctx context.Context, path string) (FileSnapshot, error) {
 	if err := ctx.Err(); err != nil {
-		return "", &ContextError{Op: "read_file", Details: "operation cancelled before start"}
+		return FileSnapshot{}, &ContextError{Op: "read_file", Details: "operation cancelled before start"}
 	}
 
-	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
 
-	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "read"); err != nil {
-		return "", err
+		return FileSnapshot{}, err
 	}
 
 	start := time.Now()
 	defer e.releaseOperation("read", start)
 
-	// Check if path is allowed (security + access control)
 	if !e.IsPathAllowed(path) {
-		return "", e.AccessDeniedError("read", path)
+		return FileSnapshot{}, e.AccessDeniedError("read", path)
 	}
 
-	// TOCTOU defense: re-resolve symlinks and re-authorize the canonical target
-	// immediately before any disk I/O. Operate on the resolved path so the read
-	// cannot be redirected outside the sandbox by a symlink swapped in after the
-	// IsPathAllowed check above.
 	if resolved, err := e.ResolveAndAuthorize("read", path); err != nil {
-		return "", err
+		return FileSnapshot{}, err
 	} else {
 		path = resolved
 	}
 
-	// Execute pre-read hook
 	workingDir, _ := os.Getwd()
 	hookCtx := &HookContext{
 		Event:      HookPreRead,
@@ -627,41 +627,49 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 		WorkingDir: workingDir,
 	}
 	if _, err := e.hookManager.ExecuteHooks(ctx, HookPreRead, hookCtx); err != nil {
-		return "", fmt.Errorf("pre-read hook denied operation: %w", err)
+		return FileSnapshot{}, fmt.Errorf("pre-read hook denied operation: %w", err)
 	}
 
-	// Try cache first
 	if cached, hit := e.cache.GetFileFresh(path); hit {
 		if e.config.DebugMode {
 			slog.Debug("Cache hit", "path", path)
 		}
-		// Track access for predictive prefetching
 		e.cache.TrackAccess(path)
-		// Record cache hit for audit log (improvement M3)
 		SetCacheHit(ctx, true)
-		return string(cached), nil
+		return snapshotFromBytes(path, cached), nil
 	}
 
-	// Check context before disk I/O
 	if err := ctx.Err(); err != nil {
-		return "", &ContextError{Op: "read_file", Details: "operation cancelled before disk read"}
+		return FileSnapshot{}, &ContextError{Op: "read_file", Details: "operation cancelled before disk read"}
 	}
 
-	// Load from disk with singleflight dedup on concurrent cache misses.
 	content, err := e.readFileBytesDeduped(ctx, path)
 	if err != nil {
-		return "", err
+		return FileSnapshot{}, err
 	}
 
-	// Record cache miss for audit log (improvement M3)
 	SetCacheHit(ctx, false)
 
-	// Execute post-read hook (best-effort)
 	hookCtx.Event = HookPostRead
 	hookCtx.Metadata = map[string]interface{}{"bytes": len(content)}
 	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostRead, hookCtx)
 
-	return string(content), nil
+	return snapshotFromBytes(path, content), nil
+}
+
+func snapshotFromBytes(path string, raw []byte) FileSnapshot {
+	mode := os.FileMode(0644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode()
+	}
+	return FileSnapshot{
+		Path:   path,
+		Canon:  CanonicalPath(path),
+		Bytes:  raw,
+		Hash:   contentHashFNV(string(raw)),
+		Mode:   mode,
+		Exists: true,
+	}
 }
 
 // WriteFileContent implements atomic file writing

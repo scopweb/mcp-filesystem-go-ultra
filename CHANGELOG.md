@@ -2,6 +2,12 @@
 
 ## [Unreleased / 4.6.0] - 2026-09-03
 
+### fix(reliability): coherent reads, typed search output, native array schemas
+
+`read_file` hashes the same snapshot it returns (full/range/head/tail/base64/batch). Structured search is built from typed engine hits, not by scraping text — filename hits and content that contains "No matches found" no longer report `status:empty`. Truncation/continuation use real line ranges (`total_lines`, clamped `end_line`, next `start_line`); a file that literally contains `[Truncated:` is not marked truncated. `max_results` sets `truncated` and keeps the pre-cap `match_count`. `multi_edit.edits` and `edit_file.patterns` declare object `items` so clients do not coerce them to `string[]`. Invalid native `edits` return the `INVALID_PARAMS` envelope.
+
+**Verification:** `TestE5_SearchFilenameHitNotEmpty` · `TestE5_SearchLiteralNoMatchesFoundStillHits` · `TestE5_SearchMaxResultsTruncated` · `TestE5_ReadLiteralTruncationMarkerNotTruncated` · `TestE5_ReadRangePastEOFActualEndLine` · `TestE5_ReadHeadContinuationNextLine` · `TestE41_ArrayItemsAreObjects`.
+
 ### feat(reliability): E6 — CI, contract catalog, independent client, agent eval
 
 CI runs `./internal/mcpserver` on Windows (no race). `help()` and `help(tool:)` serve structured-result notes plus ToolContract enums/examples (`core.ContractCatalog` / `RenderContractCatalog`). E2E includes a newline JSON-RPC client that does not use mcp-go (`TestE2E_E6_IndependentJSONRPCClient`) and an agent-eval battery with metrics (`TestE2E_E6_AgentEval`: localized edit, multifile refactor, stale-hash recovery, writer vs reviewer OCC, lost-response retry, large search). README, skill, and USAGE aligned on 24 tools, structured payloads, and `retryable`. Experimental tools stay experimental until the next version bump (4.6.1).

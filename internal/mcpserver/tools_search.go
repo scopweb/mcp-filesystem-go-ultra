@@ -9,7 +9,6 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mcp/filesystem-ultra/core"
-	localmcp "github.com/mcp/filesystem-ultra/mcp"
 )
 
 // registerSearchTools registers list_directory, search_files, analyze_operation
@@ -190,6 +189,7 @@ func registerSearchTools(reg *toolRegistry) {
 		outputFormat := ""     // empty → engine defaults to "auto"; explicit "text" preserves legacy verbose/compact
 		contentIntent := false // content-only params passed → content search implied
 		noIgnore := false
+		maxResults := 0
 
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if co, ok := args["count_only"].(bool); ok {
@@ -241,6 +241,9 @@ func registerSearchTools(reg *toolRegistry) {
 			if ni, ok := args["no_ignore"].(bool); ok {
 				noIgnore = ni
 			}
+			if mr, ok := args["max_results"].(float64); ok && mr > 0 {
+				maxResults = int(mr)
+			}
 		}
 
 		// v4.5.24 false-negative guards:
@@ -257,86 +260,28 @@ func registerSearchTools(reg *toolRegistry) {
 		}
 
 		scope := map[string]any{"path": path, "pattern": pattern, "include_content": includeContent, "count_only": countOnly}
-		wrapSearch := func(text string) *mcp.CallToolResult {
-			if engineTextIsError(text) {
-				return mcp.NewToolResultError(text)
-			}
-			capped := capSearchOutput(text, engine)
-			matches, count, jsonTrunc := parseSearchPayload(capped)
-			if countOnly {
-				if n := parseCountOnly(capped); n >= 0 {
-					count = n
-					matches = []map[string]any{}
-				}
-			}
-			truncated := jsonTrunc || contentWasTruncated(capped)
-			return mcp.NewToolResultStructured(searchStructured(capped, scope, matches, count, truncated), capped)
-		}
-
-		if countOnly {
-			result, err := engine.CountOccurrencesOpts(ctx, core.SearchOptions{
-				Path: path, Pattern: pattern, FileTypes: core.FileTypeFiltersFromArg(fileTypes),
-				ReturnLines: returnLines, CaseSensitive: caseSensitive, WholeWord: wholeWord, NoIgnore: noIgnore,
-			})
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
-			}
-			return wrapSearch(result), nil
-		}
-
-		// Advanced search mode (with content search, case sensitivity, whole word, context)
-		// Bug #32: route ALL content searches through AdvancedTextSearch which properly
-		// handles case_sensitive:false. SmartSearch (the default path) ignores this flag.
-		if includeContent || wholeWord || includeContext {
-			advArgs := map[string]interface{}{
-				"path": path, "pattern": pattern,
-				"case_sensitive": caseSensitive, "whole_word": wholeWord,
-				"include_context": includeContext, "context_lines": contextLines,
-				"output_format": outputFormat, "no_ignore": noIgnore,
-				"file_types": fileTypes,
-			}
-			// Forward optional max_results if caller set one (new param v4.5.26)
-			if rawArgs, ok := request.Params.Arguments.(map[string]interface{}); ok {
-				if mr, ok := rawArgs["max_results"].(float64); ok && mr > 0 {
-					advArgs["max_results"] = mr
-				}
-			}
-			engineReq := localmcp.CallToolRequest{Arguments: advArgs}
-			resp, err := engine.AdvancedTextSearch(ctx, engineReq)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			if len(resp.Content) > 0 {
-				return wrapSearch(resp.Content[0].Text), nil
-			}
-			return wrapSearch("No matches"), nil
-		}
-
-		// Default: SmartSearch
-		engineReq := localmcp.CallToolRequest{Arguments: map[string]interface{}{
-			"path": path, "pattern": pattern,
-			"include_content": includeContent, "file_types": fileTypes,
-			"no_ignore": noIgnore,
-		}}
-		// Forward optional max_results (new param v4.5.26) — engine falls back to
-		// config default when absent, so this is purely advisory.
-		if rawArgs, ok := request.Params.Arguments.(map[string]interface{}); ok {
-			if mr, ok := rawArgs["max_results"].(float64); ok && mr > 0 {
-				engineReq.Arguments["max_results"] = mr
-			}
-		}
-		resp, err := engine.SmartSearch(ctx, engineReq)
+		out, err := engine.SearchFiles(ctx, core.SearchOptions{
+			Path: path, Pattern: pattern, FileTypes: core.FileTypeFiltersFromArg(fileTypes),
+			CaseSensitive: caseSensitive, WholeWord: wholeWord, IncludeContent: includeContent,
+			IncludeContext: includeContext, ContextLines: contextLines, CountOnly: countOnly,
+			ReturnLines: returnLines, NoIgnore: noIgnore, MaxResults: maxResults, OutputFormat: outputFormat,
+		})
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
-		if len(resp.Content) > 0 {
-			out := resp.Content[0].Text
-			if len(out) > 8000 && len(fileTypes) == 0 && !includeContent {
-				out += "\n\n💡 hint: this search returned many matches across many files. Next time, pass `file_types` (e.g. \".razor,.cs\") or `include` to skip unrelated trees and keep latency under 1s."
-			}
-			return wrapSearch(out), nil
+		if engineTextIsError(out.Text) {
+			return mcp.NewToolResultError(out.Text), nil
 		}
-		return wrapSearch("No matches"), nil
+		capped := capSearchOutput(out.Text, engine)
+		extraTrunc := capped != out.Text
+		out.Text = capped
+		if extraTrunc {
+			out.Truncated = true
+		}
+		if !includeContent && !countOnly && len(out.Text) > 8000 && len(fileTypes) == 0 {
+			out.Text += "\n\n💡 hint: this search returned many matches across many files. Next time, pass `file_types` (e.g. \".razor,.cs\") or `include` to skip unrelated trees and keep latency under 1s."
+		}
+		return mcp.NewToolResultStructured(searchStructuredFromOutcome(out, scope, extraTrunc), out.Text), nil
 	})
 	reg.addTool(searchFilesTool, reg.searchFilesHandler)
 

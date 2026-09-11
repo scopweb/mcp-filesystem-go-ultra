@@ -362,6 +362,145 @@ func formatPipelineResult(result *core.PipelineResult, compact bool) string {
 // tells the model how to read the rest with start_line/end_line.
 const autoTruncateLargeFileLines = 300
 
+type readProjection struct {
+	Text       string
+	Truncated  bool
+	StartLine  int
+	EndLine    int
+	TotalLines int
+	ContinueAt int
+}
+
+func splitContentLines(content string) []string {
+	if content == "" {
+		return nil
+	}
+	lines := strings.Split(content, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func rangeFooter(path string, startLine, endLine, total int) string {
+	footer := fmt.Sprintf("\n\n[Lines %d-%d of %d total lines in %s",
+		startLine, endLine, total, filepath.Base(path))
+	if endLine < total {
+		rangeSize := endLine - startLine
+		if rangeSize < 0 {
+			rangeSize = 0
+		}
+		nextStart := endLine + 1
+		nextEnd := nextStart + rangeSize
+		if nextEnd > total {
+			nextEnd = total
+		}
+		footer += fmt.Sprintf(" \u2014 use start_line/end_line to read more, e.g. start_line=%d end_line=%d",
+			nextStart, nextEnd)
+	}
+	footer += "]"
+	return footer
+}
+
+func projectRead(content, path string, startLine, endLine, maxLines int, mode string, lineLimit int) readProjection {
+	lines := splitContentLines(content)
+	total := len(lines)
+	p := readProjection{Text: content, StartLine: 1, EndLine: total, TotalLines: total}
+
+	if startLine > 0 || endLine > 0 {
+		if startLine <= 0 {
+			startLine = 1
+		}
+		if endLine <= 0 {
+			endLine = total
+		}
+		if total == 0 {
+			p.StartLine, p.EndLine = startLine, 0
+			p.Truncated = true
+			p.Text = rangeFooter(path, startLine, 0, 0)
+			return applyLineLimit(p, lineLimit)
+		}
+		if startLine > total {
+			p.StartLine, p.EndLine = startLine, total
+			p.Truncated = true
+			p.Text = rangeFooter(path, startLine, total, total)
+			return applyLineLimit(p, lineLimit)
+		}
+		if endLine > total {
+			endLine = total
+		}
+		if endLine < startLine {
+			endLine = startLine
+		}
+		body := strings.Join(lines[startLine-1:endLine], "\n")
+		p.StartLine, p.EndLine = startLine, endLine
+		p.Truncated = startLine > 1 || endLine < total
+		if endLine < total {
+			p.ContinueAt = endLine + 1
+		}
+		p.Text = body + rangeFooter(path, startLine, endLine, total)
+		return applyLineLimit(p, lineLimit)
+	}
+
+	if mode == "head" || mode == "tail" || maxLines > 0 {
+		if maxLines <= 0 {
+			maxLines = 100
+		}
+		switch mode {
+		case "head":
+			if total <= maxLines {
+				return applyLineLimit(p, lineLimit)
+			}
+			p.EndLine = maxLines
+			p.Truncated = true
+			p.ContinueAt = maxLines + 1
+			p.Text = strings.Join(lines[:maxLines], "\n") + fmt.Sprintf(
+				"\n[Truncated: showing first %d of %d lines. Use mode=all or increase max_lines to see more]", maxLines, total)
+		case "tail":
+			if total <= maxLines {
+				return applyLineLimit(p, lineLimit)
+			}
+			p.StartLine = total - maxLines + 1
+			p.Truncated = true
+			p.Text = strings.Join(lines[total-maxLines:], "\n") + fmt.Sprintf(
+				"\n[Truncated: showing last %d of %d lines. Use mode=all or increase max_lines to see more]", maxLines, total)
+		default:
+			if total > maxLines {
+				half := maxLines / 2
+				if half < 1 {
+					half = 1
+				}
+				mid := fmt.Sprintf("\n... [%d lines omitted] ...\n", total-maxLines)
+				p.Truncated = true
+				p.ContinueAt = half + 1
+				p.Text = strings.Join(lines[:half], "\n") + mid + strings.Join(lines[total-half:], "\n") + fmt.Sprintf(
+					"\n[Truncated: showing %d of %d lines (%d head + %d tail). Use mode=head/tail or increase max_lines]", maxLines, total, half, half)
+			}
+		}
+		return applyLineLimit(p, lineLimit)
+	}
+
+	if total > autoTruncateLargeFileLines {
+		p.EndLine = autoTruncateLargeFileLines
+		p.Truncated = true
+		p.ContinueAt = autoTruncateLargeFileLines + 1
+		p.Text = autoTruncateLargeFile(content, path)
+	}
+	return applyLineLimit(p, lineLimit)
+}
+
+func applyLineLimit(p readProjection, lineLimit int) readProjection {
+	if lineLimit <= 0 {
+		return p
+	}
+	before := p.Text
+	p.Text = truncateLineWidths(p.Text, lineLimit)
+	if p.Text != before {
+		p.Truncated = true
+	}
+	return p
+}
+
 // autoTruncateLargeFile truncates large files read without a range and appends a
 // footer identical in style to ReadFileRange so the model always knows:
 //   - how many lines it received
