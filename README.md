@@ -19,7 +19,7 @@ Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool 
 - **Risk assessment** — mutations above configurable thresholds are flagged (20% change = MEDIUM, 75% = HIGH by default); HIGH/CRITICAL results include post-edit integrity verification
 - **Access control** — fail-closed: at least one `--allowed-paths` / positional root is required (also enforced in batch operations). `--insecure-open` is labs-only.
 - **Plan mode** — dry-run analysis with diff preview and risk report before applying changes
-- **Structured output** — `outputSchema` + `structuredContent` on the 4 I/O core tools, with a handler-level conformance sweep enforced in CI
+- **Structured output** — `outputSchema` + `structuredContent` on read/write/edit/multi_edit plus `search_files`, `list_directory`, `batch_operations`, and `backup`. Status (`applied`/`simulated`/`empty`/`partial`), truncation, and hashes are machine-readable. Errors use a JSON envelope with `retryable` (do not auto-retry when false). Text fallbacks stay byte-identical. Handler-level sweep in CI.
 - **Native tool inputs** — arrays/objects for `paths`, `edits`, `patterns`, `request`/`pipeline`/`rename`; legacy `*_json` strings stay as adapters. Conflicting dual forms and invalid enums are rejected
 - **Optional strict match** — `strict` + `expected_matches` on `edit_file`/`multi_edit`; mismatch lists candidate line numbers and `match_method`
 - **Unified tool contract** — one `ToolContract` drives validation, `help(tool:)` examples, and `--readonly` mutation gating
@@ -448,7 +448,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest unreleased: v4.6.0 — fail-closed sandbox, E1–E4 agent reliability).
+See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest unreleased: v4.6.0 — fail-closed sandbox, E1–E6 agent reliability).
 
 ---
 
