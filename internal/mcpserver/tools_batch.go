@@ -149,7 +149,7 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 		mcp.WithBoolean("tolerant_whitespace", mcp.Description("Apply tolerant_whitespace semantics to all edits in the batch (1 tab = 4 spaces, CRLF = LF). Default: false.")),
 		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Default: false.")),
-		mcp.WithString("diff_format", mcp.Description("Controls how the aggregate diff of the whole batch is rendered (parity with edit_file): \"\"/\"auto\" (default): full diff when small, else summary with anchors; \"full\": complete unified diff; \"summary\": per-hunk ranges + anchor lines; \"stat\": just \"+added -removed\"; \"none\": no diff (previous behaviour).")),
+		mcp.WithString("diff_format", mcp.Description("Controls how the aggregate diff of the whole batch is rendered (parity with edit_file): \"\"/\"auto\" (default): full diff when small, else summary with anchors; \"full\": complete unified diff; \"summary\": per-hunk ranges + anchor lines; \"stat\": just \"+added -removed\"; \"none\": no diff (previous behaviour)."), mcp.Enum("auto", "full", "summary", "stat", "none")),
 		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash from the last read_file (full, range, head/tail, base64, and per-file batch entries). If the file's current hash doesn't match, the multi_edit is rejected so the model can re-read first. Same OCC token as edit_file, atomic over the whole batch.")),
 		mcp.WithBoolean("strict", mcp.Description("Opt-in strict matching: no implicit fallbacks. Default: false.")),
 		mcp.WithNumber("expected_matches", mcp.Description("If set, each old_text must match exactly this many times.")),
@@ -731,7 +731,7 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithDescription("backup — Manage backups, restore, and undo. Actions: list, info, compare, cleanup, restore, undo_last, undo_chain, list_trash, restore_trash, purge_trash. "+
 			"Auto-created before every edit_file/multi_edit. Soft-deleted files (delete_file) are managed via list_trash/restore_trash/purge_trash when --backup-dir is set. "+
 			"Related: edit_file, batch_operations, analyze_operation, delete_file."),
-		mcp.WithString("action", mcp.Description("Action: list (default), info, compare, cleanup, restore, undo_last, undo_chain, list_trash, restore_trash, purge_trash")),
+		mcp.WithString("action", mcp.Description("Action: list (default), info, compare, cleanup, restore, undo_last, undo_chain, list_trash, restore_trash, purge_trash"), mcp.Enum("list", "info", "compare", "cleanup", "restore", "undo_last", "undo_chain", "list_trash", "restore_trash", "purge_trash")),
 		mcp.WithString("backup_id", mcp.Description("Backup ID (required for info, compare, restore)")),
 		mcp.WithString("sd_id", mcp.Description("Soft-delete ID (required for restore_trash)")),
 		mcp.WithString("file_path", mcp.Description("File path for compare or selective restore")),

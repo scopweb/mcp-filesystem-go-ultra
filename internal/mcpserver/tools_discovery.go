@@ -15,6 +15,7 @@ func registerDiscoveryTools(reg *toolRegistry) {
 
 	tool := mcp.NewTool("list_allowed_directories",
 		mcp.WithTitleAnnotation("List Allowed Directories"),
+		mcp.WithRawOutputSchema(listAllowedDirectoriesOutputSchema),
 		mcp.WithDescription("list_allowed_directories — Return the sandbox roots this server may read and write. Call this before the first read. Zero parameters. Related: list_directory, read_file, help."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -24,7 +25,8 @@ func registerDiscoveryTools(reg *toolRegistry) {
 		if refreshClientRoots != nil {
 			refreshClientRoots(ctx)
 		}
-		return mcp.NewToolResultText(formatAllowedDirectories(engine)), nil
+		text := formatAllowedDirectories(engine)
+		return mcp.NewToolResultStructured(allowedDirectoriesStructured(engine, text), text), nil
 	}),
 		`list_allowed_directories()`,
 		`Call this before the first read so the sandbox roots are visible.`,
@@ -48,4 +50,23 @@ func formatAllowedDirectories(engine *core.UltraFastEngine) string {
 		header += " (source: " + source + ")"
 	}
 	return header + ":\n" + strings.Join(paths, "\n") + "\n"
+}
+
+func allowedDirectoriesStructured(engine *core.UltraFastEngine, text string) map[string]any {
+	paths := engine.ListedAllowedPaths()
+	if paths == nil {
+		paths = []string{}
+	}
+	source := engine.AllowedSource()
+	status := statusOK
+	if len(paths) == 0 {
+		status = statusEmpty
+	}
+	return map[string]any{
+		"status":        status,
+		"paths":         paths,
+		"source":        source,
+		"insecure_open": source == core.AllowedSourceInsecure,
+		"message":       text,
+	}
 }

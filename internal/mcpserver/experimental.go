@@ -33,17 +33,10 @@ import (
 // KEEP THIS LIST SHORT: entries older than one release cycle are a policy
 // violation — graduate them (sweep coverage + optional outputSchema) and
 // remove the entry.
-var experimentalFeatures = map[string]string{
-	"batch_operations:e3-v1":   "4.6.0",
-	"pipeline:e3-v1":           "4.6.0",
-	"multi_edit:edits":         "4.6.0",
-	"batch_operations:native":  "4.6.0",
-	"edit_file:strict":         "4.6.0",
-	"list_allowed_directories": "4.6.0",
-	"directory_tree":           "4.6.0",
-	"diff_files":               "4.6.0",
-	"apply_patch":              "4.6.0",
-}
+//
+// v4.6.1 graduated the v4.6.0 cohort: list_allowed_directories, directory_tree,
+// diff_files, apply_patch, native edits/batch, strict match, and e3-v1 retries.
+var experimentalFeatures = map[string]string{}
 
 // isExperimental reports whether featureKey is currently experimental and
 // the version since which it has been.

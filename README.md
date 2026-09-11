@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra
 
-**v4.6.0** · Go 1.27.1 · MCP 2025-11-25 · 24 tools (17 core + git + minify_js + help + discovery + patch)
+**v4.6.1** · Go 1.27.1 · MCP 2025-11-25 · 24 tools (17 core + git + minify_js + help + discovery + patch)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -22,7 +22,7 @@ Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool 
 - **Structured output** — `outputSchema` + `structuredContent` on read/write/edit/multi_edit plus `search_files`, `list_directory`, `batch_operations`, and `backup`. Status (`applied`/`simulated`/`empty`/`partial`), truncation, and hashes are machine-readable. Errors use a JSON envelope with `retryable` (do not auto-retry when false). Text fallbacks stay byte-identical. Handler-level sweep in CI.
 - **Native tool inputs** — arrays/objects for `paths`, `edits`, `patterns`, `request`/`pipeline`/`rename`; legacy `*_json` strings stay as adapters. Conflicting dual forms and invalid enums are rejected
 - **Optional strict match** — `strict` + `expected_matches` on `edit_file`/`multi_edit`; mismatch lists candidate line numbers and `match_method`
-- **Unified tool contract** — one `ToolContract` drives validation, `help(tool:)` examples, and `--readonly` mutation gating
+- **Unified tool contract** — one `ToolContract` drives validation, `help(tool:)` examples, and `--readonly` mutation gating; CI asserts MCP wire types, enums and array `items` match the contract
 
 ### Productivity
 
@@ -448,7 +448,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest unreleased: v4.6.0 — fail-closed sandbox, E1–E6 agent reliability).
+See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest: v4.6.1 — graduate discovery/patch tools, unified wire contract). Remaining work: [PLAN-PENDIENTE.md](PLAN-PENDIENTE.md).
 
 ---
 

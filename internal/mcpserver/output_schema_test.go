@@ -336,6 +336,9 @@ func TestAllSchemas_PropertiesHaveDescription(t *testing.T) {
 		{"list_directory", listDirectoryOutputSchema},
 		{"batch_operations", batchOperationsOutputSchema},
 		{"backup", backupOutputSchema},
+		{"list_allowed_directories", listAllowedDirectoriesOutputSchema},
+		{"diff_files", diffFilesOutputSchema},
+		{"apply_patch", applyPatchOutputSchema},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
