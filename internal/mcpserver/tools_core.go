@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"log"
@@ -69,10 +68,8 @@ type toolRegistry struct {
 	handlers       map[string]toolHandler // dispatch map for the fs super-tool
 	regexTransform *core.RegexTransformer
 
-	// toolExamples is an OPTIONAL map populated by addTool(..., examples...)
-	// (only registerGitTools uses it today). It feeds the standalone `help(tool:"X")`
-	// tool, which renders: description + InputSchema + examples. Variadic
-	// addTool keeps the 17 existing call sites source-compatible.
+	// toolExamples feeds help(tool:"X"). Filled by addTool(..., examples...)
+	// or, when omitted, by core.ContractExamples.
 	toolExamples map[string][]string
 
 	// Named handlers needed by alias registration
@@ -90,6 +87,9 @@ func (r *toolRegistry) addTool(tool mcp.Tool, handler toolHandler, examples ...s
 	tool = applyExperimentalPolicy(tool)
 	r.server.AddTool(tool, handler)
 	r.handlers[tool.Name] = handler
+	if len(examples) == 0 {
+		examples = core.ContractExamples(tool.Name)
+	}
 	if len(examples) > 0 {
 		if r.toolExamples == nil {
 			r.toolExamples = make(map[string][]string)
@@ -235,6 +235,9 @@ func editStructured(path string, r *core.EditResult) map[string]any {
 		"lines_removed": r.LinesRemoved,
 		"total_lines":   r.TotalLines,
 	}
+	if r.MatchMethod != "" {
+		m["match_method"] = r.MatchMethod
+	}
 	if r.NewHash != "" {
 		m["content_hash"] = r.NewHash
 	}
@@ -363,10 +366,10 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("path", mcp.Description("Path to file (WSL or Windows format). Required unless paths is provided.")),
-		mcp.WithString("paths", mcp.Description("JSON array of paths to read multiple files in one call, e.g. '[\"file1.txt\",\"file2.txt\"]'")),
+		mcp.WithArray("paths", mcp.WithStringItems(), mcp.Description("Native array of paths, or a JSON array string (legacy adapter). e.g. [\"file1.txt\",\"file2.txt\"]")),
 		mcp.WithNumber("max_lines", mcp.Description("Max lines (optional, 0=all). With mode=tail/head this is tail -N / head -N. With start_line set and end_line omitted, this is a LINE COUNT from start_line (offset+count range read, e.g. start_line:100, max_lines:50 reads lines 100-149) — use this instead of guessing end_line when you only know how many lines you want.")),
 		mcp.WithNumber("max_line_length", mcp.Description("Max characters per line (cut -c). head/tail default 300. 0=no cut. Use on logs; do not use when you need exact text for edit_file.")),
-		mcp.WithString("mode", mcp.Description("all (default) | head | tail. Logs: mode=tail max_lines=40. Replaces bash tail/head.")),
+		mcp.WithString("mode", mcp.Description("all (default) | head | tail. Logs: mode=tail max_lines=40. Replaces bash tail/head."), mcp.Enum("all", "head", "tail")),
 		mcp.WithNumber("start_line", mcp.Description("Starting line number (1-indexed) for range read. Pair with end_line (absolute line number) OR max_lines (line count) — not both.")),
 		mcp.WithNumber("end_line", mcp.Description("Ending line number for range read — an ABSOLUTE line number, not a count of lines. If you know how many lines you want instead of where they end, use max_lines with start_line and omit end_line.")),
 		mcp.WithString("encoding", mcp.Description("Set to \"base64\" to read file as base64-encoded binary")),
@@ -379,10 +382,12 @@ func registerCoreTools(reg *toolRegistry) {
 		var usePathRange bool
 
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
-			if pathsJSON, ok := args["paths"].(string); ok && pathsJSON != "" {
-				if err := json.Unmarshal([]byte(pathsJSON), &paths); err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("Invalid paths JSON: %v", err)), nil
+			if v, ok := args["paths"]; ok && v != nil {
+				decoded, err := core.DecodePaths(v)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
 				}
+				paths = decoded
 			}
 
 			// Check if we should use path+range instead of paths (batch)
@@ -617,7 +622,7 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("content", mcp.Description("Text content to write to the file")),
 		mcp.WithString("content_base64", mcp.Description("Base64-encoded binary content to write")),
 		mcp.WithString("encoding", mcp.Description("Set to \"base64\" when content is base64-encoded")),
-		mcp.WithString("mode", mcp.Description("overwrite (default) or append. append does not trigger rewrite-guard.")),
+		mcp.WithString("mode", mcp.Description("overwrite (default) or append. append does not trigger rewrite-guard."), mcp.Enum("overwrite", "append")),
 	)
 	reg.writeFileHandler = auditWrap(engine, "write_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -847,9 +852,9 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("new_str", mcp.Description("Alias for new_text")),
 		mcp.WithBoolean("force", mcp.Description("Force the operation through the risk-threshold check (CRITICAL risk). A safety backup is always created. Note: force does NOT bypass the accidental-rewrite guard — use allow_rewrite for that. Default: false.")),
 		mcp.WithBoolean("allow_rewrite", mcp.Description("Bypass ONLY the accidental full-file rewrite guard (small old_text + large new_text with file content remaining). Prefer write_file for a real full-file rewrite; set allow_rewrite:true only when you genuinely want edit semantics on a near-total rewrite. A safety backup is created. Default: false.")),
-		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\", \"delete_range\" (remove lines start_line..end_line, or start_line+line_count), \"replace_range\" (replace lines start_line..end_line, or start_line+line_count, with new_text), \"insert\" (insert new_text before/after anchor without replacing anything)")),
+		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\", \"delete_range\" (remove lines start_line..end_line, or start_line+line_count), \"replace_range\" (replace lines start_line..end_line, or start_line+line_count, with new_text), \"insert\" (insert new_text before/after anchor without replacing anything)"), mcp.Enum("replace", "search_replace", "regex", "delete_range", "replace_range", "insert")),
 		mcp.WithString("anchor", mcp.Description("Anchor text for mode:\"insert\". Must match exactly once in the file. The anchor is preserved; new_text is inserted on its own line(s).")),
-		mcp.WithString("position", mcp.Description("Where to insert relative to the anchor in mode:\"insert\": \"after\" (default) or \"before\".")),
+		mcp.WithString("position", mcp.Description("Where to insert relative to the anchor in mode:\"insert\": \"after\" (default) or \"before\"."), mcp.Enum("after", "before")),
 		mcp.WithNumber("occurrence", mcp.Description("Which occurrence to replace: 1=first, 2=second, -1=last, -2=second-to-last (default: all)")),
 		mcp.WithNumber("start_line", mcp.Description("First line of the range (1-based, inclusive). Used by mode:\"delete_range\" and mode:\"replace_range\". Pair with end_line (absolute) OR line_count (count) — not both.")),
 		mcp.WithNumber("end_line", mcp.Description("Last line of the range — an ABSOLUTE line number, not a count of lines. Used by mode:\"delete_range\" and mode:\"replace_range\". If you know how many lines instead of where they end, use line_count with start_line and omit end_line.")),
@@ -858,7 +863,8 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("pattern", mcp.Description("Regex or literal pattern. In search_replace mode: literal pattern, all occurrences. In regex mode: regex pattern (synthesized into a single-pattern transformation if patterns_json is not provided).")),
 		mcp.WithString("replacement", mcp.Description("Replacement text. Used in search_replace mode, and in regex mode when pattern is provided without patterns_json.")),
 		// regex mode params
-		mcp.WithString("patterns_json", mcp.Description("JSON array of patterns for regex mode: [{\"pattern\": \"regex\", \"replacement\": \"$1...\", \"limit\": -1}]. Optional: if omitted in regex mode, pattern + replacement (or new_text) are used as a single transformation.")),
+		mcp.WithArray("patterns", mcp.Description("Native array of regex patterns: [{\"pattern\":\"regex\",\"replacement\":\"$1\",\"limit\":-1}]. Legacy adapter: patterns_json.")),
+		mcp.WithString("patterns_json", mcp.Description("JSON array of patterns for regex mode: [{\"pattern\": \"regex\", \"replacement\": \"$1...\", \"limit\": -1}]. Optional: if omitted in regex mode, pattern (with replacement/new_text) or native patterns is used.")),
 		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive matching (default: true, for regex mode)")),
 		mcp.WithBoolean("create_backup", mcp.Description("Create backup before transformation (default: true, for regex mode)")),
 		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Supported in all modes (replace, search_replace, regex, insert, replace_range, delete_range, occurrence). Does not create backups or update the undo chain. Default: false.")),
@@ -869,6 +875,8 @@ func registerCoreTools(reg *toolRegistry) {
 		// Improvement B3 (see log analysis: 6 stale-edit cycles in 12 days).
 		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash from the last read_file (full, range, head/tail and base64 reads all return it). If the file's current hash doesn't match, the edit is rejected so the model can re-read first.")),
 		mcp.WithBoolean("tolerant_whitespace", mcp.Description("Treat tabs and 4-space runs as equivalent (1 tab = 4 spaces) and CRLF/LF as equivalent when matching old_text. Use when the file has mixed indentation (e.g., tabs in some lines, spaces in others). Original file bytes are preserved — only the matching is tolerant. Default: false.")),
+		mcp.WithBoolean("strict", mcp.Description("Opt-in strict matching: no implicit fallbacks (trim/regex/escape). Tolerant match only if tolerant_whitespace:true. Default: false.")),
+		mcp.WithNumber("expected_matches", mcp.Description("If set, old_text must match exactly this many times or the edit is rejected with candidate line numbers.")),
 	)
 	regexTransform := reg.regexTransform
 	reg.editFileHandler = auditWrap(engine, "edit_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -918,7 +926,26 @@ func registerCoreTools(reg *toolRegistry) {
 				newText = nt
 			}
 		}
+		if mode != "" {
+			switch mode {
+			case "replace", "search_replace", "regex", "delete_range", "replace_range", "insert":
+			default:
+				return mcp.NewToolResultError(fmt.Sprintf(`parameter "mode": invalid value %q (valid: replace, search_replace, regex, delete_range, replace_range, insert)`, mode)), nil
+			}
+		}
+		strict := false
+		var expectedMatches *int
+		if args != nil {
+			if s, ok := args["strict"].(bool); ok {
+				strict = s
+			}
+			if em, ok := args["expected_matches"].(float64); ok {
+				n := int(em)
+				expectedMatches = &n
+			}
+		}
 		ctx = core.WithExpectedHash(ctx, expectedHash)
+		ctx = core.WithEditPolicy(ctx, core.EditPolicy{Strict: strict, ExpectedMatches: expectedMatches})
 
 		// ---- MODE: regex ----
 		if mode == "regex" {
@@ -942,10 +969,16 @@ func registerCoreTools(reg *toolRegistry) {
 			normPath := core.NormalizePath(path)
 
 			var patterns []core.TransformPattern
-			if patternsJSON != "" {
-				if err := json.Unmarshal([]byte(patternsJSON), &patterns); err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("Failed to parse patterns JSON: %v", err)), nil
+			var nativePatterns any
+			if args != nil {
+				nativePatterns = args["patterns"]
+			}
+			if nativePatterns != nil || patternsJSON != "" {
+				decoded, err := core.DecodeDual[[]core.TransformPattern](nativePatterns, patternsJSON, "patterns", "patterns_json")
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
 				}
+				patterns = decoded
 			} else if singlePattern != "" {
 				// Synthesize a single-pattern array from pattern + replacement (or new_text)
 				patterns = []core.TransformPattern{{

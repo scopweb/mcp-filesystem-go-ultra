@@ -105,7 +105,6 @@ func TestValidateToolParams_TypeMismatch(t *testing.T) {
 func TestValidateToolParams_ValidParams(t *testing.T) {
 	args := map[string]interface{}{
 		"path":       "/tmp/test.txt",
-		"max_lines":  100.0,
 		"mode":       "head",
 		"start_line": 10.0,
 		"end_line":   20.0,
@@ -190,6 +189,7 @@ func TestValidateToolParams_AllToolsRegistered(t *testing.T) {
 		"batch_operations", "backup", "analyze_operation", "wsl", "server_info",
 		"get_file_info", "git", "search", "edit", "write", "help",
 		"list_allowed_directories", "directory_tree", "diff_files", "apply_patch",
+		"minify_js", "project_replace",
 	}
 	for _, tool := range expected {
 		if _, ok := toolSchemas[tool]; !ok {

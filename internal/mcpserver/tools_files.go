@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -57,7 +56,7 @@ func registerFileTools(reg *toolRegistry) {
 			"Default: soft-delete (to trash folder), permanent:true for hard delete. "+
 			"Batch: pass paths (JSON array) to delete multiple files in one call. Related: copy_file, move_file, edit_file, backup."),
 		mcp.WithString("path", mcp.Description("Path to the file or directory to delete. Required unless paths is provided.")),
-		mcp.WithString("paths", mcp.Description("JSON array of paths to delete multiple files in one call, e.g. '[\"a.txt\",\"b.txt\"]'")),
+		mcp.WithArray("paths", mcp.WithStringItems(), mcp.Description("Native array of paths, or a JSON array string (legacy adapter). e.g. [\"a.txt\",\"b.txt\"]")),
 		mcp.WithBoolean("permanent", mcp.Description("Permanently delete instead of soft-delete (default: false)")),
 	)
 	reg.addTool(deleteFileTool, auditWrap(engine, "delete_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -70,10 +69,10 @@ func registerFileTools(reg *toolRegistry) {
 
 		// Batch mode: delete multiple files in one call
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
-			if pathsJSON, ok := args["paths"].(string); ok && pathsJSON != "" {
-				var paths []string
-				if err := json.Unmarshal([]byte(pathsJSON), &paths); err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("Invalid paths JSON: %v", err)), nil
+			if v, ok := args["paths"]; ok && v != nil {
+				paths, err := core.DecodePaths(v)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
 				}
 				if len(paths) == 0 {
 					return mcp.NewToolResultError("paths array is empty"), nil
@@ -231,15 +230,15 @@ func registerFileTools(reg *toolRegistry) {
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("path", mcp.Description("Path to the file or directory. Required unless paths is provided.")),
-		mcp.WithString("paths", mcp.Description("JSON array of paths for batch file info, e.g. '[\"file1.txt\",\"dir/\"]'")),
+		mcp.WithArray("paths", mcp.WithStringItems(), mcp.Description("Native array of paths, or a JSON array string (legacy adapter). e.g. [\"file1.txt\",\"dir/\"]")),
 	)
 	reg.addTool(fileInfoTool, auditWrap(engine, "get_file_info", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Batch mode: get info for multiple files in one call
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
-			if pathsJSON, ok := args["paths"].(string); ok && pathsJSON != "" {
-				var paths []string
-				if err := json.Unmarshal([]byte(pathsJSON), &paths); err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("Invalid paths JSON: %v", err)), nil
+			if v, ok := args["paths"]; ok && v != nil {
+				paths, err := core.DecodePaths(v)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
 				}
 				if len(paths) == 0 {
 					return mcp.NewToolResultError("paths array is empty"), nil

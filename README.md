@@ -20,6 +20,9 @@ Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool 
 - **Access control** — fail-closed: at least one `--allowed-paths` / positional root is required (also enforced in batch operations). `--insecure-open` is labs-only.
 - **Plan mode** — dry-run analysis with diff preview and risk report before applying changes
 - **Structured output** — `outputSchema` + `structuredContent` on the 4 I/O core tools, with a handler-level conformance sweep enforced in CI
+- **Native tool inputs** — arrays/objects for `paths`, `edits`, `patterns`, `request`/`pipeline`/`rename`; legacy `*_json` strings stay as adapters. Conflicting dual forms and invalid enums are rejected
+- **Optional strict match** — `strict` + `expected_matches` on `edit_file`/`multi_edit`; mismatch lists candidate line numbers and `match_method`
+- **Unified tool contract** — one `ToolContract` drives validation, `help(tool:)` examples, and `--readonly` mutation gating
 
 ### Productivity
 
@@ -27,7 +30,7 @@ Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool 
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
 - **Hook system** — 16 pre/post events (write, edit, delete, create, move, copy, read, search)
 - **Pipeline system** — 12 actions with conditions, templates, and DAG-based parallel execution; reduces client/server round-trips for multi-step refactors
-- **Atomic batch operations** — grouped file operations with rollback on failure
+- **Atomic batch operations** — grouped file operations with journal rollback (`complete`/`partial`/`failed`); recover-on-error in-process, not crash-durable. Opt-in retries: `operation_id` + `retry_contract:"e3-v1"`
 - **Compact mode** — reduced-token responses for high-volume sessions
 - **Log tail without bash** — `read_file(mode:"tail", max_lines:40)` replaces `tail | cut`; each line auto-cut to 300 chars (`max_line_length` to override)
 - **Audit logging** — JSON Lines operation log + metrics snapshots
@@ -60,7 +63,7 @@ Requires Go 1.27.1+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
 
 ```bash
 # Run tests
-go test ./tests/... ./core/...
+go test ./tests/... ./core/... ./internal/mcpserver/
 
 # With race detector
 go test -race ./...
@@ -248,10 +251,10 @@ For a host project, bind the whole task to the filesystem-ultra family. After ev
 
 | Tool | Description |
 |------|-------------|
-| `read_file` | Read full file, line range (`start_line`/`end_line`), head/tail (`max_lines`+`mode`), or base64. Logs: `mode:"tail"` `max_lines:40` auto-cuts each line to 300 chars (`max_line_length`; `0` disables). Replaces bash `cat`/`head`/`tail`/`cut`. |
-| `write_file` | Create or overwrite a file. Supports text (`content`) and binary (`encoding:"base64"`) |
-| `edit_file` | Find-and-replace with backup and risk assessment. Modes: exact match (default), `search_replace` (all occurrences), `regex` (capture groups), `occurrence:N` (Nth match) |
-| `multi_edit` | Multiple find-and-replace operations on the same file in one call via `edits_json`. v4.5.25+: `diff_format` (auto\|full\|summary\|stat\|none) for the aggregate batch diff |
+| `read_file` | Read full file, line range (`start_line`/`end_line` or `start_line`+`max_lines`), head/tail, or base64. Batch: native `paths` array (JSON string still accepted). Logs: `mode:"tail"` `max_lines:40`. Replaces bash `cat`/`head`/`tail`/`cut`. |
+| `write_file` | Create or overwrite a file. Supports text (`content`) and binary (`encoding:"base64"`). `mode:"append"` concatenates without rewrite-guard |
+| `edit_file` | Find-and-replace with backup and risk assessment. Modes: exact match (default), `search_replace`, `regex`, `delete_range`/`replace_range`, `insert`. Opt-in `strict` / `expected_matches`; `match_method` in the structured result |
+| `multi_edit` | Multiple replacements on one file. Native `edits` array (legacy `edits_json`). `diff_format`, `strict`, `expected_matches` |
 | `project_replace` | Rename a token across all files in a directory tree (regex or literal) |
 
 ### Search and inspection (4)
@@ -260,7 +263,7 @@ For a host project, bind the whole task to the filesystem-ultra family. After ev
 |------|-------------|
 | `list_directory` | Directory listing with cache |
 | `search_files` | Search by pattern with optional `file_types`, `include_content`, `include_context`, `case_sensitive`, `count_only` |
-| `get_file_info` | Size, permissions, timestamps, type |
+| `get_file_info` | Size, permissions, timestamps, type. Batch: native `paths` array |
 | `analyze_operation` | Dry-run preview via `operation`: file, edit, delete, write, optimize, compare |
 
 ### File operations (4)
@@ -269,25 +272,25 @@ For a host project, bind the whole task to the filesystem-ultra family. After ev
 |------|-------------|
 | `move_file` | Move or rename file/directory |
 | `copy_file` | Recursive copy preserving permissions |
-| `delete_file` | Soft-delete (default) or permanent (`permanent: true`) |
+| `delete_file` | Soft-delete (default) or permanent (`permanent: true`). Batch: native `paths` array |
 | `create_directory` | Create directory tree (`mkdir -p`) |
 
 ### Batch and recovery (2)
 
 | Tool | Description |
 |------|-------------|
-| `batch_operations` | Atomic batch ops (`request_json`), multi-step pipelines (`pipeline_json`), or batch rename (`rename_json`) — with rollback on failure |
-| `backup` | Manage backups via `action`: list, info, compare, cleanup, restore |
+| `batch_operations` | Native `request` / `pipeline` / `rename` objects (legacy `*_json`). Atomic journal rollback; opt-in `operation_id` + `retry_contract:"e3-v1"` |
+| `backup` | `action`: list, info, compare, cleanup, restore, undo_last, undo_chain, list_trash, restore_trash, purge_trash |
 
 ### Platform and utilities (5)
 
 | Tool | Description |
 |------|-------------|
 | `wsl` | WSL ↔ Windows sync and status. Params: `wsl_path`/`windows_path` + `direction`, or `action:"status"` |
-| `git` | Git operations: `init`, `status`, `diff`, `log`, `show`, `add`, `commit`, `restore`, `branch`. Native-array `paths[]`, `output` enum, `rev` for revisions |
+| `git` | Git operations: `init`, `status`, `diff`, `log`, `show`, `add`, `commit`, `push`, `fetch`, `restore`, `branch`. Native-array `paths[]`, `output` enum, `rev` |
 | `minify_js` | Pure-Go JS minification (no Node dependency) |
 | `server_info` | Server diagnostics via `action`: stats, help, artifact |
-| `help` | Returns the full 20-tool catalog with keywords for lazy discovery |
+| `help` | Catalog of all 24 tools; `help(tool:"X")` returns schema + curated examples |
 
 ---
 
@@ -445,7 +448,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest unreleased: v4.6.0 — fail-closed without `--allowed-paths`).
+See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest unreleased: v4.6.0 — fail-closed sandbox, E1–E4 agent reliability).
 
 ---
 

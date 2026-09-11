@@ -47,6 +47,7 @@ var editFileOutputSchema = json.RawMessage(`{
     "structure_warning": {"type": "string", "description": "Delimiter/balance warning introduced by this edit"},
     "integrity": {"type": "string", "description": "Post-edit integrity verification result (HIGH/CRITICAL ops)"},
     "external_change": {"type": "string", "description": "Auto-OCC notice: file changed on disk since last session read/write"},
+    "match_method": {"type": "string", "description": "How old_text was matched: exact, tolerant_whitespace, fallback, regex, occurrence, search_replace, range, insert"},
     "message": {"type": "string", "description": "Human-readable summary incl. diff, identical to the text content block"}
   },
   "required": ["path", "replacements", "lines_added", "lines_removed", "total_lines", "message"]

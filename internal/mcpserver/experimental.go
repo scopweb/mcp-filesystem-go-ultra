@@ -36,6 +36,9 @@ import (
 var experimentalFeatures = map[string]string{
 	"batch_operations:e3-v1":   "4.6.0",
 	"pipeline:e3-v1":           "4.6.0",
+	"multi_edit:edits":         "4.6.0",
+	"batch_operations:native":  "4.6.0",
+	"edit_file:strict":         "4.6.0",
 	"list_allowed_directories": "4.6.0",
 	"directory_tree":           "4.6.0",
 	"diff_files":               "4.6.0",

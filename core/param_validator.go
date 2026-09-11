@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 )
@@ -14,6 +15,8 @@ const (
 	ParamNumber           // JSON numbers arrive as float64
 	ParamBoolean
 	ParamArray
+	ParamObject
+	ParamStringOrArray // E4: native array or legacy JSON-array string
 )
 
 func (t ParamType) String() string {
@@ -26,6 +29,10 @@ func (t ParamType) String() string {
 		return "boolean"
 	case ParamArray:
 		return "array"
+	case ParamObject:
+		return "object"
+	case ParamStringOrArray:
+		return "array or JSON string"
 	default:
 		return "unknown"
 	}
@@ -45,21 +52,21 @@ type ToolParamSchema map[string]ParamDef
 var toolSchemas = map[string]ToolParamSchema{
 	// ---- CORE (5) ----
 	"read_file": {
-		"path":            {ParamString, true},
-		"paths":           {ParamString, false}, // batch: JSON array of paths
-		"max_lines":       {ParamNumber, false},
-		"max_line_length": {ParamNumber, false}, // cut -c: chars per line (head/tail default 300)
-		"mode":            {ParamString, false},
-		"start_line":      {ParamNumber, false},
-		"end_line":        {ParamNumber, false},
-		"encoding":        {ParamString, false},
+		"path":            {Type: ParamString, Required: true},
+		"paths":           {Type: ParamStringOrArray},
+		"max_lines":       {Type: ParamNumber},
+		"max_line_length": {Type: ParamNumber},
+		"mode":            {Type: ParamString},
+		"start_line":      {Type: ParamNumber},
+		"end_line":        {Type: ParamNumber},
+		"encoding":        {Type: ParamString},
 	},
 	"write_file": {
-		"path":           {ParamString, true},
-		"content":        {ParamString, false},
-		"content_base64": {ParamString, false},
-		"encoding":       {ParamString, false},
-		"mode":           {ParamString, false},
+		"path":           {Type: ParamString, Required: true},
+		"content":        {Type: ParamString},
+		"content_base64": {Type: ParamString},
+		"encoding":       {Type: ParamString},
+		"mode":           {Type: ParamString},
 	},
 	"diff_files": {
 		"path_a":  {ParamString, false},
@@ -76,30 +83,33 @@ var toolSchemas = map[string]ToolParamSchema{
 		"create_backup": {ParamBoolean, false},
 	},
 	"edit_file": {
-		"path":                {ParamString, true},
-		"old_text":            {ParamString, false},
-		"new_text":            {ParamString, false},
-		"old_str":             {ParamString, false}, // alias → old_text (normalizer)
-		"new_str":             {ParamString, false}, // alias → new_text (normalizer)
-		"force":               {ParamBoolean, false},
-		"allow_rewrite":       {ParamBoolean, false}, // point 5: bypass rewrite guard only (not force)
-		"mode":                {ParamString, false},
-		"occurrence":          {ParamNumber, false},
-		"start_line":          {ParamNumber, false}, // point 4: mode delete_range/replace_range
-		"end_line":            {ParamNumber, false}, // point 4: mode delete_range/replace_range
-		"line_count":          {ParamNumber, false}, // alt to end_line: start_line + line_count, mode delete_range/replace_range
-		"pattern":             {ParamString, false},
-		"replacement":         {ParamString, false},
-		"patterns_json":       {ParamString, false},
-		"case_sensitive":      {ParamBoolean, false},
-		"create_backup":       {ParamBoolean, false},
-		"dry_run":             {ParamBoolean, false},
-		"diff_format":         {ParamString, false}, // point 1: ""/auto|full|summary|stat|none
-		"whole_word":          {ParamBoolean, false},
-		"expected_hash":       {ParamString, false},  // B3: stale-edit protection
-		"tolerant_whitespace": {ParamBoolean, false}, // treat tabs↔4sp, CRLF↔LF as equivalent
-		"anchor":              {ParamString, false},  // mode insert: anchor text (unique match)
-		"position":            {ParamString, false},  // mode insert: "after" (default) | "before"
+		"path":                {Type: ParamString, Required: true},
+		"old_text":            {Type: ParamString},
+		"new_text":            {Type: ParamString},
+		"old_str":             {Type: ParamString},
+		"new_str":             {Type: ParamString},
+		"force":               {Type: ParamBoolean},
+		"allow_rewrite":       {Type: ParamBoolean},
+		"mode":                {Type: ParamString},
+		"occurrence":          {Type: ParamNumber},
+		"start_line":          {Type: ParamNumber},
+		"end_line":            {Type: ParamNumber},
+		"line_count":          {Type: ParamNumber},
+		"pattern":             {Type: ParamString},
+		"replacement":         {Type: ParamString},
+		"patterns":            {Type: ParamArray},
+		"patterns_json":       {Type: ParamString},
+		"case_sensitive":      {Type: ParamBoolean},
+		"create_backup":       {Type: ParamBoolean},
+		"dry_run":             {Type: ParamBoolean},
+		"diff_format":         {Type: ParamString},
+		"whole_word":          {Type: ParamBoolean},
+		"expected_hash":       {Type: ParamString},
+		"tolerant_whitespace": {Type: ParamBoolean},
+		"anchor":              {Type: ParamString},
+		"position":            {Type: ParamString},
+		"strict":              {Type: ParamBoolean},
+		"expected_matches":    {Type: ParamNumber},
 	},
 	"list_directory": {
 		"path":           {ParamString, true},
@@ -137,13 +147,16 @@ var toolSchemas = map[string]ToolParamSchema{
 
 	// ---- EDIT+ (1) ----
 	"multi_edit": {
-		"path":                {ParamString, true},
-		"edits_json":          {ParamString, true},
-		"force":               {ParamBoolean, false},
-		"tolerant_whitespace": {ParamBoolean, false},
-		"dry_run":             {ParamBoolean, false}, // preview without writing (was read by handler but undeclared)
-		"expected_hash":       {ParamString, false},  // B3: stale-edit protection (parity with edit_file)
-		"diff_format":         {ParamString, false},  // ""/auto|full|summary|stat|none (parity with edit_file)
+		"path":                {Type: ParamString, Required: true},
+		"edits":               {Type: ParamArray},
+		"edits_json":          {Type: ParamString, Required: true},
+		"force":               {Type: ParamBoolean},
+		"tolerant_whitespace": {Type: ParamBoolean},
+		"dry_run":             {Type: ParamBoolean},
+		"expected_hash":       {Type: ParamString},
+		"diff_format":         {Type: ParamString},
+		"strict":              {Type: ParamBoolean},
+		"expected_matches":    {Type: ParamNumber},
 	},
 
 	// ---- FILES (4) ----
@@ -157,7 +170,7 @@ var toolSchemas = map[string]ToolParamSchema{
 	},
 	"delete_file": {
 		"path":      {ParamString, true},
-		"paths":     {ParamString, false}, // batch: JSON array of paths
+		"paths":     {Type: ParamStringOrArray},
 		"permanent": {ParamBoolean, false},
 	},
 	"create_directory": {
@@ -166,15 +179,19 @@ var toolSchemas = map[string]ToolParamSchema{
 
 	// ---- BATCH (1) ----
 	"batch_operations": {
-		"request_json":  {ParamString, false},
-		"pipeline_json": {ParamString, false},
-		"rename_json":   {ParamString, false},
+		"request":       {Type: ParamObject},
+		"request_json":  {Type: ParamString},
+		"pipeline":      {Type: ParamObject},
+		"pipeline_json": {Type: ParamString},
+		"rename":        {Type: ParamObject},
+		"rename_json":   {Type: ParamString},
 	},
 
 	// ---- BACKUP (1) ----
 	"backup": {
 		"action":           {ParamString, false},
 		"backup_id":        {ParamString, false},
+		"sd_id":            {ParamString, false},
 		"file_path":        {ParamString, false},
 		"limit":            {ParamNumber, false},
 		"filter_operation": {ParamString, false},
@@ -221,7 +238,7 @@ var toolSchemas = map[string]ToolParamSchema{
 	// ---- INFO (1) ----
 	"get_file_info": {
 		"path":  {ParamString, true},
-		"paths": {ParamString, false}, // batch: JSON array of paths
+		"paths": {Type: ParamStringOrArray},
 	},
 
 	// ---- VERSION CONTROL (1) ----
@@ -286,8 +303,33 @@ var toolSchemas = map[string]ToolParamSchema{
 	},
 	"help": {
 		"topic": {ParamString, false},
+		"tool":  {ParamString, false},
 	},
 	"list_allowed_directories": {},
+	"minify_js": {
+		"path":                {ParamString, true},
+		"output_path":         {ParamString, false},
+		"remove_comments":     {ParamBoolean, false},
+		"collapse_whitespace": {ParamBoolean, false},
+		"single_line":         {ParamBoolean, false},
+		"create_backup":       {ParamBoolean, false},
+		"dry_run":             {ParamBoolean, false},
+	},
+	"project_replace": {
+		"path":           {ParamString, true},
+		"find":           {ParamString, true},
+		"replace":        {ParamString, true},
+		"literal":        {ParamBoolean, false},
+		"case_sensitive": {ParamBoolean, false},
+		"file_types":     {ParamString, false},
+		"include_paths":  {ParamString, false},
+		"exclude_paths":  {ParamString, false},
+		"preview":        {ParamBoolean, false},
+		"create_backup":  {ParamBoolean, false},
+		"parallel":       {ParamBoolean, false},
+		"max_files":      {ParamNumber, false},
+		"force":          {ParamBoolean, false},
+	},
 }
 
 // benignParams are metadata parameters some clients attach to tool calls
@@ -308,6 +350,20 @@ func ValidateToolParams(toolName string, args map[string]interface{}) []string {
 	}
 
 	var errs []string
+	if c, ok := contracts[toolName]; ok {
+		for _, group := range c.AnyOf {
+			found := false
+			for _, k := range group {
+				if _, ok := args[k]; ok {
+					found = true
+					break
+				}
+			}
+			if !found {
+				errs = append(errs, fmt.Sprintf("missing one of %s", strings.Join(group, ", ")))
+			}
+		}
+	}
 
 	// 1. Reject unknown parameters
 	for k := range args {
@@ -335,6 +391,14 @@ func ValidateToolParams(toolName string, args map[string]interface{}) []string {
 						continue
 					}
 				}
+				if name == "edits_json" {
+					if _, hasEdits := args["edits"]; hasEdits {
+						continue
+					}
+				}
+				if c, ok := contracts[toolName]; ok && inAnyOf(name, c.AnyOf) {
+					continue
+				}
 				errs = append(errs, fmt.Sprintf("missing required parameter %q", name))
 			}
 		}
@@ -347,10 +411,19 @@ func ValidateToolParams(toolName string, args map[string]interface{}) []string {
 			continue // already flagged above
 		}
 		if !typeMatches(def.Type, v) {
-			errs = append(errs, fmt.Sprintf("parameter %q: expected %s, got %T", k, def.Type, v))
+			errs = append(errs, fmt.Sprintf("parameter %q: expected %s, got %T — convert the value or use the documented field", k, def.Type, v))
+			continue
+		}
+		if c, ok := contracts[toolName]; ok {
+			if p, ok := c.Params[k]; ok && len(p.Enum) > 0 {
+				if s, ok := v.(string); ok && s != "" && !enumHas(p.Enum, s) {
+					errs = append(errs, fmt.Sprintf("parameter %q: invalid value %q (valid: %s)", k, s, strings.Join(p.Enum, ", ")))
+				}
+			}
 		}
 	}
 
+	errs = append(errs, validateCombinations(toolName, args)...)
 	return errs
 }
 
@@ -379,8 +452,97 @@ func typeMatches(expected ParamType, v interface{}) bool {
 		default:
 			return false
 		}
+	case ParamObject:
+		_, ok := v.(map[string]interface{})
+		return ok
+	case ParamStringOrArray:
+		if _, ok := v.(string); ok {
+			return true
+		}
+		switch v.(type) {
+		case []interface{}, []string:
+			return true
+		default:
+			return false
+		}
 	}
 	return true
+}
+
+func enumHas(enum []string, v string) bool {
+	for _, e := range enum {
+		if e == v {
+			return true
+		}
+	}
+	return false
+}
+
+func validateCombinations(tool string, args map[string]interface{}) []string {
+	var errs []string
+	intField := func(name string, min float64) {
+		v, ok := args[name]
+		if !ok {
+			return
+		}
+		f, ok := v.(float64)
+		if !ok {
+			return
+		}
+		if f != math.Trunc(f) {
+			errs = append(errs, fmt.Sprintf("parameter %q: must be an integer, got %v", name, f))
+			return
+		}
+		if f < min {
+			errs = append(errs, fmt.Sprintf("parameter %q: must be >= %g, got %v", name, min, f))
+		}
+	}
+	intField("start_line", 1)
+	intField("end_line", 1)
+	intField("line_count", 1)
+	intField("max_lines", 0)
+	intField("max_line_length", 0)
+	intField("expected_matches", 1)
+	intField("max_depth", 0)
+	intField("max_nodes", 1)
+	intField("context_lines", 0)
+	intField("max_results", 1)
+	if _, hasEnd := args["end_line"]; hasEnd {
+		if _, hasCount := args["max_lines"]; hasCount && tool == "read_file" {
+			errs = append(errs, `incompatible parameters "end_line" and "max_lines": use end_line (absolute) OR start_line+max_lines (count), not both`)
+		}
+		if _, hasCount := args["line_count"]; hasCount && tool == "edit_file" {
+			errs = append(errs, `incompatible parameters "end_line" and "line_count": use one`)
+		}
+	}
+	if tool == "batch_operations" {
+		families := 0
+		if hasAny(args, "request", "request_json") {
+			families++
+		}
+		if hasAny(args, "pipeline", "pipeline_json") {
+			families++
+		}
+		if hasAny(args, "rename", "rename_json") {
+			families++
+		}
+		if families > 1 {
+			errs = append(errs, `incompatible batch payload: provide only one of request/request_json, pipeline/pipeline_json, or rename/rename_json`)
+		}
+	}
+	return errs
+}
+
+func hasAny(args map[string]interface{}, keys ...string) bool {
+	for _, k := range keys {
+		if v, ok := args[k]; ok && v != nil {
+			if s, isStr := v.(string); isStr && s == "" {
+				continue
+			}
+			return true
+		}
+	}
+	return false
 }
 
 // knownParamNames returns a sorted, comma-separated list of valid parameter names.
