@@ -16,6 +16,7 @@ func registerPatchTools(reg *toolRegistry) {
 
 	diffTool := mcp.NewTool("diff_files",
 		mcp.WithTitleAnnotation("Diff Files"),
+		mcp.WithRawOutputSchema(diffFilesOutputSchema),
 		mcp.WithDescription("diff_files — Unified diff between two paths, or a file vs its last backup (against:\"backup\"). Related: apply_patch, backup, edit_file."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -54,7 +55,9 @@ func registerPatchTools(reg *toolRegistry) {
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			return mcp.NewToolResultText(cmp), nil
+			return mcp.NewToolResultStructured(map[string]any{
+				"status": statusOK, "path_a": pathA, "against": "backup", "message": cmp,
+			}, cmp), nil
 		}
 		if pathB == "" {
 			return mcp.NewToolResultError("path_b is required unless against=backup"), nil
@@ -73,15 +76,24 @@ func registerPatchTools(reg *toolRegistry) {
 		}
 		a, b := string(contentA), string(contentB)
 		if a == b {
-			return mcp.NewToolResultText(fmt.Sprintf("identical: %s %s", pathA, pathB)), nil
+			msg := fmt.Sprintf("identical: %s %s", pathA, pathB)
+			return mcp.NewToolResultStructured(map[string]any{
+				"status": "identical", "path_a": pathA, "path_b": pathB, "identical": true,
+				"added": 0, "removed": 0, "message": msg,
+			}, msg), nil
 		}
 		added, removed, _ := core.DiffCounts(a, b)
 		diff := core.UnifiedDiff(a, b, filepath.Base(nameB))
-		return mcp.NewToolResultText(fmt.Sprintf("%s\n+%d -%d", strings.TrimSpace(diff), added, removed)), nil
+		msg := fmt.Sprintf("%s\n+%d -%d", strings.TrimSpace(diff), added, removed)
+		return mcp.NewToolResultStructured(map[string]any{
+			"status": statusOK, "path_a": pathA, "path_b": pathB, "identical": false,
+			"added": added, "removed": removed, "message": msg,
+		}, msg), nil
 	}))
 
 	patchTool := mcp.NewTool("apply_patch",
 		mcp.WithTitleAnnotation("Apply Patch"),
+		mcp.WithRawOutputSchema(applyPatchOutputSchema),
 		mcp.WithDescription("apply_patch — Apply a unified diff to one file. dry_run previews. expected_hash for OCC. Fail-closed: no fuzzy match, one file per call. Related: diff_files, edit_file, backup."),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
@@ -186,7 +198,11 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 		added, removed, _ := core.DiffCounts(string(oldRaw), newContent)
 		preview := core.RenderDiff(string(oldRaw), newContent, filepath.Base(path), "stat")
 		if dryRun {
-			return mcp.NewToolResultText(fmt.Sprintf("DRY_RUN %s | %s | +%d -%d", path, preview, added, removed)), nil
+			msg := fmt.Sprintf("DRY_RUN %s | %s | +%d -%d", path, preview, added, removed)
+			sc := markSimulated(map[string]any{
+				"path": path, "lines_added": added, "lines_removed": removed, "message": msg,
+			}, actualHash, contentHashBytes([]byte(newContent)))
+			return mcp.NewToolResultStructured(sc, msg), nil
 		}
 
 		var backupID string
@@ -205,6 +221,15 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 		if backupID != "" {
 			msg += " | UNDO:" + backupID
 		}
-		return mcp.NewToolResultText(msg), nil
+		sc := markApplied(map[string]any{
+			"path": path, "lines_added": added, "lines_removed": removed, "message": msg,
+		})
+		if hash != "" {
+			sc["content_hash"] = hash
+		}
+		if backupID != "" {
+			sc["backup_id"] = backupID
+		}
+		return mcp.NewToolResultStructured(sc, msg), nil
 	}
 }

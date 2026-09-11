@@ -352,7 +352,7 @@ Tareas reproducibles:
 - [x] Actualizar README, skill, USAGE y help() con payloads estructurados + error envelopes
 - [x] Resolver contradicciones (skill decía 20 tools; ahora 24)
 - [x] Respetar `experimental.go` (correcciones OK en patch; ampliaciones de 17 core → versión)
-- [ ] Graduar experimentales en **v4.6.1** (list_allowed_directories, directory_tree, diff_files, apply_patch, e3-v1). No en 4.6.0: `since == serverVersion`.
+- [x] Graduar experimentales en **v4.6.1** (list_allowed_directories, directory_tree, diff_files, apply_patch, e3-v1).
 
 ### Evaluación con IA
 - [x] Tareas reproducibles en `TestE2E_E6_AgentEval`:

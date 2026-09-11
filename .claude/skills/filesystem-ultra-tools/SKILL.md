@@ -1,9 +1,9 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.6.0: 24 tools (17 core + git + minify_js + help + list_allowed_directories + directory_tree + diff_files + apply_patch). Host-filesystem binding, post-write verification, aliases disabled. read_file replaces bash cat/head/tail/cut. Call list_allowed_directories before the first read.
+description: Tool catalog for filesystem-ultra MCP server v4.6.1: 24 tools (17 core + git + minify_js + help + list_allowed_directories + directory_tree + diff_files + apply_patch). Host-filesystem binding, post-write verification, aliases disabled. read_file replaces bash cat/head/tail/cut. Call list_allowed_directories before the first read.
 ---
 
-# Filesystem Ultra v4.6.0 — Tool Discovery
+# Filesystem Ultra v4.6.1 — Tool Discovery
 
 ## Bind each project to one filesystem tool family
 
@@ -17,12 +17,12 @@ description: Tool catalog for filesystem-ultra MCP server v4.6.0: 24 tools (17 c
 
 | Tool | Purpose |
 |------|---------|
-| `list_allowed_directories` | Sandbox roots. Call before the first read. Zero parameters. [EXPERIMENTAL] |
-| `directory_tree` | Compact recursive tree. Alias of `list_directory` with `output_format:tree`. Respects `.gitignore`. [EXPERIMENTAL] |
+| `list_allowed_directories` | Sandbox roots. Call before the first read. Zero parameters. |
+| `directory_tree` | Compact recursive tree. Alias of `list_directory` with `output_format:tree`. Respects `.gitignore`. |
 | `read_file` | Read files (single or batch via `paths`). **Replaces bash `cat`/`head`/`tail`/`cut`/`sed -n` — never use the shell.** Logs: `mode:"tail"` `max_lines:40` (each line auto-cut to 300 chars; `max_line_length:0` disables, N overrides). Range: `start_line`/`end_line`. Binary: `encoding:"base64"`. |
 | `write_file` | Write/create files (binary via base64). `mode:"append"` concatenates without rewrite-guard. |
-| `diff_files` | Unified diff of two paths, or `against:"backup"` vs last session backup. [EXPERIMENTAL] |
-| `apply_patch` | One-file unified diff. `dry_run`, `expected_hash` OCC, rewrite-guard, backup. [EXPERIMENTAL] |
+| `diff_files` | Unified diff of two paths, or `against:"backup"` vs last session backup. |
+| `apply_patch` | One-file unified diff. `dry_run`, `expected_hash` OCC, rewrite-guard, backup. |
 | `edit_file` | Replace exact text, regex, nth occurrence. Override the rewrite guard with `allow_rewrite:true` (not `force`). |
 | `multi_edit` | Multiple edits in one file. **Ambiguity guard (v4.5.29):** any `old_text` matching >1 times in the original file rejects the whole batch and rolls it back. |
 | `project_replace` | Project-wide find/replace in one call. `create_backup:true` snapshots files **before** the writes so `backup(action:"restore")` rolls back the operation. |

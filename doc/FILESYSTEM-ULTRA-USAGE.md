@@ -1,8 +1,8 @@
 # Guía mínima para IAs — filesystem-ultra
 
-Guía de uso operativo del conector MCP **filesystem-ultra v4.6.0**.
+Guía de uso operativo del conector MCP **filesystem-ultra v4.6.1**.
 
-Expone **24 herramientas**: 17 core + `git` + `minify_js` + `help` + `list_allowed_directories` + `directory_tree` + `diff_files` + `apply_patch`. Los aliases antiguos y el super-tool `fs` están deshabilitados. `directory_tree` sí está registrado (experimental).
+Expone **24 herramientas**: 17 core + `git` + `minify_js` + `help` + `list_allowed_directories` + `directory_tree` + `diff_files` + `apply_patch`. Los aliases antiguos y el super-tool `fs` están deshabilitados. `directory_tree` está registrado y es estable.
 
 ## Reglas obligatorias
 

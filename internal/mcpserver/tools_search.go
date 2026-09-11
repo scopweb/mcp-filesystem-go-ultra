@@ -111,6 +111,7 @@ func registerSearchTools(reg *toolRegistry) {
 
 	dirTreeTool := mcp.NewTool("directory_tree",
 		mcp.WithTitleAnnotation("Directory Tree"),
+		mcp.WithRawOutputSchema(listDirectoryOutputSchema),
 		mcp.WithDescription("directory_tree — Recursive compact tree of a directory. Alias of list_directory with output_format=tree. Respects .gitignore. Related: list_directory, search_files, read_file."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -295,7 +296,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithDescription("analyze_operation — Dry-run preview before executing. Operations: file, optimize, write, edit, delete. "+
 			"Related: edit_file, multi_edit, search_files, batch_operations, backup."),
-		mcp.WithString("operation", mcp.Required(), mcp.Description("Operation to analyze: file, optimize, write, edit, delete")),
+		mcp.WithString("operation", mcp.Required(), mcp.Description("Operation to analyze: file, optimize, write, edit, delete"), mcp.Enum("file", "optimize", "write", "edit", "delete")),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the file")),
 		mcp.WithString("content", mcp.Description("Content for write analysis")),
 		mcp.WithString("old_text", mcp.Description("Text to be replaced (for edit analysis)")),

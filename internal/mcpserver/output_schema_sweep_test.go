@@ -81,6 +81,8 @@ func TestOutputSchema_HandlerSweep(t *testing.T) {
 	reg := buildEditRegistry(t, dir, false)
 	registerBatchTools(reg)
 	registerSearchTools(reg)
+	registerDiscoveryTools(reg)
+	registerPatchTools(reg)
 
 	readSchema := parseSchema(t, readFileOutputSchema)
 	writeSchema := parseSchema(t, writeFileOutputSchema)
@@ -90,6 +92,9 @@ func TestOutputSchema_HandlerSweep(t *testing.T) {
 	listSchema := parseSchema(t, listDirectoryOutputSchema)
 	batchSchema := parseSchema(t, batchOperationsOutputSchema)
 	backupSchema := parseSchema(t, backupOutputSchema)
+	allowedSchema := parseSchema(t, listAllowedDirectoriesOutputSchema)
+	diffSchema := parseSchema(t, diffFilesOutputSchema)
+	patchSchema := parseSchema(t, applyPatchOutputSchema)
 
 	// freshFile creates a per-case file so edit cases cannot interfere.
 	freshFile := func(name, content string) string {
@@ -170,6 +175,14 @@ func TestOutputSchema_HandlerSweep(t *testing.T) {
 			}}},
 		{name: "backup list", tool: "backup", schema: backupSchema, textMessage: true,
 			args: map[string]any{"action": "list"}},
+		{name: "list allowed", tool: "list_allowed_directories", schema: allowedSchema, textMessage: true,
+			args: map[string]any{}},
+		{name: "directory tree", tool: "directory_tree", schema: listSchema, textMessage: true,
+			args: map[string]any{"path": dir}},
+		{name: "diff files", tool: "diff_files", schema: diffSchema, textMessage: true,
+			args: map[string]any{"path_a": freshFile("d1.txt", sample), "path_b": freshFile("d2.txt", "other\n")}},
+		{name: "apply patch dry_run", tool: "apply_patch", schema: patchSchema, textMessage: true,
+			args: map[string]any{"path": freshFile("p1.txt", "old\n"), "patch": "--- a/p1.txt\n+++ b/p1.txt\n@@ -1 +1 @@\n-old\n+new\n", "dry_run": true}},
 	}
 
 	for _, tc := range cases {

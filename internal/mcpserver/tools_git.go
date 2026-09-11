@@ -24,7 +24,7 @@ func registerGitTools(reg *toolRegistry) {
 		mcp.WithDestructiveHintAnnotation(true), // restore, branch delete
 		mcp.WithIdempotentHintAnnotation(false), // commit, restore, branch delete are not idempotent
 
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, diff, log, show, add, commit, push, fetch, restore, branch, init")),
+		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, diff, log, show, add, commit, push, fetch, restore, branch, init"), mcp.Enum("status", "diff", "log", "show", "add", "commit", "push", "fetch", "restore", "branch", "init")),
 		mcp.WithString("path", mcp.Description("Working directory or file path (default: auto-detect repo root). If a file path, used as implicit pathspec for diff/log/status.")),
 		mcp.WithArray("paths", mcp.WithStringItems(),
 			mcp.Description("Pathspec: native array of file/dir paths relative to repo root. Limits diff/log/status/add/restore to these paths. Equivalent to 'git <cmd> -- <paths>'.")),

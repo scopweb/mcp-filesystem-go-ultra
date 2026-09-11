@@ -372,7 +372,7 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("mode", mcp.Description("all (default) | head | tail. Logs: mode=tail max_lines=40. Replaces bash tail/head."), mcp.Enum("all", "head", "tail")),
 		mcp.WithNumber("start_line", mcp.Description("Starting line number (1-indexed) for range read. Pair with end_line (absolute line number) OR max_lines (line count) — not both.")),
 		mcp.WithNumber("end_line", mcp.Description("Ending line number for range read — an ABSOLUTE line number, not a count of lines. If you know how many lines you want instead of where they end, use max_lines with start_line and omit end_line.")),
-		mcp.WithString("encoding", mcp.Description("Set to \"base64\" to read file as base64-encoded binary")),
+		mcp.WithString("encoding", mcp.Description("Set to \"base64\" to read file as base64-encoded binary"), mcp.Enum("utf-8", "utf8", "base64")),
 	)
 	reg.readFileHandler = auditWrap(engine, "read_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Batch mode: read multiple files in one call
@@ -554,7 +554,7 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path where to write (WSL or Windows format)")),
 		mcp.WithString("content", mcp.Description("Text content to write to the file")),
 		mcp.WithString("content_base64", mcp.Description("Base64-encoded binary content to write")),
-		mcp.WithString("encoding", mcp.Description("Set to \"base64\" when content is base64-encoded")),
+		mcp.WithString("encoding", mcp.Description("Set to \"base64\" when content is base64-encoded"), mcp.Enum("utf-8", "utf8", "base64")),
 		mcp.WithString("mode", mcp.Description("overwrite (default) or append. append does not trigger rewrite-guard."), mcp.Enum("overwrite", "append")),
 	)
 	reg.writeFileHandler = auditWrap(engine, "write_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -810,7 +810,7 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive matching (default: true, for regex mode)")),
 		mcp.WithBoolean("create_backup", mcp.Description("Create backup before transformation (default: true, for regex mode)")),
 		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Supported in all modes (replace, search_replace, regex, insert, replace_range, delete_range, occurrence). Does not create backups or update the undo chain. Default: false.")),
-		mcp.WithString("diff_format", mcp.Description("Controls how the diff is rendered (point 1). \"\"/\"auto\" (default): full diff when small, else a summary with anchors + ranges to save tokens; \"full\": always the complete unified diff; \"summary\": per-hunk ranges + first/last anchor lines, eliding large bodies (ideal for big block deletions); \"stat\": just \"+added -removed\"; \"none\": no diff.")),
+		mcp.WithString("diff_format", mcp.Description("Controls how the diff is rendered (point 1). \"\"/\"auto\" (default): full diff when small, else a summary with anchors + ranges to save tokens; \"full\": always the complete unified diff; \"summary\": per-hunk ranges + first/last anchor lines, eliding large bodies (ideal for big block deletions); \"stat\": just \"+added -removed\"; \"none\": no diff."), mcp.Enum("auto", "full", "summary", "stat", "none")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false, for occurrence mode)")),
 		// Stale-edit protection: hash returned by the prior read_file call. If the
 		// file's actual hash doesn't match, the edit is rejected with a clear error.

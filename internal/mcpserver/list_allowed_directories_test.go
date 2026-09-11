@@ -100,18 +100,18 @@ func TestListAllowedDirectories_RejectsUnknownParams(t *testing.T) {
 	}
 }
 
-func TestListAllowedDirectories_ExperimentalPrefix(t *testing.T) {
+func TestListAllowedDirectories_GraduatedHasSchema(t *testing.T) {
 	reg := newHelpTestRegistry(t, t.TempDir())
 	all := reg.server.ListTools()
 	st, ok := all["list_allowed_directories"]
 	if !ok {
 		t.Fatal("tool not on server")
 	}
-	if !strings.Contains(st.Tool.Description, "[EXPERIMENTAL") {
-		t.Errorf("experimental tool must carry the prefix, got: %q", st.Tool.Description)
+	if strings.Contains(st.Tool.Description, "[EXPERIMENTAL") {
+		t.Errorf("graduated tool must not carry experimental prefix, got: %q", st.Tool.Description)
 	}
-	if st.Tool.RawOutputSchema != nil || st.Tool.OutputSchema.Type != "" {
-		t.Fatal("experimental tool must not declare an outputSchema")
+	if st.Tool.RawOutputSchema == nil && st.Tool.OutputSchema.Type == "" {
+		t.Fatal("graduated tool must declare an outputSchema")
 	}
 }
 

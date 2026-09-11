@@ -1,6 +1,14 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
-## [Unreleased / 4.6.0] - 2026-09-03
+## [4.6.1] - 2026-09-11
+
+### feat: graduate experimental tools, unify wire contract
+
+`list_allowed_directories`, `directory_tree`, `diff_files` and `apply_patch` leave the experimental tier: no `[EXPERIMENTAL]` prefix, each publishes an `outputSchema`, and the handler sweep covers them. Native `edits`/`batch` inputs, `strict` match, and `e3-v1` retries graduate with them. `ToolContract` now carries array `items` (`string`/`object`); tests assert MCP wire types, enums and items match the contract. Remaining work lives in `PLAN-PENDIENTE.md`.
+
+**Verification:** `TestExperimental_EntriesWellFormed` · `TestListAllowedDirectories_GraduatedHasSchema` · `TestE41_ContractMatchesWireSchema` · `TestOutputSchema_HandlerSweep` (allowed/tree/diff/patch).
+
+## [4.6.0] - 2026-09-03
 
 ### fix(reliability): coherent reads, typed search output, native array schemas
 
@@ -4714,6 +4722,6 @@ Estimated speedup for multiple edits:
 
 ---
 
-**Current Version**: 4.6.0
+**Current Version**: 4.6.1
 **Last Updated**: 2026-09-11
 **Status**: Production Ready

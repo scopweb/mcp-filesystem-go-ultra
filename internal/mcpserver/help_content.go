@@ -85,11 +85,11 @@ Use help() for the live catalog generated from the registered MCP tools. This to
 ## Discovery (2)
 
 list_allowed_directories
-- Purpose: Return the sandbox roots. Call before the first read. Zero parameters. [EXPERIMENTAL]
+- Purpose: Return the sandbox roots. Call before the first read. Zero parameters.
 - Key params: (none)
 
 directory_tree
-- Purpose: Compact recursive tree. Alias of list_directory with output_format=tree. Respects .gitignore. [EXPERIMENTAL]
+- Purpose: Compact recursive tree. Alias of list_directory with output_format=tree. Respects .gitignore.
 - Key params: path, max_depth, exclude, respect_ignore, max_nodes
 
 ## Core I/O (6)
@@ -170,11 +170,11 @@ server_info
 ## Patch (2)
 
 diff_files
-- Purpose: Unified diff between two paths, or a file vs its last backup (against=backup). [EXPERIMENTAL]
+- Purpose: Unified diff between two paths, or a file vs its last backup (against=backup).
 - Key params: path_a, path_b, path, against
 
 apply_patch
-- Purpose: Apply a one-file unified diff. dry_run, expected_hash OCC, rewrite-guard, backup. [EXPERIMENTAL]
+- Purpose: Apply a one-file unified diff. dry_run, expected_hash OCC, rewrite-guard, backup.
 - Key params: path, patch, dry_run, expected_hash, allow_rewrite, create_backup
 
 ## Version Control, JavaScript, and Discovery (3)

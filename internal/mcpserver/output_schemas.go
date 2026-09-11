@@ -136,6 +136,49 @@ var batchOperationsOutputSchema = json.RawMessage(`{
   "required": ["status", "success", "message"]
 }`)
 
+var listAllowedDirectoriesOutputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "status": {"type": "string", "description": "ok | empty (insecure-open with no roots listed)"},
+    "paths": {"type": "array", "description": "Sandbox roots this server may read and write", "items": {"type": "string"}},
+    "source": {"type": "string", "description": "How roots were chosen (flags, roots, insecure, ...)"},
+    "insecure_open": {"type": "boolean", "description": "True when the sandbox is disabled"},
+    "message": {"type": "string", "description": "Human-readable listing, identical to the text content block"}
+  },
+  "required": ["status", "paths", "message"]
+}`)
+
+var diffFilesOutputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "status": {"type": "string", "description": "ok | identical"},
+    "path_a": {"type": "string"},
+    "path_b": {"type": "string"},
+    "identical": {"type": "boolean"},
+    "added": {"type": "integer"},
+    "removed": {"type": "integer"},
+    "against": {"type": "string", "description": "Present when comparing against a backup"},
+    "message": {"type": "string", "description": "Unified diff or identical notice, identical to the text content block"}
+  },
+  "required": ["status", "message"]
+}`)
+
+var applyPatchOutputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "status": {"type": "string", "description": "applied or simulated (dry_run)"},
+    "path": {"type": "string"},
+    "lines_added": {"type": "integer"},
+    "lines_removed": {"type": "integer"},
+    "content_hash": {"type": "string", "description": "Post-write OCC hash when applied and verified"},
+    "backup_id": {"type": "string"},
+    "current_hash": {"type": "string", "description": "On-disk hash before a dry_run"},
+    "predicted_hash": {"type": "string", "description": "Hash the file would have after applying the dry_run"},
+    "message": {"type": "string", "description": "Human-readable summary, identical to the text content block"}
+  },
+  "required": ["status", "path", "message"]
+}`)
+
 var backupOutputSchema = json.RawMessage(`{
   "type": "object",
   "properties": {

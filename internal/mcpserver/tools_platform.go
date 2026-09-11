@@ -24,7 +24,7 @@ func registerPlatformTools(reg *toolRegistry) {
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithDescription("wsl — WSL/Windows file sync and path conversion. Actions: sync, status, autosync_config, autosync_status. "+
 			"Related: read_file, edit_file, copy_file, search_files."),
-		mcp.WithString("action", mcp.Description("Action: sync (default), status, autosync_config, autosync_status")),
+		mcp.WithString("action", mcp.Description("Action: sync (default), status, autosync_config, autosync_status"), mcp.Enum("sync", "status", "autosync_config", "autosync_status")),
 		// sync params
 		mcp.WithString("wsl_path", mcp.Description("Source WSL path for sync")),
 		mcp.WithString("windows_path", mcp.Description("Destination or source Windows path for sync")),
@@ -349,7 +349,7 @@ func registerPlatformTools(reg *toolRegistry) {
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithDescription("server_info — Server help, performance stats, and artifact capture. Actions: help, stats, artifact. "+
 			"Related: edit_file, search_files, batch_operations, backup, analyze_operation."),
-		mcp.WithString("action", mcp.Description("Action: help (default), stats, artifact")),
+		mcp.WithString("action", mcp.Description("Action: help (default), stats, artifact"), mcp.Enum("help", "stats", "artifact")),
 		// help params
 		mcp.WithString("topic", mcp.Description("Help topic: overview, workflow, tools, read, write, edit, search, batch, errors, examples, tips, all")),
 		// artifact params

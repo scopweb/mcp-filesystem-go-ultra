@@ -14,11 +14,12 @@ type ParamSpec struct {
 	Type     ParamType
 	Required bool
 	Enum     []string
+	Items    string // array item type: "string" | "object" | ""
 }
 
-// ToolContract is the single source for validation, enums, examples, and
-// action classification. MCP registration in tools_*.go stays as the wire
-// schema; tests assert the registered properties are a subset of Params.
+// ToolContract is the single source for validation, enums, examples, array
+// item shapes, and action classification. MCP registration in tools_*.go is
+// the wire schema; tests assert it matches Params (names, JSON types, enums, items).
 type ToolContract struct {
 	Name     string
 	Class    ActionClass
@@ -116,6 +117,21 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 	setEnum("analyze_operation", "operation", "file", "optimize", "write", "edit", "delete")
 	setEnum("wsl", "action", "sync", "status", "autosync_config", "autosync_status")
 	setEnum("server_info", "action", "help", "stats", "artifact")
+	setItems := func(tool, param, items string) {
+		c := cs[tool]
+		if c == nil {
+			return
+		}
+		p := c.Params[param]
+		p.Items = items
+		c.Params[param] = p
+	}
+	setItems("read_file", "paths", "string")
+	setItems("delete_file", "paths", "string")
+	setItems("get_file_info", "paths", "string")
+	setItems("git", "paths", "string")
+	setItems("multi_edit", "edits", "object")
+	setItems("edit_file", "patterns", "object")
 
 	if c := cs["read_file"]; c != nil {
 		c.AnyOf = [][]string{{"path", "paths"}}
