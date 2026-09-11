@@ -10,7 +10,7 @@ A transparent stdio proxy that sits between an MCP client (Claude Desktop, Claud
 go build -ldflags="-s -w" -trimpath -o mcp-proxy.exe ./cmd/proxy/
 ```
 
-Single file: `cmd/proxy/main.go` (~300 lines, zero external dependencies beyond stdlib).
+Layout: `main.go` (relay + logging), `logical.go` / `reap*.go` (stale-hash cleanup), `job_*.go` (Windows Job Object / Unix process group). `golang.org/x/sys/windows` is used for process snapshots and job objects.
 
 ## Usage
 
@@ -24,6 +24,9 @@ mcp-proxy --model "sonnet-4" --log-dir C:\logs\mcp-proxy -- C:\path\to\filesyste
 |------|----------|-------------|
 | `--model` | No | Model name tag for logs (e.g., `opus-4`, `sonnet-4`) |
 | `--log-dir` | Yes | Directory where `proxy.jsonl` is written |
+| `--call-timeout` | No | Per-call timeout (default 60s). MCP `isError` if the child is silent. |
+| `--timeout` | No | Idle kill of the child while requests are pending (default 0 = off). |
+| `--reap-stale` | No | Kill old-hash / orphaned logical-server processes on start (default true). |
 
 Everything after `--` is the target MCP server command + args. The proxy spawns it as a child process.
 
@@ -139,7 +142,10 @@ The dashboard's **Proxy / Tokens** page reads `proxy.jsonl` and shows:
 ## Key Implementation Details
 
 - **10 MB scanner buffer**: Both stdin and stdout scanners use 10 MB buffers to handle large JSON-RPC messages (e.g., `read_file` responses with big content).
-- **Zero latency impact**: Lines are forwarded immediately before parsing. Logging happens after forwarding.
-- **Thread safety**: `pending` map protected by `sync.Mutex`. Logger has its own mutex.
+- **Zero latency impact on success**: Lines are forwarded immediately before parsing. Logging happens after forwarding.
+- **Per-call timeout**: `--call-timeout` (default 60s) writes an MCP `isError` and swallows a late child reply. No pooling and no per-tool routing.
+- **Stale reap**: on start, terminate other hashes of the same logical server and same-hash orphans (parent dead). Living same-hash children of another proxy are kept (two clients).
+- **Job Object (Windows)**: `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` so the child cannot outlive the proxy.
+- **Thread safety**: `pending` map protected by `sync.Mutex`. Logger has its own mutex. Client stdout writes are serialized.
 - **Graceful shutdown**: Deferred `logger.Close()`. Child process waited via `cmd.Wait()`.
 - **File permissions**: Log file created with `0600`.

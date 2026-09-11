@@ -12,6 +12,16 @@ Opt-in retries: `operation_id` + `retry_contract:"e3-v1"` (process-local, 24h to
 
 **Verification:** `TestE3BatchRollbackRestoresOverwrittenCopy` · `TestE3JournalPreservesLaterWriter` · `TestE3PipelineFailureAndCancellation` · `TestE3PipelinePartialIsFailure` · `TestE3PipelineCopyRecovery` · `TestE3RetryConcurrentMismatchExpiryAndRestart` · `TestE3BatchRetryDoesNotAppendTwice` · `TestE3PipelineRollbackWithoutBackup` · `TestE3BatchRenameStopsAndRestores`.
 
+### fix(proxy): reap stale hashes, Job Object lifetime, per-call timeout
+
+`mcp-proxy` is a 1:1 stdio relay (not a pool). On Windows, exiting the proxy did not kill `filesystem-ultra-*.exe` children, so a redeploy left old-hash processes alive next to the new ones. Those orphans hold IPC path locks; `apply_patch` (and other mutations) then hang while read-only tools still respond.
+
+- Bind the child to a Job Object with `KILL_ON_JOB_CLOSE` (Unix: process group kill on proxy exit).
+- On start, `--reap-stale` (default true) terminates old-hash builds of the same logical server and same-hash orphans whose parent is dead. Same-hash processes with a living parent are kept (two MCP clients, not replicas).
+- `--call-timeout` (default 60s) returns an MCP `isError` if the child does not respond; late replies are swallowed. `0` restores wait-forever.
+
+**Verification:** `go test ./cmd/proxy/` · `TestLogicalServerName` · `TestPidsToReap` · `TestCallTimeout_HangingChild` · `TestCallTimeout_SwallowsLateResponse`. Redeploy checklist in `doc/MCP-PROXY.md`.
+
 ### feat(reliability): E2 — file transaction, path locks, coherent snapshots
 
 Mutations share one pipeline: resolve/authorize → per-path lock (in-process + cooperating processes) → snapshot (bytes+hash) → OCC under the lock → backup of that snapshot → write → cache/OCC update → unlock. Nested ops on a path already held do not re-lock. Waits are cancelable via context.
