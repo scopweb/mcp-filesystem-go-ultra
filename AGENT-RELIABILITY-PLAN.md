@@ -337,3 +337,29 @@ Tareas reproducibles:
 - [ ] 1.3 `--readonly` cubre artifact write + anotaciones MCP
 - [ ] 1.4 `SearchOptions` tipado; filtros llegan a advanced/count; defaults documentados
 - [ ] `go test ./...` y `go test -tags e2e ./tests/e2e/` en verde
+
+## Checklist E6 (CI, docs, evaluación final)
+
+### CI y pruebas
+- [x] Ejecutar `internal/mcpserver` también en Windows (e2e + unit tests en win32)
+- [x] Usar directorios temporales únicos / verificados (t.TempDir + C:\temp en TestE2E_*)
+- [x] Ampliar E2E por stdio para cubrir garantías (no solo presencia): TestE2E_E5_CTemp valida structuredContent, status, truncated, retryable, empty-search, partial batch errors, dry_run hashes
+- [ ] Mantener `go vet`, race detector, suites generales (Linux + Windows)
+- [ ] Añadir un cliente de otro SDK MCP para reducir puntos ciegos del mcp-go
+
+### Documentación y versiones
+- [ ] Generar catálogo, defaults y ejemplos desde el contrato (ToolContract)
+- [ ] Actualizar README, .claude/skills, ayuda online e instrucciones para agentes con payloads estructurados + error envelopes
+- [ ] Resolver contradicciones sobre modos, hashes, backups y número de herramientas
+- [ ] Respetar `experimental.go` (correcciones OK en patch; ampliaciones de 17 core → versión)
+- [ ] Graduar experimentales (list_allowed_directories, directory_tree, diff_files, apply_patch, batch:e3 etc.) una vez sweep + tests cubran; añadir outputSchema tras graduación
+
+### Evaluación con IA
+- [ ] Definir / automatizar tareas reproducibles:
+  - Cambio localizado
+  - Refactor multiarchivo
+  - Recuperación de hash desactualizado (OCC)
+  - Escritor y revisor concurrentes
+  - Reanudación tras respuesta perdida
+  - Búsqueda en repositorio grande
+- [ ] Capturar métricas: éxito de tarea, modificaciones incorrectas, conflictos detectados, reintentos, llamadas, tokens, latencias p50/p95
