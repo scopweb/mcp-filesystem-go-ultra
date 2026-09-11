@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -17,7 +17,6 @@ import (
 	"time"
 )
 
-// JSON-RPC message envelope
 type jsonRPCMessage struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`
@@ -27,13 +26,11 @@ type jsonRPCMessage struct {
 	Error   json.RawMessage `json:"error,omitempty"`
 }
 
-// CallToolParams for extracting tool name and args
 type callToolParams struct {
 	Name      string         `json:"name"`
 	Arguments map[string]any `json:"arguments,omitempty"`
 }
 
-// initializeParams for extracting clientInfo from the MCP handshake
 type initializeParams struct {
 	ClientInfo struct {
 		Name    string `json:"name"`
@@ -41,11 +38,10 @@ type initializeParams struct {
 	} `json:"clientInfo"`
 }
 
-// ProxyLogEntry is what we write to the JSONL log
 type ProxyLogEntry struct {
 	Timestamp  time.Time `json:"ts"`
-	Model      string    `json:"model,omitempty"`  // from --model flag (user-specified)
-	Client     string    `json:"client,omitempty"` // from MCP initialize clientInfo (auto-detected)
+	Model      string    `json:"model,omitempty"`
+	Client     string    `json:"client,omitempty"`
 	Tool       string    `json:"tool"`
 	Path       string    `json:"path,omitempty"`
 	BytesIn    int64     `json:"bytes_in"`
@@ -58,21 +54,34 @@ type ProxyLogEntry struct {
 	RequestID  string    `json:"request_id,omitempty"`
 }
 
-// pendingCall tracks an in-flight tool call
 type pendingCall struct {
 	entry ProxyLogEntry
 	start time.Time
+	rawID json.RawMessage
+	timer *time.Timer
+}
+
+type config struct {
+	model       string
+	logDir      string
+	callTimeout time.Duration
+	idleTimeout time.Duration
+	reapStale   bool
+	target      []string
+	childEnv    []string
 }
 
 func main() {
 	model := flag.String("model", "", "Model name to tag in logs (e.g. opus-4, sonnet-4)")
 	logDir := flag.String("log-dir", "", "Directory for proxy logs (required)")
-	timeout := flag.Duration("timeout", 0, "Kill child after this duration of inactivity (0 = no timeout)")
+	timeout := flag.Duration("timeout", 0, "Kill child after this duration of inactivity with pending requests (0 = no idle kill)")
+	callTimeout := flag.Duration("call-timeout", 60*time.Second, "Per tools/call timeout; return an MCP error if the child does not respond (0 = wait forever)")
+	reapStale := flag.Bool("reap-stale", true, "On start, terminate old-hash and orphaned instances of the same logical server")
 	flag.Parse()
 
 	args := flag.Args()
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: mcp-proxy [--model NAME] [--log-dir DIR] [--timeout DURATION] -- <command> [args...]")
+		fmt.Fprintln(os.Stderr, "Usage: mcp-proxy [--model NAME] [--log-dir DIR] [--timeout DURATION] [--call-timeout DURATION] [--reap-stale=false] -- <command> [args...]")
 		fmt.Fprintln(os.Stderr, "  The target MCP server command follows after --")
 		os.Exit(1)
 	}
@@ -82,7 +91,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Strip leading "--" separator if present
 	if args[0] == "--" {
 		args = args[1:]
 	}
@@ -91,56 +99,112 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize logger
-	logger, err := newProxyLogger(*logDir)
+	os.Exit(runProxy(config{
+		model:       *model,
+		logDir:      *logDir,
+		callTimeout: *callTimeout,
+		idleTimeout: *timeout,
+		reapStale:   *reapStale,
+		target:      args,
+	}, os.Stdin, os.Stdout, os.Stderr))
+}
+
+func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Writer) int {
+	log.SetOutput(errOut)
+	log.Printf("mcp-proxy: model=%q log-dir=%q call-timeout=%v idle-timeout=%v reap-stale=%v target=%v",
+		cfg.model, cfg.logDir, cfg.callTimeout, cfg.idleTimeout, cfg.reapStale, cfg.target)
+
+	if cfg.reapStale && len(cfg.target) > 0 {
+		reapStaleChildren(cfg.target[0])
+	}
+
+	logger, err := newProxyLogger(cfg.logDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to init logger: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(errOut, "Failed to init logger: %v\n", err)
+		return 1
 	}
 	defer logger.Close()
 
-	log.SetOutput(os.Stderr)
-	log.Printf("mcp-proxy: model=%q log-dir=%q timeout=%v target=%v", *model, *logDir, *timeout, args)
-
-	// Start child process
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stderr = os.Stderr
-
-	childStdin, err := cmd.StdinPipe()
+	cmd, childStdin, childStdout, cleanup, err := startChild(cfg.target, errOut, cfg.childEnv)
 	if err != nil {
-		log.Fatalf("Failed to get child stdin: %v", err)
+		fmt.Fprintf(errOut, "Failed to start child: %v\n", err)
+		return 1
 	}
-	childStdout, err := cmd.StdoutPipe()
-	if err != nil {
-		log.Fatalf("Failed to get child stdout: %v", err)
-	}
+	defer cleanup()
 
-	if err := cmd.Start(); err != nil {
-		log.Fatalf("Failed to start child: %v", err)
-	}
-
-	// Track pending requests: id -> pendingCall
 	var mu sync.Mutex
 	pending := map[string]*pendingCall{}
-	detectedClient := "" // auto-populated from MCP initialize clientInfo
-
-	// Channel to signal shutdown
+	timedOutIDs := map[string]struct{}{}
+	detectedClient := ""
 	done := make(chan struct{})
+	var closeDone sync.Once
+	shut := func() { closeDone.Do(func() { close(done) }) }
 
-	// Handle shutdown signals: graceful shutdown of child
+	var outMu sync.Mutex
+	writeClient := func(line []byte) {
+		outMu.Lock()
+		defer outMu.Unlock()
+		_, _ = clientOut.Write(line)
+		_, _ = clientOut.Write([]byte("\n"))
+	}
+
+	failPending := func(status, msg string) {
+		mu.Lock()
+		left := make([]*pendingCall, 0, len(pending))
+		for id, pc := range pending {
+			if pc.timer != nil {
+				pc.timer.Stop()
+			}
+			delete(pending, id)
+			left = append(left, pc)
+		}
+		mu.Unlock()
+		for _, pc := range left {
+			pc.entry.DurationMs = time.Since(pc.start).Milliseconds()
+			pc.entry.Status = status
+			pc.entry.Error = msg
+			logger.Log(pc.entry)
+			writeClient(toolErrorReply(pc.rawID, msg))
+		}
+	}
+
+	onCallTimeout := func(reqID string) {
+		mu.Lock()
+		pc, ok := pending[reqID]
+		if ok {
+			delete(pending, reqID)
+			timedOutIDs[reqID] = struct{}{}
+		}
+		mu.Unlock()
+		if !ok {
+			return
+		}
+		msg := fmt.Sprintf("proxy: %s timed out after %s (child did not respond)", pc.entry.Tool, cfg.callTimeout)
+		log.Printf("mcp-proxy: %s", msg)
+		pc.entry.DurationMs = time.Since(pc.start).Milliseconds()
+		pc.entry.Status = "timeout"
+		pc.entry.Error = msg
+		logger.Log(pc.entry)
+		writeClient(toolErrorReply(pc.rawID, msg))
+	}
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
-		<-sigChan
-		log.Printf("mcp-proxy: received signal, shutting down child")
-		cmd.Process.Kill()
-		close(done)
+		select {
+		case <-sigChan:
+			log.Printf("mcp-proxy: received signal, shutting down child")
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			shut()
+		case <-done:
+		}
 	}()
 
-	// Goroutine: relay Claude -> child (stdin), intercept requests
 	go func() {
-		scanner := bufio.NewScanner(os.Stdin)
-		scanner.Buffer(make([]byte, 10*1024*1024), 10*1024*1024) // 10MB buffer
+		scanner := bufio.NewScanner(clientIn)
+		scanner.Buffer(make([]byte, 10*1024*1024), 10*1024*1024)
 		for scanner.Scan() {
 			select {
 			case <-done:
@@ -149,11 +213,17 @@ func main() {
 			}
 
 			line := scanner.Bytes()
-			// Write to child immediately
-			childStdin.Write(line)
-			childStdin.Write([]byte("\n"))
+			if _, err := childStdin.Write(line); err != nil {
+				log.Printf("mcp-proxy: child stdin write: %v", err)
+				shut()
+				return
+			}
+			if _, err := childStdin.Write([]byte("\n")); err != nil {
+				log.Printf("mcp-proxy: child stdin write: %v", err)
+				shut()
+				return
+			}
 
-			// Try to parse as JSON-RPC
 			var msg jsonRPCMessage
 			if err := json.Unmarshal(line, &msg); err != nil {
 				continue
@@ -161,9 +231,6 @@ func main() {
 
 			switch msg.Method {
 			case "initialize":
-				// Capture clientInfo (e.g. "Claude Desktop/0.9.2") from the MCP handshake.
-				// Note: this identifies the MCP client app, NOT the model — the model is not
-				// transmitted in the MCP protocol and must be set via --model flag.
 				var params initializeParams
 				if err := json.Unmarshal(msg.Params, &params); err == nil && params.ClientInfo.Name != "" {
 					client := params.ClientInfo.Name
@@ -188,38 +255,40 @@ func main() {
 
 					entry := ProxyLogEntry{
 						Timestamp: time.Now(),
-						Model:     *model,
+						Model:     cfg.model,
 						Client:    client,
 						Tool:      params.Name,
 						BytesIn:   int64(len(argsBytes)),
 						TokensIn:  int64(len(argsBytes)) / 4,
 						RequestID: reqID,
 					}
-
-					// Extract path from arguments
 					if p, ok := params.Arguments["path"].(string); ok {
 						entry.Path = p
 					}
 
+					pc := &pendingCall{entry: entry, start: time.Now(), rawID: append(json.RawMessage(nil), msg.ID...)}
 					mu.Lock()
-					pending[reqID] = &pendingCall{entry: entry, start: time.Now()}
+					pending[reqID] = pc
 					mu.Unlock()
+					if cfg.callTimeout > 0 {
+						id := reqID
+						pc.timer = time.AfterFunc(cfg.callTimeout, func() { onCallTimeout(id) })
+					}
 				}
 			}
 		}
 		if err := scanner.Err(); err != nil {
 			log.Printf("mcp-proxy: stdin scanner error: %v", err)
 		}
-		childStdin.Close()
-		close(done)
+		_ = childStdin.Close()
+		shut()
 	}()
 
-	// Main goroutine: relay child -> Claude (stdout), intercept responses
-	// Use a context with timeout for activity monitoring
 	ctx, cancel := context.WithCancel(context.Background())
-	if *timeout > 0 {
+	defer cancel()
+	if cfg.idleTimeout > 0 {
 		go func() {
-			ticker := time.NewTicker(*timeout)
+			ticker := time.NewTicker(cfg.idleTimeout)
 			defer ticker.Stop()
 			for {
 				select {
@@ -228,8 +297,10 @@ func main() {
 					hasPending := len(pending) > 0
 					mu.Unlock()
 					if hasPending {
-						log.Printf("mcp-proxy: timeout reached (%v) with pending requests, killing child", *timeout)
-						cmd.Process.Kill()
+						log.Printf("mcp-proxy: idle timeout reached (%v) with pending requests, killing child", cfg.idleTimeout)
+						if cmd.Process != nil {
+							_ = cmd.Process.Kill()
+						}
 						cancel()
 						return
 					}
@@ -249,22 +320,26 @@ func main() {
 			break
 		}
 		line := scanner.Bytes()
-		// Write to Claude immediately
-		os.Stdout.Write(line)
-		os.Stdout.Write([]byte("\n"))
-
-		// Try to parse as JSON-RPC response
 		var msg jsonRPCMessage
 		if err := json.Unmarshal(line, &msg); err == nil && msg.ID != nil && msg.Method == "" {
 			reqID := extractID(msg.ID)
 
 			mu.Lock()
+			if _, late := timedOutIDs[reqID]; late {
+				delete(timedOutIDs, reqID)
+				mu.Unlock()
+				continue
+			}
 			pc, ok := pending[reqID]
 			if ok {
+				if pc.timer != nil {
+					pc.timer.Stop()
+				}
 				delete(pending, reqID)
 			}
 			mu.Unlock()
 
+			writeClient(line)
 			if ok {
 				pc.entry.DurationMs = time.Since(pc.start).Milliseconds()
 				pc.entry.BytesOut = int64(len(line))
@@ -272,7 +347,6 @@ func main() {
 
 				if len(msg.Error) > 0 && string(msg.Error) != "null" {
 					pc.entry.Status = "error"
-					// Extract error message
 					var errObj struct {
 						Message string `json:"message"`
 					}
@@ -281,16 +355,11 @@ func main() {
 					}
 				} else {
 					pc.entry.Status = "ok"
-					// Check if result contains isError
 					var result struct {
 						IsError bool `json:"isError"`
 					}
 					if json.Unmarshal(msg.Result, &result) == nil && result.IsError {
 						pc.entry.Status = "error"
-						// Extract error text from result.content[0].text
-						// (matches the same extraction done in audit.go:60-64
-						// on the server side). Without this, proxy.jsonl shows
-						// status="error" but leaves the error field empty.
 						var resultFull struct {
 							Content []struct {
 								Type string `json:"type"`
@@ -305,19 +374,49 @@ func main() {
 
 				logger.Log(pc.entry)
 			}
+		} else {
+			writeClient(line)
 		}
 	}
 
-	// Report any scanner errors
 	if err := scanner.Err(); err != nil {
 		log.Printf("mcp-proxy: scanner error: %v", err)
 	}
 
 	cancel()
-	close(done)
+	shut()
+	failPending("error", "proxy: child closed stdout before responding")
 
-	// Wait for child to finish
-	cmd.Wait()
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+	_ = cmd.Wait()
+	return 0
+}
+
+func toolErrorReply(rawID json.RawMessage, msg string) []byte {
+	type content struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	payload := struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Result  struct {
+			IsError bool      `json:"isError"`
+			Content []content `json:"content"`
+		} `json:"result"`
+	}{
+		JSONRPC: "2.0",
+		ID:      rawID,
+	}
+	payload.Result.IsError = true
+	payload.Result.Content = []content{{Type: "text", Text: msg}}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return []byte(`{"jsonrpc":"2.0","id":null,"result":{"isError":true,"content":[{"type":"text","text":"proxy: timeout"}]}}`)
+	}
+	return b
 }
 
 func extractID(raw json.RawMessage) string {
@@ -328,7 +427,6 @@ func extractID(raw json.RawMessage) string {
 	return s
 }
 
-// proxyLogger writes JSONL log entries
 type proxyLogger struct {
 	mu      sync.Mutex
 	file    *os.File
@@ -367,7 +465,6 @@ func (l *proxyLogger) Log(entry ProxyLogEntry) {
 	n, _ := l.file.Write(data)
 	l.written += int64(n)
 
-	// Rotate at 10MB
 	if l.written >= 10*1024*1024 {
 		l.rotate()
 	}
@@ -379,7 +476,6 @@ func (l *proxyLogger) rotate() {
 	rotated := filepath.Join(l.logDir, fmt.Sprintf("proxy-%s.jsonl", ts))
 	os.Rename(l.logPath, rotated)
 
-	// Keep last 3 rotated files
 	pattern := filepath.Join(l.logDir, "proxy-*.jsonl")
 	matches, _ := filepath.Glob(pattern)
 	if len(matches) > 3 {

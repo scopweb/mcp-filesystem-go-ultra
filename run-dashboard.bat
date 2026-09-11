@@ -15,6 +15,6 @@ echo Proxy log dir: %PROXY_LOG_DIR%
 echo Backup dir:    %BACKUP_DIR%
 echo.
 
-"%~dp0filesystem-ultra-v4-dashboard.exe" --log-dir="%LOG_DIR%" --proxy-log-dir="%PROXY_LOG_DIR%" --backup-dir="%BACKUP_DIR%" --port=%PORT%
+"%~dp0bin\filesystem-ultra-v4-dashboard.exe" --log-dir="%LOG_DIR%" --proxy-log-dir="%PROXY_LOG_DIR%" --backup-dir="%BACKUP_DIR%" --port=%PORT%
 
 pause
