@@ -21,6 +21,7 @@ func registerSearchTools(reg *toolRegistry) {
 	// ============================================================================
 	listDirTool := mcp.NewTool("list_directory",
 		mcp.WithTitleAnnotation("List Directory"),
+		mcp.WithRawOutputSchema(listDirectoryOutputSchema),
 		mcp.WithDescription("list_directory — List directory contents on the real host filesystem; use it to verify a host creation/edit independently. "+
 			"Replaces bash ls/dir/tree — NEVER use the shell. "+
 			"output_format: 'compact' (default), 'json' (structured entries with name/type/size/modified), 'tree' (recursive JSON tree, use max_depth). "+
@@ -87,7 +88,25 @@ func registerSearchTools(reg *toolRegistry) {
 		if err != nil {
 			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
-		return mcp.NewToolResultText(listing), nil
+		format := outputFormat
+		if format == "" {
+			format = "compact"
+		}
+		truncated := contentWasTruncated(listing)
+		var entries []map[string]any
+		jsonPath := path
+		if format == "json" || format == "sizes" {
+			if p, ents, tr, ok := parseListJSON(listing); ok {
+				jsonPath, entries, truncated = p, ents, truncated || tr
+			}
+		} else if format == "compact" || format == "text" || format == "" {
+			if raw, jsonErr := engine.ListDirectoryJSON(ctx, path); jsonErr == nil {
+				if p, ents, tr, ok := parseListJSON(raw); ok {
+					jsonPath, entries, truncated = p, ents, truncated || tr
+				}
+			}
+		}
+		return mcp.NewToolResultStructured(listStructured(jsonPath, format, listing, entries, truncated), listing), nil
 	})
 	reg.addTool(listDirTool, reg.listDirHandler)
 
@@ -122,6 +141,7 @@ func registerSearchTools(reg *toolRegistry) {
 	// ============================================================================
 	searchFilesTool := mcp.NewTool("search_files",
 		mcp.WithTitleAnnotation("Search Files"),
+		mcp.WithRawOutputSchema(searchFilesOutputSchema),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -236,6 +256,23 @@ func registerSearchTools(reg *toolRegistry) {
 			}
 		}
 
+		scope := map[string]any{"path": path, "pattern": pattern, "include_content": includeContent, "count_only": countOnly}
+		wrapSearch := func(text string) *mcp.CallToolResult {
+			if engineTextIsError(text) {
+				return mcp.NewToolResultError(text)
+			}
+			capped := capSearchOutput(text, engine)
+			matches, count, jsonTrunc := parseSearchPayload(capped)
+			if countOnly {
+				if n := parseCountOnly(capped); n >= 0 {
+					count = n
+					matches = []map[string]any{}
+				}
+			}
+			truncated := jsonTrunc || contentWasTruncated(capped)
+			return mcp.NewToolResultStructured(searchStructured(capped, scope, matches, count, truncated), capped)
+		}
+
 		if countOnly {
 			result, err := engine.CountOccurrencesOpts(ctx, core.SearchOptions{
 				Path: path, Pattern: pattern, FileTypes: core.FileTypeFiltersFromArg(fileTypes),
@@ -244,7 +281,7 @@ func registerSearchTools(reg *toolRegistry) {
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 			}
-			return mcp.NewToolResultText(result), nil
+			return wrapSearch(result), nil
 		}
 
 		// Advanced search mode (with content search, case sensitivity, whole word, context)
@@ -256,7 +293,7 @@ func registerSearchTools(reg *toolRegistry) {
 				"case_sensitive": caseSensitive, "whole_word": wholeWord,
 				"include_context": includeContext, "context_lines": contextLines,
 				"output_format": outputFormat, "no_ignore": noIgnore,
-				"file_types":     fileTypes,
+				"file_types": fileTypes,
 			}
 			// Forward optional max_results if caller set one (new param v4.5.26)
 			if rawArgs, ok := request.Params.Arguments.(map[string]interface{}); ok {
@@ -270,9 +307,9 @@ func registerSearchTools(reg *toolRegistry) {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 			if len(resp.Content) > 0 {
-				return mcp.NewToolResultText(capSearchOutput(resp.Content[0].Text, engine)), nil
+				return wrapSearch(resp.Content[0].Text), nil
 			}
-			return mcp.NewToolResultText("No matches"), nil
+			return wrapSearch("No matches"), nil
 		}
 
 		// Default: SmartSearch
@@ -293,18 +330,13 @@ func registerSearchTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if len(resp.Content) > 0 {
-			out := capSearchOutput(resp.Content[0].Text, engine)
-			// Fix #3 (v4.5.26): If the call omitted file_types/include AND returned
-			// many matches (>200), surface a soft hint. The proxy log showed dozens
-			// of search_files calls in 5–45 s on unwalkable trees like CRM/SmartAdmin
-			// because the model relied on defaults. The hint costs ~30 output tokens
-			// but prevents the next call from re-walking the whole tree.
+			out := resp.Content[0].Text
 			if len(out) > 8000 && len(fileTypes) == 0 && !includeContent {
 				out += "\n\n💡 hint: this search returned many matches across many files. Next time, pass `file_types` (e.g. \".razor,.cs\") or `include` to skip unrelated trees and keep latency under 1s."
 			}
-			return mcp.NewToolResultText(out), nil
+			return wrapSearch(out), nil
 		}
-		return mcp.NewToolResultText("No matches"), nil
+		return wrapSearch("No matches"), nil
 	})
 	reg.addTool(searchFilesTool, reg.searchFilesHandler)
 

@@ -80,11 +80,16 @@ func TestOutputSchema_HandlerSweep(t *testing.T) {
 	dir := t.TempDir()
 	reg := buildEditRegistry(t, dir, false)
 	registerBatchTools(reg)
+	registerSearchTools(reg)
 
 	readSchema := parseSchema(t, readFileOutputSchema)
 	writeSchema := parseSchema(t, writeFileOutputSchema)
 	editSchema := parseSchema(t, editFileOutputSchema)
 	multiSchema := parseSchema(t, multiEditOutputSchema)
+	searchSchema := parseSchema(t, searchFilesOutputSchema)
+	listSchema := parseSchema(t, listDirectoryOutputSchema)
+	batchSchema := parseSchema(t, batchOperationsOutputSchema)
+	backupSchema := parseSchema(t, backupOutputSchema)
 
 	// freshFile creates a per-case file so edit cases cannot interfere.
 	freshFile := func(name, content string) string {
@@ -152,6 +157,19 @@ func TestOutputSchema_HandlerSweep(t *testing.T) {
 		{name: "multi_edit dry_run", tool: "multi_edit", schema: multiSchema, textMessage: true,
 			args: map[string]any{"path": freshFile("me2.txt", sample),
 				"edits_json": `[{"old_text":"beta","new_text":"B"}]`, "dry_run": true}},
+
+		{name: "search content", tool: "search_files", schema: searchSchema, textMessage: true,
+			args: map[string]any{"path": dir, "pattern": "alpha", "include_content": true, "file_types": ".txt"}},
+		{name: "search empty", tool: "search_files", schema: searchSchema, textMessage: true,
+			args: map[string]any{"path": dir, "pattern": "ZZZNOPE", "include_content": true}},
+		{name: "list compact", tool: "list_directory", schema: listSchema, textMessage: true,
+			args: map[string]any{"path": dir}},
+		{name: "batch write", tool: "batch_operations", schema: batchSchema, textMessage: true,
+			args: map[string]any{"request": map[string]any{
+				"operations": []any{map[string]any{"type": "write", "path": filepath.Join(dir, "batch.txt"), "content": "ok"}},
+			}}},
+		{name: "backup list", tool: "backup", schema: backupSchema, textMessage: true,
+			args: map[string]any{"action": "list"}},
 	}
 
 	for _, tc := range cases {

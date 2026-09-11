@@ -163,7 +163,7 @@ func formatEditDryRun(path, oldContent, predicted string, replacements int, extr
 	currentHash := contentHashBytes([]byte(oldContent))
 	predictedHash := contentHashBytes([]byte(predicted))
 	diff := core.RenderDiff(oldContent, predicted, path, diffFormatArg(args))
-	sc := editStructuredFromContents(path, oldContent, oldContent, replacements, 0, 0, "")
+	sc := markSimulated(editStructuredFromContents(path, oldContent, oldContent, replacements, 0, 0, ""), currentHash, predictedHash)
 	var b strings.Builder
 	b.WriteString("DRY RUN — No changes made\n")
 	b.WriteString(fmt.Sprintf("File: %s\n", path))
@@ -253,7 +253,7 @@ func editStructured(path string, r *core.EditResult) map[string]any {
 	if r.Integrity != nil {
 		m["integrity"] = r.Integrity.Verification
 	}
-	return m
+	return markApplied(m)
 }
 
 // attachMessage injects the human-readable text response into the structured
@@ -282,7 +282,7 @@ func writeStructured(absPath string, bytesWritten int, contentHash string, verif
 	if contentHash != "" {
 		m["content_hash"] = contentHash
 	}
-	return m
+	return markApplied(m)
 }
 
 // attachParentBackup adds parent_backup_id to a structured payload when the
@@ -409,6 +409,8 @@ func registerCoreTools(reg *toolRegistry) {
 				return mcp.NewToolResultError("paths array is empty"), nil
 			}
 			var results strings.Builder
+			files := make([]map[string]any, 0, len(paths))
+			anyOK, anyFail := false, false
 			for i, p := range paths {
 				p = core.NormalizePath(p)
 				content, err := engine.ReadFileContent(ctx, p)
@@ -416,20 +418,27 @@ func registerCoreTools(reg *toolRegistry) {
 					results.WriteString("\n")
 				}
 				results.WriteString(fmt.Sprintf("=== %s ===\n", p))
+				entry := map[string]any{"path": p}
 				if err != nil {
+					anyFail = true
 					results.WriteString(fmt.Sprintf("ERROR: %v\n", err))
+					entry["error"] = err.Error()
 				} else {
+					anyOK = true
 					results.WriteString(content)
 					if !strings.HasSuffix(content, "\n") {
 						results.WriteString("\n")
 					}
+					entry["content"] = content
+					if h, ok := computeFileOCCHash(p); ok {
+						entry["content_hash"] = h
+					}
 				}
+				files = append(files, entry)
 			}
-			// FASE1: structuredContent conformance. No content_hash here —
-			// per-file hashes will come in a later phase (the readFileOutputSchema
-			// declares content_hash as optional precisely for this branch).
 			combined := results.String()
-			return mcp.NewToolResultStructured(map[string]any{"content": combined}, combined), nil
+			sc := readStructured("", combined, "", false, 0, 0, files)
+			return structuredOrError(anyOK || !anyFail, sc, combined), nil
 		}
 
 		path, err := request.RequireString("path")
@@ -480,15 +489,12 @@ func registerCoreTools(reg *toolRegistry) {
 			} else {
 				body = fmt.Sprintf("# File: %s (%d bytes)\n# Base64 encoded:\n%s", path, originalSize, encoded)
 			}
-			// Point 3: surface the whole-file OCC hash for base64 reads too.
-			if contentHash, ok := computeFileOCCHash(core.NormalizePath(path)); ok {
-				core.RecordReadHash(core.NormalizePath(path), contentHash) // new point 4
-				return mcp.NewToolResultStructured(map[string]any{"content": body, "content_hash": contentHash}, body), nil
+			contentHash := ""
+			if h, ok := computeFileOCCHash(core.NormalizePath(path)); ok {
+				contentHash = h
+				core.RecordReadHash(core.NormalizePath(path), contentHash)
 			}
-			// FASE1: structuredContent conformance fallback (file read OK but
-			// computeFileOCCHash failed — usually transient lock). No
-			// content_hash; the schema declares it optional.
-			return mcp.NewToolResultStructured(map[string]any{"content": body}, body), nil
+			return mcp.NewToolResultStructured(readStructured(resolveAbsForResponse(path), body, contentHash, false, 0, 0, nil), body), nil
 		}
 
 		// Range read mode: read specific line range
@@ -524,13 +530,12 @@ func registerCoreTools(reg *toolRegistry) {
 			if maxLineLengthSet && maxLineLength > 0 {
 				content = truncateLineWidths(content, maxLineLength)
 			}
-			if contentHash, ok := computeFileOCCHash(core.NormalizePath(path)); ok {
-				core.RecordReadHash(core.NormalizePath(path), contentHash) // new point 4
-				return mcp.NewToolResultStructured(map[string]any{"content": content, "content_hash": contentHash}, content), nil
+			contentHash := ""
+			if h, ok := computeFileOCCHash(core.NormalizePath(path)); ok {
+				contentHash = h
+				core.RecordReadHash(core.NormalizePath(path), contentHash)
 			}
-			// FASE1: structuredContent conformance fallback (range read OK but
-			// computeFileOCCHash failed). No content_hash; schema declares it optional.
-			return mcp.NewToolResultStructured(map[string]any{"content": content}, content), nil
+			return mcp.NewToolResultStructured(readStructured(resolveAbsForResponse(path), content, contentHash, contentWasTruncated(content), startLine, endLine, nil), content), nil
 		}
 
 		// Default: read full file
@@ -587,12 +592,8 @@ func registerCoreTools(reg *toolRegistry) {
 		core.SetFileLinesTotal(ctx, totalLines)
 		core.SetLinesRead(ctx, totalLines)
 
-		// Return the body as plain text (NO trailer) and the hash as a
-		// structured field. Fallback text for naive clients is the file
-		// body — they never see a `# content_hash:` line, so they can't
-		// mistake it for content.
 		return mcp.NewToolResultStructured(
-			map[string]any{"content": content, "content_hash": contentHash},
+			readStructured(resolveAbsForResponse(path), content, contentHash, contentWasTruncated(content), 0, 0, nil),
 			content,
 		), nil
 	})
@@ -1148,8 +1149,12 @@ func registerCoreTools(reg *toolRegistry) {
 				count = parseReplacementCount(respText)
 			}
 			structured := func(msg string) map[string]any {
-				return attachMessage(editStructuredFromContents(path, string(oldContentRaw), newContentStr, count,
+				sc := attachMessage(editStructuredFromContents(path, string(oldContentRaw), newContentStr, count,
 					strings.Count(pattern, "\n")+1, strings.Count(replacement, "\n")+1, ""), msg)
+				if dryRun {
+					return markSimulated(sc, contentHashBytes(oldContentRaw), contentHashBytes([]byte(newContentStr)))
+				}
+				return markApplied(sc)
 			}
 
 			if engine.IsCompactMode() {
