@@ -83,6 +83,7 @@ jobs:
         if: runner.os != 'Linux'
         run: |
           go test -p 1 ./core/... -count=1
+          go test -p 1 ./internal/mcpserver/ -count=1
           go test -p 1 ./tests/security/... -count=1
 
       - name: Run focused core + security tests (Linux, with race)
@@ -95,6 +96,7 @@ jobs:
         if: runner.os != 'Linux'
         run: |
           go test -p 1 ./core/... -count=1
+          go test -p 1 ./internal/mcpserver/ -count=1
           go test -p 1 ./tests/security/... -count=1
 
       # E2E smoke battery (Fase 2 hardening gate): builds the real binary,

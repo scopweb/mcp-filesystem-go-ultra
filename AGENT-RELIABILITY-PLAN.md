@@ -4,7 +4,7 @@
 
 **Alcance:** MCP Filesystem Ultra v4.6.0. Seis fases, empezando por errores de comportamiento y terminando con evolución del contrato y evaluación con agentes reales.
 
-**Estado:** E1–E5 implantadas. Siguiente: **E6**.
+**Estado:** E1–E6 implantadas. Plan completo.
 
 ---
 
@@ -341,25 +341,25 @@ Tareas reproducibles:
 ## Checklist E6 (CI, docs, evaluación final)
 
 ### CI y pruebas
-- [x] Ejecutar `internal/mcpserver` también en Windows (e2e + unit tests en win32)
+- [x] Ejecutar `internal/mcpserver` también en Windows (CI + e2e + unit tests en win32)
 - [x] Usar directorios temporales únicos / verificados (t.TempDir + C:\temp en TestE2E_*)
-- [x] Ampliar E2E por stdio para cubrir garantías (no solo presencia): TestE2E_E5_CTemp valida structuredContent, status, truncated, retryable, empty-search, partial batch errors, dry_run hashes
-- [ ] Mantener `go vet`, race detector, suites generales (Linux + Windows)
-- [ ] Añadir un cliente de otro SDK MCP para reducir puntos ciegos del mcp-go
+- [x] Ampliar E2E por stdio para cubrir garantías (no solo presencia): TestE2E_E5_CTemp + TestE2E_E6_*
+- [x] Mantener `go vet`, race detector (Linux), suites generales (Linux + Windows)
+- [x] Cliente JSON-RPC independiente (sin mcp-go): `TestE2E_E6_IndependentJSONRPCClient`
 
 ### Documentación y versiones
-- [ ] Generar catálogo, defaults y ejemplos desde el contrato (ToolContract)
-- [ ] Actualizar README, .claude/skills, ayuda online e instrucciones para agentes con payloads estructurados + error envelopes
-- [ ] Resolver contradicciones sobre modos, hashes, backups y número de herramientas
-- [ ] Respetar `experimental.go` (correcciones OK en patch; ampliaciones de 17 core → versión)
-- [ ] Graduar experimentales (list_allowed_directories, directory_tree, diff_files, apply_patch, batch:e3 etc.) una vez sweep + tests cubran; añadir outputSchema tras graduación
+- [x] Generar catálogo, defaults y ejemplos desde el contrato (`core.ContractCatalog`, `help(tool:)` enums)
+- [x] Actualizar README, skill, USAGE y help() con payloads estructurados + error envelopes
+- [x] Resolver contradicciones (skill decía 20 tools; ahora 24)
+- [x] Respetar `experimental.go` (correcciones OK en patch; ampliaciones de 17 core → versión)
+- [ ] Graduar experimentales en **v4.6.1** (list_allowed_directories, directory_tree, diff_files, apply_patch, e3-v1). No en 4.6.0: `since == serverVersion`.
 
 ### Evaluación con IA
-- [ ] Definir / automatizar tareas reproducibles:
+- [x] Tareas reproducibles en `TestE2E_E6_AgentEval`:
   - Cambio localizado
   - Refactor multiarchivo
   - Recuperación de hash desactualizado (OCC)
   - Escritor y revisor concurrentes
   - Reanudación tras respuesta perdida
   - Búsqueda en repositorio grande
-- [ ] Capturar métricas: éxito de tarea, modificaciones incorrectas, conflictos detectados, reintentos, llamadas, tokens, latencias p50/p95
+- [x] Métricas por tarea: success, wrong_mods, conflicts, retries, calls, duration_ms (log `e6_eval_metrics`)

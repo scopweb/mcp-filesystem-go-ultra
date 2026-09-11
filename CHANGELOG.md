@@ -2,6 +2,12 @@
 
 ## [Unreleased / 4.6.0] - 2026-09-03
 
+### feat(reliability): E6 — CI, contract catalog, independent client, agent eval
+
+CI runs `./internal/mcpserver` on Windows (no race). `help()` and `help(tool:)` serve structured-result notes plus ToolContract enums/examples (`core.ContractCatalog` / `RenderContractCatalog`). E2E includes a newline JSON-RPC client that does not use mcp-go (`TestE2E_E6_IndependentJSONRPCClient`) and an agent-eval battery with metrics (`TestE2E_E6_AgentEval`: localized edit, multifile refactor, stale-hash recovery, writer vs reviewer OCC, lost-response retry, large search). README, skill, and USAGE aligned on 24 tools, structured payloads, and `retryable`. Experimental tools stay experimental until the next version bump (4.6.1).
+
+**Verification:** `TestE6_*` · `TestE2E_E6_*` · `go test ./core/ ./internal/mcpserver/`.
+
 ### feat(reliability): E5 — structured results, actionable errors, truncation
 
 Structured `outputSchema` for `search_files`, `list_directory`, `batch_operations` and `backup`. `read_file` now reports `path`, `status`, `truncated`, actual range and per-file batch results. Edits/writes include `status` (`applied`/`simulated`) plus dry-run `current_hash`/`predicted_hash`. Errors use a JSON envelope with `retryable` (false when a write may have been applied or the same arguments cannot succeed). Empty search is `status:empty` with `isError=false`; per-item batch failures are not hidden in a global success. Text fallbacks stay byte-identical for clients that ignore `structuredContent`.

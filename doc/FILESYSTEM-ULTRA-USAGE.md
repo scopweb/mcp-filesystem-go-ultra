@@ -49,6 +49,12 @@ Expone **24 herramientas**: 17 core + `git` + `minify_js` + `help` + `list_allow
    - Guardar el `backup_id` o `parent_backup_id` devuelto en `structuredContent` cuando se necesite una cadena de recuperación.
    - Usar `backup(action:"undo_last")`, `undo_chain` o `restore` para recuperar versiones.
 
+9. **Leer `structuredContent`, no el texto.**
+   - `status`: `applied` | `simulated` | `empty` | `partial`.
+   - Búsqueda sin coincidencias: `status:empty`, `isError=false`.
+   - `truncated` y `continuation` marcan resultados incompletos.
+   - Errores: envelope JSON con `retryable`. Si `retryable` es false, no reintentar (la escritura puede haberse aplicado).
+
 ---
 
 ## Escritura y edición

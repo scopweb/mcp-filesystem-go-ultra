@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mcp/filesystem-ultra/core"
 )
 
 // registerAliases registers the 6 compatibility aliases
@@ -421,6 +422,8 @@ func renderToolCatalog(reg *toolRegistry) string {
 	sb.WriteString("3. After every host mutation, verify independently with get_file_info or list_directory; use read_file when content matters.\n")
 	sb.WriteString("4. If a known file reports 'not found', stop and confirm it with the host reader, then audit recent writes made through the failing tool family before retrying.\n")
 	sb.WriteString("5. Disabled aliases (including create_file) and the fs super-tool are not registered here.\n\n")
+	sb.WriteString("## Structured results\n")
+	sb.WriteString("Schema-declared tools return structuredContent (status, truncated, hashes). Errors use a JSON envelope with retryable. Empty search is status=empty (not an error). Do not auto-retry when retryable is false. help(tool:\"X\") examples and enums come from the ToolContract.\n\n")
 	sb.WriteString("## Registered tools\n")
 	for _, name := range names {
 		registered := all[name]
@@ -480,6 +483,25 @@ func registerHelpTool(reg *toolRegistry) {
 			sb.WriteString("### Parameters\n```json\n")
 			sb.Write(raw)
 			sb.WriteString("\n```\n\n")
+		}
+
+		if c, ok := core.Contract(name); ok {
+			keys := make([]string, 0, len(c.Params))
+			for k := range c.Params {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			var enumLines []string
+			for _, k := range keys {
+				if e := c.Params[k].Enum; len(e) > 0 {
+					enumLines = append(enumLines, fmt.Sprintf("- `%s`: %s", k, strings.Join(e, " | ")))
+				}
+			}
+			if len(enumLines) > 0 {
+				sb.WriteString("### Contract enums\n")
+				sb.WriteString(strings.Join(enumLines, "\n"))
+				sb.WriteString("\n\n")
+			}
 		}
 
 		if examples, ok := reg.toolExamples[name]; ok && len(examples) > 0 {
