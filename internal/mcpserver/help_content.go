@@ -32,7 +32,7 @@ GOOD: search_files -> read_file(start_line/end_line) -> edit_file = 2k tokens
 ## AVAILABLE TOPICS
 Call server_info(action:"help", topic:"...") with:
 - "workflow" - The 4-step efficient workflow
-- "tools"    - Complete list of 24 tools
+- "tools"    - Compact tool list (live count via help())
 - "read"     - Reading files efficiently
 - "write"    - Writing and creating files
 - "edit"     - Editing files (most important!)
@@ -80,16 +80,18 @@ server_info(action:"stats")
 	case "tools":
 		sb.WriteString(`# COMPLETE TOOL LIST (24 Tools)
 
-Use help() for the live catalog generated from the registered MCP tools. This topic is the compact reference for clients that hide full schemas.
+Use help(tool:"X") on demand. First call list_allowed_directories, then directory_tree. help() lists the live registered catalog — do not dump it at startup.
 
 ## Discovery (2)
 
 list_allowed_directories
 - Purpose: Return the sandbox roots. Call before the first read. Zero parameters.
+- When: first call of the session
 - Key params: (none)
 
 directory_tree
-- Purpose: Compact recursive tree. Alias of list_directory with output_format=tree. Respects .gitignore.
+- Purpose: Compact recursive tree. Alias of list_directory with output_format=tree. Respects .gitignore (default ON).
+- When: after roots, to explore. Defaults max_depth=2, max_nodes=500; truncated + hidden_count in structured output.
 - Key params: path, max_depth, exclude, respect_ignore, max_nodes
 
 ## Core I/O (6)
@@ -116,8 +118,8 @@ list_directory
 - Key params: path, output_format (compact|json|tree), max_depth
 
 search_files
-- Purpose: Search by filename or content
-- Key params: path, pattern, file_types, include_content, include_context, case_sensitive, count_only
+- Purpose: Search by filename or content. Honors .gitignore by default (no_ignore=false). truncated + hidden_count in structured output.
+- Key params: path, pattern, file_types, include_content, include_context, case_sensitive, count_only, max_results, no_ignore
 
 ## File Operations (5)
 
@@ -171,10 +173,12 @@ server_info
 
 diff_files
 - Purpose: Unified diff between two paths, or a file vs its last backup (against=backup).
+- When: preview before apply_patch or to compare two files
 - Key params: path_a, path_b, path, against
 
 apply_patch
-- Purpose: Apply a one-file unified diff. dry_run, expected_hash OCC, rewrite-guard, backup.
+- Purpose: Apply a one-file unified diff. dry_run + expected_hash is the happy path. Destination EOL wins. If PATCH_APPLY_FAILED: read_file and regenerate; do not retry the same patch.
+- When: surgical one-file edits after diff_files or a generated hunk
 - Key params: path, patch, dry_run, expected_hash, allow_rewrite, create_backup
 
 ## Version Control, JavaScript, and Discovery (3)
@@ -192,11 +196,13 @@ help
 - Key params: tool
 
 ## Disabled Names
-Aliases read_text_file, search, edit, write, create_file, View, Edit, Write, Replace, LS, GlobTool, GrepTool and the fs super-tool are NOT registered. directory_tree IS registered (experimental). A runtime-native tool with one of those disabled names may target a different sandbox; it is not a filesystem-ultra alias.
+Aliases read_text_file, search, edit, write, create_file, View, Edit, Write, Replace, LS, GlobTool, GrepTool and the fs super-tool are NOT registered. directory_tree IS registered. If a client asks for read_multiple_files or read_text_file, use read_file (paths[] / mode head|tail). A runtime-native tool with one of those disabled names may target a different sandbox; it is not a filesystem-ultra alias.
 `)
 
 	case "read":
 		sb.WriteString(`# READING FILES EFFICIENTLY
+
+If a client asks for read_multiple_files or read_text_file, use read_file (paths[] / mode head|tail).
 
 ## Quick Reference
 | File Size    | How to Read                    |

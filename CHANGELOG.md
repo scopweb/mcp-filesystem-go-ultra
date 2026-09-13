@@ -1,5 +1,13 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+## [4.6.2] - 2026-09-13
+
+### feat: agent discovery, strict profile, git-network
+
+Handshake instructions no longer dump the catalog. First call is `list_allowed_directories`, then `directory_tree` or `help(tool:X)`. `--profile=strict` registers the 15-tool agent core (default remains `ultra` / 24). `git push`/`fetch` sit behind `--git-network` (default off); `openWorldHint` is true only when network is enabled. `apply_patch` stays one file per call; destination EOL wins (CRLF file + LF patch). Tree/search publish `truncated` + `hidden_count`. README, skill, CLAUDE.md, and `help()` agree.
+
+**Verification:** `TestProfile_StrictToolSetExact` · `TestListAllowedDirectories_StructuredShape` · `TestApplyPatch_CRLFFileLFPatch` · `TestGitNetwork_PushFetchRejectedWithoutFlag` · `TestOutputSchema_HandlerSweep` · `TestFailClosed_Binary`.
+
 ## [4.6.1] - 2026-09-11
 
 ### feat: graduate experimental tools, unify wire contract
@@ -4722,6 +4730,6 @@ Estimated speedup for multiple edits:
 
 ---
 
-**Current Version**: 4.6.1
-**Last Updated**: 2026-09-11
+**Current Version**: 4.6.2
+**Last Updated**: 2026-09-13
 **Status**: Production Ready
