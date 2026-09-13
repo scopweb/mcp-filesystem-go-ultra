@@ -54,10 +54,15 @@ func DefaultConfiguration() *Configuration {
 }
 
 // serverInstructions is sent to the client during the MCP initialize handshake.
-// Keep this factual and compact: detailed workflow policy belongs in
-// help(tool:X) and the filesystem-ultra-tools skill, not in every user turn.
+// Keep this factual and compact (≤12 lines): detailed workflow policy belongs
+// in help(tool:X) and the filesystem-ultra-tools skill, not in every user turn.
+// Subagents do not inherit the skill; these lines are the portable contract.
 // Never dump the full catalog here.
-const serverInstructions = `MCP Filesystem Ultra — operates on the real host filesystem visible to this MCP server (for example C:\, D:\, or /mnt/...). Runtime-native file tools may target a different sandbox. Prefer these tools over bash cat/head/tail/cut/ls/grep/find/stat. First call list_allowed_directories. Then directory_tree or help(tool:X). Do not load the full catalog at startup.`
+const serverInstructions = `MCP Filesystem Ultra operates on the real host filesystem (C:\, D:\, /mnt/...). Runtime-native tools may target a different sandbox.
+First call list_allowed_directories.
+Do not use native Read/Edit/Write/Glob for host paths. Prefer these tools over bash cat/head/tail/cut/ls/grep/find/stat.
+Subagent: request a handoff (path + content_hash). Do not assume the parent session's file body.
+help(tool:X) on demand. Do not load the full catalog at startup.`
 
 // serverVersion is the single source of truth for the version reported by
 // --version, the MCP handshake, the help header and the startup logs.
@@ -244,6 +249,7 @@ func Run() {
 		RiskOccurrencesHigh:   *riskOccurrencesHigh,
 		ReadOnly:              *readOnly,
 		AllowSecrets:          *allowSecrets,
+		RootsMode:             core.ParseRootsMode(*rootsMode),
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize engine: %v", err)

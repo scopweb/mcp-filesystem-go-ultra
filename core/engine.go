@@ -61,6 +61,7 @@ type Config struct {
 
 	ReadOnly     bool
 	AllowSecrets bool
+	RootsMode    RootsMode // How MCP client Roots combine with CLI paths (replace|union|ignore)
 }
 
 // UltraFastEngine implements all filesystem operations with maximum performance

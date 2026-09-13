@@ -145,6 +145,10 @@ var listAllowedDirectoriesOutputSchema = json.RawMessage(`{
     "paths": {"type": "array", "description": "Sandbox roots this server may read and write", "items": {"type": "string"}},
     "source": {"type": "string", "description": "How roots were chosen (flags, roots, insecure, ...)"},
     "insecure_open": {"type": "boolean", "description": "True when the sandbox is disabled"},
+    "profile": {"type": "string", "description": "Tool catalog: strict | ultra"},
+    "roots_mode": {"type": "string", "description": "How MCP client Roots combine with CLI paths: replace | union | ignore"},
+    "readonly": {"type": "boolean", "description": "True when --readonly is set"},
+    "tool_count": {"type": "integer", "description": "Number of tools registered on this server"},
     "message": {"type": "string", "description": "Human-readable listing, identical to the text content block"}
   },
   "required": ["status", "paths", "message"]
