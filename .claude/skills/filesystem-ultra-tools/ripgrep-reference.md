@@ -1,9 +1,9 @@
 ---
 name: ripgrep-reference
-description: Ripgrep backend reference for filesystem-ultra v4.4.0: detection, parameters, and fallback behavior.
+description: Ripgrep backend reference for filesystem-ultra v4.6.2: detection, parameters, and fallback behavior.
 ---
 
-# Ripgrep Backend Reference (v4.4.0)
+# Ripgrep Backend Reference (v4.6.2)
 
 ## Overview
 
@@ -115,7 +115,7 @@ INFO Ripgrep not found - using Go-native search              # not found
 ```
 
 ### Runtime Check
-Check `server_info(action:"stats")` output or look for `ripgrepAvailable: true` in engine state.
+`server_info(action:"stats")` is ultra-only (absent in `--profile=strict`). Otherwise look for `ripgrepAvailable: true` in engine state, or the startup log line.
 
 ## Error Handling
 

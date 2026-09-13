@@ -452,7 +452,7 @@ func retryableForCode(code string) bool {
 	switch code {
 	case errCodeNotAllowed, errCodeNotFound, errCodeOCCMismatch, errCodeRewriteBlocked,
 		errCodeRootsEmpty, errCodeSecretDenied, errCodeReadOnly, errCodePatchFailed,
-		errCodeInvalidParams:
+		errCodeInvalidParams, errCodeUnavailable:
 		return false
 	default:
 		return false

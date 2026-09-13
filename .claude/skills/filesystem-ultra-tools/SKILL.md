@@ -1,174 +1,121 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.6.2: 24 tools ultra / 15 strict. Host-filesystem binding, post-write verification, aliases disabled. First call list_allowed_directories, then directory_tree or help(tool:X). read_file replaces bash cat/head/tail/cut.
+description: Tool catalog for filesystem-ultra MCP server v4.6.2. 25 tools ultra / 16 strict. First call list_allowed_directories, then directory_tree or help(tool:X). Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=strict --compact-mode --roots-mode=union.
 ---
 
 # Filesystem Ultra v4.6.2 — Tool Discovery
 
+## Recommended server flags
+
+`--profile=strict --compact-mode --roots-mode=union` (`--readonly` off). `--git-network` only if the agent must `git push`/`fetch`. `--profile=ultra` (default) keeps all 25 tools including `analyze_code`.
+
 ## Bind each project to one filesystem tool family
 
-- `filesystem-ultra` operates on the real host filesystem visible to its MCP server (`C:\...`, host-mounted `/mnt/...`, etc.). Runtime-native `create_file`, `str_replace`, `view`, or similar tools may operate in a different sandbox.
+- `filesystem-ultra` operates on the real host filesystem (`C:\...`, host-mounted `/mnt/...`). Runtime-native `create_file`, `str_replace`, `view` may target a different sandbox.
 - First call `list_allowed_directories` (before any read). Then `directory_tree` or `help(tool:"X")` on demand. Do not dump the full catalog at startup.
-- Before the first project read or write, select the family explicitly mapped to that project. For host projects reachable through filesystem-ultra, use only its read/write/edit/list/info/copy/delete tools; reserve native tools for explicit agent scratch work.
-- After every host creation or edit, verify independently with `get_file_info` or `list_directory`; use `read_file` when content matters. A successful write response alone does not prove that a different tool family targeted the host.
-- Treat `File not found` for a known file as a filesystem-mismatch signal: stop, confirm with the host reader, audit recent writes made through the failing family, and understand the mismatch before retrying. Never switch tools silently.
+- For host projects, use only filesystem-ultra tools. After every host create/edit, verify with `get_file_info` or `list_directory`; `read_file` when content matters.
+- `File not found` for a known file is a filesystem-mismatch signal: stop, confirm with the host reader, audit recent writes. Never switch tool families silently.
 
-## Discovery order (same as server instructions)
+## Discovery order
 
-1. `list_allowed_directories` — before the first read.
-2. `directory_tree` — explore; defaults `respect_ignore=true`, `max_depth=2`, `max_nodes=500`; `truncated` + `hidden_count`.
-3. `help(tool:"X")` — schema + examples on demand. `help()` lists whatever is registered (`strict` = 15, `ultra` = 24).
+1. `list_allowed_directories` — sandbox roots. Zero parameters.
+2. `directory_tree` — explore. Defaults: `respect_ignore=true`, `max_depth=2`, `max_nodes=500`. Structured: `truncated` + `hidden_count`.
+3. `help(tool:"X")` — schema + examples on demand. `help()` lists whatever is registered (16 or 25).
 
-## The 24 tools (ultra). 15 in `--profile=strict`
+If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (`paths[]` / `mode` head|tail).
 
-| Tool | Purpose |
-|------|---------|
-| `list_allowed_directories` | Sandbox roots. **When:** first call. Zero parameters. |
-| `directory_tree` | Compact recursive tree. **When:** after roots. Gitignore ON. |
-| `read_file` | Read files (single or batch via `paths`). If the model asks for `read_multiple_files` / `read_text_file`, use `read_file` (`paths[]` / `mode` head\|tail). **Replaces bash `cat`/`head`/`tail`/`cut`/`sed -n`.** Logs: `mode:"tail"` `max_lines:40`. |
-| `write_file` | Write/create files (binary via base64). `mode:"append"` concatenates without rewrite-guard. |
-| `diff_files` | Unified diff of two paths, or `against:"backup"`. **When:** preview before `apply_patch`. |
-| `apply_patch` | One file per call. `dry_run` + `expected_hash` is the happy path. Dest EOL wins. **When `PATCH_APPLY_FAILED`:** `read_file` and regenerate the hunk; do not retry the same patch. |
-| `edit_file` | Replace exact text, regex, nth occurrence. Override the rewrite guard with `allow_rewrite:true` (not `force`). |
-| `multi_edit` | Multiple edits in one file. **Ambiguity guard (v4.5.29):** any `old_text` matching >1 times in the original file rejects the whole batch and rolls it back. |
-| `project_replace` | Project-wide find/replace in one call. `create_backup:true` snapshots files **before** the writes so `backup(action:"restore")` rolls back the operation. |
-| `list_directory` | List directory contents. Replaces bash `ls`/`dir`/`tree`. |
-| `search_files` | Search by pattern. Gitignore ON (`no_ignore=false`). `truncated` + `hidden_count`. Replaces bash `grep`/`find`/`rg`. |
-| `get_file_info` | File info (single or batch). Replaces bash `stat`. |
-| `move_file` | Move/rename files |
-| `copy_file` | Copy files |
-| `delete_file` | Delete (soft by default, permanent option) |
-| `create_directory` | Create directories |
-| `batch_operations` | Atomic ops, pipelines, batch rename |
-| `backup` | Backup/restore/undo/list/compare |
-| `analyze_operation` | Dry-run impact analysis |
-| `wsl` | WSL/Windows sync and path conversion |
-| `server_info` | Stats, help, artifact capture |
-| `git` | Local git (ultra only). `push`/`fetch` require `--git-network` (off by default). `paths` native array; `output` enum; `rev`. Branch delete requires `delete:true`. |
-| `minify_js` | Pure-Go JS minification, no Node (ultra only; not in handshake instructions) |
-| `help` | On demand — `help(tool:"X")` for schema; not at startup |
+## Strict profile (16) — always available when `--profile=strict`
 
-## search_files ripgrep-compatible params
+| Tool | When / notes |
+|------|----------------|
+| `list_allowed_directories` | First call |
+| `directory_tree` | After roots. Gitignore ON |
+| `list_directory` | Copy exact paths (case) before edits |
+| `search_files` | Gitignore ON (`no_ignore=false`). `truncated` + `hidden_count`. Cap with `max_results` |
+| `get_file_info` | Verify after a host mutation. Batch `paths[]` |
+| `read_file` | Full / range / head / tail / base64 / `paths[]`. Logs: `mode:"tail"` `max_lines:40` |
+| `write_file` | New files or whole-file rewrite. `mode:"append"` skips rewrite-guard |
+| `edit_file` | Targeted edits. Override rewrite-guard with `allow_rewrite:true` (not `force`) |
+| `multi_edit` | Several anchors in one file. Ambiguous `old_text` (>1 match) rejects the batch |
+| `apply_patch` | One file per call. Happy path: `dry_run` + `expected_hash`. Dest EOL wins. If `PATCH_APPLY_FAILED`: `read_file` and regenerate the hunk; do not retry the same patch |
+| `diff_files` | Preview before `apply_patch`, or two paths / `against:"backup"` |
+| `create_directory` | `mkdir -p` |
+| `move_file` | Move or rename |
+| `delete_file` | Soft-delete default; `permanent:true` hard |
+| `backup` | Undo: `undo_last` / `undo_chain` / `restore` (`backup_id`). Trash: `list_trash` / `restore_trash` (`sd_id`, not `backup_id`) / `purge_trash` |
+| `help` | On demand, not at startup |
 
-`search_files` accepts both native names and ripgrep-compatible aliases:
+## Ultra only (absent in `--profile=strict`)
 
-| Native | Alias | Purpose |
-|--------|-------|---------|
-| `file_types` | `include` | Glob pattern filter (e.g., `*.go`, `**/*.ts`) |
-| `output_format` | `output` | `"text"` (force legacy verbose with emojis) or `"json"` (structured). The auto default renders ripgrep-style `path:line:content` for ≤5 matches and verbose otherwise. **The legacy values `content`/`files_with_matches`/`count` are NOT implemented** and fall through to the default text branch — do not pass them. |
+`copy_file`, `project_replace`, `batch_operations`, `analyze_operation`, `wsl`, `git`, `minify_js`, `analyze_code`, `server_info`.
 
-**Auto-ripgrep mode (default):** omit `output_format`/`output` to get a compact `path:line:content` row when there are ≤5 matches, or the legacy verbose layout otherwise. Force the legacy verbose format regardless of count by passing `output_format:"text"`. `include_context:true` always forces the verbose layout (context blocks don't fit a one-line row).
+- `git` — local only unless `--git-network` (then `push`/`fetch` and `openWorldHint=true`). Path must be inside a repo (or `init`). Branch delete requires `delete:true`.
+- `minify_js` — exists in ultra; not in handshake instructions.
+- `analyze_code` — ultra only. For editing: `apply_patch`/`edit_file`. For understanding code: `analyze_code`. Do not use git grep or bash. Actions: `symbols`, `lint`, `sec`, `impact`. Impact is a text search, not a callgraph.
+- Dry-run impact preview → `analyze_operation` (ultra). In strict use `edit_file`/`apply_patch`/`multi_edit` with `dry_run:true`.
 
 ## Never bash for filesystem
 
-Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `grep`, `find`, `rg`, or `stat` on host project files. Use the matching filesystem-ultra tool.
+Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `grep`, `find`, `rg`, or `stat` on host project files.
 
 | Need | Call |
 |------|------|
-| Last 40 log lines (`tail -40 \| cut -c1-300`) | `read_file(path, mode:"tail", max_lines:40)` — lines auto-cut to 300 chars |
+| Last 40 log lines | `read_file(path, mode:"tail", max_lines:40)` |
 | First N lines | `read_file(path, mode:"head", max_lines:N)` |
 | Exact line range | `read_file(path, start_line, end_line)` |
-| Override / disable line cut | `max_line_length:N` or `max_line_length:0` (full/range never auto-cut) |
+| Line cut override | `max_line_length:N` or `0` to disable |
 
-`help(tool:"read_file")` returns schema plus 4 examples (full, log tail, range, base64).
+## search_files aliases
 
-## Key behaviors
+| Native | Alias | Purpose |
+|--------|-------|---------|
+| `file_types` | `include` | Glob (e.g. `*.go`) |
+| `output_format` | `output` | `"text"` or `"json"`. Omit for auto (ripgrep-style `path:line:content` if ≤5 matches). Legacy `content`/`files_with_matches`/`count` are **not** implemented. |
 
-- **Modify existing files** → `edit_file`
-- **Multiple edits same file** → `multi_edit` (each `old_text` must be unique in the **original** file — an ambiguity guard rejects batches where any edit matches >1 times and rolls the whole batch back; split into separate `edit_file` calls or quote more context if you hit it)
-- **Project-wide find/replace** → `project_replace` (1 call instead of N)
-- **Batch ops** → `batch_operations` (atomic, with rollback)
-- **Undo** → `backup(action:"undo_last")` / `backup(action:"undo_chain", file_path:"...")` / `backup(action:"restore", backup_id:"...")`
-- **Soft-delete recovery** → `delete_file` is soft by default. Locate via `backup(action:"list_trash")`, restore with `backup(action:"restore_trash", backup_id:"...")`, or purge with `backup(action:"purge_trash")`. Hard-delete with `delete_file(permanent:true)`.
-- **Git operations** → `git` tool (status, diff, log, add, commit, push, fetch, restore, branch, init). **The path passed must be inside a git repository** (or use `init` to create one). Calling `git` on a non-repo path is the #1 source of errors (analysis of 18 calls showed 5 of 7 errors were "not a git repository" — instant failures before any git command ran). Branch delete requires `delete:true`. Since v4.5.23 `restore` supports real dry-run and hardened path handling (`--` separator); no `force` needed.
-- **STALE_READ warning** (`edit_file` only): non-blocking notice if the file wasn't read in the last 10 min of this session. The engine records reads after each successful edit, so consecutive edits on the same file don't need re-reads. Hard external-change protection = `expected_hash` or `--auto-occ=block`.
-- **Dry-run** → `analyze_operation` or `edit_file(dry_run:true)` / `multi_edit(dry_run:true)` / `project_replace(preview:true)`
-- **Fast search** → `search_files` with `output_format:"json"` uses ripgrep when available. To force the legacy verbose layout (emoji headers, Context: blocks) regardless of match count, pass `output_format:"text"`.
-- **Tool discovery & schema lookup** → first `list_allowed_directories`; then `directory_tree` or `help(tool:"X")`. `help()` lists registered tools on demand.
-- **Structured results** → prefer `structuredContent` over scraping text: `status` (`applied`/`simulated`/`empty`/`partial`), `truncated`, hashes. Empty search is `status:empty` with `isError=false`. JSON error envelope includes `retryable` — do not auto-retry when false (the write may already have been applied).
-- **Chain edits without re-reading** → every successful edit returns `content_hash`; pass it as `expected_hash` on the next edit. External-change detection also via `--auto-occ` flag (`off`/`warn` default/`block`) — only flags changes NOT made by this session.
-- **Line-based edits** → `edit_file` `mode:"delete_range"` (remove lines start..end) and `mode:"replace_range"` (replace lines with `new_text`) — 1-based inclusive, no fragile `old_text` match.
-- **Move lines between files atomically** → `batch_operations` op type `extract` (`source`, `destination`, `start_line`, `end_line`, `append`) — bytes written = bytes removed, both atomic, revert together under `atomic:true`.
+`include_context:true` forces verbose layout. `output_format:"json"` uses ripgrep when `rg` is on PATH or embedded (`embed_rg`).
 
-## Critical workflow rules (anti-bug)
+## Key behaviors (strict-safe)
 
-These two failure modes are silent at the tool level — the tool returns OK, the file is "valid", but the work is wrong. The model MUST avoid them via workflow discipline, not via the tool (the tool can't always detect intent).
+- **Modify existing files** → `edit_file` or `apply_patch` (one path). Whole-file rewrite → `write_file`.
+- **Several edits same file** → `multi_edit` (each `old_text` unique in the original file).
+- **Dry-run** → `edit_file(dry_run:true)` / `multi_edit(dry_run:true)` / `apply_patch(dry_run:true)`.
+- **OCC** → every successful read/edit returns `content_hash`; pass as `expected_hash` on the next mutation. `--auto-occ` `off`/`warn` (default)/`block` flags *external* changes only.
+- **STALE_READ** (`edit_file` only): non-blocking. Consecutive edits on the same file do not need re-reads.
+- **Structured results** → prefer `structuredContent`: `status` (`applied`/`simulated`/`empty`/`partial`), `truncated`, `hidden_count`, hashes. Empty search is `status:empty` (`isError=false`). Errors have `retryable` — do not auto-retry when false.
+- **Line-based edits** → `edit_file` `mode:"delete_range"` / `"replace_range"` (1-based inclusive).
+- **Undo** → `backup(action:"undo_last")` / `undo_chain` / `restore` with `backup_id`.
+- **Soft-delete recovery** → `backup(action:"list_trash")`; restore with `backup(action:"restore_trash", sd_id:"...")` (not `backup_id`); purge with `purge_trash`.
 
-### ⚠️ Always copy paths from `list_directory` / `read_file` — never from memory (case-mismatch bug, 2026-06-11)
+## Ultra behaviors (only if those tools are registered)
 
-The path you pass to `edit_file` / `multi_edit` / `write_file` / `move_file` / `delete_file` MUST be copied character-by-character from the output of a prior `list_directory` or `read_file` call. **Do not retype it from memory or from the conversation history.**
+- **Project-wide token rename** → `project_replace` (1 call). `create_backup:true` snapshots before writes.
+- **Batch / pipeline / extract** → `batch_operations`. `extract` moves lines `[start_line,end_line]` from source to destination atomically.
+- **Impact preview** → `analyze_operation`.
 
-**Why:** Windows resolves paths case-insensitively, so writing `estats.razor` when the file is `Estats.razor` succeeds at the filesystem level — but downstream tools that register classes/modules by the path (Razor compiler, webpack, MSBuild, etc.) use the wrong capitalization and fail 3 layers down with cryptic errors like `RZ10011: class estats` or `module not found`.
+## Critical workflow rules
 
-**Symptom if you fall into this:** edit appears successful in the tool response, but compilation/build/import fails later with a "class/module not found" error that mentions a name you didn't expect. Verify the case of every path in your most recent edit.
+### Always copy paths from `list_directory` / `read_file` — never from memory
 
-### ⚠️ Never use `edit_file` for whole-file rewrites (bug 2026-06-11)
+Windows is case-insensitive at the FS layer. Passing `estats.razor` for `Estats.razor` succeeds, then Razor/MSBuild fail later (`RZ10011: class estats`). Copy the path character-by-character from a prior listing.
 
-If you intend to rewrite most or all of a file's content, use `write_file` directly. `edit_file` only swaps the matched `old_text` block — everything else in the file remains. Passing a full file as `new_text` with a small `old_text` (e.g., a header) produces a **concatenated/doubled file** silently.
+### Never use `edit_file` for whole-file rewrites
 
-**Heuristic:**
-- `len(new_text) > 2 × len(old_text)` AND file has content beyond the match → probably you want `write_file`
-- The server now BLOCKS this pattern by default. **The override flag is `allow_rewrite:true` — not `force`.** `force` is reserved for the risk-threshold bypass (CRITICAL risk). A `force:true` edit that *also* matches the rewrite heuristic will still be blocked; use `allow_rewrite:true` to acknowledge a near-total rewrite, or switch to `write_file` (recommended).
+`edit_file` replaces only the matched `old_text`. A small header + full-file `new_text` concatenates. The server blocks `new_text > 2× old_text` with leftover file content. Override is `allow_rewrite:true`, not `force`. Prefer `write_file`.
 
-**Tool guidance:**
 | Situation | Use |
 |-----------|-----|
 | Targeted small change | `edit_file` mode `replace` |
-| Replace all occurrences of a pattern | `edit_file` mode `search_replace` |
+| Replace all occurrences | `edit_file` mode `search_replace` |
 | Whole-file rewrite | `write_file` |
-| Multiple targeted changes same file | `multi_edit` with several anchors |
-| Delete/replace known line range | `edit_file` mode `delete_range` / `replace_range` |
-| Rename token project-wide | `project_replace` |
+| Multiple targeted changes same file | `multi_edit` |
+| Delete/replace known line range | `edit_file` `delete_range` / `replace_range` |
+| One-file unified diff | `apply_patch` (regenerate on `PATCH_APPLY_FAILED`) |
+| Rename token project-wide | `project_replace` (ultra) |
 
-## project_replace — Project-wide find/replace
+## Disabled (not registered)
 
-Replaces N calls to `multi_edit` with 1 call. Scans directory tree, matches pattern, replaces all occurrences.
+Aliases `read_text_file`, `search`, `edit`, `write`, `create_file`, `View`, `Edit`, `Write`, `Replace`, `LS`, `GlobTool`, `GrepTool`, and the `fs` super-tool. A runtime-native tool with one of those names is not a filesystem-ultra alias.
 
-**Parameters:**
-- `path` — root directory (required)
-- `find` — text or regex (required)
-- `replace` — replacement text (required)
-- `literal` — if false, find is regex (default: true)
-- `case_sensitive` — (default: true)
-- `file_types` — ".php,.html" (comma-separated)
-- `exclude_paths` — ["jotajotape/**"] (globs to skip)
-- `preview` — diff without writing (default: false)
-- `create_backup` — single consolidated backup (default: true)
-- `parallel` — process files concurrently (default: true)
-- `max_files` — safety cap (default: 1000)
+## project_replace (ultra)
 
-**Example:**
-```json
-{
-  "path": "C:\\project\\public_html",
-  "find": "utf8_encode(",
-  "replace": "utf8e(",
-  "file_types": ".php",
-  "exclude_paths": ["jotajotape/**"],
-  "preview": false
-}
-```
-
-**Response:** `files_changed`, `total_replacements`, `backup_id`, `per_file` array
-
-## Disabled (v4.4.0 cleanup)
-
-- 12 aliases (`read_text_file`, `search`, `edit`, `write`, `create_file`, `View`, `Edit`, `Write`, `Replace`, `LS`, `GlobTool`, `GrepTool`)
-- `fs` super-tool
-
-`directory_tree` **is registered**. These aliases were disabled to reduce discovery noise and token overhead. The registered tools are self-sufficient (`strict` 15 / `ultra` 24).
-
-## Ripgrep backend
-
-When `rg` (ripgrep) is available on PATH or embedded, `search_files` with `output_format:"json"` uses ripgrep for 10-100x faster search.
-
-**Detection priority:**
-1. `rg` in PATH
-2. Embedded binary (build with `embed_rg` tag)
-3. Fallback to Go-native regex
-
-**Log output:**
-```
-INFO Ripgrep detected for accelerated search version=14.x.x
-INFO Ripgrep not found - using Go-native search
-```
+`path`, `find`, `replace` required. `literal` default true. `file_types` e.g. `.php`. `exclude_paths` globs. `preview` / `create_backup` (default true) / `parallel` / `max_files` (default 1000).

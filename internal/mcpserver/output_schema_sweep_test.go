@@ -83,6 +83,7 @@ func TestOutputSchema_HandlerSweep(t *testing.T) {
 	registerSearchTools(reg)
 	registerDiscoveryTools(reg)
 	registerPatchTools(reg)
+	registerAnalyzeTools(reg)
 
 	readSchema := parseSchema(t, readFileOutputSchema)
 	writeSchema := parseSchema(t, writeFileOutputSchema)
@@ -95,6 +96,7 @@ func TestOutputSchema_HandlerSweep(t *testing.T) {
 	allowedSchema := parseSchema(t, listAllowedDirectoriesOutputSchema)
 	diffSchema := parseSchema(t, diffFilesOutputSchema)
 	patchSchema := parseSchema(t, applyPatchOutputSchema)
+	analyzeSchema := parseSchema(t, analyzeCodeOutputSchema)
 
 	// freshFile creates a per-case file so edit cases cannot interfere.
 	freshFile := func(name, content string) string {
@@ -183,6 +185,8 @@ func TestOutputSchema_HandlerSweep(t *testing.T) {
 			args: map[string]any{"path_a": freshFile("d1.txt", sample), "path_b": freshFile("d2.txt", "other\n")}},
 		{name: "apply patch dry_run", tool: "apply_patch", schema: patchSchema, textMessage: true,
 			args: map[string]any{"path": freshFile("p1.txt", "old\n"), "patch": "--- a/p1.txt\n+++ b/p1.txt\n@@ -1 +1 @@\n-old\n+new\n", "dry_run": true}},
+		{name: "analyze symbols", tool: "analyze_code", schema: analyzeSchema, textMessage: true,
+			args: map[string]any{"action": "symbols", "path": freshFile("an.go", "package an\nfunc Exported() {}\n")}},
 	}
 
 	for _, tc := range cases {

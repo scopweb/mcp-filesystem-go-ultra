@@ -315,6 +315,12 @@ var toolSchemas = map[string]ToolParamSchema{
 		"create_backup":       {ParamBoolean, false},
 		"dry_run":             {ParamBoolean, false},
 	},
+	"analyze_code": {
+		"action":       {ParamString, true},
+		"path":         {ParamString, true},
+		"query":        {ParamString, false},
+		"max_findings": {ParamNumber, false},
+	},
 	"project_replace": {
 		"path":           {ParamString, true},
 		"find":           {ParamString, true},
