@@ -1,5 +1,7 @@
 # CHANGELOG - MCP Filesystem Server Ultra-Fast
 
+> **Note for humans**: This file grew to ~4700 lines. For changes before v4.6 see `git log --oneline`. Only recent releases are summarized here.
+
 ## [4.6.2] - 2026-09-13
 
 ### feat: agent discovery, strict profile, git-network

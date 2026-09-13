@@ -31,15 +31,14 @@ Sigue abierto. La batería `TestE2E_E6_AgentEval` es integración scriptada, no 
 
 ## Hecho en v4.6.2
 
-- README: tabla de 24 tools; las 4 de discovery/patch con “cuándo usarla”
-- `server.WithInstructions()`: primera llamada `list_allowed_directories`; luego `directory_tree` o `help(tool:X)`; sin catálogo al arrancar; sin `minify_js`
-- Skill + `help()` + CLAUDE.md + USAGE alineados (sin “directory_tree experimental”, sin “llama help() primero”)
-- `read_file`: si piden `read_multiple_files` / `read_text_file` → `read_file` (`paths[]` / `mode` head|tail)
-- `--profile=strict|ultra` (default ultra). strict = 16 tools de agente (incluye `backup` para undo)
-- `apply_patch`: un fichero por llamada; skill PATCH_APPLY_FAILED → read + regenerar; test CRLF dest + LF patch
-- `directory_tree` / `search_files`: gitignore ON; `truncated` + `hidden_count` explícitos
-- `--git-network` (default off): `push`/`fetch` ausentes del enum; `openWorldHint` true solo con red
-- Tests: fail-closed exit 2; `list_allowed_directories` shape; perfil strict exacto; apply_patch dry_run/OCC/CRLF; sweep outputSchema
+- README / skill / help aligned on discovery: first `list_allowed_directories`, then `directory_tree` or `help(tool:X)`; no full catalog dump at start; `minify_js` omitted from instructions.
+- `--profile=strict` (16 tools incl. `backup` for undo) vs `--profile=ultra` (25 tools incl. `analyze_code`). Default ultra for compatibility.
+- `analyze_code` (ultra only): symbols (go/ast), lint (go vet + staticcheck), sec (local regex), impact (search-based). readOnly; no shell; allowlisted bins only.
+- `apply_patch`: one file per call; dest EOL wins; skill guidance for PATCH_APPLY_FAILED; CRLF test.
+- `directory_tree` / `search_files`: gitignore default ON; `truncated` + `hidden_count` in structured output + outputSchema.
+- `--git-network` (default off): push/fetch removed from default enum; `openWorldHint` only when enabled.
+- Tests: profile exact counts (16/25), output schema sweep, fail-closed exit 2, apply_patch dry-run/OCC/CRLF, git network gate.
+- `backup` promoted into strict core so agents can always undo.
 
 ## Hecho en v4.6.1
 
