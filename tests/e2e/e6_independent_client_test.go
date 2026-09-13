@@ -20,7 +20,7 @@ func TestE2E_E6_IndependentJSONRPCClient(t *testing.T) {
 	listed := c.rpc(t, "tools/list", map[string]any{})
 	result, _ := listed["result"].(map[string]any)
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 24 {
+	if len(tools) != 25 {
 		t.Fatalf("tools/list count=%d", len(tools))
 	}
 

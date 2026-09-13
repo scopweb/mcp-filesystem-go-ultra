@@ -48,7 +48,7 @@ func TestProfile_StrictToolSetExact(t *testing.T) {
 	}
 	for _, banned := range []string{
 		"git", "wsl", "minify_js", "project_replace", "batch_operations",
-		"backup", "analyze_operation", "copy_file", "server_info",
+		"analyze_operation", "copy_file", "server_info",
 	} {
 		if got[banned] {
 			t.Errorf("strict must not register %q", banned)
@@ -60,8 +60,8 @@ func TestProfile_UltraHasFullCatalog(t *testing.T) {
 	dir := t.TempDir()
 	reg := newProfileRegistry(t, dir, registerOpts{Profile: profileUltra})
 	n := len(reg.server.ListTools())
-	if n != 24 {
-		t.Fatalf("ultra registered %d tools, want 24", n)
+	if n != 25 {
+		t.Fatalf("ultra registered %d tools, want 25", n)
 	}
 	for _, name := range []string{"git", "minify_js", "backup", "help", "apply_patch"} {
 		if _, ok := reg.server.ListTools()[name]; !ok {

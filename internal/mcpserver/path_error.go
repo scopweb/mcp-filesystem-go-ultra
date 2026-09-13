@@ -16,6 +16,7 @@ const (
 	errCodeReadOnly       = "READ_ONLY"
 	errCodePatchFailed    = "PATCH_APPLY_FAILED"
 	errCodeInvalidParams  = "INVALID_PARAMS"
+	errCodeUnavailable    = "TOOL_UNAVAILABLE"
 )
 
 type pathErrorBody struct {

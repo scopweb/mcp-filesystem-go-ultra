@@ -1,10 +1,10 @@
 # MCP Filesystem Server Ultra
 
-**v4.6.2** · Go 1.27.1 · MCP 2025-11-25 · 24 tools ultra / 15 strict (agent core)
+**v4.6.2** · Go 1.27.1 · MCP 2025-11-25 · 25 tools ultra / 16 strict (agent core)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
-Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are disabled; only the 24 canonical tool names are registered.
+Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are disabled. Default `--profile=ultra` registers the 24 canonical names; `--profile=strict` registers the 16-tool agent core (includes `backup` for undo).
 
 ---
 
@@ -26,7 +26,7 @@ Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool 
 
 ### Productivity
 
-- **24 tools (ultra)** — 17 core + `git` + `minify_js` + `help` + `list_allowed_directories` + `directory_tree` + `diff_files` + `apply_patch`. `--profile=strict` registers the 15-tool agent core.
+- **25 tools (ultra)** — 17 core + `git` + `minify_js` + `analyze_code` + `help` + discovery/patch. `--profile=strict` registers the 16-tool agent core (includes `backup` for undo; no `analyze_code`).
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
 - **Hook system** — 16 pre/post events (write, edit, delete, create, move, copy, read, search)
 - **Pipeline system** — 12 actions with conditions, templates, and DAG-based parallel execution; reduces client/server round-trips for multi-step refactors
@@ -75,6 +75,22 @@ go test -fuzz=Fuzz ./tests/security
 ---
 
 ## Configuration
+
+### Recommended flags for Claude Code / OpenCode
+
+Keep this trio in the MCP `args` (and leave `--readonly` off so the agent can write):
+
+```
+--profile=strict --compact-mode --roots-mode=union
+```
+
+| Flag | Why |
+|------|-----|
+| `--profile=strict` | Registers the 16-tool agent core (`list_allowed_directories`, `directory_tree`, `read_file` / `write_file` / `edit_file` / `apply_patch`, `backup` for undo, …). Omits `git`, `wsl`, `minify_js`, `analyze_code`, `batch_operations`, `copy_file`, `server_info`, … so `tools/list` stays small and lazy-loading clients actually see the useful set. Default is `ultra` (25 tools) so existing configs do not break. |
+| `--compact-mode` | Short token-efficient responses (hashes, UNDO ids, no emoji walls). |
+| `--roots-mode=union` | MCP client Roots are **added** to the CLI allowlist. Default `replace` is wrong for OpenCode: it sends the workspace as Roots and **wipes** every other CLI path, so `list_allowed_directories` only shows one folder. |
+
+Do not pass `--git-network` unless the agent must `git push` / `git fetch`. Do not pass `--readonly` unless the session should be read-only.
 
 Add to your `claude_desktop_config.json`:
 
@@ -197,7 +213,7 @@ Allowed paths: positional args after the flags, **or** one `--allowed-paths` wit
 | `--allowed-paths` | (required) | Comma-separated allowed roots; or pass paths as positional args |
 | `--insecure-open` | off | Labs only: disable the sandbox (entire disk). Fail-closed by default since v4.6.0. |
 | `--roots-mode` | replace | How MCP client Roots combine with CLI paths: `replace`, `union`, `ignore` |
-| `--profile` | ultra | `ultra` = all 24 tools; `strict` = 15-tool agent core |
+| `--profile` | ultra | `ultra` = all 25 tools; `strict` = 16-tool agent core (includes `backup`) |
 | `--git-network` | off | Enable `git` push/fetch. Off the critical path; ignored in `strict` |
 | `--readonly` | off | Reject mutating tools |
 | `--allow-secrets` | off | Allow `.env` / keys (audited) |
@@ -227,7 +243,7 @@ Do **not** dump the 24-tool catalog at startup. Handshake instructions are short
 | 2 | `directory_tree` or `help(tool:"X")` | Explore roots, or look up one tool on demand |
 | 3 | `help()` | Only if you need the live registered list |
 
-`--profile=strict` shrinks `tools/list` to the 15-tool agent core so lazy-loading clients see the useful set.
+`--profile=strict` shrinks `tools/list` to the 16-tool agent core so lazy-loading clients see the useful set.
 
 ### Using the skill
 
@@ -243,7 +259,7 @@ For a host project, bind the whole task to the filesystem-ultra family. After ev
 
 ## Available Tools
 
-24 in `--profile=ultra` (default). `--profile=strict` keeps the 15 marked **strict**.
+25 in `--profile=ultra` (default). `--profile=strict` keeps the 16 marked **strict**.
 
 | Tool | Purpose | When to use |
 |------|---------|-------------|
@@ -265,11 +281,12 @@ For a host project, bind the whole task to the filesystem-ultra family. After ev
 | `copy_file` | Recursive copy | ultra |
 | `project_replace` | Token rename across a tree | ultra |
 | `batch_operations` | Atomic ops / pipelines / rename | ultra |
-| `backup` | Undo / restore / trash | ultra |
+| `backup` | Undo / restore / trash. **strict** | After a bad edit: `undo_last` / `restore` / `restore_trash` |
 | `analyze_operation` | Dry-run risk preview | ultra |
 | `wsl` | WSL ↔ Windows sync | ultra |
 | `git` | Local git. `push`/`fetch` need `--git-network` | ultra |
 | `minify_js` | Pure-Go JS minify (no Node) | ultra |
+| `analyze_code` | Read-only symbols / lint / sec / impact. Not a writer. | ultra — understand code; edit with `apply_patch`/`edit_file`. Do not use git grep or bash |
 | `server_info` | Stats / static help / artifacts | ultra |
 
 ---
@@ -428,7 +445,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest: v4.6.1 — graduate discovery/patch tools, unified wire contract). Remaining work: [PLAN-PENDIENTE.md](PLAN-PENDIENTE.md).
+See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest: v4.6.2 — agent discovery, `--profile=strict`, `--git-network`). Remaining work: [PLAN-PENDIENTE.md](PLAN-PENDIENTE.md).
 
 ---
 

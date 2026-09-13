@@ -181,7 +181,7 @@ apply_patch
 - When: surgical one-file edits after diff_files or a generated hunk
 - Key params: path, patch, dry_run, expected_hash, allow_rewrite, create_backup
 
-## Version Control, JavaScript, and Discovery (3)
+## Version Control, JavaScript, Analysis, and Discovery (4)
 
 git
 - Purpose: Safe Git status, diff, log, show, add, commit, push, fetch, restore, branch, and init actions
@@ -190,6 +190,10 @@ git
 minify_js
 - Purpose: Pure-Go JavaScript minification without Node
 - Key params: path, output_path
+
+analyze_code
+- Purpose: Read-only symbols/lint/sec/impact. For editing use apply_patch/edit_file. Do not use git grep or bash. Ultra only. Impact is text search, not a callgraph.
+- Key params: action (symbols|lint|sec|impact), path, query, max_findings
 
 help
 - Purpose: Dynamic registered-tool catalog; help(tool:"X") returns schema + examples

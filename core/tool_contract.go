@@ -115,6 +115,7 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 	setEnum("git", "action", "status", "diff", "log", "show", "add", "commit", "push", "fetch", "restore", "branch", "init")
 	setEnum("backup", "action", "list", "info", "compare", "cleanup", "restore", "undo_last", "undo_chain", "list_trash", "restore_trash", "purge_trash")
 	setEnum("analyze_operation", "operation", "file", "optimize", "write", "edit", "delete")
+	setEnum("analyze_code", "action", "symbols", "lint", "sec", "impact")
 	setEnum("wsl", "action", "sync", "status", "autosync_config", "autosync_status")
 	setEnum("server_info", "action", "help", "stats", "artifact")
 	setItems := func(tool, param, items string) {
@@ -140,6 +141,14 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 			`read_file(paths:["a.go","b.go"])`,
 			`read_file(path:"app.log", mode:"tail", max_lines:40)`,
 			`read_file(path:"file.bin", encoding:"base64")`,
+		}
+	}
+	if c := cs["analyze_code"]; c != nil {
+		c.Examples = []string{
+			`analyze_code(action:"symbols", path:"pkg/", query:"Foo")`,
+			`analyze_code(action:"lint", path:"pkg/")`,
+			`analyze_code(action:"sec", path:"pkg/file.go")`,
+			`analyze_code(action:"impact", path:"pkg/", query:"Foo")`,
 		}
 	}
 	if c := cs["write_file"]; c != nil {

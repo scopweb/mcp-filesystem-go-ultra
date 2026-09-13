@@ -192,3 +192,17 @@ var backupOutputSchema = json.RawMessage(`{
   },
   "required": ["status", "action", "message"]
 }`)
+
+var analyzeCodeOutputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "status": {"type": "string", "description": "ok | empty | unavailable | error | partial"},
+    "action": {"type": "string", "description": "symbols | lint | sec | impact"},
+    "findings": {"type": "array", "items": {"type": "object"}, "description": "Hits {path,line,col,symbol,kind,message,severity,suggestion}"},
+    "truncated": {"type": "boolean"},
+    "tool": {"type": "string", "description": "go-ast | go-vet | staticcheck | govulncheck | search"},
+    "retryable": {"type": "boolean"},
+    "message": {"type": "string", "description": "Text fallback, identical to the text content block"}
+  },
+  "required": ["status", "action", "findings", "truncated", "tool", "retryable", "message"]
+}`)

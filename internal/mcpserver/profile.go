@@ -13,8 +13,8 @@ const (
 )
 
 // strictToolSet is the agent-core catalog. Order matches the discovery
-// workflow: roots → tree → I/O → patch → help. Everything else (git, wsl,
-// minify_js, batch, backup, …) stays on profile=ultra.
+// workflow: roots → tree → I/O → patch → undo → help. Everything else
+// (git, wsl, minify_js, batch, …) stays on profile=ultra.
 var strictToolSet = map[string]struct{}{
 	"list_allowed_directories": {},
 	"directory_tree":           {},
@@ -30,6 +30,7 @@ var strictToolSet = map[string]struct{}{
 	"create_directory":         {},
 	"move_file":                {},
 	"delete_file":              {},
+	"backup":                   {},
 	"help":                     {},
 }
 

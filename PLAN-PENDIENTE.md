@@ -35,7 +35,7 @@ Sigue abierto. La batería `TestE2E_E6_AgentEval` es integración scriptada, no 
 - `server.WithInstructions()`: primera llamada `list_allowed_directories`; luego `directory_tree` o `help(tool:X)`; sin catálogo al arrancar; sin `minify_js`
 - Skill + `help()` + CLAUDE.md + USAGE alineados (sin “directory_tree experimental”, sin “llama help() primero”)
 - `read_file`: si piden `read_multiple_files` / `read_text_file` → `read_file` (`paths[]` / `mode` head|tail)
-- `--profile=strict|ultra` (default ultra). strict = 15 tools de agente
+- `--profile=strict|ultra` (default ultra). strict = 16 tools de agente (incluye `backup` para undo)
 - `apply_patch`: un fichero por llamada; skill PATCH_APPLY_FAILED → read + regenerar; test CRLF dest + LF patch
 - `directory_tree` / `search_files`: gitignore ON; `truncated` + `hidden_count` explícitos
 - `--git-network` (default off): `push`/`fetch` ausentes del enum; `openWorldHint` true solo con red
