@@ -18,6 +18,14 @@ type TreeOpts struct {
 	Format        string // "json" (default) or "compact"
 }
 
+// TreeListing is the typed tree result. Handlers publish truncated and
+// hidden_count from these fields rather than scraping the text footer.
+type TreeListing struct {
+	Text        string
+	Truncated   bool
+	HiddenCount int
+}
+
 type treeNode struct {
 	Name          string      `json:"name"`
 	Type          string      `json:"type"`
@@ -29,6 +37,11 @@ type treeNode struct {
 }
 
 func (e *UltraFastEngine) ListDirectoryTreeOpts(ctx context.Context, path string, opts TreeOpts) (string, error) {
+	r, err := e.ListDirectoryTreeResult(ctx, path, opts)
+	return r.Text, err
+}
+
+func (e *UltraFastEngine) ListDirectoryTreeResult(ctx context.Context, path string, opts TreeOpts) (TreeListing, error) {
 	path = NormalizePath(path)
 	if opts.MaxDepth <= 0 {
 		opts.MaxDepth = 2
@@ -41,13 +54,13 @@ func (e *UltraFastEngine) ListDirectoryTreeOpts(ctx context.Context, path string
 	}
 
 	if err := e.acquireOperation(ctx, "tree"); err != nil {
-		return "", err
+		return TreeListing{}, err
 	}
 	start := time.Now()
 	defer e.releaseOperation("tree", start)
 
 	if !e.IsPathAllowed(path) {
-		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths%s", path, e.AllowedDirsSuffix())
+		return TreeListing{}, fmt.Errorf("access denied: path '%s' is not in allowed paths%s", path, e.AllowedDirsSuffix())
 	}
 
 	var ign *IgnoreMatcher
@@ -141,23 +154,24 @@ func (e *UltraFastEngine) ListDirectoryTreeOpts(ctx context.Context, path string
 
 	tree, err := build(path, 0)
 	if err != nil {
-		return "", fmt.Errorf("failed to build directory tree: %w", err)
+		return TreeListing{}, fmt.Errorf("failed to build directory tree: %w", err)
 	}
 	if tree == nil {
-		return "", fmt.Errorf("failed to build directory tree: empty")
+		return TreeListing{}, fmt.Errorf("failed to build directory tree: empty")
 	}
 	tree.Truncated = truncated
 	tree.SkippedIgnore = skippedIgnore
 	tree.SkippedExcl = skippedExcl
+	hidden := skippedIgnore + skippedExcl
 
 	if opts.Format == "compact" {
-		return renderCompactTree(tree, opts), nil
+		return TreeListing{Text: renderCompactTree(tree, opts), Truncated: truncated, HiddenCount: hidden}, nil
 	}
 	data, err := json.MarshalIndent(tree, "", "  ")
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal tree: %w", err)
+		return TreeListing{}, fmt.Errorf("failed to marshal tree: %w", err)
 	}
-	return string(data), nil
+	return TreeListing{Text: string(data), Truncated: truncated, HiddenCount: hidden}, nil
 }
 
 func excludedName(name, absPath, root string, patterns []string) bool {

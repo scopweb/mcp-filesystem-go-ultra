@@ -175,7 +175,7 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 		}, nil
 	}
 
-	matches, err := e.performAdvancedTextSearch(ctx, validPath, pattern, caseSensitive, wholeWord, includeContext, contextLines, outputFormat, noIgnore, fileTypes)
+	matches, _, err := e.performAdvancedTextSearch(ctx, validPath, pattern, caseSensitive, wholeWord, includeContext, contextLines, outputFormat, noIgnore, fileTypes)
 	if err != nil {
 		return &mcp.CallToolResponse{
 			Content: []mcp.TextContent{
@@ -474,6 +474,7 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 	// log this is the dominant cost.
 	var filesToSearch []string
 	ign := NewIgnoreMatcher()
+	hiddenCount := 0
 	walkErr := filepath.WalkDir(path, func(currentPath string, d os.DirEntry, err error) error {
 		// Check context in walk callback
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -485,6 +486,7 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 		}
 
 		if skipWalkDir(d.Name(), currentPath, path, d.IsDir(), ign, noIgnore) {
+			hiddenCount++
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -706,7 +708,7 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 		if !includeContent {
 			text = fmt.Sprintf("🔍 No filename matches for pattern '%s' in %s (filename-only search — file contents were NOT searched; pass include_content:true to search inside files)", pattern, path)
 		}
-		return SearchOutcome{Text: text, Matches: []SearchMatch{}, FilenameOnly: !includeContent, Truncated: walkCapped}, nil
+		return SearchOutcome{Text: text, Matches: []SearchMatch{}, FilenameOnly: !includeContent, Truncated: walkCapped, HiddenCount: hiddenCount}, nil
 	}
 
 	truncated := walkCapped
@@ -726,12 +728,13 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 		Matches:      hits,
 		MatchCount:   len(hits),
 		Truncated:    truncated,
+		HiddenCount:  hiddenCount,
 		FilenameOnly: !includeContent,
 	}, nil
 }
 
 // performAdvancedTextSearch implements advanced text search with parallelization
-func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, pattern string, caseSensitive, wholeWord, includeContext bool, contextLines int, outputFormat string, noIgnore bool, fileTypes []string) ([]SearchMatch, error) {
+func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, pattern string, caseSensitive, wholeWord, includeContext bool, contextLines int, outputFormat string, noIgnore bool, fileTypes []string) ([]SearchMatch, int, error) {
 	var matchesMu sync.Mutex
 	var matches []SearchMatch
 
@@ -746,7 +749,7 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 	if e.ripgrepAvailable {
 		rgMatches, rgErr := e.RunRipgrepSearch(ctx, path, pattern, caseSensitive, wholeWord, includeContext, contextLines, noIgnore, fileTypes)
 		if rgErr == nil {
-			return rgMatches, nil
+			return rgMatches, 0, nil
 		}
 		// Fall through to Go-native on error
 		slog.Debug("Ripgrep fallback", "reason", rgErr)
@@ -763,18 +766,20 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 
 	regexPattern, err := e.CompileRegex(searchPattern)
 	if err != nil {
-		return nil, fmt.Errorf("invalid regex pattern: %w", err)
+		return nil, 0, fmt.Errorf("invalid regex pattern: %w", err)
 	}
 
 	// First pass: collect all files to search (WalkDir: no per-entry lstat, v4.5.27)
 	var filesToSearch []string
 	ign := NewIgnoreMatcher()
+	hiddenCount := 0
 	err = filepath.WalkDir(path, func(currentPath string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 
 		if skipWalkDir(d.Name(), currentPath, path, d.IsDir(), ign, noIgnore) {
+			hiddenCount++
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -802,7 +807,7 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, hiddenCount, err
 	}
 
 	// Second pass: parallel search using worker pool
@@ -900,7 +905,7 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 
 	wg.Wait()
 
-	return matches, nil
+	return matches, hiddenCount, nil
 }
 
 // searchSkipDirs are directories that should be skipped during search walks.

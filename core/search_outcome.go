@@ -18,6 +18,7 @@ type SearchOutcome struct {
 	Matches      []SearchMatch
 	MatchCount   int
 	Truncated    bool
+	HiddenCount  int
 	FilenameOnly bool
 }
 
@@ -123,7 +124,7 @@ func (e *UltraFastEngine) advancedSearchOutcomeFromOpts(ctx context.Context, opt
 		return SearchOutcome{Text: fmt.Sprintf("❌ Error: pre-search hook denied: %v", err)}, nil
 	}
 
-	matches, err := e.performAdvancedTextSearch(ctx, validPath, pattern, opts.CaseSensitive, opts.WholeWord, opts.IncludeContext, contextLines, outputFormat, opts.NoIgnore, opts.FileTypes)
+	matches, hidden, err := e.performAdvancedTextSearch(ctx, validPath, pattern, opts.CaseSensitive, opts.WholeWord, opts.IncludeContext, contextLines, outputFormat, opts.NoIgnore, opts.FileTypes)
 	if err != nil {
 		return SearchOutcome{Text: fmt.Sprintf("❌ Error: %v", err)}, nil
 	}
@@ -141,18 +142,20 @@ func (e *UltraFastEngine) advancedSearchOutcomeFromOpts(ctx context.Context, opt
 
 	if len(matches) == 0 {
 		return SearchOutcome{
-			Text:       fmt.Sprintf("🔍 No matches found for pattern '%s' in %s", pattern, path),
-			Matches:    []SearchMatch{},
-			MatchCount: 0,
+			Text:        fmt.Sprintf("🔍 No matches found for pattern '%s' in %s", pattern, path),
+			Matches:     []SearchMatch{},
+			MatchCount:  0,
+			HiddenCount: hidden,
 		}, nil
 	}
 
 	text := e.formatAdvancedSearchOutput(matches, pattern, path, outputFormat, opts.IncludeContext, totalBeforeCap, maxResults, truncated)
 	return SearchOutcome{
-		Text:       text,
-		Matches:    matches,
-		MatchCount: totalBeforeCap,
-		Truncated:  truncated,
+		Text:        text,
+		Matches:     matches,
+		MatchCount:  totalBeforeCap,
+		Truncated:   truncated,
+		HiddenCount: hidden,
 	}, nil
 }
 

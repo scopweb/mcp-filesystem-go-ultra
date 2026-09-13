@@ -15,16 +15,27 @@ import (
 // registerGitTools registers the git tool
 func registerGitTools(reg *toolRegistry) {
 	engine := reg.engine
+	gitNetwork := reg.gitNetwork
 
-	gitTool := mcp.NewTool("git",
+	gitActions := []string{"status", "diff", "log", "show", "add", "commit", "restore", "branch", "init"}
+	gitDesc := "git — Git operations: status, diff, log, show, add, commit, restore, branch, init. " +
+		"Must be run from within a git repository. Related: analyze_operation, edit_file, help."
+	actionHelp := `git(action:"status")  // or: diff, log, show, add, commit, restore, branch, init`
+	if gitNetwork {
+		gitActions = []string{"status", "diff", "log", "show", "add", "commit", "push", "fetch", "restore", "branch", "init"}
+		gitDesc = "git — Git operations: status, diff, log, show, add, commit, push, fetch, restore, branch, init. " +
+			"Must be run from within a git repository. Related: analyze_operation, edit_file, help."
+		actionHelp = `git(action:"status")  // or: diff, log, show, add, commit, push, fetch, restore, branch, init`
+	}
+
+	gitOpts := []mcp.ToolOption{
 		mcp.WithTitleAnnotation("Git Version Control"),
-		mcp.WithDescription("git — Git operations: status, diff, log, show, add, commit, push, fetch, restore, branch, init. "+
-			"Must be run from within a git repository. Related: analyze_operation, edit_file, help."),
+		mcp.WithDescription(gitDesc),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true), // restore, branch delete
 		mcp.WithIdempotentHintAnnotation(false), // commit, restore, branch delete are not idempotent
-
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, diff, log, show, add, commit, push, fetch, restore, branch, init"), mcp.Enum("status", "diff", "log", "show", "add", "commit", "push", "fetch", "restore", "branch", "init")),
+		mcp.WithOpenWorldHintAnnotation(gitNetwork),
+		mcp.WithString("action", mcp.Required(), mcp.Description("Action: "+strings.Join(gitActions, ", ")), mcp.Enum(gitActions...)),
 		mcp.WithString("path", mcp.Description("Working directory or file path (default: auto-detect repo root). If a file path, used as implicit pathspec for diff/log/status.")),
 		mcp.WithArray("paths", mcp.WithStringItems(),
 			mcp.Description("Pathspec: native array of file/dir paths relative to repo root. Limits diff/log/status/add/restore to these paths. Equivalent to 'git <cmd> -- <paths>'.")),
@@ -40,7 +51,8 @@ func registerGitTools(reg *toolRegistry) {
 		mcp.WithBoolean("delete", mcp.Description("branch: true → delete name (git branch -d). Required to delete; name alone never deletes.")),
 		mcp.WithBoolean("force", mcp.Description("branch: with delete:true, true → -D (else -d). push: true → --force-with-lease (never plain --force). Other actions: ignored.")),
 		mcp.WithBoolean("prune", mcp.Description("fetch: true → --prune (drop stale remote-tracking refs). Default: false.")),
-	)
+	}
+	gitTool := mcp.NewTool("git", gitOpts...)
 
 	reg.addTool(gitTool, auditWrap(engine, "git", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.Params.Arguments.(map[string]interface{})
@@ -51,7 +63,7 @@ func registerGitTools(reg *toolRegistry) {
 		if action == "" {
 			return usageError(
 				"missing 'action' parameter",
-				`git(action:"status")  // or: diff, log, show, add, commit, push, fetch, restore, branch, init`), nil
+				actionHelp), nil
 		}
 
 		// Normalize path
@@ -120,8 +132,14 @@ func registerGitTools(reg *toolRegistry) {
 		case "commit":
 			return gitCommit(ctx, engine, repoRoot, args)
 		case "push":
+			if !gitNetwork {
+				return usageError("git push requires --git-network", `restart the server with --git-network`), nil
+			}
 			return gitPush(ctx, engine, repoRoot, args)
 		case "fetch":
+			if !gitNetwork {
+				return usageError("git fetch requires --git-network", `restart the server with --git-network`), nil
+			}
 			return gitFetch(ctx, engine, repoRoot, args)
 		case "restore":
 			return gitRestore(ctx, engine, repoRoot, args)
@@ -130,19 +148,28 @@ func registerGitTools(reg *toolRegistry) {
 		default:
 			return usageError(
 				fmt.Sprintf("unknown action %q", action),
-				`git(action:"status")  // valid: status, diff, log, show, add, commit, push, fetch, restore, branch, init`), nil
+				actionHelp), nil
 		}
-	}),
-		// Examples for help(tool:"git") — manually curated per docs/git-tool-spec.md §5
+	}), gitHelpExamples(gitNetwork)...)
+}
+
+func gitHelpExamples(gitNetwork bool) []string {
+	ex := []string{
 		`git(action:"status")`,
 		`git(action:"diff", paths:["lib/dPeticiones.php"], output:"stat")`,
 		`git(action:"log", limit:5, paths:["public_html/ajax/"])`,
 		`git(action:"show", rev:"HEAD", output:"full")`,
 		`git(action:"add", paths:["src/file.php"])`,
 		`git(action:"commit", message:"fix: short description")`,
-		`git(action:"push")`,
-		`git(action:"push", name:"feature/new")`,
-		`git(action:"fetch", prune:true)`,
+	}
+	if gitNetwork {
+		ex = append(ex,
+			`git(action:"push")`,
+			`git(action:"push", name:"feature/new")`,
+			`git(action:"fetch", prune:true)`,
+		)
+	}
+	return append(ex,
 		`git(action:"restore", paths:["file.txt"], staged:true)`,
 		`git(action:"branch", name:"feature/new", checkout:true)`,
 		`git(action:"branch", name:"old", delete:true)`,

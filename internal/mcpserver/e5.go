@@ -129,7 +129,7 @@ func readStructuredMeta(path, content, hash string, proj readProjection, files [
 	return m
 }
 
-func listStructured(path, format, text string, entries []map[string]any, truncated bool) map[string]any {
+func listStructured(path, format, text string, entries []map[string]any, truncated bool, hiddenCount int, includeHidden bool) map[string]any {
 	status := statusOK
 	if truncated {
 		status = statusTruncated
@@ -148,6 +148,9 @@ func listStructured(path, format, text string, entries []map[string]any, truncat
 	if entries != nil {
 		m["entries"] = entries
 		m["entry_count"] = len(entries)
+	}
+	if includeHidden {
+		m["hidden_count"] = hiddenCount
 	}
 	if truncated {
 		m["continuation"] = "Raise max_nodes/max_depth or narrow the path; the listing was capped."
@@ -171,10 +174,10 @@ func searchStructuredFromOutcome(out core.SearchOutcome, scope map[string]any, e
 	if count == 0 {
 		count = len(out.Matches)
 	}
-	return searchStructured(out.Text, scope, matches, count, out.Truncated || extraTrunc)
+	return searchStructured(out.Text, scope, matches, count, out.Truncated || extraTrunc, out.HiddenCount)
 }
 
-func searchStructured(text string, scope map[string]any, matches []map[string]any, matchCount int, truncated bool) map[string]any {
+func searchStructured(text string, scope map[string]any, matches []map[string]any, matchCount int, truncated bool, hiddenCount int) map[string]any {
 	status := statusOK
 	if truncated {
 		status = statusTruncated
@@ -185,11 +188,12 @@ func searchStructured(text string, scope map[string]any, matches []map[string]an
 		matches = []map[string]any{}
 	}
 	m := map[string]any{
-		"status":      status,
-		"match_count": matchCount,
-		"truncated":   truncated,
-		"matches":     matches,
-		"message":     text,
+		"status":       status,
+		"match_count":  matchCount,
+		"truncated":    truncated,
+		"hidden_count": hiddenCount,
+		"matches":      matches,
+		"message":      text,
 	}
 	if scope != nil {
 		m["scope"] = scope
