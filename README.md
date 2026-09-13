@@ -272,6 +272,10 @@ The skill ships in `.claude/skills/filesystem-ultra-tools/`. Same order: `list_a
 
 For a host project, bind the whole task to the filesystem-ultra family. After every creation or edit, verify independently with `get_file_info` or `list_directory`, and use `read_file` when content matters. If a known file reports `File not found`, stop and audit recent operations made through the failing tool family before retrying or switching tools.
 
+### Subagentes y arneses
+
+Copy [examples/harness/](examples/harness/) — do not guess flags. One MCP instance per workspace: `--profile=strict --roots-mode=union --compact-mode`. OpenCode `timeout` ≥ 30000. One role = one disk family (never mix native Read/Edit with ultra). Codex `*** Begin Patch` is not ultra `apply_patch`. Parent→child handoff: roots, path, `content_hash`, `backup_id`, profile; the child re-reads.
+
 ---
 
 ## Available Tools
