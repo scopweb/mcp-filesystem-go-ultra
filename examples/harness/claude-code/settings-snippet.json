@@ -1,0 +1,22 @@
+{
+  "_comment": "ajusta matcher a tu Claude Code — hook/permission schema varies by version. Scope this snippet to fs-explorer / fs-editor / fs-reviewer only, not a global deny.",
+  "permissions": {
+    "deny": ["Read", "Write", "Edit", "Glob"]
+  },
+  "disallowedTools": [
+    "Read",
+    "Write",
+    "Edit",
+    "Glob",
+    "mcp__filesystem-ultra__git",
+    "mcp__filesystem-ultra__batch_operations"
+  ],
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Write|Edit|Glob",
+        "_comment": "ajusta matcher a tu Claude Code"
+      }
+    ]
+  }
+}

@@ -4,6 +4,7 @@ Esta carpeta contiene archivos de ejemplo para configuración y uso del MCP.
 
 ## Archivos
 
+- **harness/** — Copy-paste pack for Claude Code, OpenCode, and Codex subagents. See [harness/README.md](harness/README.md).
 - **hooks.example.json** - Ejemplo completo de configuración de hooks (16 eventos, todos deshabilitados por defecto — actívalos selectivamente con `enabled: true`)
 - **hooks-test.json** - Configuración de hooks con todos los eventos habilitados y `cmd /c echo` (Windows-friendly), útil para verificar que el sistema dispara los hooks correctamente. Incluye hooks de bloqueo (`failOnError: true`) para `.env` y `.key` que puedes activar para probar el rechazo.
 - **request.json** - Ejemplos de requests MCP

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "fs-editor": {
+      "description": "Edit host files via filesystem-ultra only. Native edit/write off. Pass expected_hash. Re-read on handoff.",
+      "mode": "subagent",
+      "permission": {
+        "read": "deny",
+        "edit": "deny",
+        "glob": "deny",
+        "grep": "deny",
+        "list": "deny",
+        "bash": "deny",
+        "filesystem-ultra_*": "allow"
+      }
+    }
+  }
+}

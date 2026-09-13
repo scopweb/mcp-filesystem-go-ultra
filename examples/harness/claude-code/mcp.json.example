@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "filesystem-ultra": {
+      "command": "C:\\path\\to\\filesystem-ultra-v4.exe",
+      "args": [
+        "--profile", "strict",
+        "--compact-mode",
+        "--roots-mode", "union",
+        "C:\\path\\to\\workspace"
+      ]
+    }
+  }
+}

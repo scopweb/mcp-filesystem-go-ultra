@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "filesystem-ultra": {
+      "type": "local",
+      "command": [
+        "C:\\path\\to\\filesystem-ultra-v4.exe",
+        "--profile", "strict",
+        "--compact-mode",
+        "--roots-mode", "union",
+        "C:\\path\\to\\workspace"
+      ],
+      "enabled": true,
+      "timeout": 30000
+    }
+  }
+}

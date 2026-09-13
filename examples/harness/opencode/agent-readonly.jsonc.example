@@ -1,0 +1,26 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "fs-readonly": {
+      "description": "Explore host FS via filesystem-ultra reads only. First call list_allowed_directories. Re-read on handoff.",
+      "mode": "subagent",
+      "permission": {
+        "read": "deny",
+        "edit": "deny",
+        "glob": "deny",
+        "grep": "deny",
+        "list": "deny",
+        "bash": "deny",
+        "filesystem-ultra_*": "deny",
+        "filesystem-ultra_list_allowed_directories": "allow",
+        "filesystem-ultra_directory_tree": "allow",
+        "filesystem-ultra_list_directory": "allow",
+        "filesystem-ultra_search_files": "allow",
+        "filesystem-ultra_read_file": "allow",
+        "filesystem-ultra_get_file_info": "allow",
+        "filesystem-ultra_help": "allow",
+        "filesystem-ultra_diff_files": "allow"
+      }
+    }
+  }
+}

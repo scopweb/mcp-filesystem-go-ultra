@@ -2,9 +2,13 @@
 
 Trabajo que **no** entra en esta release. v4.6.2 cierra discovery para agentes: instrucciones cortas, `--profile=strict|ultra`, `apply_patch` usable, git de red fuera del camino crítico.
 
+## Hecho — pack de arnés (docs)
+
+Copy-paste pack in [examples/harness/](examples/harness/): Claude Code agents + OpenCode permission snippets + Codex warning. Handshake instructions include subagent handoff. `list_allowed_directories` structured payload adds `profile`, `roots_mode`, `readonly`, `tool_count`. **Eval with a real model remains open** (this pack is config, not a benchmark).
+
 ## P1 — Evaluación real con agentes
 
-Sigue abierto. La batería `TestE2E_E6_AgentEval` es integración scriptada, no un modelo.
+Sigue abierto. La batería `TestE2E_E6_AgentEval` es integración scriptada, no un modelo. The harness pack does not close this.
 
 - Varios modelos / clientes MCP (Claude Code, Codex, OpenCode)
 - Repositorios representativos, no 40 archivos sintéticos
