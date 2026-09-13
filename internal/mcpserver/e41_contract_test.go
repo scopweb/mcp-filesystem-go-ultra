@@ -80,9 +80,13 @@ func TestE41_ContractMatchesWireSchema(t *testing.T) {
 					gotEnum[s] = true
 				}
 			}
-			for _, want := range spec.Enum {
-				if !gotEnum[want] {
-					t.Errorf("%s.%s: contract enum %q missing from MCP", name, k, want)
+			wantEnum := map[string]bool{}
+			for _, w := range spec.Enum {
+				wantEnum[w] = true
+			}
+			for got := range gotEnum {
+				if !wantEnum[got] {
+					t.Errorf("%s.%s: MCP enum %q not in contract", name, k, got)
 				}
 			}
 		}

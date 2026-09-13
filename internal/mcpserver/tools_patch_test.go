@@ -29,6 +29,39 @@ func callPatchToolCtx(t *testing.T, ctx context.Context, reg *toolRegistry, name
 	return res
 }
 
+func TestDirectoryTree_StructuredHiddenCount(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("secret.txt\n"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "ok.go"), []byte("x"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("nope"), 0644)
+	reg := newHelpTestRegistry(t, dir)
+	res := callPatchTool(t, reg, "directory_tree", map[string]any{"path": dir})
+	if res.IsError {
+		t.Fatalf("%s", resultText(t, res))
+	}
+	m, ok := res.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("StructuredContent %T", res.StructuredContent)
+	}
+	if m["truncated"] == nil {
+		t.Fatal("truncated must be explicit")
+	}
+	hc, ok := m["hidden_count"].(int)
+	if !ok {
+		if f, ok := m["hidden_count"].(float64); ok {
+			hc = int(f)
+		} else {
+			t.Fatalf("hidden_count type %T", m["hidden_count"])
+		}
+	}
+	if hc < 1 {
+		t.Fatalf("hidden_count=%d want >=1 payload=%#v", hc, m)
+	}
+	if strings.Contains(resultText(t, res), "secret.txt") {
+		t.Fatalf("tree should hide secret.txt:\n%s", resultText(t, res))
+	}
+}
+
 func TestDiffFiles_IdenticalAndChanged(t *testing.T) {
 	dir := t.TempDir()
 	a := filepath.Join(dir, "a.txt")
@@ -70,6 +103,24 @@ func TestApplyPatch_DryRunAndApply(t *testing.T) {
 	raw, _ = os.ReadFile(p)
 	if string(raw) != "alpha\nBETA\n" {
 		t.Fatalf("got %q", raw)
+	}
+}
+
+func TestApplyPatch_CRLFFileLFPatch(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "crlf.txt")
+	if err := os.WriteFile(p, []byte("alpha\r\nbeta\r\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	reg := newHelpTestRegistry(t, dir)
+	patch := "--- a/crlf.txt\n+++ b/crlf.txt\n@@ -1,2 +1,2 @@\n alpha\n-beta\n+BETA\n"
+	res := callPatchTool(t, reg, "apply_patch", map[string]any{"path": p, "patch": patch})
+	if res.IsError {
+		t.Fatalf("apply: %s", resultText(t, res))
+	}
+	raw, _ := os.ReadFile(p)
+	if string(raw) != "alpha\r\nBETA\r\n" {
+		t.Fatalf("destination EOL must win, got %q", raw)
 	}
 }
 

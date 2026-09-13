@@ -417,11 +417,12 @@ func renderToolCatalog(reg *toolRegistry) string {
 	sb.WriteString("These tools operate on the real host filesystem visible to this MCP server. Runtime-native create_file, str_replace, view, or similar tools may target a different sandbox.\n")
 	sb.WriteString("Do not use bash cat/head/tail/cut/ls/dir/grep/find/stat; call the matching tool instead (logs: read_file mode=tail max_lines=40).\n\n")
 	sb.WriteString("## Host project workflow\n")
-	sb.WriteString("1. Call list_allowed_directories before the first read to see the sandbox roots. After the client changes Roots, call it again (no refresh_roots tool).\n")
-	sb.WriteString("2. Bind the project to one filesystem tool family; use filesystem-ultra for host project paths.\n")
-	sb.WriteString("3. After every host mutation, verify independently with get_file_info or list_directory; use read_file when content matters.\n")
-	sb.WriteString("4. If a known file reports 'not found', stop and confirm it with the host reader, then audit recent writes made through the failing tool family before retrying.\n")
-	sb.WriteString("5. Disabled aliases (including create_file) and the fs super-tool are not registered here.\n\n")
+	sb.WriteString("1. First call list_allowed_directories (before any read). After the client changes Roots, call it again (no refresh_roots tool).\n")
+	sb.WriteString("2. Then directory_tree or help(tool:\"X\") on demand — do not dump this catalog at startup.\n")
+	sb.WriteString("3. Bind the project to one filesystem tool family; use filesystem-ultra for host project paths.\n")
+	sb.WriteString("4. After every host mutation, verify independently with get_file_info or list_directory; use read_file when content matters.\n")
+	sb.WriteString("5. If a known file reports 'not found', stop and confirm it with the host reader, then audit recent writes made through the failing tool family before retrying.\n")
+	sb.WriteString("6. Disabled aliases (including create_file) and the fs super-tool are not registered here.\n\n")
 	sb.WriteString("## Structured results\n")
 	sb.WriteString("Schema-declared tools return structuredContent (status, truncated, hashes). Errors use a JSON envelope with retryable. Empty search is status=empty (not an error). Do not auto-retry when retryable is false. help(tool:\"X\") examples and enums come from the ToolContract.\n\n")
 	sb.WriteString("## Registered tools\n")
@@ -446,7 +447,7 @@ func renderToolCatalog(reg *toolRegistry) string {
 func registerHelpTool(reg *toolRegistry) {
 	helpTool := mcp.NewTool("help",
 		mcp.WithTitleAnnotation("Server Help"),
-		mcp.WithDescription("Returns tool catalog or per-tool signature. Call help() for an overview; call help(tool:\"X\") for tool X's schema and examples."),
+		mcp.WithDescription("Returns tool catalog or per-tool signature. First call list_allowed_directories. Then directory_tree or help(tool:\"X\") on demand. help() lists registered tools; do not dump the catalog at startup."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),

@@ -37,11 +37,16 @@ func mcpText(t *testing.T, res *mcp.CallToolResult) string {
 }
 
 func newRegisteredGitHandler(engine *core.UltraFastEngine) toolHandler {
+	return newRegisteredGitHandlerOpts(engine, false)
+}
+
+func newRegisteredGitHandlerOpts(engine *core.UltraFastEngine, gitNetwork bool) toolHandler {
 	s := server.NewMCPServer("test", "0.0.0")
 	reg := &toolRegistry{
-		server:   s,
-		engine:   engine,
-		handlers: make(map[string]toolHandler),
+		server:     s,
+		engine:     engine,
+		handlers:   make(map[string]toolHandler),
+		gitNetwork: gitNetwork,
 	}
 	registerGitTools(reg)
 	return reg.handlers["git"]
@@ -772,6 +777,34 @@ func TestGitFetch_LocalRemoteAndPrune(t *testing.T) {
 	}
 }
 
+func TestGitNetwork_PushFetchRejectedWithoutFlag(t *testing.T) {
+	dir, engine := setupRepoWithFile(t)
+	defer engine.Close()
+	handler := newRegisteredGitHandler(engine)
+	for _, action := range []string{"push", "fetch"} {
+		res := callRegisteredGit(t, handler, map[string]interface{}{"action": action, "path": dir})
+		if !res.IsError {
+			t.Fatalf("%s without --git-network must error, got %s", action, mcpText(t, res))
+		}
+		if !strings.Contains(mcpText(t, res), "--git-network") {
+			t.Fatalf("%s error should mention --git-network: %s", action, mcpText(t, res))
+		}
+	}
+	s := server.NewMCPServer("test", "0.0.0")
+	reg := &toolRegistry{server: s, engine: engine, handlers: make(map[string]toolHandler), gitNetwork: false}
+	registerGitTools(reg)
+	st := s.ListTools()["git"]
+	if st.Tool.Annotations.OpenWorldHint != nil && *st.Tool.Annotations.OpenWorldHint {
+		t.Fatal("openWorldHint must not be true when git-network is off")
+	}
+	regNet := &toolRegistry{server: server.NewMCPServer("test", "0.0.0"), engine: engine, handlers: make(map[string]toolHandler), gitNetwork: true}
+	registerGitTools(regNet)
+	stNet := regNet.server.ListTools()["git"]
+	if stNet.Tool.Annotations.OpenWorldHint == nil || !*stNet.Tool.Annotations.OpenWorldHint {
+		t.Fatal("openWorldHint must be true when git-network is on")
+	}
+}
+
 func TestGitFetch_Dispatched(t *testing.T) {
 	parent := t.TempDir()
 	bare := filepath.Join(parent, "bare.git")
@@ -791,7 +824,7 @@ func TestGitFetch_Dispatched(t *testing.T) {
 
 	engine := newGitTestEngine(t, parent)
 	defer engine.Close()
-	handler := newRegisteredGitHandler(engine)
+	handler := newRegisteredGitHandlerOpts(engine, true)
 	res := callRegisteredGit(t, handler, map[string]interface{}{
 		"action": "fetch",
 		"path":   local,

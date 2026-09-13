@@ -170,11 +170,17 @@ func TestServerInstructions_IdentifiesHostScopeWithoutImperativeBlock(t *testing
 	if !strings.Contains(serverInstructions, "real host filesystem") {
 		t.Errorf("serverInstructions should identify the host filesystem scope: %q", serverInstructions)
 	}
-	if !strings.Contains(serverInstructions, "help()") {
-		t.Errorf("serverInstructions should point at help() for the catalog: %q", serverInstructions)
+	if !strings.Contains(serverInstructions, "list_allowed_directories") {
+		t.Errorf("serverInstructions should start discovery with list_allowed_directories: %q", serverInstructions)
+	}
+	if !strings.Contains(serverInstructions, "help(tool:") {
+		t.Errorf("serverInstructions should point at help(tool:X) on demand: %q", serverInstructions)
 	}
 	if !strings.Contains(serverInstructions, "Prefer these tools over bash") {
 		t.Errorf("serverInstructions should displace bash: %q", serverInstructions)
+	}
+	if strings.Contains(serverInstructions, "minify_js") {
+		t.Errorf("serverInstructions must not mention minify_js: %q", serverInstructions)
 	}
 	// The v4.3.6 mitigation removed a long imperative block from serverInstructions
 	// to avoid prompt-injection-style content. The post-v4.5.29 handshake text

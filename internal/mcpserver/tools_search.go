@@ -68,6 +68,8 @@ func registerSearchTools(reg *toolRegistry) {
 		}
 
 		var listing string
+		hiddenCount := 0
+		treeTruncated := false
 		switch outputFormat {
 		case "json":
 			listing, err = engine.ListDirectoryJSON(ctx, path)
@@ -76,9 +78,12 @@ func registerSearchTools(reg *toolRegistry) {
 			if request.Params.Name == "directory_tree" {
 				format = "compact"
 			}
-			listing, err = engine.ListDirectoryTreeOpts(ctx, core.NormalizePath(path), core.TreeOpts{
+			tr, treeErr := engine.ListDirectoryTreeResult(ctx, core.NormalizePath(path), core.TreeOpts{
 				MaxDepth: maxDepth, MaxNodes: maxNodes, Exclude: exclude, RespectIgnore: respectIgnore, Format: format,
 			})
+			listing, err = tr.Text, treeErr
+			hiddenCount = tr.HiddenCount
+			treeTruncated = tr.Truncated
 		case "sizes":
 			listing, err = engine.ListDirectoryJSON(ctx, path)
 		default: // "" / "compact" / "text" — current behaviour
@@ -91,7 +96,7 @@ func registerSearchTools(reg *toolRegistry) {
 		if format == "" {
 			format = "compact"
 		}
-		truncated := contentWasTruncated(listing)
+		truncated := contentWasTruncated(listing) || treeTruncated
 		var entries []map[string]any
 		jsonPath := path
 		if format == "json" || format == "sizes" {
@@ -105,14 +110,17 @@ func registerSearchTools(reg *toolRegistry) {
 				}
 			}
 		}
-		return mcp.NewToolResultStructured(listStructured(jsonPath, format, listing, entries, truncated), listing), nil
+		isTree := outputFormat == "tree" || request.Params.Name == "directory_tree"
+		return mcp.NewToolResultStructured(listStructured(jsonPath, format, listing, entries, truncated, hiddenCount, isTree), listing), nil
 	})
 	reg.addTool(listDirTool, reg.listDirHandler)
 
 	dirTreeTool := mcp.NewTool("directory_tree",
 		mcp.WithTitleAnnotation("Directory Tree"),
 		mcp.WithRawOutputSchema(listDirectoryOutputSchema),
-		mcp.WithDescription("directory_tree — Recursive compact tree of a directory. Alias of list_directory with output_format=tree. Respects .gitignore. Related: list_directory, search_files, read_file."),
+		mcp.WithDescription("directory_tree — Recursive compact tree of a directory. Alias of list_directory with output_format=tree. "+
+			"Call after list_allowed_directories to explore. Defaults: respect_ignore=true, max_depth=2, max_nodes=500. "+
+			"structuredContent includes truncated and hidden_count. Related: list_directory, search_files, read_file."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -146,6 +154,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithDescription("search_files — Search and find files by name or content. Replaces bash grep/find/rg — NEVER use the shell. "+
+			"Honors .gitignore by default (no_ignore=false). Cap with max_results. structuredContent includes truncated and hidden_count. "+
 			"Supports regex, count_only, include_content, include_context. "+
 			"Default output auto-adapts to match count (ripgrep-style 'path:line:content' for ≤5 matches, verbose with emojis otherwise). "+
 			"Use search_files to find, then edit_file to modify. Related: edit_file, read_file, multi_edit, batch_operations."),

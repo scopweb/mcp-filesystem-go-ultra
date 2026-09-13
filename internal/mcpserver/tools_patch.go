@@ -94,7 +94,9 @@ func registerPatchTools(reg *toolRegistry) {
 	patchTool := mcp.NewTool("apply_patch",
 		mcp.WithTitleAnnotation("Apply Patch"),
 		mcp.WithRawOutputSchema(applyPatchOutputSchema),
-		mcp.WithDescription("apply_patch — Apply a unified diff to one file. dry_run previews. expected_hash for OCC. Fail-closed: no fuzzy match, one file per call. Related: diff_files, edit_file, backup."),
+		mcp.WithDescription("apply_patch — Apply a unified diff to one file. dry_run previews. expected_hash for OCC. "+
+			"Fail-closed: no fuzzy match, one file per call. Destination EOL wins (CRLF file + LF patch keeps CRLF). "+
+			"If PATCH_APPLY_FAILED: read_file and regenerate the hunk; do not retry the same patch. Related: diff_files, edit_file, backup."),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),

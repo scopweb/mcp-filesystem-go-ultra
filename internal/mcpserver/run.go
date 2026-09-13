@@ -54,14 +54,15 @@ func DefaultConfiguration() *Configuration {
 }
 
 // serverInstructions is sent to the client during the MCP initialize handshake.
-// Keep this factual and compact: detailed workflow policy belongs in help() and
-// the filesystem-ultra-tools skill, not in every user turn.
-const serverInstructions = `MCP Filesystem Ultra — operates on the real host filesystem visible to this MCP server (for example C:\, D:\, or /mnt/...). Runtime-native file tools may target a different sandbox. Prefer these tools over bash cat/head/tail/cut/ls/grep/find/stat. Run help() for the registered tool catalog and host-filesystem workflow guidance.`
+// Keep this factual and compact: detailed workflow policy belongs in
+// help(tool:X) and the filesystem-ultra-tools skill, not in every user turn.
+// Never dump the full catalog here.
+const serverInstructions = `MCP Filesystem Ultra — operates on the real host filesystem visible to this MCP server (for example C:\, D:\, or /mnt/...). Runtime-native file tools may target a different sandbox. Prefer these tools over bash cat/head/tail/cut/ls/grep/find/stat. First call list_allowed_directories. Then directory_tree or help(tool:X). Do not load the full catalog at startup.`
 
 // serverVersion is the single source of truth for the version reported by
 // --version, the MCP handshake, the help header and the startup logs.
 // Keep in sync with the top CHANGELOG entry.
-const serverVersion = "4.6.1"
+const serverVersion = "4.6.2"
 
 // BuildCommit and BuildDate are stamped at build time via
 //
@@ -94,6 +95,8 @@ func Run() {
 		rootsMode        = flag.String("roots-mode", "replace", "How MCP client Roots combine with CLI paths: replace (default), union, ignore")
 		readOnly         = flag.Bool("readonly", false, "Reject mutating tools (READ_ONLY)")
 		allowSecrets     = flag.Bool("allow-secrets", false, "Allow reading secret files (.env, *.pem, keys). Audited.")
+		profileFlag      = flag.String("profile", "ultra", "Tool catalog: ultra (default, all tools) or strict (agent core only)")
+		gitNetwork       = flag.Bool("git-network", false, "Enable git push/fetch (network). Off by default; ignored in profile=strict.")
 		compactMode      = flag.Bool("compact-mode", false, "Enable compact responses (minimal tokens for Claude Desktop)")
 		maxResponseSize  = flag.String("max-response-size", "10MB", "Maximum response size")
 		maxSearchResults = flag.Int("max-search-results", 1000, "Maximum search results to return")
@@ -258,8 +261,11 @@ func Run() {
 		server.WithInstructions(serverInstructions),
 	)
 
-	// Register all 16 consolidated tools
-	if err := registerTools(s, engine); err != nil {
+	activeProfile, profErr := parseToolProfile(*profileFlag)
+	if profErr != nil {
+		log.Fatal(profErr)
+	}
+	if err := registerToolsOpts(s, engine, registerOpts{Profile: activeProfile, GitNetwork: *gitNetwork}); err != nil {
 		log.Fatalf("Failed to register tools: %v", err)
 	}
 

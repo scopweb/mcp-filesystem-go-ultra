@@ -95,12 +95,13 @@ var searchFilesOutputSchema = json.RawMessage(`{
     "status": {"type": "string", "description": "ok | empty | truncated"},
     "match_count": {"type": "integer", "description": "Number of matches (may exceed len(matches) when truncated)"},
     "truncated": {"type": "boolean", "description": "True when output was capped (max_results or response budget)"},
+    "hidden_count": {"type": "integer", "description": "Entries skipped by .gitignore/.cursorignore/.fsultraignore (0 when no_ignore:true)"},
     "matches": {"type": "array", "description": "Structured hits {path, line, text}. Empty on filename-only/count_only when not parseable as line hits.", "items": {"type": "object"}},
     "scope": {"type": "object", "description": "Path/pattern/filters actually used"},
     "continuation": {"type": "string", "description": "How to continue when truncated. Never means 'retry the same mutation'."},
     "message": {"type": "string", "description": "Human-readable text fallback, identical to the text content block"}
   },
-  "required": ["status", "match_count", "truncated", "message"]
+  "required": ["status", "match_count", "truncated", "hidden_count", "message"]
 }`)
 
 var listDirectoryOutputSchema = json.RawMessage(`{
@@ -109,6 +110,7 @@ var listDirectoryOutputSchema = json.RawMessage(`{
     "path": {"type": "string"},
     "status": {"type": "string", "description": "ok | empty | truncated"},
     "truncated": {"type": "boolean"},
+    "hidden_count": {"type": "integer", "description": "Entries skipped by gitignore/exclude (tree). Explicit on directory_tree."},
     "format": {"type": "string", "description": "compact | json | tree | sizes"},
     "entries": {"type": "array", "description": "Directory entries {name, type, size, modified} when available", "items": {"type": "object"}},
     "entry_count": {"type": "integer"},

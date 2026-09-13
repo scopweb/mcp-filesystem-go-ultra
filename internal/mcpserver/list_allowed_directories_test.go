@@ -100,6 +100,39 @@ func TestListAllowedDirectories_RejectsUnknownParams(t *testing.T) {
 	}
 }
 
+func TestListAllowedDirectories_StructuredShape(t *testing.T) {
+	dir := t.TempDir()
+	reg := newHelpTestRegistry(t, dir)
+	res := callListAllowed(t, reg, nil)
+	if res.IsError {
+		t.Fatalf("unexpected error: %v", res.Content)
+	}
+	m, ok := res.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("StructuredContent is %T", res.StructuredContent)
+	}
+	for _, key := range []string{"paths", "source", "insecure_open"} {
+		if _, ok := m[key]; !ok {
+			t.Errorf("missing %q in %#v", key, m)
+		}
+	}
+	if m["insecure_open"] != false {
+		t.Errorf("insecure_open=%v want false", m["insecure_open"])
+	}
+	paths, ok := m["paths"].([]string)
+	if !ok {
+		if raw, ok := m["paths"].([]any); ok {
+			if len(raw) == 0 {
+				t.Fatal("paths empty")
+			}
+		} else {
+			t.Fatalf("paths type %T", m["paths"])
+		}
+	} else if len(paths) == 0 {
+		t.Fatal("paths empty")
+	}
+}
+
 func TestListAllowedDirectories_GraduatedHasSchema(t *testing.T) {
 	reg := newHelpTestRegistry(t, t.TempDir())
 	all := reg.server.ListTools()

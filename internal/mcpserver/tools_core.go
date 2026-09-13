@@ -67,6 +67,8 @@ type toolRegistry struct {
 	engine         *core.UltraFastEngine
 	handlers       map[string]toolHandler // dispatch map for the fs super-tool
 	regexTransform *core.RegexTransformer
+	profile        toolProfile
+	gitNetwork     bool
 
 	// toolExamples feeds help(tool:"X"). Filled by addTool(..., examples...)
 	// or, when omitted, by core.ContractExamples.
@@ -84,6 +86,9 @@ type toolRegistry struct {
 // The trailing examples... is optional and only consumed by help(tool:"<name>").
 // All 17 existing call sites pass no examples, so this stays source-compatible.
 func (r *toolRegistry) addTool(tool mcp.Tool, handler toolHandler, examples ...string) {
+	if !r.profile.allows(tool.Name) {
+		return
+	}
 	tool = applyExperimentalPolicy(tool)
 	r.server.AddTool(tool, handler)
 	r.handlers[tool.Name] = handler
@@ -98,13 +103,23 @@ func (r *toolRegistry) addTool(tool mcp.Tool, handler toolHandler, examples ...s
 	}
 }
 
-// registerTools registers all 16 consolidated filesystem tools + aliases + super-tool + help
+// registerTools registers the ultra (full) catalog. Tests and the default
+// --profile=ultra path use this. Aliases and the fs super-tool stay disabled.
 func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
+	return registerToolsOpts(s, engine, registerOpts{Profile: profileUltra})
+}
+
+func registerToolsOpts(s *server.MCPServer, engine *core.UltraFastEngine, opts registerOpts) error {
+	if opts.Profile == "" {
+		opts.Profile = profileUltra
+	}
 	reg := &toolRegistry{
 		server:         s,
 		engine:         engine,
 		handlers:       make(map[string]toolHandler),
 		regexTransform: core.NewRegexTransformer(engine),
+		profile:        opts.Profile,
+		gitNetwork:     opts.GitNetwork,
 	}
 
 	registerCoreTools(reg)
@@ -122,7 +137,7 @@ func registerTools(s *server.MCPServer, engine *core.UltraFastEngine) error {
 	// registerSuperTool(reg)
 	registerHelpTool(reg)
 
-	log.Printf("Registered 24 tools for v%s — aliases disabled except directory_tree", serverVersion)
+	log.Printf("Registered %d tools for v%s (profile=%s)", len(s.ListTools()), serverVersion, opts.Profile)
 	return nil
 }
 
@@ -359,6 +374,7 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithRawOutputSchema(readFileOutputSchema),
 		mcp.WithDescription("read_file — Read file contents from the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
 			"Replaces bash cat/head/tail/cut/sed -n — NEVER use the shell. "+
+			"If the model asks for read_multiple_files or read_text_file, use read_file (paths[] / mode head|tail). "+
 			"Logs: mode=\"tail\" max_lines=40 (each line auto-cut to 300 chars; max_line_length:0 disables). "+
 			"Range: start_line/end_line (absolute, inclusive) OR start_line/max_lines (count). Binary: encoding=\"base64\". Batch: paths JSON array. "+
 			"To MODIFY files use edit_file."),
