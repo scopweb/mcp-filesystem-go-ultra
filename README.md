@@ -4,7 +4,24 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
-Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are disabled. Default `--profile=ultra` registers the 24 canonical names; `--profile=strict` registers the 16-tool agent core (includes `backup` for undo).
+Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are disabled. Default `--profile=ultra` registers all 25 tools; `--profile=strict` registers the 16-tool agent core (includes `backup` for undo; no `analyze_code`, no `git` network).
+
+---
+
+## Quick start
+
+```bash
+# 1. Build
+go build -ldflags="-s -w" -trimpath -o filesystem-ultra ./cmd/filesystem-ultra
+
+# 2. Run (agent-optimized; required: at least one path)
+./filesystem-ultra --profile=strict --compact-mode --roots-mode=union /path/to/project
+
+# 3. Tests (core + server)
+go test ./core/ ./internal/mcpserver/ -count=1
+```
+
+See [Build](#build) and [Configuration](#configuration) below for more.
 
 ---
 
@@ -235,7 +252,7 @@ Allowed paths: positional args after the flags, **or** one `--allowed-paths` wit
 
 ## Tool Discovery
 
-Do **not** dump the 24-tool catalog at startup. Handshake instructions are short.
+Do **not** dump the full catalog at startup. Handshake instructions are short. First call `list_allowed_directories`, then `directory_tree` or `help(tool:"X")`.
 
 | Step | Call | When |
 |------|------|------|
@@ -355,14 +372,17 @@ internal/mcpserver/         MCP server: config, tool registration, stdio loop
   audit.go                  auditWrap — request normalization + audit logging
   format.go                 Response formatters, parseSize, truncateContent, formatSize
   help_content.go           getHelpContent() — static help text for all topics
-  tools_search.go           list_directory, search_files, analyze_operation
+  tools_core.go             read_file, write_file, edit_file (the 3 core mutators)
+  tools_search.go           list_directory, directory_tree, search_files, analyze_operation
   tools_files.go            create_directory, delete_file, move_file, copy_file, get_file_info
-  tools_batch.go            multi_edit, batch_operations, backup
+  tools_batch.go            multi_edit, batch_operations, backup, project_replace
   tools_platform.go         wsl, server_info
-  tools_aliases.go          Aliases + fs super-tool (disabled), help tool
-   tools_git.go              git (11 actions: init, status, diff, log, show, add, commit, push, fetch, restore, branch)
-  tools_minify.go           minify_js (pure-Go JS minification)
-tools_minify.go             minify_js (pure-Go JS minification)
+  tools_discovery.go        list_allowed_directories
+  tools_patch.go            diff_files, apply_patch
+  tools_git.go              git (11 actions; push/fetch gated by --git-network)
+  tools_minify.go           minify_js (pure-Go)
+  tools_aliases.go          help (on-demand; legacy aliases disabled)
+  tools_analyze.go          analyze_code (ultra only: symbols|lint|sec|impact)
 core/
   engine.go                 UltraFastEngine — central struct, cache, worker pool, metrics
   edit_operations.go        EditFile, MultiEdit — backup, risk assessment, hooks
