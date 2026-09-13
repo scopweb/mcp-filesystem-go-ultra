@@ -1,33 +1,39 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.6.1: 24 tools (17 core + git + minify_js + help + list_allowed_directories + directory_tree + diff_files + apply_patch). Host-filesystem binding, post-write verification, aliases disabled. read_file replaces bash cat/head/tail/cut. Call list_allowed_directories before the first read.
+description: Tool catalog for filesystem-ultra MCP server v4.6.2: 24 tools ultra / 15 strict. Host-filesystem binding, post-write verification, aliases disabled. First call list_allowed_directories, then directory_tree or help(tool:X). read_file replaces bash cat/head/tail/cut.
 ---
 
-# Filesystem Ultra v4.6.1 — Tool Discovery
+# Filesystem Ultra v4.6.2 — Tool Discovery
 
 ## Bind each project to one filesystem tool family
 
 - `filesystem-ultra` operates on the real host filesystem visible to its MCP server (`C:\...`, host-mounted `/mnt/...`, etc.). Runtime-native `create_file`, `str_replace`, `view`, or similar tools may operate in a different sandbox.
-- Call `list_allowed_directories` before the first read so the sandbox roots are visible.
+- First call `list_allowed_directories` (before any read). Then `directory_tree` or `help(tool:"X")` on demand. Do not dump the full catalog at startup.
 - Before the first project read or write, select the family explicitly mapped to that project. For host projects reachable through filesystem-ultra, use only its read/write/edit/list/info/copy/delete tools; reserve native tools for explicit agent scratch work.
 - After every host creation or edit, verify independently with `get_file_info` or `list_directory`; use `read_file` when content matters. A successful write response alone does not prove that a different tool family targeted the host.
 - Treat `File not found` for a known file as a filesystem-mismatch signal: stop, confirm with the host reader, audit recent writes made through the failing family, and understand the mismatch before retrying. Never switch tools silently.
 
-## The 24 tools (17 core + git + minify_js + help + discovery + patch)
+## Discovery order (same as server instructions)
+
+1. `list_allowed_directories` — before the first read.
+2. `directory_tree` — explore; defaults `respect_ignore=true`, `max_depth=2`, `max_nodes=500`; `truncated` + `hidden_count`.
+3. `help(tool:"X")` — schema + examples on demand. `help()` lists whatever is registered (`strict` = 15, `ultra` = 24).
+
+## The 24 tools (ultra). 15 in `--profile=strict`
 
 | Tool | Purpose |
 |------|---------|
-| `list_allowed_directories` | Sandbox roots. Call before the first read. Zero parameters. |
-| `directory_tree` | Compact recursive tree. Alias of `list_directory` with `output_format:tree`. Respects `.gitignore`. |
-| `read_file` | Read files (single or batch via `paths`). **Replaces bash `cat`/`head`/`tail`/`cut`/`sed -n` — never use the shell.** Logs: `mode:"tail"` `max_lines:40` (each line auto-cut to 300 chars; `max_line_length:0` disables, N overrides). Range: `start_line`/`end_line`. Binary: `encoding:"base64"`. |
+| `list_allowed_directories` | Sandbox roots. **When:** first call. Zero parameters. |
+| `directory_tree` | Compact recursive tree. **When:** after roots. Gitignore ON. |
+| `read_file` | Read files (single or batch via `paths`). If the model asks for `read_multiple_files` / `read_text_file`, use `read_file` (`paths[]` / `mode` head\|tail). **Replaces bash `cat`/`head`/`tail`/`cut`/`sed -n`.** Logs: `mode:"tail"` `max_lines:40`. |
 | `write_file` | Write/create files (binary via base64). `mode:"append"` concatenates without rewrite-guard. |
-| `diff_files` | Unified diff of two paths, or `against:"backup"` vs last session backup. |
-| `apply_patch` | One-file unified diff. `dry_run`, `expected_hash` OCC, rewrite-guard, backup. |
+| `diff_files` | Unified diff of two paths, or `against:"backup"`. **When:** preview before `apply_patch`. |
+| `apply_patch` | One file per call. `dry_run` + `expected_hash` is the happy path. Dest EOL wins. **When `PATCH_APPLY_FAILED`:** `read_file` and regenerate the hunk; do not retry the same patch. |
 | `edit_file` | Replace exact text, regex, nth occurrence. Override the rewrite guard with `allow_rewrite:true` (not `force`). |
 | `multi_edit` | Multiple edits in one file. **Ambiguity guard (v4.5.29):** any `old_text` matching >1 times in the original file rejects the whole batch and rolls it back. |
 | `project_replace` | Project-wide find/replace in one call. `create_backup:true` snapshots files **before** the writes so `backup(action:"restore")` rolls back the operation. |
 | `list_directory` | List directory contents. Replaces bash `ls`/`dir`/`tree`. |
-| `search_files` | Search by pattern (regex or literal). Replaces bash `grep`/`find`/`rg`. |
+| `search_files` | Search by pattern. Gitignore ON (`no_ignore=false`). `truncated` + `hidden_count`. Replaces bash `grep`/`find`/`rg`. |
 | `get_file_info` | File info (single or batch). Replaces bash `stat`. |
 | `move_file` | Move/rename files |
 | `copy_file` | Copy files |
@@ -38,9 +44,9 @@ description: Tool catalog for filesystem-ultra MCP server v4.6.1: 24 tools (17 c
 | `analyze_operation` | Dry-run impact analysis |
 | `wsl` | WSL/Windows sync and path conversion |
 | `server_info` | Stats, help, artifact capture |
-| `git` | Version control (status, diff, log, **show**, add, commit, push, **fetch**, restore, branch, init). `paths` is a **native array**; `output` enum (`stat`/`name-only`/`full`); 4-layer guardrail downgrades big full diffs to stat with a top-of-output banner; `rev` replaces `commit_range`/`source`. Branch delete requires `delete:true` (`force:true` → `-D`). `fetch` + `prune:true` syncs remote-tracking refs. Errors include a `usage:` line; `help(tool:"git")` returns schema + curated examples. Compact mode: `status` without explicit `output` returns a one-line summary — pass `output:"name-only"` or `"full"` to get the changed-file listing. `show`: `max_lines` applies to the diff body only, the commit header is always complete. |
-| `minify_js` | Pure-Go JS minification, no Node (v4.5.7+) |
-| `help` | Discovery — call first to see all 24 tools |
+| `git` | Local git (ultra only). `push`/`fetch` require `--git-network` (off by default). `paths` native array; `output` enum; `rev`. Branch delete requires `delete:true`. |
+| `minify_js` | Pure-Go JS minification, no Node (ultra only; not in handshake instructions) |
+| `help` | On demand — `help(tool:"X")` for schema; not at startup |
 
 ## search_files ripgrep-compatible params
 
@@ -78,7 +84,7 @@ Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `gr
 - **STALE_READ warning** (`edit_file` only): non-blocking notice if the file wasn't read in the last 10 min of this session. The engine records reads after each successful edit, so consecutive edits on the same file don't need re-reads. Hard external-change protection = `expected_hash` or `--auto-occ=block`.
 - **Dry-run** → `analyze_operation` or `edit_file(dry_run:true)` / `multi_edit(dry_run:true)` / `project_replace(preview:true)`
 - **Fast search** → `search_files` with `output_format:"json"` uses ripgrep when available. To force the legacy verbose layout (emoji headers, Context: blocks) regardless of match count, pass `output_format:"text"`.
-- **Tool discovery & schema lookup** → `help()` renders the dynamic 24-tool catalog (host workflow, structuredContent/`retryable` note); `help(tool:"X")` returns description + InputSchema + contract enums + curated examples.
+- **Tool discovery & schema lookup** → first `list_allowed_directories`; then `directory_tree` or `help(tool:"X")`. `help()` lists registered tools on demand.
 - **Structured results** → prefer `structuredContent` over scraping text: `status` (`applied`/`simulated`/`empty`/`partial`), `truncated`, hashes. Empty search is `status:empty` with `isError=false`. JSON error envelope includes `retryable` — do not auto-retry when false (the write may already have been applied).
 - **Chain edits without re-reading** → every successful edit returns `content_hash`; pass it as `expected_hash` on the next edit. External-change detection also via `--auto-occ` flag (`off`/`warn` default/`block`) — only flags changes NOT made by this session.
 - **Line-based edits** → `edit_file` `mode:"delete_range"` (remove lines start..end) and `mode:"replace_range"` (replace lines with `new_text`) — 1-based inclusive, no fragile `old_text` match.
@@ -150,7 +156,7 @@ Replaces N calls to `multi_edit` with 1 call. Scans directory tree, matches patt
 - 12 aliases (`read_text_file`, `search`, `edit`, `write`, `create_file`, `View`, `Edit`, `Write`, `Replace`, `LS`, `GlobTool`, `GrepTool`)
 - `fs` super-tool
 
-`directory_tree` **is registered** (experimental). These aliases were disabled to reduce discovery noise and token overhead. The 24 registered tools are self-sufficient.
+`directory_tree` **is registered**. These aliases were disabled to reduce discovery noise and token overhead. The registered tools are self-sufficient (`strict` 15 / `ultra` 24).
 
 ## Ripgrep backend
 

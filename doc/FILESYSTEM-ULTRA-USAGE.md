@@ -171,7 +171,7 @@ Usarlo también para copiar rutas con su capitalización exacta.
 
 ### `directory_tree`
 
-Árbol compacto (experimental). Equivale a `list_directory` con `output_format:"tree"`. Respeta `.gitignore`. `max_depth` por defecto 2.
+Árbol compacto. Equivale a `list_directory` con `output_format:"tree"`. Respeta `.gitignore` (default ON). `max_depth` por defecto 2, `max_nodes` 500. `truncated` y `hidden_count` en structured output. Primera exploración después de `list_allowed_directories`.
 
 ### `diff_files`
 
@@ -179,7 +179,7 @@ Diff unificado entre dos rutas (`path_a`, `path_b`) o un archivo contra su últi
 
 ### `apply_patch`
 
-Aplicar un unified diff a **un** archivo. Fail-closed: sin fuzzy, sin multi-file. `dry_run:true` previsualiza. `expected_hash` para OCC.
+Aplicar un unified diff a **un** archivo. Fail-closed: sin fuzzy, sin multi-file. `dry_run` + `expected_hash` es el camino feliz. El EOL del destino gana (fichero CRLF + patch LF → sigue CRLF). Si `PATCH_APPLY_FAILED`: `read_file` y regenerar el hunk; no reintentar el mismo patch.
 
 ### `search_files`
 
@@ -192,7 +192,8 @@ Opciones comunes:
 - `case_sensitive`;
 - `include_context:true`;
 - `max_results`;
-- `output_format` o `output`: `content`, `files_with_matches` o `count`.
+- `no_ignore` (default false — honra `.gitignore`);
+- `output_format` o `output`: `text` o `json`.
 
 ---
 

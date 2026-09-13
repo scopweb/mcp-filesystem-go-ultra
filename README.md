@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra
 
-**v4.6.1** · Go 1.27.1 · MCP 2025-11-25 · 24 tools (17 core + git + minify_js + help + discovery + patch)
+**v4.6.2** · Go 1.27.1 · MCP 2025-11-25 · 24 tools ultra / 15 strict (agent core)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -26,7 +26,7 @@ Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool 
 
 ### Productivity
 
-- **24 tools** — 17 core + `git` + `minify_js` + `help` + `list_allowed_directories` + `directory_tree` + `diff_files` + `apply_patch`
+- **24 tools (ultra)** — 17 core + `git` + `minify_js` + `help` + `list_allowed_directories` + `directory_tree` + `diff_files` + `apply_patch`. `--profile=strict` registers the 15-tool agent core.
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
 - **Hook system** — 16 pre/post events (write, edit, delete, create, move, copy, read, search)
 - **Pipeline system** — 12 actions with conditions, templates, and DAG-based parallel execution; reduces client/server round-trips for multi-step refactors
@@ -84,6 +84,7 @@ Add to your `claude_desktop_config.json`:
     "filesystem": {
       "command": "C:\\path\\to\\filesystem-ultra-v4.exe",
       "args": [
+        "--profile", "strict",
         "--compact-mode",
         "--cache-size", "200MB",
         "--parallel-ops", "8",
@@ -105,6 +106,7 @@ Linux:
     "filesystem-ultra": {
       "command": "/path/to/filesystem-ultra",
       "args": [
+        "--profile", "strict",
         "--compact-mode",
         "--cache-size", "200MB",
         "--parallel-ops", "8",
@@ -122,7 +124,7 @@ Linux:
 
 OpenCode does **not** read `claude_desktop_config.json`. Put this in the project `opencode.json` / `opencode.jsonc`, or globally in `~/.config/opencode/opencode.json` (Windows: `%USERPROFILE%\.config\opencode\opencode.json`).
 
-Differences vs Claude: key is `mcp` (not `mcpServers`), `type` is required, `command` is **one array** (binary + flags + paths), and `timeout` defaults to **5s** — too short for a 24-tool `tools/list`. Set `30000`.
+Differences vs Claude: key is `mcp` (not `mcpServers`), `type` is required, `command` is **one array** (binary + flags + paths), and `timeout` defaults to **5s** — too short for `tools/list`. Set `30000`. Recommended: `--profile=strict --compact-mode --roots-mode=union` (`--readonly` off).
 
 Windows (`opencode.json`):
 
@@ -134,6 +136,7 @@ Windows (`opencode.json`):
       "type": "local",
       "command": [
         "C:\\path\\to\\filesystem-ultra-v4.exe",
+        "--profile", "strict",
         "--compact-mode",
         "--cache-size", "200MB",
         "--parallel-ops", "8",
@@ -159,6 +162,7 @@ Linux:
       "type": "local",
       "command": [
         "/path/to/filesystem-ultra",
+        "--profile", "strict",
         "--compact-mode",
         "--cache-size", "200MB",
         "--parallel-ops", "8",
@@ -193,6 +197,8 @@ Allowed paths: positional args after the flags, **or** one `--allowed-paths` wit
 | `--allowed-paths` | (required) | Comma-separated allowed roots; or pass paths as positional args |
 | `--insecure-open` | off | Labs only: disable the sandbox (entire disk). Fail-closed by default since v4.6.0. |
 | `--roots-mode` | replace | How MCP client Roots combine with CLI paths: `replace`, `union`, `ignore` |
+| `--profile` | ultra | `ultra` = all 24 tools; `strict` = 15-tool agent core |
+| `--git-network` | off | Enable `git` push/fetch. Off the critical path; ignored in `strict` |
 | `--readonly` | off | Reject mutating tools |
 | `--allow-secrets` | off | Allow `.env` / keys (audited) |
 | `--compact-mode` | off | Reduced-token responses |
@@ -213,29 +219,19 @@ Allowed paths: positional args after the flags, **or** one `--allowed-paths` wit
 
 ## Tool Discovery
 
-Claude Desktop uses **lazy tool loading** — it discovers only a few tools per query via semantic search, missing most of the 24 registered tools.
+Do **not** dump the 24-tool catalog at startup. Handshake instructions are short.
 
-Three layers address this:
+| Step | Call | When |
+|------|------|------|
+| 1 | `list_allowed_directories` | Before the first read |
+| 2 | `directory_tree` or `help(tool:"X")` | Explore roots, or look up one tool on demand |
+| 3 | `help()` | Only if you need the live registered list |
 
-| Layer | How it works | Client support |
-|-------|-------------|----------------|
-| **`/filesystem-ultra-tools` skill** | Claude Code skill that calls `help` on conversation start | Claude Code |
-| **`help` tool** | Generates a catalog from the tools actually registered in the server | Any MCP client |
-| **`server.WithInstructions()`** | Identifies the server's real-host filesystem scope and points to `help()` | Spec-compliant clients |
+`--profile=strict` shrinks `tools/list` to the 15-tool agent core so lazy-loading clients see the useful set.
 
 ### Using the skill
 
-The skill ships in `.claude/skills/filesystem-ultra-tools/`. In Claude Code or Claude Desktop, invoke:
-
-```
-/filesystem-ultra-tools
-```
-
-This calls the `help` tool and loads the full catalog. You can also add this to your project instructions:
-
-```
-At the start of every conversation, do tool_search for "filesystem help" and then call filesystem-ultra:help()
-```
+The skill ships in `.claude/skills/filesystem-ultra-tools/`. Same order: `list_allowed_directories` first, then `directory_tree` / `help(tool:X)`.
 
 ### Host filesystem vs runtime sandbox
 
@@ -247,50 +243,34 @@ For a host project, bind the whole task to the filesystem-ultra family. After ev
 
 ## Available Tools
 
-### Reading and editing (5)
+24 in `--profile=ultra` (default). `--profile=strict` keeps the 15 marked **strict**.
 
-| Tool | Description |
-|------|-------------|
-| `read_file` | Read full file, line range (`start_line`/`end_line` or `start_line`+`max_lines`), head/tail, or base64. Batch: native `paths` array (JSON string still accepted). Logs: `mode:"tail"` `max_lines:40`. Replaces bash `cat`/`head`/`tail`/`cut`. |
-| `write_file` | Create or overwrite a file. Supports text (`content`) and binary (`encoding:"base64"`). `mode:"append"` concatenates without rewrite-guard |
-| `edit_file` | Find-and-replace with backup and risk assessment. Modes: exact match (default), `search_replace`, `regex`, `delete_range`/`replace_range`, `insert`. Opt-in `strict` / `expected_matches`; `match_method` in the structured result |
-| `multi_edit` | Multiple replacements on one file. Native `edits` array (legacy `edits_json`). `diff_format`, `strict`, `expected_matches` |
-| `project_replace` | Rename a token across all files in a directory tree (regex or literal) |
-
-### Search and inspection (4)
-
-| Tool | Description |
-|------|-------------|
-| `list_directory` | Directory listing with cache |
-| `search_files` | Search by pattern with optional `file_types`, `include_content`, `include_context`, `case_sensitive`, `count_only` |
-| `get_file_info` | Size, permissions, timestamps, type. Batch: native `paths` array |
-| `analyze_operation` | Dry-run preview via `operation`: file, edit, delete, write, optimize, compare |
-
-### File operations (4)
-
-| Tool | Description |
-|------|-------------|
-| `move_file` | Move or rename file/directory |
-| `copy_file` | Recursive copy preserving permissions |
-| `delete_file` | Soft-delete (default) or permanent (`permanent: true`). Batch: native `paths` array |
-| `create_directory` | Create directory tree (`mkdir -p`) |
-
-### Batch and recovery (2)
-
-| Tool | Description |
-|------|-------------|
-| `batch_operations` | Native `request` / `pipeline` / `rename` objects (legacy `*_json`). Atomic journal rollback; opt-in `operation_id` + `retry_contract:"e3-v1"` |
-| `backup` | `action`: list, info, compare, cleanup, restore, undo_last, undo_chain, list_trash, restore_trash, purge_trash |
-
-### Platform and utilities (5)
-
-| Tool | Description |
-|------|-------------|
-| `wsl` | WSL ↔ Windows sync and status. Params: `wsl_path`/`windows_path` + `direction`, or `action:"status"` |
-| `git` | Git operations: `init`, `status`, `diff`, `log`, `show`, `add`, `commit`, `push`, `fetch`, `restore`, `branch`. Native-array `paths[]`, `output` enum, `rev` |
-| `minify_js` | Pure-Go JS minification (no Node dependency) |
-| `server_info` | Server diagnostics via `action`: stats, help, artifact |
-| `help` | Catalog of all 24 tools; `help(tool:"X")` returns schema + curated examples |
+| Tool | Purpose | When to use |
+|------|---------|-------------|
+| `list_allowed_directories` | Sandbox roots. Zero parameters. **strict** | Before the first read |
+| `directory_tree` | Compact recursive tree. `respect_ignore=true`, `max_depth=2`, `max_nodes=500`. **strict** | After roots, to explore. `truncated` + `hidden_count` in structured output |
+| `diff_files` | Unified diff of two paths, or `against:"backup"`. **strict** | Preview before `apply_patch` or to compare two files |
+| `apply_patch` | One-file unified diff. `dry_run` + `expected_hash`. Dest EOL wins. **strict** | Surgical one-file edit. If `PATCH_APPLY_FAILED`: `read_file` and regenerate; do not retry the same patch |
+| `read_file` | Full / range / head / tail / base64 / `paths[]`. Replaces bash `cat`/`head`/`tail`/`cut`. **strict** | If a client asks for `read_multiple_files` or `read_text_file`, use this |
+| `write_file` | Create or overwrite. `mode:"append"` skips rewrite-guard. **strict** | New files or whole-file rewrite |
+| `edit_file` | Exact / regex / range / insert. Backup + OCC. **strict** | Targeted edits (`allow_rewrite` not `force` for rewrite-guard) |
+| `multi_edit` | Multiple replacements on one file. **strict** | Several anchors in the same file |
+| `list_directory` | Directory listing. **strict** | Copy exact paths (case) before edits |
+| `search_files` | Name or content. Gitignore ON (`no_ignore=false`). **strict** | Find, then edit. `truncated` + `hidden_count` |
+| `get_file_info` | Size, dates, type. Batch `paths[]`. **strict** | Verify after a host mutation |
+| `create_directory` | `mkdir -p`. **strict** | New folders |
+| `move_file` | Move or rename. **strict** | Relocate |
+| `delete_file` | Soft-delete default; `permanent:true` hard. **strict** | Remove |
+| `help` | Live catalog; `help(tool:"X")` schema + examples. **strict** | On demand — not at startup |
+| `copy_file` | Recursive copy | ultra |
+| `project_replace` | Token rename across a tree | ultra |
+| `batch_operations` | Atomic ops / pipelines / rename | ultra |
+| `backup` | Undo / restore / trash | ultra |
+| `analyze_operation` | Dry-run risk preview | ultra |
+| `wsl` | WSL ↔ Windows sync | ultra |
+| `git` | Local git. `push`/`fetch` need `--git-network` | ultra |
+| `minify_js` | Pure-Go JS minify (no Node) | ultra |
+| `server_info` | Stats / static help / artifacts | ultra |
 
 ---
 
