@@ -181,6 +181,12 @@ func TestServerInstructions_IdentifiesHostScopeWithoutImperativeBlock(t *testing
 	if !strings.Contains(serverInstructions, "Prefer these tools over bash") {
 		t.Errorf("serverInstructions should displace bash: %q", serverInstructions)
 	}
+	if !strings.Contains(serverInstructions, "handoff") {
+		t.Errorf("serverInstructions should mention subagent handoff: %q", serverInstructions)
+	}
+	if !strings.Contains(serverInstructions, "Read/Edit/Write") {
+		t.Errorf("serverInstructions should warn against native Read/Edit/Write: %q", serverInstructions)
+	}
 	if strings.Contains(serverInstructions, "minify_js") {
 		t.Errorf("serverInstructions must not mention minify_js: %q", serverInstructions)
 	}
@@ -189,6 +195,10 @@ func TestServerInstructions_IdentifiesHostScopeWithoutImperativeBlock(t *testing
 	// must stay brief; the recovery rules live in help() and the skill.
 	if strings.Contains(serverInstructions, "ALWAYS") || strings.Contains(serverInstructions, "CRITICAL") {
 		t.Errorf("serverInstructions must not reintroduce imperative directives: %q", serverInstructions)
+	}
+	lines := 1 + strings.Count(strings.TrimSpace(serverInstructions), "\n")
+	if lines > 12 {
+		t.Errorf("serverInstructions must be ≤12 lines, got %d: %q", lines, serverInstructions)
 	}
 }
 

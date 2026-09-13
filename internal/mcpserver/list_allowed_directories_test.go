@@ -111,13 +111,34 @@ func TestListAllowedDirectories_StructuredShape(t *testing.T) {
 	if !ok {
 		t.Fatalf("StructuredContent is %T", res.StructuredContent)
 	}
-	for _, key := range []string{"paths", "source", "insecure_open"} {
+	for _, key := range []string{"paths", "source", "insecure_open", "profile", "roots_mode", "readonly", "tool_count"} {
 		if _, ok := m[key]; !ok {
 			t.Errorf("missing %q in %#v", key, m)
 		}
 	}
 	if m["insecure_open"] != false {
 		t.Errorf("insecure_open=%v want false", m["insecure_open"])
+	}
+	if m["profile"] != "ultra" {
+		t.Errorf("profile=%v want ultra", m["profile"])
+	}
+	if m["roots_mode"] != "replace" {
+		t.Errorf("roots_mode=%v want replace", m["roots_mode"])
+	}
+	if m["readonly"] != false {
+		t.Errorf("readonly=%v want false", m["readonly"])
+	}
+	switch n := m["tool_count"].(type) {
+	case int:
+		if n < 1 {
+			t.Errorf("tool_count=%d want ≥1", n)
+		}
+	case float64:
+		if n < 1 {
+			t.Errorf("tool_count=%v want ≥1", n)
+		}
+	default:
+		t.Errorf("tool_count type %T", m["tool_count"])
 	}
 	paths, ok := m["paths"].([]string)
 	if !ok {

@@ -16,6 +16,12 @@ description: Tool catalog for filesystem-ultra MCP server v4.6.2. 25 tools ultra
 - For host projects, use only filesystem-ultra tools. After every host create/edit, verify with `get_file_info` or `list_directory`; `read_file` when content matters.
 - `File not found` for a known file is a filesystem-mismatch signal: stop, confirm with the host reader, audit recent writes. Never switch tool families silently.
 
+## Subagents do not inherit this skill
+
+Harness subagents start without this file. The portable contract is `server.WithInstructions()` (handshake). Copy `examples/harness/` rather than guessing flags.
+
+**Handoff** parent → child: roots, path, `content_hash`, `backup_id`, profile. The child re-reads; it must not reuse the parent's file body. First call `list_allowed_directories` (structured: `profile`, `roots_mode`, `readonly`, `tool_count`). One role = one disk family — never mix native Read/Edit/Write/Glob with filesystem-ultra in the same subagent.
+
 ## Discovery order
 
 1. `list_allowed_directories` — sandbox roots. Zero parameters.
