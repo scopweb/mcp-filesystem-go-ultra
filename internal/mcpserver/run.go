@@ -99,6 +99,7 @@ func Run() {
 		insecureOpen     = flag.Bool("insecure-open", false, "Disable access control (entire disk). Labs only. Default since v4.6.0 is fail-closed.")
 		rootsMode        = flag.String("roots-mode", "replace", "How MCP client Roots combine with CLI paths: replace (default), union, ignore")
 		readOnly         = flag.Bool("readonly", false, "Reject mutating tools (READONLY)")
+		mutationBudget   = flag.Int("mutation-budget", 0, "Max applied mutations per process (0=off). Shared by all stdio clients.")
 		allowSecrets     = flag.Bool("allow-secrets", false, "Allow reading secret files (.env, *.pem, keys). Audited.")
 		profileFlag      = flag.String("profile", "ultra", "Tool catalog: ultra (default, all tools) or strict (agent core only)")
 		gitNetwork       = flag.Bool("git-network", false, "Enable git push/fetch (network). Off by default; ignored in profile=strict.")
@@ -250,6 +251,7 @@ func Run() {
 		ReadOnly:              *readOnly,
 		AllowSecrets:          *allowSecrets,
 		RootsMode:             core.ParseRootsMode(*rootsMode),
+		MutationBudget:        *mutationBudget,
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize engine: %v", err)

@@ -21,6 +21,7 @@ const (
 	errCodeInvalidParams  = "VALIDATION"
 	errCodeHashRequired   = "HASH_REQUIRED"
 	errCodeUnavailable    = "TOOL_UNAVAILABLE"
+	errCodeBudgetExceeded = "BUDGET_EXCEEDED"
 )
 
 const (
@@ -30,6 +31,7 @@ const (
 	suggestionHashRequired   = "Read the file and resend the mutation with expected_hash."
 	suggestionValidation     = "Correct the listed parameters; do not retry with the same arguments"
 	suggestionOCCMismatch    = "Rebase against current content; retry with current_hash."
+	suggestionBudgetExceeded = "Raise --mutation-budget or start a new server process."
 )
 
 type pathErrorBody struct {
@@ -203,6 +205,13 @@ func quotedField(s string) string {
 		return ""
 	}
 	return rest[:j]
+}
+
+func budgetExceededResult(used, limit int) *mcp.CallToolResult {
+	return pathErrorResult(errCodeBudgetExceeded, "mutation budget exceeded", "", map[string]string{
+		"used":  strconv.Itoa(used),
+		"limit": strconv.Itoa(limit),
+	}, suggestionBudgetExceeded)
 }
 
 func validationFieldExpected(msg string) (field, expected string) {
