@@ -60,6 +60,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"start_line":      {Type: ParamNumber},
 		"end_line":        {Type: ParamNumber},
 		"encoding":        {Type: ParamString},
+		"detail":          {Type: ParamString},
 	},
 	"write_file": {
 		"path":           {Type: ParamString, Required: true},
@@ -122,6 +123,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"exclude":        {ParamString, false},
 		"respect_ignore": {ParamBoolean, false},
 		"max_nodes":      {ParamNumber, false},
+		"detail":         {ParamString, false},
 	},
 	"directory_tree": {
 		"path":           {ParamString, true},
@@ -130,6 +132,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"exclude":        {ParamString, false},
 		"respect_ignore": {ParamBoolean, false},
 		"max_nodes":      {ParamNumber, false},
+		"detail":         {ParamString, false},
 	},
 	"search_files": {
 		"path":            {ParamString, true},
@@ -147,6 +150,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"output":          {ParamString, false},  // alias for output_format
 		"max_results":     {ParamNumber, false},  // cap filenames returned (v4.5.26, fix #3)
 		"no_ignore":       {ParamBoolean, false},
+		"detail":          {ParamString, false},
 	},
 
 	// ---- EDIT+ (1) ----
@@ -306,8 +310,9 @@ var toolSchemas = map[string]ToolParamSchema{
 		"encoding":       {ParamString, false},
 	},
 	"help": {
-		"topic": {ParamString, false},
-		"tool":  {ParamString, false},
+		"topic":  {ParamString, false},
+		"tool":   {ParamString, false},
+		"detail": {ParamString, false},
 	},
 	"list_allowed_directories": {},
 	"minify_js": {
