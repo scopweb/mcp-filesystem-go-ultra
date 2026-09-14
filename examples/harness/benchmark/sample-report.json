@@ -1,0 +1,147 @@
+{
+  "generated": "2026-09-14T06:45:38Z",
+  "note": "paths redacted; tokens = proxy bytes/4 estimates; retries always 0 (harness does not replay)",
+  "scenarios": [
+    {
+      "scenario": "explore_2k",
+      "calls": 3,
+      "tokens_in": 64,
+      "tokens_out": 7859,
+      "duration_ms": 95,
+      "occ_mismatch": 0,
+      "patch_failed": 0,
+      "retries": 0,
+      "errors": 0,
+      "tools": [
+        {
+          "tool": "directory_tree",
+          "calls": 1,
+          "tokens_out": 5738
+        },
+        {
+          "tool": "list_allowed_directories",
+          "calls": 1,
+          "tokens_out": 108
+        },
+        {
+          "tool": "search_files",
+          "calls": 1,
+          "tokens_out": 2013
+        }
+      ]
+    },
+    {
+      "scenario": "occ_clash",
+      "calls": 3,
+      "tokens_in": 83,
+      "tokens_out": 252,
+      "duration_ms": 8,
+      "occ_mismatch": 1,
+      "patch_failed": 0,
+      "retries": 0,
+      "errors": 1,
+      "tools": [
+        {
+          "tool": "edit_file",
+          "calls": 1,
+          "tokens_out": 63
+        },
+        {
+          "tool": "read_file",
+          "calls": 1,
+          "tokens_out": 78
+        },
+        {
+          "tool": "write_file",
+          "calls": 1,
+          "tokens_out": 111
+        }
+      ]
+    },
+    {
+      "scenario": "patch_fail",
+      "calls": 1,
+      "tokens_in": 42,
+      "tokens_out": 92,
+      "duration_ms": 3,
+      "occ_mismatch": 0,
+      "patch_failed": 1,
+      "retries": 0,
+      "errors": 1,
+      "tools": [
+        {
+          "tool": "apply_patch",
+          "calls": 1,
+          "tokens_out": 92
+        }
+      ]
+    },
+    {
+      "scenario": "help_catalog",
+      "calls": 1,
+      "tokens_in": 0,
+      "tokens_out": 852,
+      "duration_ms": 0,
+      "occ_mismatch": 0,
+      "patch_failed": 0,
+      "retries": 0,
+      "errors": 0,
+      "tools": [
+        {
+          "tool": "help",
+          "calls": 1,
+          "tokens_out": 852
+        }
+      ]
+    }
+  ],
+  "by_tool": [
+    {
+      "tool": "directory_tree",
+      "calls": 1,
+      "tokens_out": 5738
+    },
+    {
+      "tool": "search_files",
+      "calls": 1,
+      "tokens_out": 2013
+    },
+    {
+      "tool": "help",
+      "calls": 1,
+      "tokens_out": 852
+    },
+    {
+      "tool": "write_file",
+      "calls": 1,
+      "tokens_out": 111
+    },
+    {
+      "tool": "list_allowed_directories",
+      "calls": 1,
+      "tokens_out": 108
+    },
+    {
+      "tool": "apply_patch",
+      "calls": 1,
+      "tokens_out": 92
+    },
+    {
+      "tool": "read_file",
+      "calls": 1,
+      "tokens_out": 78
+    },
+    {
+      "tool": "edit_file",
+      "calls": 1,
+      "tokens_out": 63
+    }
+  ],
+  "expensive_tools": [
+    "directory_tree",
+    "search_files",
+    "help",
+    "read_file"
+  ],
+  "decision": "PR-4 detail targets (highest tokens_out among eligible tools): directory_tree, search_files, help, read_file"
+}
