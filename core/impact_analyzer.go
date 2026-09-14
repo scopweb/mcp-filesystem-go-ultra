@@ -14,6 +14,8 @@ type ChangeImpact struct {
 	IsRisky           bool     `json:"is_risky"`
 	RiskLevel         string   `json:"risk_level"` // low, medium, high, critical
 	RiskFactors       []string `json:"risk_factors"`
+	PathFloor         string   `json:"path_floor,omitempty"`
+	Reasons           []string `json:"reasons,omitempty"`
 }
 
 // RiskThresholds define los umbrales de riesgo configurables
@@ -162,6 +164,7 @@ func CalculateBatchImpact(operations []BatchImpactInfo, thresholds RiskThreshold
 
 	for _, op := range operations {
 		impact := CalculateChangeImpact(op.Content, op.OldText, op.NewText, thresholds)
+		ApplyPathFloor(impact, op.FilePath, thresholds)
 
 		batchImpact.TotalOccurrences += impact.Occurrences
 		totalChangePercent += impact.ChangePercentage
