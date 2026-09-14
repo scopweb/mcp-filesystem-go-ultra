@@ -22,7 +22,7 @@ func TestReadOnly_BlocksWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.IsError || !strings.Contains(resultText(t, res), "READ_ONLY") {
+	if !res.IsError || !strings.Contains(resultText(t, res), "READONLY") {
 		t.Fatalf("got %s", resultText(t, res))
 	}
 }

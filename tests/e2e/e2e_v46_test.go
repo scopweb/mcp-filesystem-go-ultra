@@ -172,7 +172,7 @@ func runLiveV46(t *testing.T, workDir string) {
 
 	ro := startClient(t, exe, "--readonly", workDir)
 	blocked := callErr(t, ro, "write_file", map[string]any{"path": a, "content": "nope"})
-	if !strings.Contains(blocked, "READ_ONLY") {
+	if !strings.Contains(blocked, "READONLY") {
 		t.Fatalf("readonly: %s", blocked)
 	}
 	call(t, ro, "list_allowed_directories", map[string]any{})
@@ -228,11 +228,11 @@ func TestE2E_MultiAgent_CTemp(t *testing.T) {
 	}
 
 	ro := callErr(t, reviewer, "write_file", map[string]any{"path": shared, "content": "reviewer-nope\n"})
-	if !strings.Contains(ro, "READ_ONLY") {
+	if !strings.Contains(ro, "READONLY") {
 		t.Fatalf("reviewer write: %s", ro)
 	}
 	roEdit := callErr(t, reviewer, "edit_file", map[string]any{"path": shared, "old_text": "from-writer", "new_text": "nope"})
-	if !strings.Contains(roEdit, "READ_ONLY") {
+	if !strings.Contains(roEdit, "READONLY") {
 		t.Fatalf("reviewer edit: %s", roEdit)
 	}
 
@@ -254,7 +254,7 @@ func TestE2E_MultiAgent_CTemp(t *testing.T) {
 	blocked := callErr(t, peer, "edit_file", map[string]any{
 		"path": shared, "old_text": "from-writer-2", "new_text": "peer-auto",
 	})
-	if !strings.Contains(blocked, "changed on disk") && !strings.Contains(blocked, "stale") {
+	if !strings.Contains(blocked, `"code":"HASH_REQUIRED"`) || !strings.Contains(blocked, `"retryable":true`) {
 		t.Fatalf("auto-occ=block: %s", blocked)
 	}
 	raw, _ = os.ReadFile(shared)
@@ -330,7 +330,7 @@ func TestE2E_ApplyPatch_ContextMismatch(t *testing.T) {
 			patch := "--- a/patch.txt\n+++ b/patch.txt\n@@ -1,1 +1,1 @@\n-WRONG CONTEXT\n+patched line\n"
 			res := invoke("apply_patch", map[string]any{"path": path, "patch": patch})
 			text := textOf(t, res)
-			if !res.IsError || !strings.Contains(text, "PATCH_APPLY_FAILED") || !strings.Contains(text, "mismatch") {
+			if !res.IsError || !strings.Contains(text, "PATCH_FAILED") || !strings.Contains(text, "mismatch") {
 				t.Fatalf("expected context mismatch tool error, got: %s", text)
 			}
 			raw, err := os.ReadFile(path)

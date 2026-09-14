@@ -103,8 +103,9 @@ func main() {
 		if err != nil {
 			return err
 		}
-		if !isError(res) || !strings.Contains(resultText(res), "PATCH_APPLY_FAILED") {
-			return fmt.Errorf("expected PATCH_APPLY_FAILED, got %q", resultText(res))
+		text := resultText(res)
+		if !isError(res) || (!strings.Contains(text, "PATCH_FAILED") && !strings.Contains(text, "PATCH_APPLY_FAILED")) {
+			return fmt.Errorf("expected PATCH_FAILED, got %q", text)
 		}
 		return nil
 	})

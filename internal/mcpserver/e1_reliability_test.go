@@ -150,8 +150,9 @@ func TestEditFile_OCC_BlocksAllModes(t *testing.T) {
 		if !res.IsError {
 			t.Fatalf("mode %d: expected OCC error, got %s", i, resultText(t, res))
 		}
-		if !strings.Contains(resultText(t, res), "stale edit") {
-			t.Fatalf("mode %d: want stale edit, got %s", i, resultText(t, res))
+		text := resultText(t, res)
+		if !strings.Contains(text, "stale edit") || !strings.Contains(text, `"code":"OCC_MISMATCH"`) || !strings.Contains(text, `"retryable":true`) {
+			t.Fatalf("mode %d: want retryable OCC envelope, got %s", i, text)
 		}
 		if string(fileBytes(t, path)) != string(original) {
 			t.Fatalf("mode %d mutated the file under OCC reject", i)
@@ -181,7 +182,7 @@ func TestEditFile_AutoOCC_Block_RangeAndMultiEdit(t *testing.T) {
 	rangeRes := callEdit(t, reg, map[string]interface{}{
 		"path": path, "mode": "replace_range", "start_line": float64(1), "end_line": float64(1), "new_text": "X",
 	})
-	if !rangeRes.IsError || !strings.Contains(resultText(t, rangeRes), "changed on disk") {
+	if !rangeRes.IsError || !strings.Contains(resultText(t, rangeRes), `"code":"HASH_REQUIRED"`) || !strings.Contains(resultText(t, rangeRes), `"retryable":true`) {
 		t.Fatalf("replace_range auto-OCC block: %s", resultText(t, rangeRes))
 	}
 	if string(fileBytes(t, path)) != "alpha beta gamma\n" {
@@ -198,7 +199,7 @@ func TestEditFile_AutoOCC_Block_RangeAndMultiEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.IsError || !strings.Contains(resultText(t, res), "changed on disk") {
+	if !res.IsError || !strings.Contains(resultText(t, res), `"code":"HASH_REQUIRED"`) || !strings.Contains(resultText(t, res), `"retryable":true`) {
 		t.Fatalf("multi_edit auto-OCC block: %s", resultText(t, res))
 	}
 }
@@ -233,7 +234,7 @@ func TestReadOnly_BlocksArtifactWrite_AllowsStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.IsError || !strings.Contains(resultText(t, res), "READ_ONLY") {
+	if !res.IsError || !strings.Contains(resultText(t, res), "READONLY") {
 		t.Fatalf("artifact write under --readonly: %s", resultText(t, res))
 	}
 }

@@ -448,12 +448,13 @@ func backupItems(backups []core.BackupInfo) []map[string]any {
 	return items
 }
 
+// retryableForCode is the stable Failure Intelligence policy. True means
+// callers must first use the envelope data; it never authorizes replaying an
+// identical mutation blindly.
 func retryableForCode(code string) bool {
 	switch code {
-	case errCodeNotAllowed, errCodeNotFound, errCodeOCCMismatch, errCodeRewriteBlocked,
-		errCodeRootsEmpty, errCodeSecretDenied, errCodeReadOnly, errCodePatchFailed,
-		errCodeInvalidParams, errCodeUnavailable:
-		return false
+	case errCodeOCCMismatch, errCodeHashRequired:
+		return true
 	default:
 		return false
 	}

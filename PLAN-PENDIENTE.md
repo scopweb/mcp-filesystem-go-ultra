@@ -13,7 +13,7 @@ Canonical: [ROADMAP-v4.7-Failure-Intelligence.md](ROADMAP-v4.7-Failure-Intellige
 | PR | What | Status |
 |----|------|--------|
 | PR-0 | Baseline harness behind `cmd/proxy` | `examples/harness/benchmark/` |
-| PR-1 | Envelope + `retryable` table | pending |
+| PR-1 | Envelope + `retryable` table | done |
 | PR-2 | OCC Conflict Report (ranges default; diff only `detail=full` / `include_diff`) | pending |
 | PR-3 | Actionable payloads (PATCH_FAILED stays `retryable:false`) | pending |
 | PR-4 | `detail=summary\|normal\|full` on expensive tools only | pending (needs PR-0 numbers) |
@@ -54,7 +54,7 @@ Sigue abierto. La batería `TestE2E_E6_AgentEval` es integración scriptada, no 
 - README / skill / help aligned on discovery: first `list_allowed_directories`, then `directory_tree` or `help(tool:X)`; no full catalog dump at start; `minify_js` omitted from instructions.
 - `--profile=strict` (16 tools incl. `backup` for undo) vs `--profile=ultra` (25 tools incl. `analyze_code`). Default ultra for compatibility.
 - `analyze_code` (ultra only): symbols (go/ast), lint (go vet + staticcheck), sec (local regex), impact (search-based). readOnly; no shell; allowlisted bins only.
-- `apply_patch`: one file per call; dest EOL wins; skill guidance for PATCH_APPLY_FAILED; CRLF test.
+- `apply_patch`: one file per call; dest EOL wins; skill guidance for PATCH_FAILED; CRLF test.
 - `directory_tree` / `search_files`: gitignore default ON; `truncated` + `hidden_count` in structured output + outputSchema.
 - `--git-network` (default off): push/fetch removed from default enum; `openWorldHint` only when enabled.
 - Tests: profile exact counts (16/25), output schema sweep, fail-closed exit 2, apply_patch dry-run/OCC/CRLF, git network gate.

@@ -60,7 +60,7 @@ On Windows the child is assigned to a Job Object (`KILL_ON_JOB_CLOSE`) so it die
 3. Restart the MCP connection.
 4. `tasklist /FI "IMAGENAME eq filesystem-ultra*"` — only the new hash should remain.
 5. Repeat a second rebuild/restart and confirm again.
-6. `apply_patch` with a mismatching hunk must return `PATCH_APPLY_FAILED` in well under 1s.
+6. `apply_patch` with a mismatching hunk must return `PATCH_FAILED` in well under 1s.
 
 ## Notes
 

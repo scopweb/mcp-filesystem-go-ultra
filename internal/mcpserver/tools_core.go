@@ -155,19 +155,23 @@ func contentHashBytes(raw []byte) string {
 func enforceEditOCC(ctx context.Context, path, expectedHash string, content []byte) (string, *mcp.CallToolResult) {
 	actualHash := contentHashBytes(content)
 	if expectedHash != "" && actualHash != expectedHash {
-		core.SetError(ctx, fmt.Sprintf(
-			"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file before editing.",
-			expectedHash, actualHash))
-		return "", mcp.NewToolResultError(fmt.Sprintf(
+		message := fmt.Sprintf(
 			"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file with read_file to get the current content_hash, then retry.",
-			expectedHash, actualHash))
+			expectedHash, actualHash)
+		core.SetError(ctx, message)
+		return "", pathErrorResult(errCodeOCCMismatch, message, path, map[string]string{
+			"expected_hash": expectedHash,
+			"current_hash":  actualHash,
+		}, "Rebase against current content; retry with current_hash.")
 	}
 	if expectedHash == "" {
 		if occSignal := core.CheckAutoOCC(core.NormalizePath(path), actualHash); occSignal.Status != core.FeedbackOK {
 			core.SetFeedback(ctx, occSignal)
 			if occSignal.BlockOp {
-				return "", mcp.NewToolResultError(core.FormatFeedback(occSignal,
-					"edit_file blocked: file changed on disk since this session last read it"))
+				return "", pathErrorResult(errCodeHashRequired,
+					"expected_hash is required after an external file change", path,
+					map[string]string{"current_hash": actualHash},
+					"Read the file and resend the mutation with expected_hash.")
 			}
 			return "⚠ " + occSignal.Message, nil
 		}

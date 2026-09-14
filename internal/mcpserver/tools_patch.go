@@ -96,7 +96,7 @@ func registerPatchTools(reg *toolRegistry) {
 		mcp.WithRawOutputSchema(applyPatchOutputSchema),
 		mcp.WithDescription("apply_patch — Apply a unified diff to one file. dry_run previews. expected_hash for OCC. "+
 			"Fail-closed: no fuzzy match, one file per call. Destination EOL wins (CRLF file + LF patch keeps CRLF). "+
-			"If PATCH_APPLY_FAILED: read_file and regenerate the hunk; do not retry the same patch. Related: diff_files, edit_file, backup."),
+			"If PATCH_FAILED: read_file and regenerate the hunk; do not retry the same patch. Related: diff_files, edit_file, backup."),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
@@ -152,8 +152,8 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 		if txnErr != nil {
 			if occ, ok := txnErr.(*core.OCCMismatchError); ok {
 				return pathErrorResult(errCodeOCCMismatch, "content hash != expected_hash", path, map[string]string{
-					"expected_hash": occ.Expected, "actual_hash": occ.Actual,
-				}, "call read_file and retry with actual_hash"), nil
+					"expected_hash": occ.Expected, "current_hash": occ.Actual,
+				}, "Rebase against current content; retry with current_hash."), nil
 			}
 			return mcp.NewToolResultError(formatToolError(txnErr)), nil
 		}
@@ -172,16 +172,17 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 		actualHash := contentHashBytes(oldRaw)
 		if expectedHash != "" && actualHash != expectedHash {
 			return pathErrorResult(errCodeOCCMismatch, "content hash != expected_hash", path, map[string]string{
-				"expected_hash": expectedHash, "actual_hash": actualHash,
-			}, "call read_file and retry with actual_hash"), nil
+				"expected_hash": expectedHash, "current_hash": actualHash,
+			}, "Rebase against current content; retry with current_hash."), nil
 		}
 		if expectedHash == "" && !isNew {
 			if occSignal := core.CheckAutoOCC(path, actualHash); occSignal.Status != core.FeedbackOK {
 				core.SetFeedback(ctx, occSignal)
 				if occSignal.BlockOp {
-					return pathErrorResult(errCodeOCCMismatch, occSignal.Message, path, map[string]string{
-						"actual_hash": actualHash,
-					}, "re-read the file with read_file, then retry"), nil
+					return pathErrorResult(errCodeHashRequired,
+						"expected_hash is required after an external file change", path,
+						map[string]string{"current_hash": actualHash},
+						"Read the file and resend the mutation with expected_hash."), nil
 				}
 			}
 		}

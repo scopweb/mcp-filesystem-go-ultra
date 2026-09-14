@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -233,11 +234,14 @@ func registerBatchTools(reg *toolRegistry) {
 		}
 		if expectedHash == "" {
 			if raw, rerr := os.ReadFile(normPath); rerr == nil {
-				if occSignal := core.CheckAutoOCC(normPath, contentHashBytes(raw)); occSignal.Status != core.FeedbackOK {
+				currentHash := contentHashBytes(raw)
+				if occSignal := core.CheckAutoOCC(normPath, currentHash); occSignal.Status != core.FeedbackOK {
 					core.SetFeedback(ctx, occSignal)
 					if occSignal.BlockOp {
-						return mcp.NewToolResultError(core.FormatFeedback(occSignal,
-							"multi_edit blocked: file changed on disk since this session last read it")), nil
+						return pathErrorResult(errCodeHashRequired,
+							"expected_hash is required after an external file change", path,
+							map[string]string{"current_hash": currentHash},
+							"Read the file and resend the mutation with expected_hash."), nil
 					}
 					staleWarning += "\n⚠ " + occSignal.Message
 				}
@@ -246,6 +250,13 @@ func registerBatchTools(reg *toolRegistry) {
 		ctx = core.WithExpectedHash(ctx, expectedHash)
 		result, err := engine.MultiEdit(ctx, path, edits, force, dryRun, tolerantWhitespace, expectedHash)
 		if err != nil {
+			var occ *core.OCCMismatchError
+			if errors.As(err, &occ) {
+				return pathErrorResult(errCodeOCCMismatch,
+					"stale edit: file content changed since expected_hash", path,
+					map[string]string{"expected_hash": occ.Expected, "current_hash": occ.Actual},
+					"Rebase against current content; retry with current_hash."), nil
+			}
 			// Bug #27: If result is non-nil, this is an atomic rollback — include backup_id and details
 			if result != nil && result.BackupID != "" {
 				errMsg := fmt.Sprintf("Multi-edit ROLLED BACK (file unchanged): %v\n", err)

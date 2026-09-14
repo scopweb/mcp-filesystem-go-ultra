@@ -179,7 +179,7 @@ Diff unificado entre dos rutas (`path_a`, `path_b`) o un archivo contra su últi
 
 ### `apply_patch`
 
-Aplicar un unified diff a **un** archivo. Fail-closed: sin fuzzy, sin multi-file. `dry_run` + `expected_hash` es el camino feliz. El EOL del destino gana (fichero CRLF + patch LF → sigue CRLF). Si `PATCH_APPLY_FAILED`: `read_file` y regenerar el hunk; no reintentar el mismo patch.
+Aplicar un unified diff a **un** archivo. Fail-closed: sin fuzzy, sin multi-file. `dry_run` + `expected_hash` es el camino feliz. El EOL del destino gana (fichero CRLF + patch LF → sigue CRLF). Si `PATCH_FAILED`: `read_file` y regenerar el hunk; no reintentar el mismo patch.
 
 ### `search_files`
 
