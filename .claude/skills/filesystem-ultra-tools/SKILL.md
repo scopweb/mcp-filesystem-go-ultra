@@ -1,9 +1,9 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.6.2. 25 tools ultra / 16 strict. First call list_allowed_directories, then directory_tree or help(tool:X). Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=strict --compact-mode --roots-mode=union.
+description: Tool catalog for filesystem-ultra MCP server v4.7.0. 25 tools ultra / 16 strict. First call list_allowed_directories, then directory_tree or help(tool:X). Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=strict --compact-mode --roots-mode=union.
 ---
 
-# Filesystem Ultra v4.6.2 — Tool Discovery
+# Filesystem Ultra v4.7.0 — Tool Discovery
 
 ## Recommended server flags
 

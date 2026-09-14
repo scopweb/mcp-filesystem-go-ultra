@@ -67,7 +67,7 @@ help(tool:X) on demand. Do not load the full catalog at startup.`
 // serverVersion is the single source of truth for the version reported by
 // --version, the MCP handshake, the help header and the startup logs.
 // Keep in sync with the top CHANGELOG entry.
-const serverVersion = "4.6.2"
+const serverVersion = "4.7.0"
 
 // BuildCommit and BuildDate are stamped at build time via
 //

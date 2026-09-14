@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra
 
-**v4.6.2** · Go 1.27.1 · MCP 2025-11-25 · 25 tools ultra / 16 strict (agent core)
+**v4.7.0** · Go 1.27.1 · MCP 2025-11-25 · 25 tools ultra / 16 strict (agent core)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -30,10 +30,13 @@ See [Build](#build) and [Configuration](#configuration) below for more.
 ### Safety and correctness
 
 - **Automatic backups with step-through undo** — every mutation is recoverable: `backup(action:"undo_last")` walks the chain; `restore` returns a file to its pre-edit bytes
-- **Optimistic concurrency (OCC)** — `content_hash`/`expected_hash` chaining detects external file changes between read and edit; `--auto-occ` warns or blocks on stale edits
+- **Optimistic concurrency (OCC)** — `content_hash`/`expected_hash` chaining detects external file changes between read and edit; `--auto-occ` warns or blocks on stale edits. Mismatch returns a conflict report (`changed_ranges`, hashes); a bounded diff only if `include_diff:true` or `detail:"full"`
 - **Accidental-rewrite guard** (v4.5.10) — blocks `edit_file` calls that look like unintended full-file rewrites
 - **Path security** — symlink-resolved containment via `filepath.Rel`, NTFS ADS blocking, RTLO/zero-width Unicode rejection, Windows reserved names, TOCTOU symlink defense
-- **Risk assessment** — mutations above configurable thresholds are flagged (20% change = MEDIUM, 75% = HIGH by default); HIGH/CRITICAL results include post-edit integrity verification
+- **Risk assessment** — mutations above configurable thresholds are flagged (20% change = MEDIUM, 75% = HIGH by default); HIGH/CRITICAL results include post-edit integrity verification. Path floors raise risk for `go.mod`, Dockerfiles, GitHub workflows, and `*.csproj` (never lower it; tests/docs do not raise)
+- **Failure Intelligence** — errors are a JSON envelope with `code`, `retryable`, `suggestion`, and typed `details`. Do not replay when `retryable` is false (`PATCH_FAILED`, `BUDGET_EXCEEDED`, `VALIDATION`, …)
+- **Mutation budget** — `--mutation-budget=N` (default off) caps applied mutations per process; dry-run does not count
+- **Explicit `detail`** — `summary|normal|full` on `directory_tree`, `search_files`, `read_file` (batch), and `help` (catalog). Default `normal`. Compact-mode trims text; `detail` trims structuredContent
 - **Access control** — fail-closed: at least one `--allowed-paths` / positional root is required (also enforced in batch operations). `--insecure-open` is labs-only.
 - **Plan mode** — dry-run analysis with diff preview and risk report before applying changes
 - **Structured output** — `outputSchema` + `structuredContent` on read/write/edit/multi_edit plus `search_files`, `list_directory`, `batch_operations`, and `backup`. Status (`applied`/`simulated`/`empty`/`partial`), truncation, and hashes are machine-readable. Errors use a JSON envelope with `retryable` (do not auto-retry when false). Text fallbacks stay byte-identical. Handler-level sweep in CI.
@@ -233,6 +236,7 @@ Allowed paths: positional args after the flags, **or** one `--allowed-paths` wit
 | `--profile` | ultra | `ultra` = all 25 tools; `strict` = 16-tool agent core (includes `backup`) |
 | `--git-network` | off | Enable `git` push/fetch. Off the critical path; ignored in `strict` |
 | `--readonly` | off | Reject mutating tools |
+| `--mutation-budget` | 0 (off) | Max applied mutations per process. Shared by all stdio clients. `BUDGET_EXCEEDED` when exceeded |
 | `--allow-secrets` | off | Allow `.env` / keys (audited) |
 | `--compact-mode` | off | Reduced-token responses |
 | `--cache-size` | 100MB | In-memory file cache limit |
@@ -469,7 +473,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest: v4.6.2 — agent discovery, `--profile=strict`, `--git-network`). Remaining work: [PLAN-PENDIENTE.md](PLAN-PENDIENTE.md).
+See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest: v4.7.0 — Failure Intelligence: error envelopes, OCC reports, `detail`, mutation budget, path-aware risk). Remaining work: [PLAN-PENDIENTE.md](PLAN-PENDIENTE.md).
 
 ---
 

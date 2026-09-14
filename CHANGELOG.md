@@ -2,6 +2,22 @@
 
 > **Note for humans**: This file grew to ~4700 lines. For changes before v4.6 see `git log --oneline`. Only recent releases are summarized here.
 
+## [4.7.0] - 2026-09-14
+
+### feat(failure): Failure Intelligence
+
+Deterministic errors and risk so agents recover without guessing.
+
+- **PR-0** — Reproducible harness behind `cmd/proxy`: `examples/harness/benchmark/`.
+- **PR-1** — JSON error envelope `{code, retryable, message, path?, details?, suggestion?}`. `OCC_MISMATCH` and `HASH_REQUIRED` are retryable; `PATCH_FAILED` is not.
+- **PR-2** — OCC conflict report: `expected_hash`/`current_hash`, `changed_ranges`, `hunk_count`, `bytes_delta`. Missing snapshot → `reason:"no_baseline"` (empty ranges). Unified diff only with `detail:"full"` or `include_diff:true` (8 KiB cap).
+- **PR-3** — Actionable `details`: `PATCH_FAILED` (`hunk_index`, `reason`, `line_hint`), `REWRITE_BLOCKED` (`old_len`/`new_len`/`pattern`), `NOT_ALLOWED` (`roots[]`/`source`), `HASH_REQUIRED` (`path`), `VALIDATION` (`field`/`expected`). Stable `suggestion` literals.
+- **PR-4** — `detail: summary|normal|full` (default `normal`) on `directory_tree`, `search_files`, `read_file` (batch), `help` (catalog). `detail` shapes structuredContent; compact-mode trims text.
+- **PR-5** — `--mutation-budget=N` (default 0 = off). Counts successful mutating tool calls in the process (not `dry_run`/`preview`). Over limit: `BUDGET_EXCEEDED`, `retryable:false`, `details:{used,limit}`.
+- **PR-6** — Path-aware risk floors (never lower content risk): workflows/Dockerfile/`go.mod`/`go.sum`/`*.csproj` → high; `*_test.go` and docs do not raise; `cmd/**`/`internal/**` → medium if change% ≥ medium threshold. Secrets stay `SECRET_DENIED`. Table in SECURITY.md.
+
+**Verification:** `TestRetryableForCode_FailureIntelligence` · `TestBuildOCCConflict_*` · `TestPatchFailedResult_ContextNotFound` · `TestDirectoryTree_DetailSummary_PathsNoSizes` · `TestMutationBudget_ThirdWriteBlocked` · `TestPathFloorFor_Table` · `go test ./core/ ./internal/mcpserver/` · `go test -tags=e2e ./tests/e2e/`.
+
 ## [4.6.2] - 2026-09-13
 
 ### feat: agent discovery, strict profile, git-network
@@ -4732,6 +4748,6 @@ Estimated speedup for multiple edits:
 
 ---
 
-**Current Version**: 4.6.2
-**Last Updated**: 2026-09-13
+**Current Version**: 4.7.0
+**Last Updated**: 2026-09-14
 **Status**: Production Ready
