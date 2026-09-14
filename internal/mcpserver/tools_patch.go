@@ -104,6 +104,8 @@ func registerPatchTools(reg *toolRegistry) {
 		mcp.WithString("patch", mcp.Required(), mcp.Description("Unified diff")),
 		mcp.WithBoolean("dry_run", mcp.Description("Preview without writing (default: false)")),
 		mcp.WithString("expected_hash", mcp.Description("OCC token from last read_file")),
+		mcp.WithString("detail", mcp.Description("Set to full to include a bounded diff in an OCC conflict."), mcp.Enum("full")),
+		mcp.WithBoolean("include_diff", mcp.Description("Include a bounded diff in an OCC conflict.")),
 		mcp.WithBoolean("allow_rewrite", mcp.Description("Bypass accidental-rewrite guard")),
 		mcp.WithBoolean("create_backup", mcp.Description("Backup before write (default: true)")),
 	)
@@ -127,6 +129,10 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 		dryRun, _ := args["dry_run"].(bool)
 		allowRewrite, _ := args["allow_rewrite"].(bool)
 		expectedHash, _ := args["expected_hash"].(string)
+		includeOCCDiff, _ := args["include_diff"].(bool)
+		if detail, _ := args["detail"].(string); detail == "full" {
+			includeOCCDiff = true
+		}
 		createBackup := true
 		if v, ok := args["create_backup"].(bool); ok {
 			createBackup = v
@@ -147,13 +153,12 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 		}
 
 		ctx = core.WithExpectedHash(ctx, expectedHash)
+		ctx = core.WithOCCConflictDiff(ctx, includeOCCDiff)
 		allowMissing := strings.Contains(core.PatchHeaderPath(parsed.OldFile), "dev/null")
 		ctx, txn, txnErr := engine.BeginFileTxn(ctx, path, allowMissing)
 		if txnErr != nil {
 			if occ, ok := txnErr.(*core.OCCMismatchError); ok {
-				return pathErrorResult(errCodeOCCMismatch, "content hash != expected_hash", path, map[string]string{
-					"expected_hash": occ.Expected, "current_hash": occ.Actual,
-				}, "Rebase against current content; retry with current_hash."), nil
+				return occMismatchResult("content hash != expected_hash", path, occ.Expected, occ.Actual, occ.Conflict), nil
 			}
 			return mcp.NewToolResultError(formatToolError(txnErr)), nil
 		}
@@ -171,9 +176,12 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 
 		actualHash := contentHashBytes(oldRaw)
 		if expectedHash != "" && actualHash != expectedHash {
-			return pathErrorResult(errCodeOCCMismatch, "content hash != expected_hash", path, map[string]string{
-				"expected_hash": expectedHash, "current_hash": actualHash,
-			}, "Rebase against current content; retry with current_hash."), nil
+			baseline := engine.FindOCCBaseline(path, expectedHash)
+			conflict := core.BuildOCCConflict(expectedHash, oldRaw, baseline)
+			if includeOCCDiff {
+				core.IncludeOCCConflictDiff(&conflict, oldRaw, baseline, filepath.Base(path))
+			}
+			return occMismatchResult("content hash != expected_hash", path, expectedHash, actualHash, conflict), nil
 		}
 		if expectedHash == "" && !isNew {
 			if occSignal := core.CheckAutoOCC(path, actualHash); occSignal.Status != core.FeedbackOK {

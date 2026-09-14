@@ -152,17 +152,19 @@ func contentHashBytes(raw []byte) string {
 // enforceEditOCC validates explicit expected_hash and session auto-OCC before
 // any backup or write. Returns (warning, errorResult). If errorResult != nil
 // the caller must return it unchanged.
-func enforceEditOCC(ctx context.Context, path, expectedHash string, content []byte) (string, *mcp.CallToolResult) {
+func enforceEditOCC(engine *core.UltraFastEngine, ctx context.Context, path, expectedHash string, content []byte, includeDiff bool) (string, *mcp.CallToolResult) {
 	actualHash := contentHashBytes(content)
 	if expectedHash != "" && actualHash != expectedHash {
 		message := fmt.Sprintf(
 			"stale edit: file content changed since read (expected hash: %s, actual: %s). Re-read the file with read_file to get the current content_hash, then retry.",
 			expectedHash, actualHash)
 		core.SetError(ctx, message)
-		return "", pathErrorResult(errCodeOCCMismatch, message, path, map[string]string{
-			"expected_hash": expectedHash,
-			"current_hash":  actualHash,
-		}, "Rebase against current content; retry with current_hash.")
+		baseline := engine.FindOCCBaseline(path, expectedHash)
+		conflict := core.BuildOCCConflict(expectedHash, content, baseline)
+		if includeDiff {
+			core.IncludeOCCConflictDiff(&conflict, content, baseline, filepath.Base(path))
+		}
+		return "", occMismatchResult(message, path, expectedHash, actualHash, conflict)
 	}
 	if expectedHash == "" {
 		if occSignal := core.CheckAutoOCC(core.NormalizePath(path), actualHash); occSignal.Status != core.FeedbackOK {
@@ -832,6 +834,8 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithBoolean("create_backup", mcp.Description("Create backup before transformation (default: true, for regex mode)")),
 		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Supported in all modes (replace, search_replace, regex, insert, replace_range, delete_range, occurrence). Does not create backups or update the undo chain. Default: false.")),
 		mcp.WithString("diff_format", mcp.Description("Controls how the diff is rendered (point 1). \"\"/\"auto\" (default): full diff when small, else a summary with anchors + ranges to save tokens; \"full\": always the complete unified diff; \"summary\": per-hunk ranges + first/last anchor lines, eliding large bodies (ideal for big block deletions); \"stat\": just \"+added -removed\"; \"none\": no diff."), mcp.Enum("auto", "full", "summary", "stat", "none")),
+		mcp.WithString("detail", mcp.Description("Set to full to include a bounded diff in an OCC conflict."), mcp.Enum("full")),
+		mcp.WithBoolean("include_diff", mcp.Description("Include a bounded diff in an OCC conflict.")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false, for occurrence mode)")),
 		// Stale-edit protection: hash returned by the prior read_file call. If the
 		// file's actual hash doesn't match, the edit is rejected with a clear error.
@@ -859,6 +863,7 @@ func registerCoreTools(reg *toolRegistry) {
 		occurrence := 0
 		tolerantWhitespace := false
 		expectedHash := ""
+		includeOCCDiff := false
 
 		if args != nil {
 			if m, ok := args["mode"].(string); ok {
@@ -866,6 +871,12 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			if eh, ok := args["expected_hash"].(string); ok {
 				expectedHash = eh
+			}
+			if include, ok := args["include_diff"].(bool); ok {
+				includeOCCDiff = include
+			}
+			if detail, ok := args["detail"].(string); ok && detail == "full" {
+				includeOCCDiff = true
 			}
 			if f, ok := args["force"].(bool); ok {
 				force = f
@@ -908,6 +919,7 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 		}
 		ctx = core.WithExpectedHash(ctx, expectedHash)
+		ctx = core.WithOCCConflictDiff(ctx, includeOCCDiff)
 		ctx = core.WithEditPolicy(ctx, core.EditPolicy{Strict: strict, ExpectedMatches: expectedMatches})
 
 		// ---- MODE: regex ----
@@ -971,7 +983,7 @@ func registerCoreTools(reg *toolRegistry) {
 
 			oldContentRaw, _ := os.ReadFile(normPath)
 			autoOCCWarn := ""
-			if warn, blocked := enforceEditOCC(ctx, path, expectedHash, oldContentRaw); blocked != nil {
+			if warn, blocked := enforceEditOCC(engine, ctx, path, expectedHash, oldContentRaw, includeOCCDiff); blocked != nil {
 				return blocked, nil
 			} else {
 				autoOCCWarn = warn
@@ -1063,7 +1075,7 @@ func registerCoreTools(reg *toolRegistry) {
 			normPath := core.NormalizePath(path)
 			oldContentRaw, _ := os.ReadFile(normPath)
 			autoOCCWarn := ""
-			if warn, blocked := enforceEditOCC(ctx, path, expectedHash, oldContentRaw); blocked != nil {
+			if warn, blocked := enforceEditOCC(engine, ctx, path, expectedHash, oldContentRaw, includeOCCDiff); blocked != nil {
 				return blocked, nil
 			} else {
 				autoOCCWarn = warn
@@ -1177,7 +1189,7 @@ func registerCoreTools(reg *toolRegistry) {
 			normPath := core.NormalizePath(path)
 			oldContentRaw, _ := os.ReadFile(normPath)
 			autoOCCWarn := ""
-			if warn, blocked := enforceEditOCC(ctx, path, expectedHash, oldContentRaw); blocked != nil {
+			if warn, blocked := enforceEditOCC(engine, ctx, path, expectedHash, oldContentRaw, includeOCCDiff); blocked != nil {
 				return blocked, nil
 			} else {
 				autoOCCWarn = warn
@@ -1246,7 +1258,7 @@ func registerCoreTools(reg *toolRegistry) {
 			normPath := core.NormalizePath(path)
 			oldContentRaw, _ := os.ReadFile(normPath)
 			autoOCCWarn := ""
-			if warn, blocked := enforceEditOCC(ctx, path, expectedHash, oldContentRaw); blocked != nil {
+			if warn, blocked := enforceEditOCC(engine, ctx, path, expectedHash, oldContentRaw, includeOCCDiff); blocked != nil {
 				return blocked, nil
 			} else {
 				autoOCCWarn = warn
@@ -1315,7 +1327,7 @@ func registerCoreTools(reg *toolRegistry) {
 			oldContentRaw, _ := os.ReadFile(normPath)
 			oldContentStr := string(oldContentRaw)
 			autoOCCWarn := ""
-			if warn, blocked := enforceEditOCC(ctx, path, expectedHash, oldContentRaw); blocked != nil {
+			if warn, blocked := enforceEditOCC(engine, ctx, path, expectedHash, oldContentRaw, includeOCCDiff); blocked != nil {
 				return blocked, nil
 			} else {
 				autoOCCWarn = warn
@@ -1417,7 +1429,7 @@ func registerCoreTools(reg *toolRegistry) {
 
 			oldContentRaw, _ := os.ReadFile(normPath)
 			autoOCCWarn := ""
-			if warn, blocked := enforceEditOCC(ctx, path, expectedHash, oldContentRaw); blocked != nil {
+			if warn, blocked := enforceEditOCC(engine, ctx, path, expectedHash, oldContentRaw, includeOCCDiff); blocked != nil {
 				return blocked, nil
 			} else {
 				autoOCCWarn = warn
@@ -1453,7 +1465,7 @@ func registerCoreTools(reg *toolRegistry) {
 		oldContentRaw, _ := os.ReadFile(normPath)
 		oldContentStr := string(oldContentRaw)
 		autoOCCWarn := ""
-		if warn, blocked := enforceEditOCC(ctx, path, expectedHash, oldContentRaw); blocked != nil {
+		if warn, blocked := enforceEditOCC(engine, ctx, path, expectedHash, oldContentRaw, includeOCCDiff); blocked != nil {
 			return blocked, nil
 		} else {
 			autoOCCWarn = warn

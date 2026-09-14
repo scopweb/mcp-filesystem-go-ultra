@@ -5,6 +5,87 @@ import (
 	"strings"
 )
 
+// ChangedLineRange is a 1-based inclusive range in the current on-disk file.
+type ChangedLineRange struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
+// OCCConflictReport is deterministic conflict metadata. A missing baseline is
+// explicit: reporting no ranges is safer than inferring them from edit input.
+type OCCConflictReport struct {
+	Path          string             `json:"path,omitempty"`
+	ChangedRanges []ChangedLineRange `json:"changed_ranges"`
+	HunkCount     int                `json:"hunk_count"`
+	BytesDelta    int64              `json:"bytes_delta"`
+	Reason        string             `json:"reason,omitempty"`
+	Diff          string             `json:"diff,omitempty"`
+}
+
+const maxOCCConflictDiffBytes = 8 * 1024
+
+// BuildOCCConflict compares a trusted baseline with current bytes. baseline nil
+// means no trustworthy snapshot for expectedHash was available.
+func BuildOCCConflict(expectedHash string, actualBytes, baselineBytes []byte) OCCConflictReport {
+	report := OCCConflictReport{ChangedRanges: []ChangedLineRange{}}
+	if baselineBytes == nil {
+		report.Reason = "no_baseline"
+		return report
+	}
+	report.BytesDelta = int64(len(actualBytes) - len(baselineBytes))
+	oldLines := splitLines(string(baselineBytes))
+	newLines := splitLines(string(actualBytes))
+	if len(oldLines)*len(newLines) > maxDiffMatrixCells {
+		report.Reason = "too_large_delta"
+		return report
+	}
+	hunks := computeHunks(oldLines, newLines, 0)
+	report.HunkCount = len(hunks)
+	for _, h := range hunks {
+		newLine := h.newStart
+		start, end := 0, 0
+		for _, line := range h.lines {
+			switch {
+			case strings.HasPrefix(line, "+"):
+				if start == 0 {
+					start = newLine
+				}
+				end = newLine
+				newLine++
+			case strings.HasPrefix(line, " "):
+				newLine++
+			case strings.HasPrefix(line, "-"):
+				if start == 0 {
+					start, end = newLine, newLine
+				}
+			}
+		}
+		if start < 1 {
+			start = 1
+		}
+		if end < start {
+			end = start
+		}
+		report.ChangedRanges = append(report.ChangedRanges, ChangedLineRange{Start: start, End: end})
+	}
+	return report
+}
+
+// IncludeOCCConflictDiff adds a bounded unified diff when a trusted baseline
+// is available. A truncated diff is still useful for recovery but never
+// exceeds the response budget.
+func IncludeOCCConflictDiff(report *OCCConflictReport, actualBytes, baselineBytes []byte, filePath string) {
+	if report == nil || report.Reason != "" || baselineBytes == nil {
+		return
+	}
+	diff := UnifiedDiffContext(string(baselineBytes), string(actualBytes), filePath, 20)
+	if len(diff) > maxOCCConflictDiffBytes {
+		report.Diff = diff[:maxOCCConflictDiffBytes]
+		return
+	}
+	report.Diff = diff
+}
+
 // UnifiedDiff generates a unified diff string from old and new content.
 // Format follows the standard unified diff (-3 context lines by default).
 func UnifiedDiff(oldContent, newContent, filePath string) string {

@@ -13,6 +13,7 @@ import (
 
 type ctxHeldPathsKey struct{}
 type ctxExpectedHashKey struct{}
+type ctxOCCConflictDiffKey struct{}
 type ctxSessionIDKey struct{}
 
 func withHeldPath(ctx context.Context, canon string) context.Context {
@@ -42,6 +43,19 @@ func WithExpectedHash(ctx context.Context, hash string) context.Context {
 func expectedHashFrom(ctx context.Context) string {
 	h, _ := ctx.Value(ctxExpectedHashKey{}).(string)
 	return h
+}
+
+// WithOCCConflictDiff requests a bounded diff if an OCC mismatch occurs.
+func WithOCCConflictDiff(ctx context.Context, include bool) context.Context {
+	if !include {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxOCCConflictDiffKey{}, true)
+}
+
+func occConflictDiffRequested(ctx context.Context) bool {
+	include, _ := ctx.Value(ctxOCCConflictDiffKey{}).(bool)
+	return include
 }
 
 // WithSessionID binds auto-OCC state to an effective session.

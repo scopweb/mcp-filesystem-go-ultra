@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // FileSnapshot is one coherent view of a file: bytes and hash from the same read.
@@ -92,11 +93,43 @@ func (e *UltraFastEngine) BeginFileTxn(ctx context.Context, path string, allowMi
 		return ctx, nil, err
 	}
 	if eh := expectedHashFrom(ctx); eh != "" && snap.Hash != eh {
+		baseline := e.FindOCCBaseline(path, eh)
+		conflict := BuildOCCConflict(eh, snap.Bytes, baseline)
+		conflict.Path = path
+		if occConflictDiffRequested(ctx) {
+			IncludeOCCConflictDiff(&conflict, snap.Bytes, baseline, filepath.Base(path))
+		}
 		unlock()
-		return ctx, nil, &OCCMismatchError{Expected: eh, Actual: snap.Hash}
+		return ctx, nil, &OCCMismatchError{Expected: eh, Actual: snap.Hash, Conflict: conflict}
 	}
 	txn.snap = snap
 	return ctx, txn, nil
+}
+
+// FindOCCBaseline returns only a backup whose bytes match expectedHash. The
+// feedback session state stores hashes, not file bodies, and must not become an
+// agent-facing baseline API. It is safe to use while holding a file transaction lock.
+func (e *UltraFastEngine) FindOCCBaseline(path, expectedHash string) []byte {
+	if e == nil || e.backupManager == nil || expectedHash == "" {
+		return nil
+	}
+	backups, err := e.backupManager.ListBackups(0, "all", path, 0)
+	if err != nil {
+		return nil
+	}
+	cleanPath := filepath.Clean(path)
+	for _, backup := range backups {
+		for _, file := range backup.Files {
+			if filepath.Clean(file.OriginalPath) != cleanPath {
+				continue
+			}
+			raw, err := os.ReadFile(filepath.Join(e.backupManager.GetBackupPath(backup.BackupID), file.BackupPath))
+			if err == nil && contentHashFNV(string(raw)) == expectedHash {
+				return append([]byte{}, raw...)
+			}
+		}
+	}
+	return nil
 }
 
 func isNotExistPathError(err error) bool {
