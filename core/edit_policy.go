@@ -8,6 +8,8 @@ import (
 
 type ctxEditPolicyKey struct{}
 
+// Path-aware risk floors live in path_risk.go (PathFloorFor / ApplyPathFloor).
+
 // EditPolicy is the opt-in E4 strict-matching contract. Default (zero value)
 // preserves historical fallback behaviour.
 type EditPolicy struct {

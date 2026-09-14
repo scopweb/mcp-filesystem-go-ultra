@@ -132,6 +132,7 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 
 	// Calculate change impact for risk assessment
 	impact := CalculateChangeImpact(string(content), oldText, newText, e.riskThresholds)
+	ApplyPathFloor(impact, path, e.riskThresholds)
 
 	var backupID string
 
@@ -1317,6 +1318,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		}
 	}
 	aggregateImpact := calculateMultiEditImpact(originalContent, simContent, edits, e.riskThresholds)
+	ApplyPathFloor(aggregateImpact, path, e.riskThresholds)
 
 	var backupID string
 

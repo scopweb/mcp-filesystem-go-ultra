@@ -408,6 +408,7 @@ func (e *UltraFastEngine) streamingEditLargeFile(ctx context.Context, path, oldT
 
 	// Risk assessment + backup for large file edits (Bug #16)
 	impact := calculateChangeImpactFromStats(totalLines+1, normalizedLen, occurrences, oldText, newText, e.riskThresholds)
+	ApplyPathFloor(impact, path, e.riskThresholds)
 
 	var backupID string
 	if e.backupManager != nil && impact.IsRisky {

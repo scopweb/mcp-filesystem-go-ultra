@@ -177,10 +177,20 @@ func (e *UltraFastEngine) AnalyzeEditChange(ctx context.Context, path, oldText, 
 		analysis.Impact = "No changes will be made with exact matching"
 	}
 
-	// Assess risk
 	analysis.RiskLevel = e.assessEditRisk(analysis, occurrences, oldText, newText)
+	impact := CalculateChangeImpact(content, oldText, newText, e.riskThresholds)
+	ApplyPathFloor(impact, path, e.riskThresholds)
+	if riskRank(impact.RiskLevel) > riskRank(analysis.RiskLevel) {
+		analysis.RiskLevel = impact.RiskLevel
+	}
+	analysis.RiskFactors = append(analysis.RiskFactors, impact.RiskFactors...)
+	if impact.PathFloor != "" {
+		analysis.Metadata["path_floor"] = impact.PathFloor
+	}
+	if len(impact.Reasons) > 0 {
+		analysis.Metadata["path_reasons"] = impact.Reasons
+	}
 
-	// Add metadata
 	analysis.Metadata["occurrences"] = occurrences
 	analysis.Metadata["exact_match"] = occurrences > 0
 

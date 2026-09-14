@@ -204,6 +204,19 @@ The `git` tool executes Git commands on behalf of the AI. It includes the follow
 
 ---
 
+## Path-aware risk (v4.7)
+
+Edits still auto-proceed with backup. These path floors only raise `ChangeImpact.RiskLevel` (never lower it). Test files and docs do not get a path floor. Secrets stay `SECRET_DENIED` and are not double-counted.
+
+| glob / class | floor |
+|--------------|--------|
+| `.github/workflows/*`, `**/Dockerfile`, `go.mod`, `go.sum`, `*.csproj` | high |
+| `**/*_test.go` | none (does not raise) |
+| `cmd/**`, `internal/**` if change% ≥ medium threshold | medium |
+| `README*`, `docs/**` | none |
+
+---
+
 ## Known Residual Risks
 
 | Risk | Severity | Status | Recommendation |
