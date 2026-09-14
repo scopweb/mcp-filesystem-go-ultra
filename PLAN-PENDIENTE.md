@@ -6,6 +6,22 @@ Trabajo que **no** entra en esta release. v4.6.2 cierra discovery para agentes: 
 
 Copy-paste pack in [examples/harness/](examples/harness/): Claude Code agents + OpenCode permission snippets + Codex warning. Handshake instructions include subagent handoff. `list_allowed_directories` structured payload adds `profile`, `roots_mode`, `readonly`, `tool_count`. **Eval with a real model remains open** (this pack is config, not a benchmark).
 
+## v4.7 Failure Intelligence
+
+Canonical: [ROADMAP-v4.7-Failure-Intelligence.md](ROADMAP-v4.7-Failure-Intelligence.md). [ROADMAP-v4.7-Agent-Intelligence.md](ROADMAP-v4.7-Agent-Intelligence.md) is obsolete.
+
+| PR | What | Status |
+|----|------|--------|
+| PR-0 | Baseline harness behind `cmd/proxy` | `examples/harness/benchmark/` |
+| PR-1 | Envelope + `retryable` table | pending |
+| PR-2 | OCC Conflict Report (ranges default; diff only `detail=full` / `include_diff`) | pending |
+| PR-3 | Actionable payloads (PATCH_FAILED stays `retryable:false`) | pending |
+| PR-4 | `detail=summary\|normal\|full` on expensive tools only | pending (needs PR-0 numbers) |
+| PR-5 | Mutation budget per process (default off) | pending |
+| PR-6 | Path-aware risk on `impact_analyzer` | pending |
+
+P1 eval with a real model stays P1 of the product and does **not** block merge of PR-0–6. P2 durable e3 / multi-file patch / completions stay behind v4.7.
+
 ## P1 — Evaluación real con agentes
 
 Sigue abierto. La batería `TestE2E_E6_AgentEval` es integración scriptada, no un modelo. The harness pack does not close this.
