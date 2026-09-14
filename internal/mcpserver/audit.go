@@ -66,14 +66,25 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 			}
 		}
 
+		args, _ := request.Params.Arguments.(map[string]interface{})
 		if engine.IsReadOnly() {
-			args, _ := request.Params.Arguments.(map[string]interface{})
 			if toolIsMutating(tool, args) {
 				entry.DurationMs = time.Since(start).Milliseconds()
 				entry.Status = "error"
 				entry.Error = "READ_ONLY"
 				engine.Audit(*entry)
 				return pathErrorResult(errCodeReadOnly, "server is --readonly", "", nil, "restart without --readonly to mutate"), nil
+			}
+		}
+		mutating := toolIsMutating(tool, args)
+		dryRun := isDryRunArgs(args)
+		if mutating && !dryRun {
+			if used, limit, ok := engine.CheckMutationBudget(); !ok {
+				entry.DurationMs = time.Since(start).Milliseconds()
+				entry.Status = "error"
+				entry.Error = errCodeBudgetExceeded
+				engine.Audit(*entry)
+				return budgetExceededResult(used, limit), nil
 			}
 		}
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
@@ -118,6 +129,9 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 			}
 		} else {
 			entry.Status = "ok"
+			if mutating && !dryRun {
+				engine.RecordMutation()
+			}
 		}
 
 		// Extract path and summarize args for logging
@@ -176,6 +190,19 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 
 func toolIsMutating(tool string, args map[string]interface{}) bool {
 	return core.IsMutating(tool, args)
+}
+
+func isDryRunArgs(args map[string]interface{}) bool {
+	if args == nil {
+		return false
+	}
+	if v, ok := args["dry_run"].(bool); ok && v {
+		return true
+	}
+	if v, ok := args["preview"].(bool); ok && v {
+		return true
+	}
+	return false
 }
 
 // summarizeArgs creates a compact map of key arguments for audit logging

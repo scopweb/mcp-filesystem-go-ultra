@@ -36,6 +36,7 @@ func TestRetryableForCode_FailureIntelligence(t *testing.T) {
 		errCodeInvalidParams:  false,
 		errCodeNotFound:       false,
 		errCodeUnavailable:    false,
+		errCodeBudgetExceeded: false,
 	}
 	for code, want := range cases {
 		if got := retryableForCode(code); got != want {
