@@ -88,3 +88,39 @@ func TestPatchHeaderMatches(t *testing.T) {
 		t.Fatal("should not match")
 	}
 }
+
+func TestApplyUnifiedPatch_ContextMismatchIsTyped(t *testing.T) {
+	old := "real line\n"
+	patch := "--- a/patch.txt\n+++ b/patch.txt\n@@ -1,1 +1,1 @@\n-WRONG CONTEXT\n+patched line\n"
+	_, err := ApplyUnifiedPatch(old, patch)
+	pe := AsPatchError(err)
+	if pe.Reason != PatchReasonContextNotFound || pe.HunkIndex != 1 || pe.LineHint != 1 {
+		t.Fatalf("%+v", pe)
+	}
+}
+
+func TestParseUnifiedDiff_MalformedReason(t *testing.T) {
+	_, err := ParseUnifiedDiff("not a patch")
+	pe := AsPatchError(err)
+	if pe.Reason != PatchReasonMalformed {
+		t.Fatalf("%+v", pe)
+	}
+}
+
+func TestApplyUnifiedPatch_OverlapReason(t *testing.T) {
+	old := "a\nb\nc\n"
+	patch := `--- a/f.txt
++++ b/f.txt
+@@ -3,1 +3,1 @@
+-c
++C
+@@ -1,1 +1,1 @@
+-a
++A
+`
+	_, err := ApplyUnifiedPatch(old, patch)
+	pe := AsPatchError(err)
+	if pe.Reason != PatchReasonOverlap {
+		t.Fatalf("%+v err=%v", pe, err)
+	}
+}

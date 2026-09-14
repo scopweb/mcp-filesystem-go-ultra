@@ -171,8 +171,14 @@ func TestApplyPatch_ContextMismatch_ReleasesLock(t *testing.T) {
 	if strings.Contains(strings.ToLower(text), "new file") || strings.Contains(text, "PATCHED") {
 		t.Fatalf("mismatch must not create/rewrite: %s", text)
 	}
-	if !strings.Contains(text, "PATCH_FAILED") && !strings.Contains(strings.ToLower(text), "mismatch") {
-		t.Fatalf("want mismatch/PATCH_FAILED, got %s", text)
+	if !strings.Contains(text, `"code":"PATCH_FAILED"`) || !strings.Contains(text, `"retryable":false`) {
+		t.Fatalf("want PATCH_FAILED retryable=false, got %s", text)
+	}
+	if !strings.Contains(text, `"reason":"context_not_found"`) {
+		t.Fatalf("want context_not_found, got %s", text)
+	}
+	if !strings.Contains(text, `"suggestion":"re-read the file and regenerate the patch"`) {
+		t.Fatalf("want stable suggestion, got %s", text)
 	}
 
 	editCtx, editCancel := context.WithTimeout(context.Background(), time.Second)

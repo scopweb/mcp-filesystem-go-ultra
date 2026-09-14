@@ -1208,7 +1208,13 @@ func (e *UltraFastEngine) AllowedDirsSuffix() string {
 // AccessDeniedError builds a PathError whose message lists the effective
 // allowed directories via AllowedDirsSuffix.
 func (e *UltraFastEngine) AccessDeniedError(op, path string) *PathError {
-	return &PathError{Op: op, Path: path, Err: fmt.Errorf("access denied%s", e.AllowedDirsSuffix())}
+	return &PathError{
+		Op:     op,
+		Path:   path,
+		Err:    fmt.Errorf("access denied%s", e.AllowedDirsSuffix()),
+		Roots:  e.ListedAllowedPaths(),
+		Source: e.AllowedSource(),
+	}
 }
 
 // IsPathAllowed checks if the given path is within one of the allowed base paths.

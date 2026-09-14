@@ -47,7 +47,7 @@ func formatToolError(err error) string {
 			return pathErrorJSON(errCodeSecretDenied, pe.Error(), pe.Path, nil, "pass --allow-secrets to read (writes still audited)")
 		}
 		if pe.Err != nil && strings.Contains(pe.Err.Error(), "access denied") {
-			return pathErrorJSON(errCodeNotAllowed, pe.Error(), pe.Path, nil, "call list_allowed_directories")
+			return marshalPathError(errCodeNotAllowed, pe.Error(), pe.Path, notAllowedDetailsFromPathError(pe), suggestionNotAllowed)
 		}
 	}
 	if errors.Is(err, fs.ErrNotExist) {

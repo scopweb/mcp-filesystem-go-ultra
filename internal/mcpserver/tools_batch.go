@@ -238,10 +238,7 @@ func registerBatchTools(reg *toolRegistry) {
 				if occSignal := core.CheckAutoOCC(normPath, currentHash); occSignal.Status != core.FeedbackOK {
 					core.SetFeedback(ctx, occSignal)
 					if occSignal.BlockOp {
-						return pathErrorResult(errCodeHashRequired,
-							"expected_hash is required after an external file change", path,
-							map[string]string{"current_hash": currentHash},
-							"Read the file and resend the mutation with expected_hash."), nil
+						return hashRequiredResult(path, currentHash), nil
 					}
 					staleWarning += "\n⚠ " + occSignal.Message
 				}

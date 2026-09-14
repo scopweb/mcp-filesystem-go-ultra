@@ -38,7 +38,7 @@ func registerAnalyzeTools(reg *toolRegistry) {
 		}
 		path = core.NormalizePath(path)
 		if !engine.IsPathAllowed(path) {
-			return pathErrorResult(errCodeNotAllowed, "access denied", path, nil, "call list_allowed_directories"), nil
+			return notAllowedResult(engine, path), nil
 		}
 		if _, statErr := os.Stat(path); statErr != nil {
 			return mcp.NewToolResultError(formatToolError(statErr)), nil

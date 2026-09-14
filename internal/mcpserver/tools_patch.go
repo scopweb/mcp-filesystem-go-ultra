@@ -40,7 +40,7 @@ func registerPatchTools(reg *toolRegistry) {
 		}
 		pathA = core.NormalizePath(pathA)
 		if !engine.IsPathAllowed(pathA) {
-			return pathErrorResult(errCodeNotAllowed, "access denied", pathA, nil, "call list_allowed_directories"), nil
+			return notAllowedResult(engine, pathA), nil
 		}
 
 		var contentA, contentB []byte
@@ -64,7 +64,7 @@ func registerPatchTools(reg *toolRegistry) {
 		}
 		pathB = core.NormalizePath(pathB)
 		if !engine.IsPathAllowed(pathB) {
-			return pathErrorResult(errCodeNotAllowed, "access denied", pathB, nil, "call list_allowed_directories"), nil
+			return notAllowedResult(engine, pathB), nil
 		}
 		contentA, err = os.ReadFile(pathA)
 		if err != nil {
@@ -140,16 +140,17 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 
 		path = core.NormalizePath(path)
 		if !engine.IsPathAllowed(path) {
-			return pathErrorResult(errCodeNotAllowed, "access denied", path, nil, "call list_allowed_directories"), nil
+			return notAllowedResult(engine, path), nil
 		}
 		parsed, err := core.ParseUnifiedDiff(patch)
 		if err != nil {
-			return pathErrorResult(errCodePatchFailed, err.Error(), path, nil, "pass a unified diff for a single file"), nil
+			return patchFailedResult(path, err, nil), nil
 		}
 		if !core.PatchHeaderMatches(parsed.NewFile, path) && !core.PatchHeaderMatches(parsed.OldFile, path) {
-			return pathErrorResult(errCodePatchFailed, "patch header does not match path", path, map[string]string{
-				"+++": parsed.NewFile, "---": parsed.OldFile,
-			}, "+++ header must match path (a/ b/ prefixes ok)"), nil
+			return patchFailedResult(path, &core.PatchError{
+				Reason: core.PatchReasonMalformed,
+				Msg:    "patch header does not match path",
+			}, map[string]string{"+++": parsed.NewFile, "---": parsed.OldFile}), nil
 		}
 
 		ctx = core.WithExpectedHash(ctx, expectedHash)
@@ -187,22 +188,19 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 			if occSignal := core.CheckAutoOCC(path, actualHash); occSignal.Status != core.FeedbackOK {
 				core.SetFeedback(ctx, occSignal)
 				if occSignal.BlockOp {
-					return pathErrorResult(errCodeHashRequired,
-						"expected_hash is required after an external file change", path,
-						map[string]string{"current_hash": actualHash},
-						"Read the file and resend the mutation with expected_hash."), nil
+					return hashRequiredResult(path, actualHash), nil
 				}
 			}
 		}
 
 		newContent, err := core.ApplyUnifiedPatch(string(oldRaw), patch)
 		if err != nil {
-			return pathErrorResult(errCodePatchFailed, err.Error(), path, nil, "re-read the file and regenerate the patch"), nil
+			return patchFailedResult(path, err, nil), nil
 		}
 
 		if !isNew {
 			if sig := core.CheckEditRewrite(string(oldRaw), newContent, int64(len(oldRaw))); sig.BlockOp && !allowRewrite {
-				return pathErrorResult(errCodeRewriteBlocked, sig.Message, path, nil, "use write_file or allow_rewrite:true"), nil
+				return rewriteBlockedResult(path, sig.Message, len(oldRaw), len(newContent)), nil
 			}
 		}
 

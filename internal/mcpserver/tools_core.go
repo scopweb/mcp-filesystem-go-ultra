@@ -170,10 +170,7 @@ func enforceEditOCC(engine *core.UltraFastEngine, ctx context.Context, path, exp
 		if occSignal := core.CheckAutoOCC(core.NormalizePath(path), actualHash); occSignal.Status != core.FeedbackOK {
 			core.SetFeedback(ctx, occSignal)
 			if occSignal.BlockOp {
-				return "", pathErrorResult(errCodeHashRequired,
-					"expected_hash is required after an external file change", path,
-					map[string]string{"current_hash": actualHash},
-					"Read the file and resend the mutation with expected_hash.")
+				return "", hashRequiredResult(path, actualHash)
 			}
 			return "⚠ " + occSignal.Message, nil
 		}
@@ -1407,9 +1404,7 @@ func registerCoreTools(reg *toolRegistry) {
 			if rewriteSignal := core.CheckEditRewrite(oldText, newText, fileSize); rewriteSignal != nil && rewriteSignal.BlockOp {
 				core.SetFeedback(ctx, rewriteSignal)
 				if !allowRewrite {
-					errMsg := core.FormatFeedback(rewriteSignal,
-						"edit_file blocked: looks like an accidental full-file rewrite")
-					return mcp.NewToolResultError(errMsg), nil
+					return rewriteBlockedResult(path, rewriteSignal.Message, len(oldText), len(newText)), nil
 				}
 				// allow_rewrite=true: proceed but the audit will record the pattern
 				_ = rewriteSignal // already attached via SetFeedback above

@@ -78,6 +78,24 @@ func TestPathErrorJSONWithOCC_ConflictReport(t *testing.T) {
 		t.Fatalf("conflict=%+v", env.Error.Conflict)
 	}
 }
+func TestActionablePayloads_StableSuggestions(t *testing.T) {
+	if suggestionPatchFailed != "re-read the file and regenerate the patch" {
+		t.Fatalf("suggestionPatchFailed=%q", suggestionPatchFailed)
+	}
+	if suggestionRewriteBlocked != "use write_file or allow_rewrite:true" {
+		t.Fatalf("suggestionRewriteBlocked=%q", suggestionRewriteBlocked)
+	}
+	if suggestionNotAllowed != "call list_allowed_directories" {
+		t.Fatalf("suggestionNotAllowed=%q", suggestionNotAllowed)
+	}
+	if suggestionHashRequired != "Read the file and resend the mutation with expected_hash." {
+		t.Fatalf("suggestionHashRequired=%q", suggestionHashRequired)
+	}
+	if suggestionValidation != "Correct the listed parameters; do not retry with the same arguments" {
+		t.Fatalf("suggestionValidation=%q", suggestionValidation)
+	}
+}
+
 func TestFormatToolError_AccessDeniedEnvelope(t *testing.T) {
 	err := &core.PathError{Op: "read", Path: `C:\secret`, Err: errors.New("access denied — outside allowed directories: C:\\proj")}
 	got := formatToolError(err)
