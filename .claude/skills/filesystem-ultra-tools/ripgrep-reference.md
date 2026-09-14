@@ -1,9 +1,9 @@
 ---
 name: ripgrep-reference
-description: Ripgrep backend reference for filesystem-ultra v4.6.2: detection, parameters, and fallback behavior.
+description: Ripgrep backend reference for filesystem-ultra v4.7.0: detection, parameters, and fallback behavior.
 ---
 
-# Ripgrep Backend Reference (v4.6.2)
+# Ripgrep Backend Reference (v4.7.0)
 
 ## Overview
 

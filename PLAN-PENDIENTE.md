@@ -1,6 +1,6 @@
-# Plan pendiente (después de v4.6.2)
+# Plan pendiente (después de v4.7.0)
 
-Trabajo que **no** entra en esta release. v4.6.2 cierra discovery para agentes: instrucciones cortas, `--profile=strict|ultra`, `apply_patch` usable, git de red fuera del camino crítico.
+Trabajo que **no** entra en esta release. v4.7.0 cierra Failure Intelligence (PR-0–PR-6). v4.6.2 cerró discovery para agentes.
 
 ## Hecho — pack de arnés (docs)
 
@@ -12,15 +12,15 @@ Canonical: [ROADMAP-v4.7-Failure-Intelligence.md](ROADMAP-v4.7-Failure-Intellige
 
 | PR | What | Status |
 |----|------|--------|
-| PR-0 | Baseline harness behind `cmd/proxy` | `examples/harness/benchmark/` |
+| PR-0 | Baseline harness behind `cmd/proxy` | done |
 | PR-1 | Envelope + `retryable` table | done |
-| PR-2 | OCC Conflict Report (ranges default; diff only `detail=full` / `include_diff`) | pending |
-| PR-3 | Actionable payloads (PATCH_FAILED stays `retryable:false`) | pending |
-| PR-4 | `detail=summary\|normal\|full` on expensive tools only | pending (needs PR-0 numbers) |
-| PR-5 | Mutation budget per process (default off) | pending |
-| PR-6 | Path-aware risk on `impact_analyzer` | pending |
+| PR-2 | OCC Conflict Report (ranges default; diff only `detail=full` / `include_diff`) | done |
+| PR-3 | Actionable payloads (PATCH_FAILED stays `retryable:false`) | done |
+| PR-4 | `detail=summary\|normal\|full` on expensive tools only | done |
+| PR-5 | Mutation budget per process (default off) | done |
+| PR-6 | Path-aware risk on `impact_analyzer` | done |
 
-P1 eval with a real model stays P1 of the product and does **not** block merge of PR-0–6. P2 durable e3 / multi-file patch / completions stay behind v4.7.
+Shipped in v4.7.0. P1 eval with a real model stays P1 of the product. P2 durable e3 / multi-file patch / completions stay open.
 
 ## P1 — Evaluación real con agentes
 

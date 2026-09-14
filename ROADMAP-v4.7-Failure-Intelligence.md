@@ -277,13 +277,13 @@ Se puede fusionar PR-1+2 si el diff es pequeño. No saltar PR-0.
 
 **Hecho** cuando:
 
-- [ ] Baseline JSON en repo
-- [ ] Sweep CI de codes + retryable
-- [ ] Test OCC con ranges + caso sin baseline
-- [ ] Test PATCH_FAILED no retryable
-- [ ] `detail` en ≥1 tool cara con snapshot de schema
-- [ ] Budget off por defecto; on en test
-- [ ] PLAN-PENDIENTE actualizado; Agent-Intelligence MD marcado obsolete
+- [x] Baseline JSON en repo
+- [x] Sweep CI de codes + retryable
+- [x] Test OCC con ranges + caso sin baseline
+- [x] Test PATCH_FAILED no retryable
+- [x] `detail` en ≥1 tool cara con snapshot de schema
+- [x] Budget off por defecto; on en test
+- [x] PLAN-PENDIENTE actualizado; Agent-Intelligence MD marcado obsolete
 - [ ] Eval con modelo real **sigue abierta** (no es gate de v4.7 código)
 
 ## Tests que no negociar
