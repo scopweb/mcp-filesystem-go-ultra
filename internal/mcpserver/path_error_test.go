@@ -60,6 +60,24 @@ func TestPathErrorJSON_RequiredFailureIntelligenceFields(t *testing.T) {
 		t.Fatalf("OCC_MISMATCH must be retryable: %#v", errBody)
 	}
 }
+func TestPathErrorJSONWithOCC_ConflictReport(t *testing.T) {
+	conflict := core.OCCConflictReport{
+		Path:          `C:\x`,
+		ChangedRanges: []core.ChangedLineRange{},
+		Reason:        "no_baseline",
+	}
+	raw := pathErrorJSONWithOCC("stale edit", `C:\x`, "old", "new", conflict)
+	var env pathErrorEnvelope
+	if err := json.Unmarshal([]byte(raw), &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Error.ExpectedHash != "old" || env.Error.CurrentHash != "new" || env.Error.Conflict == nil {
+		t.Fatalf("error=%+v", env.Error)
+	}
+	if env.Error.Conflict.Reason != "no_baseline" || len(env.Error.Conflict.ChangedRanges) != 0 {
+		t.Fatalf("conflict=%+v", env.Error.Conflict)
+	}
+}
 func TestFormatToolError_AccessDeniedEnvelope(t *testing.T) {
 	err := &core.PathError{Op: "read", Path: `C:\secret`, Err: errors.New("access denied — outside allowed directories: C:\\proj")}
 	got := formatToolError(err)

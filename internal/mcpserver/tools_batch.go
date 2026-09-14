@@ -252,10 +252,8 @@ func registerBatchTools(reg *toolRegistry) {
 		if err != nil {
 			var occ *core.OCCMismatchError
 			if errors.As(err, &occ) {
-				return pathErrorResult(errCodeOCCMismatch,
-					"stale edit: file content changed since expected_hash", path,
-					map[string]string{"expected_hash": occ.Expected, "current_hash": occ.Actual},
-					"Rebase against current content; retry with current_hash."), nil
+				return occMismatchResult("stale edit: file content changed since expected_hash", path,
+					occ.Expected, occ.Actual, occ.Conflict), nil
 			}
 			// Bug #27: If result is non-nil, this is an atomic rollback — include backup_id and details
 			if result != nil && result.BackupID != "" {

@@ -7,6 +7,7 @@ import "fmt"
 type OCCMismatchError struct {
 	Expected string
 	Actual   string
+	Conflict OCCConflictReport
 }
 
 func (e *OCCMismatchError) Error() string {
