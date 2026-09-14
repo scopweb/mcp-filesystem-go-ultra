@@ -393,6 +393,7 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithNumber("start_line", mcp.Description("Starting line number (1-indexed) for range read. Pair with end_line (absolute line number) OR max_lines (line count) — not both.")),
 		mcp.WithNumber("end_line", mcp.Description("Ending line number for range read — an ABSOLUTE line number, not a count of lines. If you know how many lines you want instead of where they end, use max_lines with start_line and omit end_line.")),
 		mcp.WithString("encoding", mcp.Description("Set to \"base64\" to read file as base64-encoded binary"), mcp.Enum("utf-8", "utf8", "base64")),
+		mcp.WithString("detail", mcp.Description("summary|normal|full. Batch summary omits file bodies (keeps path/hash). detail shapes structuredContent; compact-mode trims text."), mcp.Enum("summary", "normal", "full")),
 	)
 	reg.readFileHandler = auditWrap(engine, "read_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Batch mode: read multiple files in one call
@@ -400,8 +401,9 @@ func registerCoreTools(reg *toolRegistry) {
 		// we prioritize path+range over paths (batch) to avoid confusion.
 		var paths []string
 		var usePathRange bool
+		args, _ := request.Params.Arguments.(map[string]interface{})
 
-		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+		if args != nil {
 			if v, ok := args["paths"]; ok && v != nil {
 				decoded, err := core.DecodePaths(v)
 				if err != nil {
@@ -457,6 +459,8 @@ func registerCoreTools(reg *toolRegistry) {
 				files = append(files, entry)
 			}
 			combined := results.String()
+			detail := parseDetailArg(args)
+			files, combined = applyBatchReadDetail(files, combined, detail)
 			sc := readStructured("", combined, "", false, 0, 0, files)
 			return structuredOrError(anyOK || !anyFail, sc, combined), nil
 		}

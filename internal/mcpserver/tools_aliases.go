@@ -403,13 +403,20 @@ func firstCatalogSentence(s string) string {
 // renderToolCatalog builds the no-argument help response from the registered
 // tools. Keeping discovery data here prevents the catalog from drifting when a
 // tool is added, removed, or an alias is disabled.
-func renderToolCatalog(reg *toolRegistry) string {
+func renderToolCatalog(reg *toolRegistry, detail string) (string, map[string]any) {
 	all := reg.server.ListTools()
 	names := make([]string, 0, len(all))
 	for name := range all {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	payload := map[string]any{"tools": names, "count": len(names), "detail": detail}
+
+	if detail == detailSummary {
+		text := strings.Join(names, "\n")
+		payload["message"] = text
+		return text, payload
+	}
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("# MCP Filesystem Ultra v%s — %d registered tools\n\n", serverVersion, len(names)))
@@ -432,7 +439,26 @@ func renderToolCatalog(reg *toolRegistry) string {
 		sb.WriteString(fmt.Sprintf("- `%s` — %s\n", name, description))
 	}
 	sb.WriteString("\nCall help(tool:\"X\") for a tool's schema and curated examples.\n")
-	return sb.String()
+	if detail == detailFull {
+		sb.WriteString("\n## Examples\n")
+		for _, name := range names {
+			ex := core.ContractExamples(name)
+			if len(ex) == 0 {
+				continue
+			}
+			sb.WriteString("\n### ")
+			sb.WriteString(name)
+			sb.WriteByte('\n')
+			for _, e := range ex {
+				sb.WriteString("- `")
+				sb.WriteString(e)
+				sb.WriteString("`\n")
+			}
+		}
+	}
+	text := sb.String()
+	payload["message"] = text
+	return text, payload
 }
 
 // registerHelpTool registers the standalone help discovery tool.
@@ -452,12 +478,18 @@ func registerHelpTool(reg *toolRegistry) {
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("tool", mcp.Description("Tool name (e.g. \"git\"). When set, returns that tool's schema + examples.")),
+		mcp.WithString("detail", mcp.Description("summary|normal|full. Catalog only (no tool:). summary: names. full: catalog + examples. detail shapes structuredContent; compact-mode trims text."), mcp.Enum("summary", "normal", "full")),
 	)
 	reg.server.AddTool(helpTool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args, _ := request.Params.Arguments.(map[string]any)
 		name, _ := args["tool"].(string)
+		detail := parseDetailArg(args)
 		if name == "" {
-			return mcp.NewToolResultText(renderToolCatalog(reg)), nil
+			text, payload := renderToolCatalog(reg, detail)
+			if engine := reg.engine; engine != nil && engine.IsCompactMode() && detail != detailNormal && len(text) > 2000 {
+				text = text[:2000] + "\n…"
+			}
+			return mcp.NewToolResultStructured(payload, text), nil
 		}
 
 		// Find the tool in the registry

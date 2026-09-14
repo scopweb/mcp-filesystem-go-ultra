@@ -45,8 +45,10 @@ func registerSearchTools(reg *toolRegistry) {
 		maxDepth := 2
 		maxNodes := 500
 		respectIgnore := true
+		detail := detailNormal
 		var exclude []string
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			detail = parseDetailArg(args)
 			if of, ok := args["output_format"].(string); ok {
 				outputFormat = of
 			}
@@ -70,6 +72,7 @@ func registerSearchTools(reg *toolRegistry) {
 		var listing string
 		hiddenCount := 0
 		treeTruncated := false
+		var trEntries []core.TreeEntry
 		switch outputFormat {
 		case "json":
 			listing, err = engine.ListDirectoryJSON(ctx, path)
@@ -84,6 +87,7 @@ func registerSearchTools(reg *toolRegistry) {
 			listing, err = tr.Text, treeErr
 			hiddenCount = tr.HiddenCount
 			treeTruncated = tr.Truncated
+			trEntries = tr.Entries
 		case "sizes":
 			listing, err = engine.ListDirectoryJSON(ctx, path)
 		default: // "" / "compact" / "text" — current behaviour
@@ -111,7 +115,18 @@ func registerSearchTools(reg *toolRegistry) {
 			}
 		}
 		isTree := outputFormat == "tree" || request.Params.Name == "directory_tree"
-		return mcp.NewToolResultStructured(listStructured(jsonPath, format, listing, entries, truncated, hiddenCount, isTree), listing), nil
+		if isTree && trEntries != nil {
+			entries = treeEntriesToMaps(trEntries, detail)
+			if detail == detailSummary {
+				listing = treeSummaryText(trEntries)
+			}
+		}
+		sc := listStructured(jsonPath, format, listing, entries, truncated, hiddenCount, isTree)
+		text := listing
+		if engine.IsCompactMode() && detail != detailNormal && len(text) > 2000 {
+			text = text[:2000] + "\n…"
+		}
+		return mcp.NewToolResultStructured(sc, text), nil
 	})
 	reg.addTool(listDirTool, reg.listDirHandler)
 
@@ -130,6 +145,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithString("exclude", mcp.Description("JSON array or comma-separated globs to skip")),
 		mcp.WithBoolean("respect_ignore", mcp.Description("Honor gitignore-style files (default: true)")),
 		mcp.WithNumber("max_nodes", mcp.Description("Cap nodes (default: 500)")),
+		mcp.WithString("detail", mcp.Description("summary|normal|full. summary: paths + truncated/hidden_count. full: include sizes. detail shapes structuredContent; compact-mode trims text."), mcp.Enum("summary", "normal", "full")),
 	)
 	reg.addTool(dirTreeTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
@@ -173,6 +189,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithString("output", mcp.Description("Alias for output_format. Accepts 'text' or 'json'. Legacy values 'content'|'files_with_matches'|'count' are NOT implemented and fall through to the default text branch.")),
 		mcp.WithNumber("max_results", mcp.Description("Maximum number of filenames to return (default: uses engine config; cap recommended for large trees)")),
 		mcp.WithBoolean("no_ignore", mcp.Description("If true, do not honor .gitignore/.cursorignore (default: false)")),
+		mcp.WithString("detail", mcp.Description("summary|normal|full. summary: paths + count. full: keep snippets. detail shapes structuredContent; compact-mode trims text."), mcp.Enum("summary", "normal", "full")),
 	)
 	reg.searchFilesHandler = auditWrap(engine, "search_files", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -200,8 +217,10 @@ func registerSearchTools(reg *toolRegistry) {
 		contentIntent := false // content-only params passed → content search implied
 		noIgnore := false
 		maxResults := 0
+		detail := detailNormal
 
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			detail = parseDetailArg(args)
 			if co, ok := args["count_only"].(bool); ok {
 				countOnly = co
 			}
@@ -266,6 +285,8 @@ func registerSearchTools(reg *toolRegistry) {
 				includeContent = true
 			} else if st, statErr := os.Stat(path); statErr == nil && !st.IsDir() {
 				includeContent = true
+			} else if detail == detailFull && !countOnly {
+				includeContent = true
 			}
 		}
 
@@ -291,7 +312,13 @@ func registerSearchTools(reg *toolRegistry) {
 		if !includeContent && !countOnly && len(out.Text) > 8000 && len(fileTypes) == 0 {
 			out.Text += "\n\n💡 hint: this search returned many matches across many files. Next time, pass `file_types` (e.g. \".razor,.cs\") or `include` to skip unrelated trees and keep latency under 1s."
 		}
-		return mcp.NewToolResultStructured(searchStructuredFromOutcome(out, scope, extraTrunc), out.Text), nil
+		sc := searchStructuredFromOutcome(out, scope, extraTrunc)
+		text := out.Text
+		sc, text = applySearchDetail(sc, text, detail)
+		if engine.IsCompactMode() && detail != detailNormal && len(text) > 2000 {
+			text = text[:2000] + "\n…"
+		}
+		return mcp.NewToolResultStructured(sc, text), nil
 	})
 	reg.addTool(searchFilesTool, reg.searchFilesHandler)
 

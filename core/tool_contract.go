@@ -106,6 +106,13 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 	}
 	setEnum("read_file", "mode", "all", "head", "tail")
 	setEnum("read_file", "encoding", "utf-8", "utf8", "base64")
+	setEnum("read_file", "detail", "summary", "normal", "full")
+	setEnum("directory_tree", "detail", "summary", "normal", "full")
+	setEnum("list_directory", "detail", "summary", "normal", "full")
+	setEnum("search_files", "detail", "summary", "normal", "full")
+	setEnum("help", "detail", "summary", "normal", "full")
+	setEnum("edit_file", "detail", "full")
+	setEnum("apply_patch", "detail", "full")
 	setEnum("write_file", "mode", "overwrite", "append")
 	setEnum("write_file", "encoding", "utf-8", "utf8", "base64")
 	setEnum("edit_file", "mode", "replace", "search_replace", "regex", "delete_range", "replace_range", "insert")

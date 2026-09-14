@@ -18,12 +18,19 @@ type TreeOpts struct {
 	Format        string // "json" (default) or "compact"
 }
 
+type TreeEntry struct {
+	Path string
+	Type string
+	Size int64
+}
+
 // TreeListing is the typed tree result. Handlers publish truncated and
 // hidden_count from these fields rather than scraping the text footer.
 type TreeListing struct {
 	Text        string
 	Truncated   bool
 	HiddenCount int
+	Entries     []TreeEntry
 }
 
 type treeNode struct {
@@ -164,14 +171,33 @@ func (e *UltraFastEngine) ListDirectoryTreeResult(ctx context.Context, path stri
 	tree.SkippedExcl = skippedExcl
 	hidden := skippedIgnore + skippedExcl
 
+	entries := collectTreeEntries(tree, "")
+	listing := TreeListing{Truncated: truncated, HiddenCount: hidden, Entries: entries}
 	if opts.Format == "compact" {
-		return TreeListing{Text: renderCompactTree(tree, opts), Truncated: truncated, HiddenCount: hidden}, nil
+		listing.Text = renderCompactTree(tree, opts, true)
+		return listing, nil
 	}
 	data, err := json.MarshalIndent(tree, "", "  ")
 	if err != nil {
 		return TreeListing{}, fmt.Errorf("failed to marshal tree: %w", err)
 	}
-	return TreeListing{Text: string(data), Truncated: truncated, HiddenCount: hidden}, nil
+	listing.Text = string(data)
+	return listing, nil
+}
+
+func collectTreeEntries(n *treeNode, parent string) []TreeEntry {
+	if n == nil {
+		return nil
+	}
+	path := n.Name
+	if parent != "" {
+		path = parent + "/" + n.Name
+	}
+	out := []TreeEntry{{Path: path, Type: n.Type, Size: n.Size}}
+	for _, ch := range n.Children {
+		out = append(out, collectTreeEntries(ch, path)...)
+	}
+	return out
 }
 
 func excludedName(name, absPath, root string, patterns []string) bool {
@@ -202,7 +228,7 @@ func excludedName(name, absPath, root string, patterns []string) bool {
 	return false
 }
 
-func renderCompactTree(n *treeNode, opts TreeOpts) string {
+func renderCompactTree(n *treeNode, opts TreeOpts, includeSize bool) string {
 	var b strings.Builder
 	var walk func(node *treeNode, indent string)
 	walk = func(node *treeNode, indent string) {
@@ -217,7 +243,7 @@ func renderCompactTree(n *treeNode, opts TreeOpts) string {
 		}
 		b.WriteString(indent)
 		b.WriteString(node.Name)
-		if node.Size > 0 {
+		if includeSize && node.Size > 0 {
 			b.WriteString("  ")
 			b.WriteString(humanBytes(node.Size))
 		}
