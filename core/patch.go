@@ -1,11 +1,45 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
 )
+
+const (
+	PatchReasonMalformed       = "malformed"
+	PatchReasonContextNotFound = "context_not_found"
+	PatchReasonOverlap         = "overlap"
+)
+
+// PatchError is a fail-closed apply_patch failure. Reason is one of
+// malformed, context_not_found, overlap.
+type PatchError struct {
+	HunkIndex int
+	Reason    string
+	LineHint  int
+	Msg       string
+}
+
+func (e *PatchError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Msg
+}
+
+func AsPatchError(err error) *PatchError {
+	var pe *PatchError
+	if errors.As(err, &pe) && pe != nil {
+		return pe
+	}
+	if err == nil {
+		return &PatchError{Reason: PatchReasonMalformed}
+	}
+	return &PatchError{Reason: PatchReasonMalformed, Msg: err.Error()}
+}
 
 type PatchHunk struct {
 	OldStart int
@@ -31,7 +65,7 @@ func ParseUnifiedDiff(patch string) (*ParsedPatch, error) {
 		switch {
 		case strings.HasPrefix(line, "--- "):
 			if p.OldFile != "" && len(p.Hunks) > 0 {
-				return nil, fmt.Errorf("multi-file patch not supported; split into N apply_patch calls")
+				return nil, &PatchError{Reason: PatchReasonMalformed, Msg: "multi-file patch not supported; split into N apply_patch calls"}
 			}
 			p.OldFile = strings.TrimSpace(strings.TrimPrefix(line, "--- "))
 			i++
@@ -50,7 +84,7 @@ func ParseUnifiedDiff(patch string) (*ParsedPatch, error) {
 		}
 	}
 	if p.OldFile == "" || p.NewFile == "" || len(p.Hunks) == 0 {
-		return nil, fmt.Errorf("not a unified diff (need --- / +++ / @@ hunks)")
+		return nil, &PatchError{Reason: PatchReasonMalformed, Msg: "not a unified diff (need --- / +++ / @@ hunks)"}
 	}
 	return p, nil
 }
@@ -62,7 +96,7 @@ func parseHunk(lines []string, i int) (PatchHunk, int, error) {
 	rest := strings.TrimPrefix(header, "@@ ")
 	parts := strings.Fields(rest)
 	if len(parts) < 2 {
-		return h, i, fmt.Errorf("invalid hunk header %q", header)
+		return h, i, &PatchError{Reason: PatchReasonMalformed, Msg: fmt.Sprintf("invalid hunk header %q", header)}
 	}
 	oldSpec := strings.TrimPrefix(parts[0], "-")
 	newSpec := strings.TrimPrefix(parts[1], "+")
@@ -131,8 +165,13 @@ func ApplyUnifiedPatch(oldContent, patch string) (string, error) {
 		if idx < 0 {
 			idx = 0
 		}
+		if idx < pos {
+			return "", &PatchError{HunkIndex: hi + 1, Reason: PatchReasonOverlap, LineHint: hunk.OldStart,
+				Msg: fmt.Sprintf("hunk %d: overlap at line %d", hi+1, hunk.OldStart)}
+		}
 		if idx > len(oldLines) {
-			return "", fmt.Errorf("hunk %d: start line %d past end of file (%d lines)", hi+1, hunk.OldStart, len(oldLines))
+			return "", &PatchError{HunkIndex: hi + 1, Reason: PatchReasonOverlap, LineHint: hunk.OldStart,
+				Msg: fmt.Sprintf("hunk %d: start line %d past end of file (%d lines)", hi+1, hunk.OldStart, len(oldLines))}
 		}
 		out = append(out, oldLines[pos:idx]...)
 		pos = idx
@@ -144,13 +183,15 @@ func ApplyUnifiedPatch(oldContent, patch string) (string, error) {
 			switch kind {
 			case ' ':
 				if pos >= len(oldLines) || oldLines[pos] != body {
-					return "", fmt.Errorf("hunk %d: context mismatch at line %d", hi+1, pos+1)
+					return "", &PatchError{HunkIndex: hi + 1, Reason: PatchReasonContextNotFound, LineHint: pos + 1,
+						Msg: fmt.Sprintf("hunk %d: context mismatch at line %d", hi+1, pos+1)}
 				}
 				out = append(out, body)
 				pos++
 			case '-':
 				if pos >= len(oldLines) || oldLines[pos] != body {
-					return "", fmt.Errorf("hunk %d: deletion mismatch at line %d", hi+1, pos+1)
+					return "", &PatchError{HunkIndex: hi + 1, Reason: PatchReasonContextNotFound, LineHint: pos + 1,
+						Msg: fmt.Sprintf("hunk %d: deletion mismatch at line %d", hi+1, pos+1)}
 				}
 				pos++
 			case '+':

@@ -58,7 +58,11 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 				entry.Status = "error"
 				entry.Error = "parameter validation failed"
 				engine.Audit(*entry)
-				return mcp.NewToolResultError(pathErrorJSON(errCodeInvalidParams, "Parameter validation failed:\n• "+strings.Join(validationErrs, "\n• "), "", nil, "Correct the listed parameters; do not retry with the same arguments")), nil
+				field, expected := "", ""
+				if len(validationErrs) > 0 {
+					field, expected = validationFieldExpected(validationErrs[0])
+				}
+				return validationResult("Parameter validation failed:\n• "+strings.Join(validationErrs, "\n• "), field, expected), nil
 			}
 		}
 

@@ -2,6 +2,8 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"strconv"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mcp/filesystem-ultra/core"
@@ -21,11 +23,20 @@ const (
 	errCodeUnavailable    = "TOOL_UNAVAILABLE"
 )
 
+const (
+	suggestionPatchFailed    = "re-read the file and regenerate the patch"
+	suggestionRewriteBlocked = "use write_file or allow_rewrite:true"
+	suggestionNotAllowed     = "call list_allowed_directories"
+	suggestionHashRequired   = "Read the file and resend the mutation with expected_hash."
+	suggestionValidation     = "Correct the listed parameters; do not retry with the same arguments"
+	suggestionOCCMismatch    = "Rebase against current content; retry with current_hash."
+)
+
 type pathErrorBody struct {
 	Code         string                  `json:"code"`
 	Message      string                  `json:"message"`
 	Path         string                  `json:"path,omitempty"`
-	Details      map[string]string       `json:"details,omitempty"`
+	Details      map[string]any          `json:"details,omitempty"`
 	ExpectedHash string                  `json:"expected_hash,omitempty"`
 	CurrentHash  string                  `json:"current_hash,omitempty"`
 	Conflict     *core.OCCConflictReport `json:"conflict,omitempty"`
@@ -37,7 +48,18 @@ type pathErrorEnvelope struct {
 	Error pathErrorBody `json:"error"`
 }
 
-func pathErrorJSON(code, message, path string, details map[string]string, suggestion string) string {
+func toAnyDetails(details map[string]string) map[string]any {
+	if details == nil {
+		return nil
+	}
+	out := make(map[string]any, len(details))
+	for k, v := range details {
+		out[k] = v
+	}
+	return out
+}
+
+func marshalPathError(code, message, path string, details map[string]any, suggestion string) string {
 	env := pathErrorEnvelope{Error: pathErrorBody{
 		Code:       code,
 		Message:    message,
@@ -53,8 +75,16 @@ func pathErrorJSON(code, message, path string, details map[string]string, sugges
 	return string(b)
 }
 
+func pathErrorJSON(code, message, path string, details map[string]string, suggestion string) string {
+	return marshalPathError(code, message, path, toAnyDetails(details), suggestion)
+}
+
 func pathErrorResult(code, message, path string, details map[string]string, suggestion string) *mcp.CallToolResult {
 	return mcp.NewToolResultError(pathErrorJSON(code, message, path, details, suggestion))
+}
+
+func pathErrorResultDetails(code, message, path string, details map[string]any, suggestion string) *mcp.CallToolResult {
+	return mcp.NewToolResultError(marshalPathError(code, message, path, details, suggestion))
 }
 
 func occMismatchResult(message, path, expectedHash, currentHash string, conflict core.OCCConflictReport) *mcp.CallToolResult {
@@ -72,7 +102,7 @@ func pathErrorJSONWithOCC(message, path, expectedHash, currentHash string, confl
 		ExpectedHash: expectedHash,
 		CurrentHash:  currentHash,
 		Conflict:     &conflict,
-		Suggestion:   "Rebase against current content; retry with current_hash.",
+		Suggestion:   suggestionOCCMismatch,
 		Retryable:    true,
 	}}
 	b, err := json.Marshal(env)
@@ -80,4 +110,125 @@ func pathErrorJSONWithOCC(message, path, expectedHash, currentHash string, confl
 		return message
 	}
 	return string(b)
+}
+
+func patchFailedResult(path string, err error, extra map[string]string) *mcp.CallToolResult {
+	pe := core.AsPatchError(err)
+	details := map[string]any{"path": path, "reason": pe.Reason}
+	if pe.HunkIndex > 0 {
+		details["hunk_index"] = strconv.Itoa(pe.HunkIndex)
+	}
+	if pe.LineHint > 0 {
+		details["line_hint"] = strconv.Itoa(pe.LineHint)
+	}
+	for k, v := range extra {
+		details[k] = v
+	}
+	msg := pe.Msg
+	if msg == "" && err != nil {
+		msg = err.Error()
+	}
+	return pathErrorResultDetails(errCodePatchFailed, msg, path, details, suggestionPatchFailed)
+}
+
+func rewriteBlockedResult(path, message string, oldLen, newLen int) *mcp.CallToolResult {
+	return pathErrorResult(errCodeRewriteBlocked, message, path, map[string]string{
+		"path":    path,
+		"old_len": strconv.Itoa(oldLen),
+		"new_len": strconv.Itoa(newLen),
+		"pattern": string(core.PatternAccidentalRewrite),
+	}, suggestionRewriteBlocked)
+}
+
+func notAllowedResult(engine *core.UltraFastEngine, path string) *mcp.CallToolResult {
+	return pathErrorResultDetails(errCodeNotAllowed, "access denied", path, notAllowedDetails(engine, path), suggestionNotAllowed)
+}
+
+func notAllowedDetails(engine *core.UltraFastEngine, path string) map[string]any {
+	roots := []string{}
+	source := ""
+	if engine != nil {
+		if listed := engine.ListedAllowedPaths(); listed != nil {
+			roots = listed
+		}
+		source = engine.AllowedSource()
+	}
+	return map[string]any{
+		"path":   path,
+		"roots":  roots,
+		"source": source,
+	}
+}
+
+func notAllowedDetailsFromPathError(pe *core.PathError) map[string]any {
+	roots := pe.Roots
+	if roots == nil {
+		roots = []string{}
+	}
+	return map[string]any{
+		"path":   pe.Path,
+		"roots":  roots,
+		"source": pe.Source,
+	}
+}
+
+func hashRequiredResult(path, currentHash string) *mcp.CallToolResult {
+	details := map[string]string{"path": path}
+	if currentHash != "" {
+		details["current_hash"] = currentHash
+	}
+	return pathErrorResult(errCodeHashRequired,
+		"expected_hash is required after an external file change", path, details, suggestionHashRequired)
+}
+
+func validationResult(message, field, expected string) *mcp.CallToolResult {
+	details := map[string]string{}
+	if field != "" {
+		details["field"] = field
+	}
+	if expected != "" {
+		details["expected"] = expected
+	}
+	return pathErrorResult(errCodeInvalidParams, message, "", details, suggestionValidation)
+}
+
+func quotedField(s string) string {
+	i := strings.Index(s, `"`)
+	if i < 0 {
+		return ""
+	}
+	rest := s[i+1:]
+	j := strings.Index(rest, `"`)
+	if j < 0 {
+		return ""
+	}
+	return rest[:j]
+}
+
+func validationFieldExpected(msg string) (field, expected string) {
+	switch {
+	case strings.Contains(msg, "unknown parameter"):
+		return quotedField(msg), "known parameter"
+	case strings.Contains(msg, "missing required parameter"):
+		return quotedField(msg), "required"
+	case strings.HasPrefix(msg, "missing one of "):
+		group := strings.TrimPrefix(msg, "missing one of ")
+		return group, group
+	case strings.Contains(msg, "expected "):
+		field = quotedField(msg)
+		_, rest, ok := strings.Cut(msg, "expected ")
+		if ok {
+			expected, _, _ = strings.Cut(rest, ",")
+			expected = strings.TrimSpace(expected)
+		}
+		return field, expected
+	case strings.Contains(msg, "invalid value"):
+		field = quotedField(msg)
+		if i := strings.Index(msg, "(valid: "); i >= 0 {
+			expected = strings.TrimSuffix(msg[i+len("(valid: "):], ")")
+		}
+		return field, expected
+	default:
+		return quotedField(msg), ""
+	}
 }

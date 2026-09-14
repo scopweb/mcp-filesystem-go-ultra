@@ -15,9 +15,11 @@ func (e *OCCMismatchError) Error() string {
 }
 
 type PathError struct {
-	Op   string // Operation (e.g., "read", "write", "stat")
-	Path string // The path that caused the error
-	Err  error  // The underlying error
+	Op     string   // Operation (e.g., "read", "write", "stat")
+	Path   string   // The path that caused the error
+	Err    error    // The underlying error
+	Roots  []string // Effective sandbox roots when access was denied
+	Source string   // cli | roots | union | insecure
 }
 
 func (e *PathError) Error() string {
