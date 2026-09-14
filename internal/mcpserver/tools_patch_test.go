@@ -133,8 +133,9 @@ func TestApplyPatch_OCCMismatch(t *testing.T) {
 	res := callPatchTool(t, reg, "apply_patch", map[string]any{
 		"path": p, "patch": patch, "expected_hash": "deadbeef",
 	})
-	if !res.IsError || !strings.Contains(resultText(t, res), "OCC_MISMATCH") {
-		t.Fatalf("got %s", resultText(t, res))
+	text := resultText(t, res)
+	if !res.IsError || !strings.Contains(text, `"code":"OCC_MISMATCH"`) || !strings.Contains(text, `"retryable":true`) {
+		t.Fatalf("got %s", text)
 	}
 }
 
@@ -145,8 +146,9 @@ func TestApplyPatch_PathEscapeHeader(t *testing.T) {
 	reg := newHelpTestRegistry(t, dir)
 	patch := "--- a/other.txt\n+++ b/other.txt\n@@ -1 +1 @@\n-x\n+y\n"
 	res := callPatchTool(t, reg, "apply_patch", map[string]any{"path": p, "patch": patch})
-	if !res.IsError || !strings.Contains(resultText(t, res), "PATCH_APPLY_FAILED") {
-		t.Fatalf("got %s", resultText(t, res))
+	text := resultText(t, res)
+	if !res.IsError || !strings.Contains(text, `"code":"PATCH_FAILED"`) || !strings.Contains(text, `"retryable":false`) {
+		t.Fatalf("got %s", text)
 	}
 }
 
@@ -169,8 +171,8 @@ func TestApplyPatch_ContextMismatch_ReleasesLock(t *testing.T) {
 	if strings.Contains(strings.ToLower(text), "new file") || strings.Contains(text, "PATCHED") {
 		t.Fatalf("mismatch must not create/rewrite: %s", text)
 	}
-	if !strings.Contains(text, "PATCH_APPLY_FAILED") && !strings.Contains(strings.ToLower(text), "mismatch") {
-		t.Fatalf("want mismatch/PATCH_APPLY_FAILED, got %s", text)
+	if !strings.Contains(text, "PATCH_FAILED") && !strings.Contains(strings.ToLower(text), "mismatch") {
+		t.Fatalf("want mismatch/PATCH_FAILED, got %s", text)
 	}
 
 	editCtx, editCancel := context.WithTimeout(context.Background(), time.Second)

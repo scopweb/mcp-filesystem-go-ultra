@@ -177,7 +177,7 @@ diff_files
 - Key params: path_a, path_b, path, against
 
 apply_patch
-- Purpose: Apply a one-file unified diff. dry_run + expected_hash is the happy path. Destination EOL wins. If PATCH_APPLY_FAILED: read_file and regenerate; do not retry the same patch.
+- Purpose: Apply a one-file unified diff. dry_run + expected_hash is the happy path. Destination EOL wins. If PATCH_FAILED: read_file and regenerate; do not retry the same patch.
 - When: surgical one-file edits after diff_files or a generated hunk
 - Key params: path, patch, dry_run, expected_hash, allow_rewrite, create_backup
 
@@ -426,6 +426,19 @@ CAUSE: Path missing on the host filesystem visible to this server, or WSL vs Win
 FIX: Call list_allowed_directories; copy the path from list_directory/read_file. Envelope: {"error":{"code":"NOT_FOUND",...}} with FILESYSTEM MISMATCH? suggestion.
 All tools auto-convert paths:
 - /mnt/c/Users/... <-> C:\Users\...
+
+## Failure Intelligence error envelope
+
+Errors use {"error":{"code","retryable","message",...}}. retryable:true means use the envelope data before another call; never replay the same mutation blindly.
+
+| Code | Next action |
+|------|-------------|
+| OCC_MISMATCH | Rebase against current_hash, then retry. |
+| HASH_REQUIRED | read_file, then resend with expected_hash. |
+| PATCH_FAILED | Do not replay the patch; read_file and regenerate its hunk. |
+| REWRITE_BLOCKED | Use write_file for a rewrite, or make a smaller edit. |
+| NOT_ALLOWED / NOT_FOUND | Check roots or list the host path. |
+| READONLY / VALIDATION | Remove --readonly or correct the arguments. |
 
 ## "Tool not found: create_file"
 FIX: Use write_file instead (it creates files too)

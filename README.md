@@ -287,7 +287,7 @@ Copy [examples/harness/](examples/harness/) — do not guess flags. One MCP inst
 | `list_allowed_directories` | Sandbox roots. Zero parameters. **strict** | Before the first read |
 | `directory_tree` | Compact recursive tree. `respect_ignore=true`, `max_depth=2`, `max_nodes=500`. **strict** | After roots, to explore. `truncated` + `hidden_count` in structured output |
 | `diff_files` | Unified diff of two paths, or `against:"backup"`. **strict** | Preview before `apply_patch` or to compare two files |
-| `apply_patch` | One-file unified diff. `dry_run` + `expected_hash`. Dest EOL wins. **strict** | Surgical one-file edit. If `PATCH_APPLY_FAILED`: `read_file` and regenerate; do not retry the same patch |
+| `apply_patch` | One-file unified diff. `dry_run` + `expected_hash`. Dest EOL wins. **strict** | Surgical one-file edit. If `PATCH_FAILED`: `read_file` and regenerate; do not retry the same patch |
 | `read_file` | Full / range / head / tail / base64 / `paths[]`. Replaces bash `cat`/`head`/`tail`/`cut`. **strict** | If a client asks for `read_multiple_files` or `read_text_file`, use this |
 | `write_file` | Create or overwrite. `mode:"append"` skips rewrite-guard. **strict** | New files or whole-file rewrite |
 | `edit_file` | Exact / regex / range / insert. Backup + OCC. **strict** | Targeted edits (`allow_rewrite` not `force` for rewrite-guard) |

@@ -13,9 +13,10 @@ const (
 	errCodeRewriteBlocked = "REWRITE_BLOCKED"
 	errCodeRootsEmpty     = "ROOTS_EMPTY"
 	errCodeSecretDenied   = "SECRET_DENIED"
-	errCodeReadOnly       = "READ_ONLY"
-	errCodePatchFailed    = "PATCH_APPLY_FAILED"
-	errCodeInvalidParams  = "INVALID_PARAMS"
+	errCodeReadOnly       = "READONLY"
+	errCodePatchFailed    = "PATCH_FAILED"
+	errCodeInvalidParams  = "VALIDATION"
+	errCodeHashRequired   = "HASH_REQUIRED"
 	errCodeUnavailable    = "TOOL_UNAVAILABLE"
 )
 

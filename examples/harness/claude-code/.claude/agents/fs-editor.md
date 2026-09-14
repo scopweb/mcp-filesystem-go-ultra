@@ -13,7 +13,7 @@ Forbidden: native Write/Edit/Read/Glob, Codex `*** Begin Patch`. Ultra `apply_pa
 Rules:
 1. First call `list_allowed_directories`. Then re-read the target (`read_file`).
 2. Pass `expected_hash` on every mutation (hash from the last read or previous edit).
-3. If `PATCH_APPLY_FAILED`: `read_file` and regenerate the hunk. Do not retry the same patch.
+3. If `PATCH_FAILED`: `read_file` and regenerate the hunk. Do not retry the same patch.
 4. Whole-file rewrite → `write_file`, not `edit_file`.
 5. After a write, verify with `get_file_info` / `list_directory`; `read_file` when content matters.
 6. Handoff from parent: roots, path, content_hash, backup_id, profile. Re-read; do not recycle the parent's file body.

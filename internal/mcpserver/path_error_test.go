@@ -24,6 +24,42 @@ func TestPathErrorJSON_Envelope(t *testing.T) {
 	}
 }
 
+func TestRetryableForCode_FailureIntelligence(t *testing.T) {
+	cases := map[string]bool{
+		errCodeOCCMismatch:    true,
+		errCodeHashRequired:   true,
+		errCodePatchFailed:    false,
+		errCodeRewriteBlocked: false,
+		errCodeNotAllowed:     false,
+		errCodeSecretDenied:   false,
+		errCodeReadOnly:       false,
+		errCodeInvalidParams:  false,
+		errCodeNotFound:       false,
+		errCodeUnavailable:    false,
+	}
+	for code, want := range cases {
+		if got := retryableForCode(code); got != want {
+			t.Errorf("retryableForCode(%q)=%v want %v", code, got, want)
+		}
+	}
+}
+
+func TestPathErrorJSON_RequiredFailureIntelligenceFields(t *testing.T) {
+	raw := pathErrorJSON(errCodeOCCMismatch, "stale edit", `C:\x`, map[string]string{"current_hash": "new"}, "Rebase")
+	var payload map[string]map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatal(err)
+	}
+	errBody := payload["error"]
+	for _, key := range []string{"code", "retryable", "message"} {
+		if _, ok := errBody[key]; !ok {
+			t.Errorf("missing %q in %#v", key, errBody)
+		}
+	}
+	if errBody["retryable"] != true {
+		t.Fatalf("OCC_MISMATCH must be retryable: %#v", errBody)
+	}
+}
 func TestFormatToolError_AccessDeniedEnvelope(t *testing.T) {
 	err := &core.PathError{Op: "read", Path: `C:\secret`, Err: errors.New("access denied — outside allowed directories: C:\\proj")}
 	got := formatToolError(err)

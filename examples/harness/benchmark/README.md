@@ -37,4 +37,4 @@ The generated workspace is temporary. The committed `sample-report.json` is reda
 
 `calls`, `tokens_in`, `tokens_out`, `duration_ms`, `occ_mismatch`, `patch_failed`, `retries`, and `errors` are grouped per scenario. `tokens_*` are proxy estimates (`bytes / 4`). `by_tool` ranks the tools that emitted the most output and supplies the PR-4 decision for which tools can receive `detail=summary|normal|full`.
 
-Current error spellings are recorded exactly as emitted (`PATCH_APPLY_FAILED` today). PR-1 will introduce the stable Failure Intelligence code table; it must keep patch failures non-retryable.
+The committed baseline predates PR-1 and records `PATCH_APPLY_FAILED`. The runner accepts that legacy spelling and stable `PATCH_FAILED`; both represent a non-retryable patch failure.
