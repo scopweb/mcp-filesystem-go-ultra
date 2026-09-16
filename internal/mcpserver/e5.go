@@ -121,9 +121,14 @@ func readStructuredMeta(path, content, hash string, proj readProjection, files [
 		m["files"] = files
 	}
 	if truncated && proj.ContinueAt > 0 {
+		chunk := proj.EndLine - proj.StartLine + 1
+		if chunk < 1 {
+			chunk = 1
+		}
 		m["continuation"] = map[string]any{
 			"start_line": proj.ContinueAt,
-			"hint":       "use start_line/end_line (or mode:head/tail) to read the rest; do not re-read the whole file",
+			"max_lines":  chunk,
+			"hint":       "use start_line=" + strconv.Itoa(proj.ContinueAt) + ", max_lines=" + strconv.Itoa(chunk) + " to read the next chunk; do not re-read the whole file",
 		}
 	}
 	return m

@@ -99,6 +99,7 @@ directory_tree
 read_file
 - Purpose: Read a full file, line range, head/tail, or base64 content. Replaces bash cat/head/tail/cut.
 - Key params: path, paths, start_line, end_line, max_lines, max_line_length, mode, encoding
+- max_lines without range (mode omitted or all): first N consecutive lines; continue with start_line+max_lines
 - Logs: mode="tail" max_lines=40 (lines auto-cut to 300 chars)
 
 write_file

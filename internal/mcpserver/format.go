@@ -382,6 +382,25 @@ func splitContentLines(content string) []string {
 	return lines
 }
 
+func truncatedPrefixFooter(shown, total, chunk int) string {
+	return fmt.Sprintf(
+		"\n[Truncated: showing lines 1-%d of %d. To continue: start_line=%d, max_lines=%d]",
+		shown, total, shown+1, chunk)
+}
+
+func projectMaxLinesPrefix(p readProjection, lines []string, maxLines int) readProjection {
+	total := len(lines)
+	if total <= maxLines {
+		return p
+	}
+	p.StartLine = 1
+	p.EndLine = maxLines
+	p.Truncated = true
+	p.ContinueAt = maxLines + 1
+	p.Text = strings.Join(lines[:maxLines], "\n") + truncatedPrefixFooter(maxLines, total, maxLines)
+	return p
+}
+
 func rangeFooter(path string, startLine, endLine, total int) string {
 	footer := fmt.Sprintf("\n\n[Lines %d-%d of %d total lines in %s",
 		startLine, endLine, total, filepath.Base(path))
@@ -448,14 +467,7 @@ func projectRead(content, path string, startLine, endLine, maxLines int, mode st
 		}
 		switch mode {
 		case "head":
-			if total <= maxLines {
-				return applyLineLimit(p, lineLimit)
-			}
-			p.EndLine = maxLines
-			p.Truncated = true
-			p.ContinueAt = maxLines + 1
-			p.Text = strings.Join(lines[:maxLines], "\n") + fmt.Sprintf(
-				"\n[Truncated: showing first %d of %d lines. Use mode=all or increase max_lines to see more]", maxLines, total)
+			p = projectMaxLinesPrefix(p, lines, maxLines)
 		case "tail":
 			if total <= maxLines {
 				return applyLineLimit(p, lineLimit)
@@ -463,19 +475,9 @@ func projectRead(content, path string, startLine, endLine, maxLines int, mode st
 			p.StartLine = total - maxLines + 1
 			p.Truncated = true
 			p.Text = strings.Join(lines[total-maxLines:], "\n") + fmt.Sprintf(
-				"\n[Truncated: showing last %d of %d lines. Use mode=all or increase max_lines to see more]", maxLines, total)
+				"\n[Truncated: showing last %d of %d lines. Increase max_lines or use start_line to read more]", maxLines, total)
 		default:
-			if total > maxLines {
-				half := maxLines / 2
-				if half < 1 {
-					half = 1
-				}
-				mid := fmt.Sprintf("\n... [%d lines omitted] ...\n", total-maxLines)
-				p.Truncated = true
-				p.ContinueAt = half + 1
-				p.Text = strings.Join(lines[:half], "\n") + mid + strings.Join(lines[total-half:], "\n") + fmt.Sprintf(
-					"\n[Truncated: showing %d of %d lines (%d head + %d tail). Use mode=head/tail or increase max_lines]", maxLines, total, half, half)
-			}
+			p = projectMaxLinesPrefix(p, lines, maxLines)
 		}
 		return applyLineLimit(p, lineLimit)
 	}
@@ -550,22 +552,19 @@ func truncateContent(content string, maxLines int, mode string) string {
 			return content
 		}
 		result = lines[:maxLines]
-		truncMsg = fmt.Sprintf("\n[Truncated: showing first %d of %d lines. Use mode=all or increase max_lines to see more]", maxLines, totalLines)
+		truncMsg = truncatedPrefixFooter(maxLines, totalLines, maxLines)
 
 	case "tail":
 		if totalLines <= maxLines {
 			return content
 		}
 		result = lines[totalLines-maxLines:]
-		truncMsg = fmt.Sprintf("\n[Truncated: showing last %d of %d lines. Use mode=all or increase max_lines to see more]", maxLines, totalLines)
+		truncMsg = fmt.Sprintf("\n[Truncated: showing last %d of %d lines. Increase max_lines or use start_line to read more]", maxLines, totalLines)
 
 	default: // "all" or unspecified
 		if maxLines > 0 && totalLines > maxLines {
-			// Take half from head, half from tail
-			half := maxLines / 2
-			result = append(lines[:half], fmt.Sprintf("\n... [%d lines omitted] ...\n", totalLines-maxLines))
-			result = append(result, lines[totalLines-half:]...)
-			truncMsg = fmt.Sprintf("\n[Truncated: showing %d of %d lines (%d head + %d tail). Use mode=head/tail or increase max_lines]", maxLines, totalLines, half, half)
+			result = lines[:maxLines]
+			truncMsg = truncatedPrefixFooter(maxLines, totalLines, maxLines)
 		} else {
 			return content
 		}

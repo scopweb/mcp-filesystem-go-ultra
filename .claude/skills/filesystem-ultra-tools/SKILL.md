@@ -67,7 +67,7 @@ Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `gr
 | Need | Call |
 |------|------|
 | Last 40 log lines | `read_file(path, mode:"tail", max_lines:40)` |
-| First N lines | `read_file(path, mode:"head", max_lines:N)` |
+| First N lines | `read_file(path, max_lines:N)` (mode omitted/`"all"`) or `mode:"head"` |
 | Exact line range | `read_file(path, start_line, end_line)` |
 | Line cut override | `max_line_length:N` or `0` to disable |
 

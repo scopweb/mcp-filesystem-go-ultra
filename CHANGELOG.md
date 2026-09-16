@@ -2,6 +2,12 @@
 
 > **Note for humans**: This file grew to ~4700 lines. For changes before v4.6 see `git log --oneline`. Only recent releases are summarized here.
 
+## [Unreleased]
+
+### fix(read_file): max_lines without range returns a consecutive prefix
+
+`read_file(max_lines:N)` with mode omitted or `"all"` (no `start_line`/`end_line`) now returns the first N consecutive lines instead of N/2 head + N/2 tail. Truncation footer and structured `continuation` use `start_line` + `max_lines`. `mode:head`/`tail` and omitted/0 `max_lines` (including the large-file auto-cap) are unchanged.
+
 ## [4.7.0] - 2026-09-14
 
 ### feat(failure): Failure Intelligence
