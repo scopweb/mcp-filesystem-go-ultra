@@ -380,14 +380,15 @@ func registerCoreTools(reg *toolRegistry) {
 			"Replaces bash cat/head/tail/cut/sed -n — NEVER use the shell. "+
 			"If the model asks for read_multiple_files or read_text_file, use read_file (paths[] / mode head|tail). "+
 			"Logs: mode=\"tail\" max_lines=40 (each line auto-cut to 300 chars; max_line_length:0 disables). "+
-			"Range: start_line/end_line (absolute, inclusive) OR start_line/max_lines (count). Binary: encoding=\"base64\". Batch: paths JSON array. "+
+			"Range: start_line/end_line (absolute, inclusive) OR start_line/max_lines (count). "+
+			"max_lines without start_line/end_line and mode omitted/all: first N consecutive lines. Binary: encoding=\"base64\". Batch: paths JSON array. "+
 			"To MODIFY files use edit_file."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("path", mcp.Description("Path to file (WSL or Windows format). Required unless paths is provided.")),
 		mcp.WithArray("paths", mcp.WithStringItems(), mcp.Description("Native array of paths, or a JSON array string (legacy adapter). e.g. [\"file1.txt\",\"file2.txt\"]")),
-		mcp.WithNumber("max_lines", mcp.Description("Max lines (optional, 0=all). With mode=tail/head this is tail -N / head -N. With start_line set and end_line omitted, this is a LINE COUNT from start_line (offset+count range read, e.g. start_line:100, max_lines:50 reads lines 100-149) — use this instead of guessing end_line when you only know how many lines you want.")),
+		mcp.WithNumber("max_lines", mcp.Description("Max lines (optional, 0 or omitted = no max_lines cap; large files still auto-cap). Without start_line/end_line and with mode omitted or all: first N consecutive lines. With mode=tail/head this is tail -N / head -N. With start_line set and end_line omitted, this is a LINE COUNT from start_line (offset+count range read, e.g. start_line:100, max_lines:50 reads lines 100-149).")),
 		mcp.WithNumber("max_line_length", mcp.Description("Max characters per line (cut -c). head/tail default 300. 0=no cut. Use on logs; do not use when you need exact text for edit_file.")),
 		mcp.WithString("mode", mcp.Description("all (default) | head | tail. Logs: mode=tail max_lines=40. Replaces bash tail/head."), mcp.Enum("all", "head", "tail")),
 		mcp.WithNumber("start_line", mcp.Description("Starting line number (1-indexed) for range read. Pair with end_line (absolute line number) OR max_lines (line count) — not both.")),
@@ -556,6 +557,7 @@ func registerCoreTools(reg *toolRegistry) {
 	reg.addTool(readFileTool, reg.readFileHandler,
 		`read_file(path:"file.go")`,
 		`read_file(path:"logs/app.txt", mode:"tail", max_lines:40)`,
+		`read_file(path:"file.go", max_lines:340)`,
 		`read_file(path:"file.go", start_line:10, end_line:40)`,
 		`read_file(path:"file.go", start_line:100, max_lines:50)`, // lines 100-149 — count instead of absolute end_line
 		`read_file(path:"file.bin", encoding:"base64")`,

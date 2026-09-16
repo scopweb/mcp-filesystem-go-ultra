@@ -22,7 +22,7 @@ var readFileOutputSchema = json.RawMessage(`{
     "end_line": {"type": "integer", "description": "Last line returned (1-based, inclusive, clamped to file length)"},
     "total_lines": {"type": "integer", "description": "Total lines in the full file"},
     "files": {"type": "array", "description": "Per-file results for batch reads (paths). Item errors are listed here; status=partial when mixed.", "items": {"type": "object"}},
-    "continuation": {"type": "object", "description": "How to read the rest when truncated (start_line + hint)"}
+    "continuation": {"type": "object", "description": "How to read the rest when truncated (start_line, max_lines, hint)"}
   },
   "required": ["content"]
 }`)
