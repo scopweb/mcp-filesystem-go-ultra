@@ -183,11 +183,12 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false)")),
 		mcp.WithBoolean("include_context", mcp.Description("Include context lines (default: false)")),
 		mcp.WithNumber("context_lines", mcp.Description("Number of context lines (default: 3)")),
-		mcp.WithBoolean("count_only", mcp.Description("Count pattern occurrences without full search (default: false)")),
+		mcp.WithBoolean("count_only", mcp.Description("Count pattern occurrences without listing hits (default: false). Do not combine with detail=full; count_only is a total, not a page.")),
 		mcp.WithString("return_lines", mcp.Description("Return line numbers of count matches (true/false, for count_only mode)")),
 		mcp.WithString("output_format", mcp.Description("Output format. 'text' = verbose with emojis (legacy default), 'json' = structured for AI parsing. If omitted: auto-detect — ripgrep-style 'path:line:content' when ≤5 matches, verbose when more. Pass 'text' explicitly to force the legacy verbose format regardless of match count.")),
 		mcp.WithString("output", mcp.Description("Alias for output_format. Accepts 'text' or 'json'. Legacy values 'content'|'files_with_matches'|'count' are NOT implemented and fall through to the default text branch.")),
-		mcp.WithNumber("max_results", mcp.Description("Maximum number of filenames to return (default: uses engine config; cap recommended for large trees)")),
+		mcp.WithNumber("max_results", mcp.Description("Page size. Filename search: matching filenames. Content search: matching lines. Default: engine config. Pair with offset to continue.")),
+		mcp.WithNumber("offset", mcp.Description("0-based index into the stable result list (path, line). Default 0. When truncated, structured continuation includes the next offset.")),
 		mcp.WithBoolean("no_ignore", mcp.Description("If true, do not honor .gitignore/.cursorignore (default: false)")),
 		mcp.WithString("detail", mcp.Description("summary|normal|full. summary: paths + count. full: keep snippets. detail shapes structuredContent; compact-mode trims text."), mcp.Enum("summary", "normal", "full")),
 	)
@@ -217,6 +218,7 @@ func registerSearchTools(reg *toolRegistry) {
 		contentIntent := false // content-only params passed → content search implied
 		noIgnore := false
 		maxResults := 0
+		offset := 0
 		detail := detailNormal
 
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
@@ -273,6 +275,9 @@ func registerSearchTools(reg *toolRegistry) {
 			if mr, ok := args["max_results"].(float64); ok && mr > 0 {
 				maxResults = int(mr)
 			}
+			if off, ok := args["offset"].(float64); ok && off > 0 {
+				offset = int(off)
+			}
 		}
 
 		// v4.5.24 false-negative guards:
@@ -290,12 +295,12 @@ func registerSearchTools(reg *toolRegistry) {
 			}
 		}
 
-		scope := map[string]any{"path": path, "pattern": pattern, "include_content": includeContent, "count_only": countOnly}
+		scope := map[string]any{"path": path, "pattern": pattern, "include_content": includeContent, "count_only": countOnly, "offset": offset, "max_results": maxResults}
 		out, err := engine.SearchFiles(ctx, core.SearchOptions{
 			Path: path, Pattern: pattern, FileTypes: core.FileTypeFiltersFromArg(fileTypes),
 			CaseSensitive: caseSensitive, WholeWord: wholeWord, IncludeContent: includeContent,
 			IncludeContext: includeContext, ContextLines: contextLines, CountOnly: countOnly,
-			ReturnLines: returnLines, NoIgnore: noIgnore, MaxResults: maxResults, OutputFormat: outputFormat,
+			ReturnLines: returnLines, NoIgnore: noIgnore, MaxResults: maxResults, Offset: offset, OutputFormat: outputFormat,
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
@@ -308,6 +313,9 @@ func registerSearchTools(reg *toolRegistry) {
 		out.Text = capped
 		if extraTrunc {
 			out.Truncated = true
+			if out.TruncReason == "" {
+				out.TruncReason = "byte_budget"
+			}
 		}
 		if !includeContent && !countOnly && len(out.Text) > 8000 && len(fileTypes) == 0 {
 			out.Text += "\n\n💡 hint: this search returned many matches across many files. Next time, pass `file_types` (e.g. \".razor,.cs\") or `include` to skip unrelated trees and keep latency under 1s."
@@ -315,9 +323,6 @@ func registerSearchTools(reg *toolRegistry) {
 		sc := searchStructuredFromOutcome(out, scope, extraTrunc)
 		text := out.Text
 		sc, text = applySearchDetail(sc, text, detail)
-		if engine.IsCompactMode() && detail != detailNormal && len(text) > 2000 {
-			text = text[:2000] + "\n…"
-		}
 		return mcp.NewToolResultStructured(sc, text), nil
 	})
 	reg.addTool(searchFilesTool, reg.searchFilesHandler)

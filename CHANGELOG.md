@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [4.7.1] - 2026-09-17
+
+### fix(reliability): operational recovery
+
+- **multi_edit** — Ambiguous edits are included in the atomic-rollback diagnosis. No more `Failed: .`. The handler lists every edit cause even when no backup exists; the file is unchanged.
+- **git push/fetch** — Compact and verbose output show the effective destination (pushurl + insteadOf), not only `origin`. Credentials are redacted. `git(action:"remote")` lists remotes without `--git-network`. `--git-remote-allow` checks the effective URL; `force:true` does not bypass it. Empty allowlist = any destination.
+- **search_files** — Removed hidden 10/20 presentation caps. `max_results` is the page size; `offset` continues a truncated search. Stable order is path, line, match_start. Structured `continuation` tells how to continue. Exact totals are not claimed when the walk stopped early.
+- **telemetry** — ops/s uses MCP-call deltas per interval; latency avg is sum/count with p50/p95 (256-sample ring). Stats separate MCP calls, internal ops, applied/rejected/simulated mutations, and process vs historical backups.
+
+**Verification:** `TestMultiEdit_AmbiguousAfterValid_DiagnosedAndUnchanged` · `TestMultiEdit_HandlerDiagnosesAmbiguousWithoutBackup` · `TestGitPush_CompactShowsDestination` · `TestGitPush_AllowlistRejectsBeforeNetwork` · `TestGitRemoteAction_NoGitNetwork` · `TestSearch_CompactHonorsMaxResultsOverHidden20` · `TestSearch_PaginationNoDupNoGap` · `TestMetrics_*` · `go test ./core/ ./internal/mcpserver/ ./tests/`
+
 ### fix(read_file): max_lines without range returns a consecutive prefix
 
 `read_file(max_lines:N)` with mode omitted or `"all"` (no `start_line`/`end_line`) now returns the first N consecutive lines instead of N/2 head + N/2 tail. Truncation footer and structured `continuation` use `start_line` + `max_lines`. `mode:head`/`tail` and omitted/0 `max_lines` (including the large-file auto-cap) are unchanged.

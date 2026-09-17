@@ -20,6 +20,10 @@ type SearchOutcome struct {
 	Truncated    bool
 	HiddenCount  int
 	FilenameOnly bool
+	Offset       int
+	NextOffset   int
+	TruncReason  string
+	ExactTotal   bool
 }
 
 // SearchFiles runs filename, content, or count search and returns a typed outcome.
@@ -74,7 +78,7 @@ func (e *UltraFastEngine) filenameSearchOutcome(ctx context.Context, opts Search
 	if _, err := e.hookManager.ExecuteHooks(ctx, HookPreSearch, hookCtx); err != nil {
 		return SearchOutcome{Text: fmt.Sprintf("❌ Error: pre-search hook denied: %v", err), FilenameOnly: true}, nil
 	}
-	out, err := e.performSmartSearchOutcome(ctx, validPath, pattern, false, opts.FileTypes, opts.NoIgnore, opts.MaxResults)
+	out, err := e.performSmartSearchOutcome(ctx, validPath, pattern, false, opts.FileTypes, opts.NoIgnore, opts.MaxResults, opts.Offset)
 	if err != nil {
 		return SearchOutcome{Text: fmt.Sprintf("❌ Error: Search error: %v", err), FilenameOnly: true}, nil
 	}
@@ -101,6 +105,10 @@ func (e *UltraFastEngine) advancedSearchOutcomeFromOpts(ctx context.Context, opt
 	maxResults := e.config.MaxSearchResults
 	if opts.MaxResults > 0 {
 		maxResults = opts.MaxResults
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
 	}
 
 	if path == "" || pattern == "" {
@@ -129,33 +137,39 @@ func (e *UltraFastEngine) advancedSearchOutcomeFromOpts(ctx context.Context, opt
 		return SearchOutcome{Text: fmt.Sprintf("❌ Error: %v", err)}, nil
 	}
 
+	SortSearchMatches(matches)
 	totalBeforeCap := len(matches)
-	truncated := false
-	if maxResults > 0 && len(matches) > maxResults {
-		matches = matches[:maxResults]
-		truncated = true
+	page, truncated, next := SliceSearchPage(matches, offset, maxResults)
+	reason := ""
+	if truncated {
+		reason = "max_results"
 	}
 
 	hookCtx.Event = HookPostSearch
-	hookCtx.Metadata["match_count"] = len(matches)
+	hookCtx.Metadata["match_count"] = len(page)
 	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostSearch, hookCtx)
 
-	if len(matches) == 0 {
+	if len(page) == 0 && offset == 0 {
 		return SearchOutcome{
 			Text:        fmt.Sprintf("🔍 No matches found for pattern '%s' in %s", pattern, path),
 			Matches:     []SearchMatch{},
 			MatchCount:  0,
 			HiddenCount: hidden,
+			ExactTotal:  true,
 		}, nil
 	}
 
-	text := e.formatAdvancedSearchOutput(matches, pattern, path, outputFormat, opts.IncludeContext, totalBeforeCap, maxResults, truncated)
+	text := e.formatAdvancedSearchOutput(page, pattern, path, outputFormat, opts.IncludeContext, contextLines, totalBeforeCap, maxResults, truncated, offset, next)
 	return SearchOutcome{
 		Text:        text,
-		Matches:     matches,
+		Matches:     page,
 		MatchCount:  totalBeforeCap,
 		Truncated:   truncated,
 		HiddenCount: hidden,
+		Offset:      offset,
+		NextOffset:  next,
+		TruncReason: reason,
+		ExactTotal:  true,
 	}, nil
 }
 

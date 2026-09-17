@@ -1537,12 +1537,7 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	// The backup is already created, so the original file is safe.
 	if result.FailedEdits > 0 {
 		result.BackupID = backupID
-		failedDetails := make([]string, 0, result.FailedEdits)
-		for _, detail := range result.EditDetails {
-			if detail.Status == EditStatusFailed {
-				failedDetails = append(failedDetails, fmt.Sprintf("edit %d: %s", detail.Index+1, detail.Error))
-			}
-		}
+		failedDetails := formatFailedEditDetails(result.EditDetails)
 		return result, fmt.Errorf("atomic rollback: %d of %d edits failed — file NOT modified. Failed: %s. Fix the failing edits and retry, or use individual edit_file calls",
 			result.FailedEdits, result.TotalEdits, strings.Join(failedDetails, "; "))
 	}
@@ -2120,4 +2115,22 @@ func (e *UltraFastEngine) CreateBackup(ctx context.Context, request mcp.CallTool
 			{Text: fmt.Sprintf("✅ Backup created successfully\n📦 Backup ID: %s\n📄 File: %s\n🏷️ Operation: %s", backupID, validPath, operation)},
 		},
 	}, nil
+}
+
+func formatFailedEditDetails(details []EditDetail) []string {
+	out := make([]string, 0, len(details))
+	for _, detail := range details {
+		switch detail.Status {
+		case EditStatusFailed, EditStatusAmbiguous:
+			err := detail.Error
+			if strings.TrimSpace(err) == "" {
+				err = string(detail.Status)
+			}
+			out = append(out, fmt.Sprintf("edit %d [%s]: %s", detail.Index+1, detail.Status, err))
+		}
+	}
+	if len(out) == 0 {
+		return []string{"no per-edit cause recorded"}
+	}
+	return out
 }

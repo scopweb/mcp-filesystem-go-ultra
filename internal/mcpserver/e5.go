@@ -20,7 +20,7 @@ const (
 	statusSimulated = "simulated"
 )
 
-const searchContinuationHint = "Use count_only:true or narrow the path/pattern/file_types. Do not retry the same unbounded search."
+const searchContinuationHint = "Use offset with the same path/pattern/max_results, or count_only:true / narrower file_types. Do not retry the same unbounded search."
 
 var (
 	searchRipgrepLine = regexp.MustCompile(`^(.+):(\d+):(.*)$`)
@@ -179,7 +179,29 @@ func searchStructuredFromOutcome(out core.SearchOutcome, scope map[string]any, e
 	if count == 0 {
 		count = len(out.Matches)
 	}
-	return searchStructured(out.Text, scope, matches, count, out.Truncated || extraTrunc, out.HiddenCount)
+	truncated := out.Truncated || extraTrunc
+	if !out.ExactTotal && truncated {
+		count = len(out.Matches)
+	}
+	m := searchStructured(out.Text, scope, matches, count, truncated, out.HiddenCount)
+	if truncated {
+		page := 0
+		if scope != nil {
+			if v, ok := scope["max_results"].(int); ok {
+				page = v
+			}
+		}
+		reason := out.TruncReason
+		if extraTrunc && reason == "" {
+			reason = "byte_budget"
+		}
+		next := out.NextOffset
+		if next == 0 {
+			next = out.Offset + len(out.Matches)
+		}
+		m["continuation"] = core.SearchContinuationHint(next, page, reason)
+	}
+	return m
 }
 
 func searchStructured(text string, scope map[string]any, matches []map[string]any, matchCount int, truncated bool, hiddenCount int) map[string]any {

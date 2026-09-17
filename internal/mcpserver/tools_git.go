@@ -17,15 +17,15 @@ func registerGitTools(reg *toolRegistry) {
 	engine := reg.engine
 	gitNetwork := reg.gitNetwork
 
-	gitActions := []string{"status", "diff", "log", "show", "add", "commit", "restore", "branch", "init"}
-	gitDesc := "git — Git operations: status, diff, log, show, add, commit, restore, branch, init. " +
+	gitActions := []string{"status", "diff", "log", "show", "add", "commit", "restore", "branch", "init", "remote"}
+	gitDesc := "git — Git operations: status, diff, log, show, add, commit, restore, branch, init, remote. " +
 		"Must be run from within a git repository. Related: analyze_operation, edit_file, help."
-	actionHelp := `git(action:"status")  // or: diff, log, show, add, commit, restore, branch, init`
+	actionHelp := `git(action:"status")  // or: diff, log, show, add, commit, restore, branch, init, remote`
 	if gitNetwork {
-		gitActions = []string{"status", "diff", "log", "show", "add", "commit", "push", "fetch", "restore", "branch", "init"}
-		gitDesc = "git — Git operations: status, diff, log, show, add, commit, push, fetch, restore, branch, init. " +
+		gitActions = []string{"status", "diff", "log", "show", "add", "commit", "push", "fetch", "restore", "branch", "init", "remote"}
+		gitDesc = "git — Git operations: status, diff, log, show, add, commit, push, fetch, restore, branch, init, remote. " +
 			"Must be run from within a git repository. Related: analyze_operation, edit_file, help."
-		actionHelp = `git(action:"status")  // or: diff, log, show, add, commit, push, fetch, restore, branch, init`
+		actionHelp = `git(action:"status")  // or: diff, log, show, add, commit, push, fetch, restore, branch, init, remote`
 	}
 
 	gitOpts := []mcp.ToolOption{
@@ -46,7 +46,7 @@ func registerGitTools(reg *toolRegistry) {
 		mcp.WithBoolean("staged", mcp.Description("diff: compare index vs HEAD (--cached). Default: false.")),
 		mcp.WithString("message", mcp.Description("commit: message text (required for commit)")),
 		mcp.WithString("name", mcp.Description("branch: branch name to create/switch/delete. push: branch to push (default: current upstream).")),
-		mcp.WithString("remote", mcp.Description("push/fetch: remote name (default: 'origin'). Named remotes only — not a URL.")),
+		mcp.WithString("remote", mcp.Description("push/fetch/remote: remote name (default: 'origin' for push/fetch; omit for remote to list all). Named remotes only — not a URL.")),
 		mcp.WithBoolean("checkout", mcp.Description("branch: switch to name (creates with git switch -c if missing). Default: false.")),
 		mcp.WithBoolean("delete", mcp.Description("branch: true → delete name (git branch -d). Required to delete; name alone never deletes.")),
 		mcp.WithBoolean("force", mcp.Description("branch: with delete:true, true → -D (else -d). push: true → --force-with-lease (never plain --force). Other actions: ignored.")),
@@ -145,6 +145,8 @@ func registerGitTools(reg *toolRegistry) {
 			return gitRestore(ctx, engine, repoRoot, args)
 		case "branch":
 			return gitBranch(ctx, engine, repoRoot, args)
+		case "remote":
+			return gitRemote(ctx, engine, repoRoot, args)
 		default:
 			return usageError(
 				fmt.Sprintf("unknown action %q", action),
@@ -170,6 +172,7 @@ func gitHelpExamples(gitNetwork bool) []string {
 		)
 	}
 	return append(ex,
+		`git(action:"remote")`,
 		`git(action:"restore", paths:["file.txt"], staged:true)`,
 		`git(action:"branch", name:"feature/new", checkout:true)`,
 		`git(action:"branch", name:"old", delete:true)`,
@@ -1040,12 +1043,25 @@ func gitFetch(ctx context.Context, engine *core.UltraFastEngine, repoRoot string
 	}
 	prune := getBoolArg(args, "prune")
 
+	resolved, rerr := resolveGitRemote(repoRoot, remote)
+	if rerr != nil {
+		return mcp.NewToolResultError(redactGitText(fmt.Sprintf("git fetch: cannot resolve remote %q: %v", remote, rerr))), nil
+	}
+	fetchDests := resolved.Fetch
+	if len(fetchDests) == 0 {
+		fetchDests = resolved.Push
+	}
+	if denied := rejectUnauthorizedRemotes(engine, fetchDests); denied != nil {
+		return denied, nil
+	}
+	destLabel := formatResolvedRemote(resolved, true)
+
 	hookCtx := &core.HookContext{
 		Event:     core.HookPreWrite,
 		ToolName:  "git",
 		FilePath:  repoRoot,
 		Operation: "fetch",
-		Metadata:  map[string]interface{}{"git_operation": "fetch", "remote": remote, "prune": prune},
+		Metadata:  map[string]interface{}{"git_operation": "fetch", "remote": remote, "prune": prune, "destination": redactGitURL(strings.Join(fetchDests, ","))},
 	}
 	if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreWrite, hookCtx); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git fetch denied by hook: %v", err)), nil
@@ -1059,20 +1075,20 @@ func gitFetch(ctx context.Context, engine *core.UltraFastEngine, repoRoot string
 
 	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
 	if werr != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("git fetch failed: %v\n%s", werr, output)), nil
+		return mcp.NewToolResultError(redactGitText(fmt.Sprintf("git fetch failed: %v\n%s", werr, output))), nil
 	}
 
 	hookCtx.Event = core.HookPostWrite
 	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostWrite, hookCtx)
 
-	label := remote
+	label := destLabel
 	if prune {
 		label += " (prune)"
 	}
 	if engine.IsCompactMode() {
 		return mcp.NewToolResultText(fmt.Sprintf("OK: fetched %s", label)), nil
 	}
-	out := strings.TrimSpace(output)
+	out := redactGitText(strings.TrimSpace(output))
 	if out == "" {
 		return mcp.NewToolResultText(fmt.Sprintf("Fetched %s", label)), nil
 	}
@@ -1094,12 +1110,25 @@ func gitPush(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 	name, _ := args["name"].(string)
 	force, _ := args["force"].(bool)
 
+	resolved, rerr := resolveGitRemote(repoRoot, remote)
+	if rerr != nil {
+		return mcp.NewToolResultError(redactGitText(fmt.Sprintf("git push: cannot resolve remote %q: %v", remote, rerr))), nil
+	}
+	pushDests := resolved.Push
+	if len(pushDests) == 0 {
+		pushDests = resolved.Fetch
+	}
+	if denied := rejectUnauthorizedRemotes(engine, pushDests); denied != nil {
+		return denied, nil
+	}
+	destLabel := formatResolvedRemote(resolved, true)
+
 	hookCtx := &core.HookContext{
 		Event:     core.HookPreWrite,
 		ToolName:  "git",
 		FilePath:  repoRoot,
 		Operation: "push",
-		Metadata:  map[string]interface{}{"git_operation": "push", "remote": remote, "branch": name, "force": force},
+		Metadata:  map[string]interface{}{"git_operation": "push", "remote": remote, "branch": name, "force": force, "destination": redactGitURL(strings.Join(pushDests, ","))},
 	}
 	if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreWrite, hookCtx); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git push denied by hook: %v", err)), nil
@@ -1117,20 +1146,20 @@ func gitPush(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 
 	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
 	if werr != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("git push failed: %v\n%s", werr, output)), nil
+		return mcp.NewToolResultError(redactGitText(fmt.Sprintf("git push failed: %v\n%s", werr, output))), nil
 	}
 
 	hookCtx.Event = core.HookPostWrite
 	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostWrite, hookCtx)
 
-	target := remote
+	target := destLabel
 	if name != "" {
-		target = remote + "/" + name
+		target = destLabel + " (" + name + ")"
 	}
 	if engine.IsCompactMode() {
 		return mcp.NewToolResultText(fmt.Sprintf("OK: pushed to %s", target)), nil
 	}
-	return mcp.NewToolResultText(fmt.Sprintf("Pushed to %s\n%s", target, strings.TrimSpace(output))), nil
+	return mcp.NewToolResultText(fmt.Sprintf("Pushed to %s\n%s", target, redactGitText(strings.TrimSpace(output)))), nil
 }
 
 // execGitCommand executes a git command in the given directory.

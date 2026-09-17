@@ -85,7 +85,7 @@ func (e *UltraFastEngine) SmartSearch(ctx context.Context, request mcp.CallToolR
 	if mr, ok := request.Arguments["max_results"].(float64); ok && mr > 0 {
 		maxResults = int(mr)
 	}
-	out, err := e.performSmartSearchOutcome(ctx, validPath, pattern, includeContent, fileTypes, noIgnore, maxResults)
+	out, err := e.performSmartSearchOutcome(ctx, validPath, pattern, includeContent, fileTypes, noIgnore, maxResults, 0)
 	if err != nil {
 		return &mcp.CallToolResponse{
 			Content: []mcp.TextContent{
@@ -202,106 +202,14 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 		}, nil
 	}
 
-	var result strings.Builder
-
-	maxToShow := maxResults
-	if maxToShow > len(matches) {
-		maxToShow = len(matches)
-	}
-	_ = truncated // surfaced via JSON payload; kept for parity with the structured response contract
-
-	// Auto-detect output style for the default branch (outputFormat == "auto").
-	// "text" preserves the legacy verbose/compact layout below.
-	// "json" is handled in a separate branch AFTER this block.
-	// include_context always forces the verbose layout because Context: blocks
-	// don't fit in a single 'path:line:content' line.
-	const ripgrepThreshold = 5
-	useRipgrep := outputFormat == "auto" && !includeContext && len(matches) <= ripgrepThreshold
-
-	if useRipgrep {
-		// Ripgrep-style: one 'path:line:content' per match.
-		// Doesn't honor CompactMode (the whole point of auto is to give
-		// Grep-like direct readability when there are few hits).
-		result.WriteString(formatSearchMatchesRipgrep(matches, maxToShow))
-	} else if e.config.CompactMode && outputFormat != "text" {
-		// NOTE: an explicit output_format:"text" opts out of CompactMode —
-		// the flag sets the DEFAULT, it is not an absolute override. This is
-		// what the tool description (tools_search.go, param output_format)
-		// has always promised.
-		// Compact format: minimal output but with full paths
-		result.WriteString(fmt.Sprintf("%d matches", len(matches)))
-		if len(matches) > 20 {
-			result.WriteString(" (first 20)")
-			maxToShow = 20
-		}
-		result.WriteString("\n")
-
-		if includeContext {
-			// Compact-with-context: one line per match + condensed context
-			for i := 0; i < maxToShow; i++ {
-				match := matches[i]
-				result.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd, match.Line))
-				if len(match.Context) > 0 {
-					for _, ctxLine := range match.Context {
-						result.WriteString(fmt.Sprintf("  | %s\n", ctxLine))
-					}
-				}
-			}
-		} else {
-			// Compact without context: one line per match WITH content.
-			// (Bug fix: this branch used to print positions only, silently
-			// dropping match.Line even though AdvancedTextSearch is only
-			// reachable via content search — forcing a second read_file call
-			// for every search with >5 hits.)
-			for i := 0; i < maxToShow; i++ {
-				match := matches[i]
-				result.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd, match.Line))
-			}
-		}
-
-		if len(matches) > maxToShow {
-			result.WriteString(fmt.Sprintf(" ... (%d more)", len(matches)-maxToShow))
-		}
-	} else {
-		// Verbose format
-		result.WriteString(fmt.Sprintf("🔍 Found %d matches for pattern '%s':\n\n", len(matches), pattern))
-
-		for i := 0; i < maxToShow; i++ {
-			match := matches[i]
-			result.WriteString(fmt.Sprintf("📁 %s:%d [%d:%d]\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd))
-			result.WriteString(fmt.Sprintf("   %s\n", match.Line))
-
-			if includeContext && len(match.Context) > 0 {
-				result.WriteString("   Context:\n")
-				for _, contextLine := range match.Context {
-					result.WriteString(fmt.Sprintf("   │ %s\n", contextLine))
-				}
-			}
-			result.WriteString("\n")
-		}
-
-		if len(matches) > maxToShow {
-			result.WriteString(fmt.Sprintf("⚠️ Showing %d of %d matches. Use more specific pattern.\n", maxToShow, len(matches)))
-		}
-	}
-
-	// Execute post-search hook (best-effort)
 	hookCtx2.Event = HookPostSearch
 	hookCtx2.Metadata["match_count"] = len(matches)
 	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostSearch, hookCtx2)
 
-	// JSON output format for AI parsing
-	if outputFormat == "json" {
-		return &mcp.CallToolResponse{
-			Content: []mcp.TextContent{
-				{Text: formatSearchMatchesJSON(matches, pattern, path, totalBeforeCap, maxResults)},
-			},
-		}, nil
-	}
-
+	text := e.formatAdvancedSearchOutput(matches, pattern, path, outputFormat, includeContext, 0, totalBeforeCap, maxResults, truncated, 0, len(matches))
 	return &mcp.CallToolResponse{
 		Content: []mcp.TextContent{
-			{Text: result.String()},
+			{Text: text},
 		},
 	}, nil
 }
@@ -346,63 +254,88 @@ func formatSearchMatchesJSON(matches []SearchMatch, pattern, path string, totalB
 	return buf.String()
 }
 
-func (e *UltraFastEngine) formatAdvancedSearchOutput(matches []SearchMatch, pattern, path, outputFormat string, includeContext bool, totalBeforeCap, maxResults int, truncated bool) string {
+func (e *UltraFastEngine) formatAdvancedSearchOutput(matches []SearchMatch, pattern, path, outputFormat string, includeContext bool, contextLines, totalBeforeCap, maxResults int, truncated bool, offset, nextOffset int) string {
 	if outputFormat == "json" {
-		return formatSearchMatchesJSON(matches, pattern, path, totalBeforeCap, maxResults)
+		body := formatSearchMatchesJSON(matches, pattern, path, totalBeforeCap, maxResults)
+		if truncated {
+			return body
+		}
+		return body
 	}
-	_ = truncated
 	var result strings.Builder
-	maxToShow := maxResults
-	if maxToShow <= 0 || maxToShow > len(matches) {
-		maxToShow = len(matches)
-	}
+	n := len(matches)
 	const ripgrepThreshold = 5
-	useRipgrep := outputFormat == "auto" && !includeContext && len(matches) <= ripgrepThreshold
+	useRipgrep := outputFormat == "auto" && !includeContext && n <= ripgrepThreshold
 	if useRipgrep {
-		result.WriteString(formatSearchMatchesRipgrep(matches, maxToShow))
+		result.WriteString(formatSearchMatchesRipgrep(matches, n))
 	} else if e.config.CompactMode && outputFormat != "text" {
-		result.WriteString(fmt.Sprintf("%d matches", len(matches)))
-		if len(matches) > 20 {
-			result.WriteString(" (first 20)")
-			maxToShow = 20
-		}
-		result.WriteString("\n")
-		if includeContext {
-			for i := 0; i < maxToShow; i++ {
-				match := matches[i]
-				result.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd, match.Line))
-				for _, ctxLine := range match.Context {
-					result.WriteString(fmt.Sprintf("  | %s\n", ctxLine))
-				}
-			}
+		if totalBeforeCap > n {
+			result.WriteString(fmt.Sprintf("%d matches (showing %d-%d)\n", totalBeforeCap, offset+1, offset+n))
 		} else {
-			for i := 0; i < maxToShow; i++ {
-				match := matches[i]
-				result.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd, match.Line))
-			}
+			result.WriteString(fmt.Sprintf("%d matches\n", n))
 		}
-		if len(matches) > maxToShow {
-			result.WriteString(fmt.Sprintf(" ... (%d more)", len(matches)-maxToShow))
+		for i := 0; i < n; i++ {
+			match := matches[i]
+			result.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd, match.Line))
+			if includeContext {
+				result.WriteString(formatNumberedContext(match, contextLines, true))
+			}
 		}
 	} else {
-		result.WriteString(fmt.Sprintf("🔍 Found %d matches for pattern '%s':\n\n", len(matches), pattern))
-		for i := 0; i < maxToShow; i++ {
+		if totalBeforeCap > n {
+			result.WriteString(fmt.Sprintf("🔍 Found %d matches for pattern '%s' (showing %d-%d):\n\n", totalBeforeCap, pattern, offset+1, offset+n))
+		} else {
+			result.WriteString(fmt.Sprintf("🔍 Found %d matches for pattern '%s':\n\n", n, pattern))
+		}
+		for i := 0; i < n; i++ {
 			match := matches[i]
 			result.WriteString(fmt.Sprintf("📁 %s:%d [%d:%d]\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd))
 			result.WriteString(fmt.Sprintf("   %s\n", match.Line))
-			if includeContext && len(match.Context) > 0 {
-				result.WriteString("   Context:\n")
-				for _, contextLine := range match.Context {
-					result.WriteString(fmt.Sprintf("   │ %s\n", contextLine))
-				}
+			if includeContext && (len(match.Context) > 0 || contextLines > 0) {
+				result.WriteString(formatNumberedContext(match, contextLines, false))
 			}
 			result.WriteString("\n")
 		}
-		if len(matches) > maxToShow {
-			result.WriteString(fmt.Sprintf("⚠️ Showing %d of %d matches. Use more specific pattern.\n", maxToShow, len(matches)))
-		}
+	}
+	if truncated {
+		reason := "page limit"
+		result.WriteString(SearchContinuationHint(nextOffset, maxResults, reason+". "))
+		result.WriteByte('\n')
 	}
 	return result.String()
+}
+
+func formatNumberedContext(match SearchMatch, contextLines int, compact bool) string {
+	if len(match.Context) == 0 {
+		return ""
+	}
+	nBefore := contextLines
+	if nBefore <= 0 {
+		nBefore = len(match.Context) / 2
+	}
+	if match.LineNumber-1 < nBefore {
+		nBefore = match.LineNumber - 1
+	}
+	if nBefore > len(match.Context) {
+		nBefore = len(match.Context)
+	}
+	before := match.Context[:nBefore]
+	after := match.Context[nBefore:]
+	var b strings.Builder
+	indent := "  "
+	if !compact {
+		indent = "   "
+		b.WriteString(indent + "Context:\n")
+	}
+	for i, line := range before {
+		ln := match.LineNumber - len(before) + i
+		fmt.Fprintf(&b, "%s%d | %s\n", indent, ln, line)
+	}
+	fmt.Fprintf(&b, "%s>%d | %s\n", indent, match.LineNumber, strings.TrimRight(match.Line, "\r\n"))
+	for i, line := range after {
+		fmt.Fprintf(&b, "%s%d | %s\n", indent, match.LineNumber+1+i, line)
+	}
+	return b.String()
 }
 
 // jsonString escapes a string for JSON
@@ -437,7 +370,7 @@ func formatSearchMatchesRipgrep(matches []SearchMatch, maxToShow int) string {
 }
 
 // performSmartSearch
-func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, pattern string, includeContent bool, fileTypes []string, noIgnore bool, maxResults int) (SearchOutcome, error) {
+func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, pattern string, includeContent bool, fileTypes []string, noIgnore bool, maxResults int, offset int) (SearchOutcome, error) {
 	// Check context before starting
 	if err := ctx.Err(); err != nil {
 		return SearchOutcome{}, &ContextError{Op: "search", Details: "operation cancelled before start"}
@@ -449,6 +382,10 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 	if maxResults <= 0 {
 		maxResults = e.config.MaxSearchResults
 	}
+	if offset < 0 {
+		offset = 0
+	}
+	collectUntil := offset + maxResults + 1
 
 	// Compile regex pattern (uses engine cache to avoid repeated compilation)
 	// For glob patterns (*, ?), use filepath.Match instead to avoid regex misinterpretation
@@ -501,7 +438,7 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 		// tree cannot change the response. Walk used to continue to the end.
 		if !includeContent {
 			resultsMu.Lock()
-			full := len(results) >= maxResults
+			full := len(results) >= collectUntil
 			resultsMu.Unlock()
 			if full {
 				return errWalkStop
@@ -522,7 +459,7 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 		}
 		if matched {
 			resultsMu.Lock()
-			if len(results) < maxResults {
+			if len(results) < collectUntil {
 				results = append(results, fmt.Sprintf("📄 %s", currentPath))
 			}
 			resultsMu.Unlock()
@@ -622,7 +559,7 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 				if len(localMatches) > 0 {
 					resultsMu.Lock()
 					for _, match := range localMatches {
-						if len(contentMatches) < maxResults {
+						if len(contentMatches) < collectUntil {
 							contentMatches = append(contentMatches, match)
 						} else {
 							break
@@ -636,100 +573,77 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 		wg.Wait()
 	}
 
-	var resultBuilder strings.Builder
-
-	totalResults := len(results) + len(contentMatches)
-
-	if len(results) > 0 {
-		if e.config.CompactMode {
-			resultBuilder.WriteString(fmt.Sprintf("%d filename matches", len(results)))
-			if len(results) > 10 {
-				resultBuilder.WriteString(" (showing first 10): ")
-				for i := 0; i < 10; i++ {
-					if i > 0 {
-						resultBuilder.WriteString(", ")
-					}
-					// Use full path instead of just basename
-					resultBuilder.WriteString(strings.TrimPrefix(results[i], "📄 "))
-				}
-			} else {
-				resultBuilder.WriteString(": ")
-				for i, result := range results {
-					if i > 0 {
-						resultBuilder.WriteString(", ")
-					}
-					// Use full path instead of just basename
-					resultBuilder.WriteString(strings.TrimPrefix(result, "📄 "))
-				}
-			}
-			resultBuilder.WriteString("\n")
-		} else {
-			resultBuilder.WriteString(fmt.Sprintf("🔍 File name matches (%d):\n", len(results)))
-			for _, result := range results {
-				resultBuilder.WriteString(fmt.Sprintf("  %s\n", result))
-			}
-			resultBuilder.WriteString("\n")
-		}
+	hits := hitsFromFilenameResults(results)
+	hits = append(hits, contentMatches...)
+	SortSearchMatches(hits)
+	page, pageTrunc, next := SliceSearchPage(hits, offset, maxResults)
+	truncated := walkCapped || pageTrunc
+	exact := !walkCapped
+	matchCount := len(hits)
+	if !exact {
+		matchCount = len(page)
 	}
 
-	if len(contentMatches) > 0 {
-		if e.config.CompactMode {
-			resultBuilder.WriteString(fmt.Sprintf("%d content matches", len(contentMatches)))
-			if len(contentMatches) > 10 {
-				resultBuilder.WriteString(" (first 10): ")
-				for i := 0; i < 10; i++ {
-					if i > 0 {
-						resultBuilder.WriteString(", ")
-					}
-					m := contentMatches[i]
-					// Use full path instead of just basename
-					resultBuilder.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s", m.File, m.LineNumber, m.MatchStart, m.MatchEnd, m.Line))
-				}
-			} else {
-				resultBuilder.WriteString(": ")
-				for i, match := range contentMatches {
-					if i > 0 {
-						resultBuilder.WriteString(", ")
-					}
-					// Use full path instead of just basename
-					resultBuilder.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s", match.File, match.LineNumber, match.MatchStart, match.MatchEnd, match.Line))
-				}
-			}
-		} else {
-			resultBuilder.WriteString(fmt.Sprintf("📝 Content matches (%d):\n", len(contentMatches)))
-			for _, match := range contentMatches {
-				resultBuilder.WriteString(fmt.Sprintf("  📁 %s:%d [%d:%d] - %s\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd, match.Line))
-			}
-		}
-	}
-
-	if len(results) == 0 && len(contentMatches) == 0 {
+	if len(page) == 0 && offset == 0 {
 		text := fmt.Sprintf("🔍 No matches found for pattern '%s' in %s", pattern, path)
 		if !includeContent {
 			text = fmt.Sprintf("🔍 No filename matches for pattern '%s' in %s (filename-only search — file contents were NOT searched; pass include_content:true to search inside files)", pattern, path)
 		}
-		return SearchOutcome{Text: text, Matches: []SearchMatch{}, FilenameOnly: !includeContent, Truncated: walkCapped, HiddenCount: hiddenCount}, nil
+		return SearchOutcome{Text: text, Matches: []SearchMatch{}, FilenameOnly: !includeContent, Truncated: walkCapped, HiddenCount: hiddenCount, ExactTotal: exact}, nil
 	}
 
-	truncated := walkCapped
-	if totalResults >= maxResults {
-		truncated = true
-		if e.config.CompactMode {
-			resultBuilder.WriteString(fmt.Sprintf(" (limited to %d)", maxResults))
+	var resultBuilder strings.Builder
+	if e.config.CompactMode {
+		if exact && matchCount > len(page) {
+			resultBuilder.WriteString(fmt.Sprintf("%d matches (showing %d-%d): ", matchCount, offset+1, offset+len(page)))
 		} else {
-			resultBuilder.WriteString(fmt.Sprintf("\n⚠️ Results limited to %d. Use more specific pattern.\n", maxResults))
+			resultBuilder.WriteString(fmt.Sprintf("%d matches: ", len(page)))
+		}
+		for i, h := range page {
+			if i > 0 {
+				resultBuilder.WriteString(", ")
+			}
+			if h.LineNumber > 0 {
+				resultBuilder.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s", h.File, h.LineNumber, h.MatchStart, h.MatchEnd, h.Line))
+			} else {
+				resultBuilder.WriteString(h.File)
+			}
+		}
+		resultBuilder.WriteString("\n")
+	} else {
+		label := "File name matches"
+		if includeContent {
+			label = "Content matches"
+		}
+		resultBuilder.WriteString(fmt.Sprintf("🔍 %s (%d):\n", label, len(page)))
+		for _, h := range page {
+			if h.LineNumber > 0 {
+				resultBuilder.WriteString(fmt.Sprintf("  📁 %s:%d [%d:%d] - %s\n", h.File, h.LineNumber, h.MatchStart, h.MatchEnd, h.Line))
+			} else {
+				resultBuilder.WriteString(fmt.Sprintf("  📄 %s\n", h.File))
+			}
 		}
 	}
+	if truncated {
+		reason := "page limit"
+		if walkCapped && !exact {
+			reason = "walk stopped at page limit"
+		}
+		resultBuilder.WriteString(SearchContinuationHint(next, maxResults, reason+". "))
+		resultBuilder.WriteByte('\n')
+	}
 
-	hits := hitsFromFilenameResults(results)
-	hits = append(hits, contentMatches...)
 	return SearchOutcome{
 		Text:         resultBuilder.String(),
-		Matches:      hits,
-		MatchCount:   len(hits),
+		Matches:      page,
+		MatchCount:   matchCount,
 		Truncated:    truncated,
 		HiddenCount:  hiddenCount,
 		FilenameOnly: !includeContent,
+		Offset:       offset,
+		NextOffset:   next,
+		TruncReason:  "",
+		ExactTotal:   exact,
 	}, nil
 }
 

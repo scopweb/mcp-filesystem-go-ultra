@@ -185,8 +185,11 @@ apply_patch
 ## Version Control, JavaScript, Analysis, and Discovery (4)
 
 git
-- Purpose: Safe Git status, diff, log, show, add, commit, push, fetch, restore, branch, and init actions
+- Purpose: Safe Git status, diff, log, show, add, commit, push, fetch, restore, branch, init, and remote actions
 - Key params: action, path, paths, output, rev, max_lines, delete, prune, remote
+- remote lists effective fetch/push URLs (credentials redacted) without --git-network
+- commit risk is informational (staged file/insertion counts); it does not block the commit
+- push/fetch show the effective destination, not only the remote name. --git-remote-allow checks that URL; force:true does not bypass it
 
 minify_js
 - Purpose: Pure-Go JavaScript minification without Node
@@ -318,7 +321,8 @@ For files >1000 lines, ALWAYS:
 | Task                  | How                                          |
 |-----------------------|----------------------------------------------|
 | Find location         | search_files(path, pattern)                  |
-| Count matches         | search_files(path, pattern, count_only=true) |
+| Count matches         | search_files(path, pattern, count_only=true) — do not pair with detail=full |
+| Continue a truncated page | search_files(..., offset:N, max_results:M) same path/pattern |
 | Search with context   | search_files(path, pattern, include_context=true) |
 | Find and replace all  | edit_file(path, mode:"search_replace", pattern, replacement) |
 

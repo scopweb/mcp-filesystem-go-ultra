@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra
 
-**v4.7.0** · Go 1.27.1 · MCP 2025-11-25 · 25 tools ultra / 16 strict (agent core)
+**v4.7.1** · Go 1.27.1 · MCP 2025-11-25 · 25 tools ultra / 16 strict (agent core)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -35,6 +35,10 @@ See [Build](#build) and [Configuration](#configuration) below for more.
 - **Path security** — symlink-resolved containment via `filepath.Rel`, NTFS ADS blocking, RTLO/zero-width Unicode rejection, Windows reserved names, TOCTOU symlink defense
 - **Risk assessment** — mutations above configurable thresholds are flagged (20% change = MEDIUM, 75% = HIGH by default); HIGH/CRITICAL results include post-edit integrity verification. Path floors raise risk for `go.mod`, Dockerfiles, GitHub workflows, and `*.csproj` (never lower it; tests/docs do not raise)
 - **Failure Intelligence** — errors are a JSON envelope with `code`, `retryable`, `suggestion`, and typed `details`. Do not replay when `retryable` is false (`PATCH_FAILED`, `BUDGET_EXCEEDED`, `VALIDATION`, …)
+- **Unambiguous multi_edit rollback** — every counted failure (including `ambiguous`) appears in the diagnosis; the file is not written
+- **Search pagination** — `max_results` is the page size; `offset` continues. No hidden 10/20 presentation cap. Structured `continuation` says how to continue
+- **Git destinations** — `git(action:"remote")` without `--git-network`; push/fetch print the effective URL (credentials redacted). `--git-remote-allow` matches that URL (`force:true` does not bypass; empty allowlist = any destination)
+- **Verifiable stats** — `server_info(action:"stats")` splits MCP calls vs internal ops, applied/rejected/simulated mutations, and process vs historical backups; ops/s is an interval delta; latency is avg/p50/p95
 - **Mutation budget** — `--mutation-budget=N` (default off) caps applied mutations per process; dry-run does not count
 - **Explicit `detail`** — `summary|normal|full` on `directory_tree`, `search_files`, `read_file` (batch), and `help` (catalog). Default `normal`. Compact-mode trims text; `detail` trims structuredContent
 - **Access control** — fail-closed: at least one `--allowed-paths` / positional root is required (also enforced in batch operations). `--insecure-open` is labs-only.
@@ -235,6 +239,7 @@ Allowed paths: positional args after the flags, **or** one `--allowed-paths` wit
 | `--roots-mode` | replace | How MCP client Roots combine with CLI paths: `replace`, `union`, `ignore` |
 | `--profile` | ultra | `ultra` = all 25 tools; `strict` = 16-tool agent core (includes `backup`) |
 | `--git-network` | off | Enable `git` push/fetch. Off the critical path; ignored in `strict` |
+| `--git-remote-allow` | empty | Comma-separated allowed push/fetch destinations (`host`, `host/org`, or repo URL). Empty = any. `git(action:"remote")` still works without `--git-network` |
 | `--readonly` | off | Reject mutating tools |
 | `--mutation-budget` | 0 (off) | Max applied mutations per process. Shared by all stdio clients. `BUDGET_EXCEEDED` when exceeded |
 | `--allow-secrets` | off | Allow `.env` / keys (audited) |
@@ -297,7 +302,7 @@ Copy [examples/harness/](examples/harness/) — do not guess flags. One MCP inst
 | `edit_file` | Exact / regex / range / insert. Backup + OCC. **strict** | Targeted edits (`allow_rewrite` not `force` for rewrite-guard) |
 | `multi_edit` | Multiple replacements on one file. **strict** | Several anchors in the same file |
 | `list_directory` | Directory listing. **strict** | Copy exact paths (case) before edits |
-| `search_files` | Name or content. Gitignore ON (`no_ignore=false`). **strict** | Find, then edit. `truncated` + `hidden_count` |
+| `search_files` | Name or content. Gitignore ON (`no_ignore=false`). Page with `max_results` + `offset`. **strict** | Find, then edit. `truncated` + `hidden_count` + `continuation` |
 | `get_file_info` | Size, dates, type. Batch `paths[]`. **strict** | Verify after a host mutation |
 | `create_directory` | `mkdir -p`. **strict** | New folders |
 | `move_file` | Move or rename. **strict** | Relocate |
@@ -309,7 +314,7 @@ Copy [examples/harness/](examples/harness/) — do not guess flags. One MCP inst
 | `backup` | Undo / restore / trash. **strict** | After a bad edit: `undo_last` / `restore` / `restore_trash` |
 | `analyze_operation` | Dry-run risk preview | ultra |
 | `wsl` | WSL ↔ Windows sync | ultra |
-| `git` | Local git. `push`/`fetch` need `--git-network` | ultra |
+| `git` | Local git. `remote` is read-only (no `--git-network`). `push`/`fetch` need `--git-network` | ultra |
 | `minify_js` | Pure-Go JS minify (no Node) | ultra |
 | `analyze_code` | Read-only symbols / lint / sec / impact. Not a writer. | ultra — understand code; edit with `apply_patch`/`edit_file`. Do not use git grep or bash |
 | `server_info` | Stats / static help / artifacts | ultra |
@@ -387,7 +392,7 @@ internal/mcpserver/         MCP server: config, tool registration, stdio loop
   tools_platform.go         wsl, server_info
   tools_discovery.go        list_allowed_directories
   tools_patch.go            diff_files, apply_patch
-  tools_git.go              git (11 actions; push/fetch gated by --git-network)
+  tools_git.go              git (12 actions; push/fetch gated by --git-network; remote is local)
   tools_minify.go           minify_js (pure-Go)
   tools_aliases.go          help (on-demand; legacy aliases disabled)
   tools_analyze.go          analyze_code (ultra only: symbols|lint|sec|impact)
@@ -473,7 +478,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest: v4.7.0 — Failure Intelligence: error envelopes, OCC reports, `detail`, mutation budget, path-aware risk). Remaining work: [PLAN-PENDIENTE.md](PLAN-PENDIENTE.md).
+See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest: v4.7.1 — operational recovery: multi_edit diagnosis, search pagination, git destinations, verifiable stats). Remaining work: [PLAN-PENDIENTE.md](PLAN-PENDIENTE.md).
 
 ---
 

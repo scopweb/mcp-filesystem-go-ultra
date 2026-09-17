@@ -252,22 +252,33 @@ func registerBatchTools(reg *toolRegistry) {
 				return occMismatchResult("stale edit: file content changed since expected_hash", path,
 					occ.Expected, occ.Actual, occ.Conflict), nil
 			}
-			// Bug #27: If result is non-nil, this is an atomic rollback — include backup_id and details
-			if result != nil && result.BackupID != "" {
+			if result != nil {
 				errMsg := fmt.Sprintf("Multi-edit ROLLED BACK (file unchanged): %v\n", err)
-				errMsg += fmt.Sprintf("Applied: %d, Failed: %d, Skipped: %d of %d total\n",
+				errMsg += fmt.Sprintf("Applied (not written): %d, Failed: %d, Skipped: %d of %d total\n",
 					result.SuccessfulEdits, result.FailedEdits, result.SkippedEdits, result.TotalEdits)
 				for _, detail := range result.EditDetails {
 					switch detail.Status {
 					case core.EditStatusApplied:
-						errMsg += fmt.Sprintf("  edit %d: would apply (rolled back)\n", detail.Index+1)
+						errMsg += fmt.Sprintf("  edit %d: would apply (not written)\n", detail.Index+1)
 					case core.EditStatusFailed:
 						errMsg += fmt.Sprintf("  edit %d: FAILED — %s\n", detail.Index+1, detail.Error)
+					case core.EditStatusAmbiguous:
+						errMsg += fmt.Sprintf("  edit %d: AMBIGUOUS — %s\n", detail.Index+1, detail.Error)
 					case core.EditStatusAlreadyPresent:
 						errMsg += fmt.Sprintf("  edit %d: already present\n", detail.Index+1)
+					default:
+						cause := detail.Error
+						if cause == "" {
+							cause = string(detail.Status)
+						}
+						errMsg += fmt.Sprintf("  edit %d: %s — %s\n", detail.Index+1, detail.Status, cause)
 					}
 				}
-				errMsg += fmt.Sprintf("Backup: %s (original file is safe)\n", result.BackupID)
+				if result.BackupID != "" {
+					errMsg += fmt.Sprintf("Backup: %s (original file is safe)\n", result.BackupID)
+				} else {
+					errMsg += "No backup created — file was never written.\n"
+				}
 				errMsg += "Fix the failing old_text and retry. Use read_file to get exact text."
 				if staleWarning != "" {
 					errMsg += staleWarning
@@ -716,7 +727,7 @@ func registerBatchTools(reg *toolRegistry) {
 				sb.WriteString(fmt.Sprintf("  %s: %d replacements\n", fr.Path, fr.Replaced))
 			}
 		} else if len(result.PerFileResults) > 20 {
-			sb.WriteString(fmt.Sprintf("\n(Showing 20 of %d files — use verbose=true for full list)\n", len(result.PerFileResults)))
+			sb.WriteString(fmt.Sprintf("\n(Showing 20 of %d files — re-run with preview:true for a dry listing, or narrow file_types)\n", len(result.PerFileResults)))
 			for _, fr := range result.PerFileResults[:20] {
 				sb.WriteString(fmt.Sprintf("  %s: %d replacements\n", fr.Path, fr.Replaced))
 			}
