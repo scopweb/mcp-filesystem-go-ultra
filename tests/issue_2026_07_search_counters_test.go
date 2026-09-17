@@ -310,8 +310,13 @@ func TestIssue202607_MaxResultsCapJSON(t *testing.T) {
 		t.Fatalf("AdvancedTextSearch text error: %v", err)
 	}
 	text2 := responseIssueText(resp2)
-	count := strings.Count(text2, "m")
-	if count > 6 { // 3 lines, each contains one 'm'
-		t.Errorf("text output returned more than 3 match lines; got:\n%s", text2)
+	n := 0
+	for _, line := range strings.Split(text2, "\n") {
+		if strings.Contains(line, ":m") && !strings.Contains(line, "search_files") {
+			n++
+		}
+	}
+	if n != 3 {
+		t.Errorf("text output match lines = %d, want 3; got:\n%s", n, text2)
 	}
 }

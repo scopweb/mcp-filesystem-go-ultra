@@ -94,6 +94,35 @@ func TestMultiEdit_AmbiguousRefusesThreeOccurrences(t *testing.T) {
 	}
 }
 
+func TestMultiEdit_HandlerDiagnosesAmbiguousWithoutBackup(t *testing.T) {
+	dir := t.TempDir()
+	reg := newMultiEditRegistry(t, dir)
+	path := filepath.Join(dir, "mix.txt")
+	original := "foo\nbar\nfoo\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	edits := `[{"old_text":"bar","new_text":"baz"},{"old_text":"foo","new_text":"qux"}]`
+	result := callMultiEditHandler(t, reg, path, edits, nil)
+	body := resultText(t, result)
+	if !result.IsError {
+		t.Fatalf("expected error, got %s", body)
+	}
+	if strings.Contains(body, "Failed: .") {
+		t.Fatalf("empty failed list: %s", body)
+	}
+	if !strings.Contains(body, "AMBIGUOUS") && !strings.Contains(body, "ambiguous") {
+		t.Fatalf("expected ambiguous: %s", body)
+	}
+	if !strings.Contains(body, "edit 2") {
+		t.Fatalf("expected edit 2: %s", body)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != original {
+		t.Fatalf("file changed: %q", got)
+	}
+}
+
 func TestMultiEdit_TolerantWhitespacePlumbing(t *testing.T) {
 	dir := t.TempDir()
 	reg := newMultiEditRegistry(t, dir)

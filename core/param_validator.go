@@ -148,7 +148,8 @@ var toolSchemas = map[string]ToolParamSchema{
 		"include":         {ParamString, false},  // glob pattern (alias for file_types)
 		"output_format":   {ParamString, false},  // "text" or "json"
 		"output":          {ParamString, false},  // alias for output_format
-		"max_results":     {ParamNumber, false},  // cap filenames returned (v4.5.26, fix #3)
+		"max_results":     {ParamNumber, false},  // page size (filenames or matching lines)
+		"offset":          {ParamNumber, false},  // 0-based index into the stable result list
 		"no_ignore":       {ParamBoolean, false},
 		"detail":          {ParamString, false},
 	},

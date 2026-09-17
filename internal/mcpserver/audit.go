@@ -133,6 +133,7 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 				engine.RecordMutation()
 			}
 		}
+		engine.RecordMCPCall(time.Since(start), entry.Status, mutating, dryRun)
 
 		// Extract path and summarize args for logging
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {

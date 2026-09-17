@@ -36,7 +36,9 @@ import (
 //
 // v4.6.1 graduated the v4.6.0 cohort: list_allowed_directories, directory_tree,
 // diff_files, apply_patch, native edits/batch, strict match, and e3-v1 retries.
-var experimentalFeatures = map[string]string{}
+var experimentalFeatures = map[string]string{
+	"git:remote": "4.7.1",
+}
 
 // isExperimental reports whether featureKey is currently experimental and
 // the version since which it has been.

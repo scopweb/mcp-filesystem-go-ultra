@@ -265,19 +265,21 @@ func (c *IntelligentCache) updateAccessStats() {
 }
 
 // GetHitRate calculates the overall cache hit rate
-func (c *IntelligentCache) GetHitRate() float64 {
+func (c *IntelligentCache) GetHitMiss() (hits, misses int64) {
 	c.stats.mu.RLock()
 	defer c.stats.mu.RUnlock()
+	hits = c.stats.FileHits + c.stats.DirHits + c.stats.MetaHits
+	misses = c.stats.FileMisses + c.stats.DirMisses + c.stats.MetaMisses
+	return
+}
 
-	totalHits := c.stats.FileHits + c.stats.DirHits + c.stats.MetaHits
-	totalMisses := c.stats.FileMisses + c.stats.DirMisses + c.stats.MetaMisses
-	total := totalHits + totalMisses
-
+func (c *IntelligentCache) GetHitRate() float64 {
+	hits, misses := c.GetHitMiss()
+	total := hits + misses
 	if total == 0 {
 		return 0.0
 	}
-
-	return float64(totalHits) / float64(total)
+	return float64(hits) / float64(total)
 }
 
 // GetMemoryUsage returns current memory usage in bytes (approximate for bigcache)

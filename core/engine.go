@@ -63,6 +63,7 @@ type Config struct {
 	AllowSecrets   bool
 	RootsMode      RootsMode // How MCP client Roots combine with CLI paths (replace|union|ignore)
 	MutationBudget int       // Max applied mutations per process; 0 = off
+	GitRemoteAllow []string  // Allowed push/fetch destinations; empty = any
 }
 
 // UltraFastEngine implements all filesystem operations with maximum performance
@@ -170,6 +171,17 @@ type PerformanceMetrics struct {
 	ListOperations   int64
 	SearchOperations int64
 
+	StartedAt           time.Time
+	MCPCalls            int64
+	MCPErrors           int64
+	MutationsApplied    int64
+	MutationsRejected   int64
+	MutationsSimulated  int64
+	LatencySum          time.Duration
+	LatencyCount        int64
+	lastMCPCalls        int64
+	mcpLatency          latencyRing
+
 	// Telemetry: Track edit operations
 	// Used to detect full-file rewrites vs targeted edits
 	EditOperations      int64   // Total edit operations
@@ -207,7 +219,7 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 	engine := &UltraFastEngine{
 		config:       config,
 		cache:        config.Cache,
-		metrics:      &PerformanceMetrics{},
+		metrics:      &PerformanceMetrics{StartedAt: time.Now()},
 		semaphore:    make(chan struct{}, config.ParallelOps),
 		backupChain:  make(map[string]string),
 		pathLocks:    newPathLockManager(),
@@ -539,8 +551,12 @@ func (e *UltraFastEngine) updateMetrics() {
 	if !e.metrics.LastUpdateTime.IsZero() {
 		duration := now.Sub(e.metrics.LastUpdateTime).Seconds()
 		if duration > 0 {
-			e.metrics.OperationsPerSecond = float64(e.metrics.OperationsTotal) / duration
+			delta := e.metrics.MCPCalls - e.metrics.lastMCPCalls
+			e.metrics.OperationsPerSecond = float64(delta) / duration
+			e.metrics.lastMCPCalls = e.metrics.MCPCalls
 		}
+	} else {
+		e.metrics.lastMCPCalls = e.metrics.MCPCalls
 	}
 
 	// Update cache hit rate
@@ -568,8 +584,7 @@ func (e *UltraFastEngine) releaseOperation(opType string, start time.Time) {
 	// Update metrics
 	e.metrics.mu.Lock()
 	e.metrics.OperationsTotal++
-	duration := time.Since(start)
-	e.metrics.AverageResponseTime = (e.metrics.AverageResponseTime + duration) / 2
+	_ = start
 
 	// Update operation-specific counters
 	switch opType {
@@ -1157,41 +1172,7 @@ func (e *UltraFastEngine) ListDirectoryJSON(ctx context.Context, path string) (s
 // EditFile implements intelligent file editing
 // MOVED to core/edit_operations.go
 
-// GetPerformanceStats returns performance statistics
-func (e *UltraFastEngine) GetPerformanceStats() string {
-	e.metrics.mu.RLock()
-	defer e.metrics.mu.RUnlock()
 
-	if e.config.CompactMode {
-		// Compact format: key metrics only
-		return fmt.Sprintf("ops/s:%.1f hit:%.1f%% mem:%s ops:%d",
-			e.metrics.OperationsPerSecond,
-			e.metrics.CacheHitRate*100,
-			formatSize(e.metrics.MemoryUsage),
-			e.metrics.OperationsTotal)
-	}
-
-	// Verbose format
-	return fmt.Sprintf(`Performance Statistics:
-Operations Total: %d
-Operations/Second: %.2f
-Cache Hit Rate: %.2f%%
-Average Response Time: %v
-Memory Usage: %s
-Read Operations: %d
-Write Operations: %d
-List Operations: %d
-Search Operations: %d`,
-		e.metrics.OperationsTotal,
-		e.metrics.OperationsPerSecond,
-		e.metrics.CacheHitRate*100,
-		e.metrics.AverageResponseTime,
-		formatSize(e.metrics.MemoryUsage),
-		e.metrics.ReadOperations,
-		e.metrics.WriteOperations,
-		e.metrics.ListOperations,
-		e.metrics.SearchOperations)
-}
 
 // AllowedDirsSuffix returns a human-readable suffix listing the effective
 // allowed directories, for inclusion in access-denied error messages. When

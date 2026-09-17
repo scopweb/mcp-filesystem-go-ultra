@@ -67,7 +67,7 @@ help(tool:X) on demand. Do not load the full catalog at startup.`
 // serverVersion is the single source of truth for the version reported by
 // --version, the MCP handshake, the help header and the startup logs.
 // Keep in sync with the top CHANGELOG entry.
-const serverVersion = "4.7.0"
+const serverVersion = "4.7.1"
 
 // BuildCommit and BuildDate are stamped at build time via
 //
@@ -103,6 +103,7 @@ func Run() {
 		allowSecrets     = flag.Bool("allow-secrets", false, "Allow reading secret files (.env, *.pem, keys). Audited.")
 		profileFlag      = flag.String("profile", "ultra", "Tool catalog: ultra (default, all tools) or strict (agent core only)")
 		gitNetwork       = flag.Bool("git-network", false, "Enable git push/fetch (network). Off by default; ignored in profile=strict.")
+		gitRemoteAllow   = flag.String("git-remote-allow", "", "Comma-separated allowed git push/fetch destinations (host, host/org, or repo URL). Empty = any destination. git(action:\"remote\") still works without --git-network. force:true does not bypass.")
 		compactMode      = flag.Bool("compact-mode", false, "Enable compact responses (minimal tokens for Claude Desktop)")
 		maxResponseSize  = flag.String("max-response-size", "10MB", "Maximum response size")
 		maxSearchResults = flag.Int("max-search-results", 1000, "Maximum search results to return")
@@ -252,6 +253,7 @@ func Run() {
 		AllowSecrets:          *allowSecrets,
 		RootsMode:             core.ParseRootsMode(*rootsMode),
 		MutationBudget:        *mutationBudget,
+		GitRemoteAllow:        sanitizeAllowedPaths(strings.Split(*gitRemoteAllow, ",")),
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize engine: %v", err)

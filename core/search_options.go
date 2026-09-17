@@ -2,6 +2,8 @@ package core
 
 import (
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -20,8 +22,22 @@ type SearchOptions struct {
 	ReturnLines    bool
 	NoIgnore       bool
 	MaxResults     int
+	Offset         int
 	OutputFormat   string
 }
+
+// Search pagination (FIABILIDAD-OPERATIVA E3):
+//   Match unit: filename-only = one path; content = one matching line;
+//   count_only is a total, not a page.
+//   max_results is the page size in that unit. offset is 0-based into the
+//   stable list (path, then line, then match_start). Offset rather than a
+//   cursor: WalkDir order plus an explicit sort is stable for an unchanged
+//   tree, and agents already continue with offset-style read_file ranges.
+//   If the tree changes between pages, results may skip or duplicate; restart
+//   at offset 0. hidden_count is filter exclusion, not pending results.
+//   truncated means more matches exist or a byte budget cut the page.
+//   match_count is an exact total only when the walk finished; otherwise it
+//   is the count known so far and must not be treated as complete.
 
 // ParseFileTypeFilters splits a comma-separated file_types or include value
 // into trimmed tokens. Empty input yields nil.
@@ -134,4 +150,49 @@ func FileTypeGlobsForRipgrep(fileTypes []string) []string {
 		globs = append(globs, "*"+strings.ToLower(ft))
 	}
 	return globs
+}
+
+func SortSearchMatches(m []SearchMatch) {
+	sort.SliceStable(m, func(i, j int) bool {
+		fi := strings.ToLower(filepath.ToSlash(m[i].File))
+		fj := strings.ToLower(filepath.ToSlash(m[j].File))
+		if fi != fj {
+			return fi < fj
+		}
+		if m[i].LineNumber != m[j].LineNumber {
+			return m[i].LineNumber < m[j].LineNumber
+		}
+		return m[i].MatchStart < m[j].MatchStart
+	})
+}
+
+func SliceSearchPage(matches []SearchMatch, offset, pageSize int) (page []SearchMatch, truncated bool, next int) {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(matches) {
+		offset = len(matches)
+	}
+	end := len(matches)
+	if pageSize > 0 && offset+pageSize < end {
+		end = offset + pageSize
+		truncated = true
+	}
+	page = matches[offset:end]
+	next = offset + len(page)
+	if !truncated && next < len(matches) {
+		truncated = true
+	}
+	return page, truncated, next
+}
+
+func SearchContinuationHint(offset, pageSize int, reason string) string {
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	hint := "search_files(..., offset:" + strconv.Itoa(offset) + ", max_results:" + strconv.Itoa(pageSize) + ")"
+	if reason != "" {
+		return reason + " Continue with " + hint
+	}
+	return "Continue with " + hint
 }

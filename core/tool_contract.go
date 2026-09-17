@@ -119,7 +119,7 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 	setEnum("edit_file", "diff_format", "auto", "full", "summary", "stat", "none")
 	setEnum("edit_file", "position", "after", "before")
 	setEnum("multi_edit", "diff_format", "auto", "full", "summary", "stat", "none")
-	setEnum("git", "action", "status", "diff", "log", "show", "add", "commit", "push", "fetch", "restore", "branch", "init")
+	setEnum("git", "action", "status", "diff", "log", "show", "add", "commit", "push", "fetch", "restore", "branch", "init", "remote")
 	setEnum("backup", "action", "list", "info", "compare", "cleanup", "restore", "undo_last", "undo_chain", "list_trash", "restore_trash", "purge_trash")
 	setEnum("analyze_operation", "operation", "file", "optimize", "write", "edit", "delete")
 	setEnum("analyze_code", "action", "symbols", "lint", "sec", "impact")
@@ -200,6 +200,7 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 			`git(action:"commit", message:"fix: short description")`,
 			`git(action:"push")`,
 			`git(action:"fetch", prune:true)`,
+			`git(action:"remote")`,
 			`git(action:"restore", paths:["file.txt"], staged:true)`,
 			`git(action:"branch", name:"feature/new", checkout:true)`,
 			`git(action:"branch", name:"old", delete:true)`,
@@ -207,7 +208,7 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 		c.Mutating = func(args map[string]interface{}) bool {
 			a, _ := args["action"].(string)
 			switch a {
-			case "status", "diff", "log", "show", "":
+			case "status", "diff", "log", "show", "remote", "":
 				return false
 			case "branch":
 				name, _ := args["name"].(string)
