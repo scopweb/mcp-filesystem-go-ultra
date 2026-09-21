@@ -1,13 +1,13 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.7.0. 25 tools ultra / 16 strict. First call list_allowed_directories, then directory_tree or help(tool:X). Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=strict --compact-mode --roots-mode=union.
+description: Tool catalog for filesystem-ultra MCP server v4.7.1. 25 tools ultra / 16 strict. First call list_allowed_directories, then directory_tree or help(tool:X). Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=strict --compact-mode --roots-mode=union.
 ---
 
-# Filesystem Ultra v4.7.0 — Tool Discovery
+# Filesystem Ultra v4.7.1 — Tool Discovery
 
 ## Recommended server flags
 
-`--profile=strict --compact-mode --roots-mode=union` (`--readonly` off). `--git-network` only if the agent must `git push`/`fetch`. `--profile=ultra` (default) keeps all 25 tools including `analyze_code`.
+`--profile=strict --compact-mode --roots-mode=union` (`--readonly` off). `--git-network` only if the agent must `git push`/`fetch`. `--git-remote-allow` if network is on and destinations must be constrained. `--profile=ultra` (default) keeps all 25 tools including `analyze_code`.
 
 ## Bind each project to one filesystem tool family
 
@@ -37,12 +37,12 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 | `list_allowed_directories` | First call |
 | `directory_tree` | After roots. Gitignore ON |
 | `list_directory` | Copy exact paths (case) before edits |
-| `search_files` | Gitignore ON (`no_ignore=false`). `truncated` + `hidden_count`. Cap with `max_results` |
+| `search_files` | Gitignore ON (`no_ignore=false`). `max_results` is the page size; continue with `offset`. Structured: `truncated` + `hidden_count` + `continuation`. Do not pair `count_only` with `detail=full` |
 | `get_file_info` | Verify after a host mutation. Batch `paths[]` |
 | `read_file` | Full / range / head / tail / base64 / `paths[]`. Logs: `mode:"tail"` `max_lines:40` |
 | `write_file` | New files or whole-file rewrite. `mode:"append"` skips rewrite-guard |
 | `edit_file` | Targeted edits. Override rewrite-guard with `allow_rewrite:true` (not `force`) |
-| `multi_edit` | Several anchors in one file. Ambiguous `old_text` (>1 match) rejects the batch |
+| `multi_edit` | Several anchors in one file. Ambiguous `old_text` (>1 match) rejects the batch (file unchanged). The error lists each edit (index, `FAILED`/`AMBIGUOUS`); do not treat `Failed: .` as empty |
 | `apply_patch` | One file per call. Happy path: `dry_run` + `expected_hash`. Dest EOL wins. If `PATCH_FAILED`: `read_file` and regenerate the hunk; do not retry the same patch |
 | `diff_files` | Preview before `apply_patch`, or two paths / `against:"backup"` |
 | `create_directory` | `mkdir -p` |
@@ -55,7 +55,7 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 
 `copy_file`, `project_replace`, `batch_operations`, `analyze_operation`, `wsl`, `git`, `minify_js`, `analyze_code`, `server_info`.
 
-- `git` — local only unless `--git-network` (then `push`/`fetch` and `openWorldHint=true`). Path must be inside a repo (or `init`). Branch delete requires `delete:true`.
+- `git` — local only unless `--git-network` (then `push`/`fetch` and `openWorldHint=true`). `git(action:"remote")` is read-only and works without `--git-network`; it shows effective fetch/push URLs (credentials redacted). Push/fetch print that destination, not only `origin`. `--git-remote-allow` matches the effective URL (`host`, `host/org`, or repo); empty = any destination; `force:true` does not bypass. Path must be inside a repo (or `init`). Branch delete requires `delete:true`. Commit `risk` is informational and does not block.
 - `minify_js` — exists in ultra; not in handshake instructions.
 - `analyze_code` — ultra only. For editing: `apply_patch`/`edit_file`. For understanding code: `analyze_code`. Do not use git grep or bash. Actions: `symbols`, `lint`, `sec`, `impact`. Impact is a text search, not a callgraph.
 - Dry-run impact preview → `analyze_operation` (ultra). In strict use `edit_file`/`apply_patch`/`multi_edit` with `dry_run:true`.
@@ -78,12 +78,12 @@ Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `gr
 | `file_types` | `include` | Glob (e.g. `*.go`) |
 | `output_format` | `output` | `"text"` or `"json"`. Omit for auto (ripgrep-style `path:line:content` if ≤5 matches). Legacy `content`/`files_with_matches`/`count` are **not** implemented. |
 
-`include_context:true` forces verbose layout. `output_format:"json"` uses ripgrep when `rg` is on PATH or embedded (`embed_rg`).
+`include_context:true` forces verbose layout. `output_format:"json"` uses ripgrep when `rg` is on PATH or embedded (`embed_rg`). When truncated, call the same search with `offset` from `continuation` — do not reformulate. There is no hidden 10/20 presentation cap.
 
 ## Key behaviors (strict-safe)
 
 - **Modify existing files** → `edit_file` or `apply_patch` (one path). Whole-file rewrite → `write_file`.
-- **Several edits same file** → `multi_edit` (each `old_text` unique in the original file).
+- **Several edits same file** → `multi_edit` (each `old_text` unique in the original file). On atomic rollback, read the per-edit causes; the file was not written.
 - **Dry-run** → `edit_file(dry_run:true)` / `multi_edit(dry_run:true)` / `apply_patch(dry_run:true)`.
 - **OCC** → every successful read/edit returns `content_hash`; pass as `expected_hash` on the next mutation. `--auto-occ` `off`/`warn` (default)/`block` flags *external* changes only.
 - **STALE_READ** (`edit_file` only): non-blocking. Consecutive edits on the same file do not need re-reads.
@@ -124,4 +124,4 @@ Aliases `read_text_file`, `search`, `edit`, `write`, `create_file`, `View`, `Edi
 
 ## project_replace (ultra)
 
-`path`, `find`, `replace` required. `literal` default true. `file_types` e.g. `.php`. `exclude_paths` globs. `preview` / `create_backup` (default true) / `parallel` / `max_files` (default 1000).
+`path`, `find`, `replace` required. `literal` default true. `file_types` e.g. `.php`. `exclude_paths` globs. `preview` / `create_backup` (default true) / `parallel` / `max_files` (default 1000). Compact default is counters only; `detail:"full"` lists each file.

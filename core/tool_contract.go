@@ -110,6 +110,7 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 	setEnum("directory_tree", "detail", "summary", "normal", "full")
 	setEnum("list_directory", "detail", "summary", "normal", "full")
 	setEnum("search_files", "detail", "summary", "normal", "full")
+	setEnum("project_replace", "detail", "summary", "normal", "full")
 	setEnum("help", "detail", "summary", "normal", "full")
 	setEnum("edit_file", "detail", "full")
 	setEnum("apply_patch", "detail", "full")

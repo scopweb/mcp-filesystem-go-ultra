@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### chore(harness): `-suite reliability` scripted gate
+
+`examples/harness/benchmark -suite reliability` runs pagination, multi_edit ambiguous rollback, `project_replace` `detail:full`, and `git remote` against a live server via `cmd/proxy`. Not a real-model eval.
+
+### fix(project_replace): optional file list via `detail`
+
+Compact `project_replace` still returns counters only (`N files | M replacements`). Pass `detail:"full"` to append the per-file list (sorted, cap 200). Verbose `detail:"normal"` still caps at 20 and now points to `detail:"full"` instead of the nonexistent `verbose=true`.
+
+**Verification:** `TestFormatProjectReplace_CompactDefaultOmitsFiles` · `TestFormatProjectReplace_CompactFullListsFilesSorted` · `TestProjectReplace_HandlerCompactFullListsFiles` · `TestE41_RegisteredSchemaSubsetOfContract`
+
 ## [4.7.1] - 2026-09-17
 
 ### fix(reliability): operational recovery

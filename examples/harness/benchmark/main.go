@@ -14,9 +14,16 @@ func main() {
 	server := flag.String("server", "", "Path to filesystem-ultra binary")
 	out := flag.String("out", "sample-report.json", "Output report path")
 	keep := flag.Bool("keep-workdir", false, "Keep the generated workspace")
+	suite := flag.String("suite", "pr0", "pr0 | reliability | all")
 	flag.Parse()
 	if *proxy == "" || *server == "" {
-		fmt.Fprintln(os.Stderr, "Usage: go run . -proxy <mcp-proxy> -server <filesystem-ultra> [-out report.json]")
+		fmt.Fprintln(os.Stderr, "Usage: go run . -proxy <mcp-proxy> -server <filesystem-ultra> [-suite pr0|reliability|all] [-out report.json]")
+		os.Exit(2)
+	}
+	switch *suite {
+	case "pr0", "reliability", "all":
+	default:
+		fmt.Fprintf(os.Stderr, "invalid -suite %q (want pr0|reliability|all)\n", *suite)
 		os.Exit(2)
 	}
 
@@ -27,14 +34,27 @@ func main() {
 	if !*keep {
 		defer os.RemoveAll(workDir)
 	}
-	if err := seedTree(workDir, 2000); err != nil {
-		fail(err)
+	needPr0 := *suite == "pr0" || *suite == "all"
+	needRel := *suite == "reliability" || *suite == "all"
+	if needPr0 {
+		if err := seedTree(workDir, 2000); err != nil {
+			fail(err)
+		}
+	}
+	if needRel {
+		if err := seedReliability(workDir); err != nil {
+			fail(err)
+		}
 	}
 	logDir := filepath.Join(workDir, "proxy-log")
 	if err := os.MkdirAll(logDir, 0700); err != nil {
 		fail(err)
 	}
-	client, err := startRPC(*proxy, logDir, *server, workDir)
+	profile := "strict"
+	if needRel {
+		profile = "ultra"
+	}
+	client, err := startRPC(*proxy, logDir, *server, workDir, profile)
 	if err != nil {
 		fail(err)
 	}
@@ -56,6 +76,7 @@ func main() {
 		slices[name] = [2]int{len(before), len(after)}
 	}
 
+	if needPr0 {
 	run("explore_2k", func() error {
 		if _, err := client.tool("list_allowed_directories", map[string]any{}); err != nil {
 			return err
@@ -114,12 +135,31 @@ func main() {
 		_, err := client.tool("help", map[string]any{})
 		return err
 	})
+	}
+
+	if needRel {
+		run("search_pages", func() error { return scenarioSearchPages(client, workDir) })
+		run("multi_edit_ambiguous", func() error { return scenarioMultiEditAmbiguous(client, workDir) })
+		run("project_replace_files", func() error { return scenarioProjectReplaceFiles(client, workDir) })
+		run("git_remote", func() error { return scenarioGitRemote(client, workDir) })
+	}
 
 	entries, err := loadProxyLog(filepath.Join(logDir, "proxy.jsonl"))
 	if err != nil {
 		fail(err)
 	}
-	report := summarize(entries, slices)
+	var names []string
+	if needPr0 {
+		names = append(names, pr0Scenarios...)
+	}
+	if needRel {
+		names = append(names, reliabilityScenarios...)
+	}
+	decision := ""
+	if needRel && !needPr0 {
+		decision = "reliability gate (scripted): search pagination, multi_edit diagnosis, project_replace detail, git remote"
+	}
+	report := summarize(entries, slices, names, decision)
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		fail(err)
@@ -127,7 +167,7 @@ func main() {
 	if err := os.WriteFile(*out, append(data, '\n'), 0644); err != nil {
 		fail(err)
 	}
-	fmt.Printf("PR-0 report: %s\n", *out)
+	fmt.Printf("%s report: %s\n", *suite, *out)
 	fmt.Println(report.Decision)
 	if *keep {
 		fmt.Printf("Workspace retained: %s\n", workDir)

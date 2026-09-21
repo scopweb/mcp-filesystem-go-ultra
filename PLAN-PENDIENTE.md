@@ -26,7 +26,7 @@ Shipped in v4.7.0. P1 eval with a real model stays P1 of the product. P2 durable
 
 Sigue abierto. La batería `TestE2E_E6_AgentEval` es integración scriptada, no un modelo. The harness pack does not close this.
 
-v4.7 operational reliability (FIABILIDAD-OPERATIVA) shipped engine telemetry that *can* back a real eval (MCP vs internal ops, applied/rejected/simulated, p50/p95). It does not replace running equivalent tasks on a real model.
+v4.7 operational reliability (FIABILIDAD-OPERATIVA) shipped engine telemetry that *can* back a real eval (MCP vs internal ops, applied/rejected/simulated, p50/p95). `examples/harness/benchmark -suite reliability` is a **scripted** wire gate (pagination, multi_edit rollback, project_replace detail, git remote). It does not replace running equivalent tasks on a real model.
 
 - Varios modelos / clientes MCP (Claude Code, Codex, OpenCode)
 - Repositorios representativos, no 40 archivos sintéticos

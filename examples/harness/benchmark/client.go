@@ -16,14 +16,17 @@ type rpcClient struct {
 	id    int
 }
 
-func startRPC(proxy, logDir, server, workDir string) (*rpcClient, error) {
+func startRPC(proxy, logDir, server, workDir, profile string) (*rpcClient, error) {
+	if profile == "" {
+		profile = "strict"
+	}
 	cmd := exec.Command(proxy,
 		"--model", "pr0-baseline",
 		"--log-dir", logDir,
 		"--reap-stale=false",
 		"--",
 		server,
-		"--profile", "strict",
+		"--profile", profile,
 		"--compact-mode",
 		"--roots-mode", "union",
 		workDir,
