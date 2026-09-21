@@ -267,6 +267,7 @@ func checkAutoOCCOn(st *sessionState, path, diskHash string) *FeedbackSignal {
 
 // RecordFailedOldText increments the failure counter for an old_text on a path.
 func RecordFailedOldText(path, oldText string) {
+	path = CanonicalOCCKey(path)
 	globalSession.mu.Lock()
 	defer globalSession.mu.Unlock()
 	if globalSession.failedOldText[path] == nil {
@@ -282,6 +283,7 @@ func RecordFailedOldText(path, oldText string) {
 
 // ResetFailedOldText clears the counter after a successful edit.
 func ResetFailedOldText(path, oldText string) {
+	path = CanonicalOCCKey(path)
 	globalSession.mu.Lock()
 	defer globalSession.mu.Unlock()
 	if globalSession.failedOldText[path] != nil {
@@ -355,7 +357,7 @@ func CheckWriteOp(path string, newContent string, existingSize int64) *FeedbackS
 // explicit expected_hash — cryptographic proof of a prior read — in which
 // case the STALE_READ warning is suppressed entirely.
 func CheckEditOp(path, oldText string, fileSize int64, expectedHashProvided ...bool) *FeedbackSignal {
-	// Stale read: file not read in this session in the last 10 minutes
+	path = CanonicalOCCKey(path)
 	globalSession.mu.Lock()
 	lastRead, hasRead := globalSession.lastRead[path]
 	failCount := 0

@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### fix(stats): compact ops/s is MCP calls / uptime
+
+The compact `ops/s` line used the last 5s ticker window, so a stats call after a burst showed `0.0`. It now uses lifetime MCP-call rate; hit% is live cache, not the ticker snapshot. Verbose still prints the interval rate.
+
+**Verification:** `TestMetrics_CompactOpsPerSecUsesLifetime`
+
+### fix(stale_read): CheckEditOp uses CanonicalOCCKey
+
+`read_file` recorded last-read under a case-folded absolute key; `multi_edit`/`edit_file` looked up the raw path. On Windows that made STALE_READ fire after a real `read_file` in the same session.
+
+**Verification:** `TestCheckEditOp_RecordReadSilencesFirstEdit`
+
 ### chore(harness): `-suite reliability` scripted gate
 
 `examples/harness/benchmark -suite reliability` runs pagination, multi_edit ambiguous rollback, `project_replace` `detail:full`, and `git remote` against a live server via `cmd/proxy`. Not a real-model eval.
