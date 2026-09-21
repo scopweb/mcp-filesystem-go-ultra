@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/mcp/filesystem-ultra/cache"
@@ -16,17 +17,18 @@ import (
 
 // Configuration holds all server configuration
 type Configuration struct {
-	CacheSize        int64    // Cache size in bytes
-	ParallelOps      int      // Max concurrent operations
-	BinaryThreshold  int64    // File size threshold for binary protocol
-	VSCodeAPIEnabled bool     // Enable VSCode API integration when available
-	DebugMode        bool     // Enable debug logging
-	LogLevel         string   // Log level (info, debug, error)
-	AllowedPaths     []string // List of allowed base paths for access control
-	CompactMode      bool     // Enable compact responses (minimal tokens)
-	MaxResponseSize  int64    // Max response size in bytes
-	MaxSearchResults int      // Max search results to return
-	MaxListItems     int      // Max items in directory listings
+	CacheSize        int64         // Cache size in bytes
+	CacheTTL         time.Duration // File content cache life (retention, not coherence)
+	ParallelOps      int           // Max concurrent operations
+	BinaryThreshold  int64         // File size threshold for binary protocol
+	VSCodeAPIEnabled bool          // Enable VSCode API integration when available
+	DebugMode        bool          // Enable debug logging
+	LogLevel         string        // Log level (info, debug, error)
+	AllowedPaths     []string      // List of allowed base paths for access control
+	CompactMode      bool          // Enable compact responses (minimal tokens)
+	MaxResponseSize  int64         // Max response size in bytes
+	MaxSearchResults int           // Max search results to return
+	MaxListItems     int           // Max items in directory listings
 }
 
 // DefaultConfiguration returns optimized defaults based on system
@@ -40,6 +42,7 @@ func DefaultConfiguration() *Configuration {
 
 	return &Configuration{
 		CacheSize:        100 * 1024 * 1024, // 100MB default
+		CacheTTL:         cache.DefaultFileTTL,
 		ParallelOps:      parallelOps,
 		BinaryThreshold:  1024 * 1024, // 1MB threshold
 		VSCodeAPIEnabled: true,
@@ -90,6 +93,7 @@ func Run() {
 	// Parse command line arguments
 	var (
 		cacheSize        = flag.String("cache-size", "100MB", "Memory cache limit (e.g., 50MB, 1GB)")
+		cacheTTL         = flag.String("cache-ttl", "3m", "File content cache life (Go duration, e.g. 3m, 10m). Retention only; freshness is size/mtime. Does not apply to directory listings.")
 		parallelOps      = flag.Int("parallel-ops", config.ParallelOps, "Max concurrent operations")
 		binaryThreshold  = flag.String("binary-threshold", "1MB", "File size threshold for binary protocol")
 		vsCodeAPI        = flag.Bool("vscode-api", true, "Enable VSCode API integration when available")
@@ -103,7 +107,7 @@ func Run() {
 		allowSecrets     = flag.Bool("allow-secrets", false, "Allow reading secret files (.env, *.pem, keys). Audited.")
 		profileFlag      = flag.String("profile", "ultra", "Tool catalog: ultra (default, all tools) or strict (agent core only)")
 		gitNetwork       = flag.Bool("git-network", false, "Enable git push/fetch (network). Off by default; ignored in profile=strict.")
-		gitRemoteAllow   = flag.String("git-remote-allow", "", "Comma-separated allowed git push/fetch destinations (host, host/org, or repo URL). Empty = any destination. git(action:\"remote\") still works without --git-network. force:true does not bypass.")
+		gitRemoteAllow   = flag.String("git-remote-allow", "", "Optional. Comma-separated allowed push/fetch destinations (host, host/org, or repo URL). Empty = no extra lock (any configured remote). Example: github.com,gitlab.com. force:true does not bypass. git(action:\"remote\") works without --git-network.")
 		compactMode      = flag.Bool("compact-mode", false, "Enable compact responses (minimal tokens for Claude Desktop)")
 		maxResponseSize  = flag.String("max-response-size", "10MB", "Maximum response size")
 		maxSearchResults = flag.Int("max-search-results", 1000, "Maximum search results to return")
@@ -154,6 +158,12 @@ func Run() {
 		config.CacheSize = size
 	}
 
+	if ttl, err := cache.ParseFileTTL(*cacheTTL); err != nil {
+		log.Fatalf("Invalid cache TTL: %v", err)
+	} else {
+		config.CacheTTL = ttl
+	}
+
 	// Parse binary threshold
 	if threshold, err := parseSize(*binaryThreshold); err != nil {
 		log.Fatalf("Invalid binary threshold: %v", err)
@@ -201,8 +211,8 @@ func Run() {
 	}
 
 	log.Printf("Starting MCP Filesystem Server Ultra-Fast v%s (commit %s)", serverVersion, BuildCommit)
-	log.Printf("Config: Cache=%s, Parallel=%d, Binary=%s, VSCode=%v, Compact=%v",
-		formatSize(config.CacheSize), config.ParallelOps,
+	log.Printf("Config: Cache=%s ttl=%s, Parallel=%d, Binary=%s, VSCode=%v, Compact=%v",
+		formatSize(config.CacheSize), config.CacheTTL, config.ParallelOps,
 		formatSize(config.BinaryThreshold), config.VSCodeAPIEnabled, config.CompactMode)
 
 	if *benchmark {
@@ -214,7 +224,7 @@ func Run() {
 	ctx := context.Background()
 
 	// Initialize cache system
-	cacheSystem, err := cache.NewIntelligentCache(config.CacheSize)
+	cacheSystem, err := cache.NewIntelligentCacheTTL(config.CacheSize, config.CacheTTL)
 	if err != nil {
 		log.Fatalf("Failed to initialize cache: %v", err)
 	}

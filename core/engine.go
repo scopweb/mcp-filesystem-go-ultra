@@ -226,6 +226,9 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 		occBySession: make(map[string]*sessionState),
 	}
 	engine.mutationBudget.limit = config.MutationBudget
+	if engine.cache != nil {
+		engine.cache.SetPrefetchAuthorizer(engine.authorizePrefetch)
+	}
 
 	// Initialize buffer pool for memory-efficient I/O operations
 	// Using 64KB buffers for optimal performance
@@ -391,6 +394,9 @@ func (e *UltraFastEngine) resolveAllowedPaths() {
 
 // Close gracefully shuts down the engine
 func (e *UltraFastEngine) Close() error {
+	if e.cache != nil {
+		_ = e.cache.Close()
+	}
 	if e.workerPool != nil {
 		e.workerPool.Release()
 	}
@@ -1336,6 +1342,21 @@ func (e *UltraFastEngine) IsAllowedPathRoot(path string) bool {
 // allowed paths — common in real projects (e.g. node_modules, vendored deps).
 // Callers should operate on the returned canonical path so the syscall acts on
 // the verified target rather than re-traversing the (swappable) symlink name.
+func (e *UltraFastEngine) authorizePrefetch(path string) (string, bool) {
+	if path == "" {
+		return "", false
+	}
+	path = NormalizePath(path)
+	if !e.IsPathAllowed(path) {
+		return "", false
+	}
+	resolved, err := e.ResolveAndAuthorize("prefetch", path)
+	if err != nil {
+		return "", false
+	}
+	return resolved, true
+}
+
 func (e *UltraFastEngine) ResolveAndAuthorize(op, path string) (string, error) {
 	resolved, _, err := ResolveSymlinks(path)
 	if err != nil {
