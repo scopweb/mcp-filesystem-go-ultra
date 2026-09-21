@@ -3,6 +3,9 @@ package core
 import (
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/mcp/filesystem-ultra/cache"
 )
 
 func TestSetAllowedPaths_SwapsSandbox(t *testing.T) {
@@ -40,7 +43,7 @@ func TestSetAllowedPaths_FlushesCache(t *testing.T) {
 	defer engine.Close()
 
 	key := filepath.Join(dir1, "cached.txt")
-	engine.cache.SetFile(key, []byte("stale"))
+	engine.cache.SetFile(key, []byte("stale"), cache.FileStatMeta{Valid: true, Size: 5, Mtime: time.Now()})
 	if _, hit := engine.cache.GetFile(key); !hit {
 		t.Fatal("expected cache hit before swap")
 	}
