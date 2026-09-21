@@ -7,6 +7,19 @@ import (
 	"time"
 )
 
+// CacheSnapshot reports demand-only file counters without looking up corpus entries.
+// Resident bytes are tracked lazily, not an eager expiry sweep or process RSS.
+func (e *UltraFastEngine) CacheSnapshot() map[string]any {
+	s := e.cache.GetStats()
+	m := e.cache.Memory()
+	return map[string]any{
+		"file_hits": s.FileHits, "file_misses": s.FileMisses,
+		"disk_loads": s.DiskLoads, "prefetch_fills": s.PrefetchFills,
+		"prefetch_hits": s.PrefetchHits, "prefetch_misses": s.PrefetchMisses,
+		"resident_bytes_tracked": m.ResidentBytes, "capacity_bytes": m.CapacityBytes,
+	}
+}
+
 const latencySampleCap = 256
 
 type latencyRing struct {
