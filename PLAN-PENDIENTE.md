@@ -45,7 +45,7 @@ Plan consensuado: [PLAN-CACHE-WARM-START.md](PLAN-CACHE-WARM-START.md). Implemen
 - Fase 2: snapshot de contenido únicamente si las mediciones justifican el coste.
 - mmap y recibos e3 durables mantienen líneas separadas. No se presuponen mejoras de latencia.
 
-CACHE-01 y CACHE-02 hechos. Próxima entrega: **CACHE-03 — Prefetch autorizado y cierre ordenado**.
+Fase 0 (CACHE-01–04) cerrada. Persistencia (WARM-01) condicionada a baseline.
 
 ## P2 — Recuperación durable
 

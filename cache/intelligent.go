@@ -1,8 +1,8 @@
 package cache
 
 import (
+	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -26,14 +26,21 @@ type IntelligentCache struct {
 
 	// Configuration
 	maxSize       int64
+	fileTTL       time.Duration
 	residentBytes int64
 	fileBytesLen  map[string]int64
 	mu            sync.RWMutex
 
-	// Prefetch tracking for predictive caching
-	accessPattern map[string]int64 // path -> access count
-	prefetchQueue chan string      // paths to prefetch
-	patternMu     sync.RWMutex
+	accessPattern   map[string]int64
+	prefetchQueue   chan string
+	prefetchPending map[string]struct{}
+	patternMu       sync.RWMutex
+	prefetchMu      sync.Mutex
+	authorizer      PrefetchAuthorizer
+	authMu          sync.Mutex
+	prefetchWG      sync.WaitGroup
+	closed          bool
+	closeOnce       sync.Once
 
 	globalGen uint64
 	pathGen   map[string]uint64
@@ -66,46 +73,60 @@ type CacheStats struct {
 	TotalAccesses int64
 }
 
-// NewIntelligentCache creates a new intelligent cache system
+const DefaultFileTTL = 3 * time.Minute
+
 func NewIntelligentCache(maxSize int64) (*IntelligentCache, error) {
-	// Initialize bigcache for file content with optimized settings
-	bigConfig := bigcache.Config{
-		Shards:             256,              // Reduced from 1024 for better overhead balance
-		LifeWindow:         3 * time.Minute,  // Reduced from 10min for faster cache refresh
-		CleanWindow:        1 * time.Minute,  // Balanced with LifeWindow
-		MaxEntriesInWindow: 1000 * 10 * 1024, // Adjust based on expected entries
-		MaxEntrySize:       1024 * 1024,      // 1MB per entry (was 500 bytes!)
-		Verbose:            false,
-		HardMaxCacheSize:   int(maxSize / (1024 * 1024)), // Convert to MB
+	return NewIntelligentCacheTTL(maxSize, DefaultFileTTL)
+}
+
+func NewIntelligentCacheTTL(maxSize int64, fileTTL time.Duration) (*IntelligentCache, error) {
+	if fileTTL < time.Second {
+		return nil, fmt.Errorf("cache file TTL must be at least 1s")
 	}
-	// Approximate max size: MaxEntriesInWindow * MaxEntrySize ≈ maxSize / 2
+	clean := fileTTL / 3
+	if clean < time.Second {
+		clean = time.Second
+	}
+	if clean > time.Minute {
+		clean = time.Minute
+	}
+	bigConfig := bigcache.Config{
+		Shards:             256,
+		LifeWindow:         fileTTL,
+		CleanWindow:        clean,
+		MaxEntriesInWindow: 1000 * 10 * 1024,
+		MaxEntrySize:       1024 * 1024,
+		Verbose:            false,
+		HardMaxCacheSize:   int(maxSize / (1024 * 1024)),
+	}
 	bigConfig.MaxEntriesInWindow = int((maxSize / 2) / int64(bigConfig.MaxEntrySize))
 	fileCache, err := bigcache.NewBigCache(bigConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	// Shorter expiration for faster cache refresh - optimized for Claude Desktop
 	dirCache := gocache.New(3*time.Minute, 1*time.Minute)
 	metaCache := gocache.New(10*time.Minute, 2*time.Minute)
 
 	cache := &IntelligentCache{
-		fileCache:     fileCache,
-		dirCache:      dirCache,
-		metaCache:     metaCache,
-		stats:         &CacheStats{},
-		maxSize:       maxSize,
-		fileBytesLen:  make(map[string]int64),
-		accessPattern: make(map[string]int64),
-		prefetchQueue: make(chan string, 100),
-		pathGen:       make(map[string]uint64),
+		fileCache:       fileCache,
+		dirCache:        dirCache,
+		metaCache:       metaCache,
+		stats:           &CacheStats{},
+		maxSize:         maxSize,
+		fileTTL:         fileTTL,
+		fileBytesLen:    make(map[string]int64),
+		accessPattern:   make(map[string]int64),
+		prefetchQueue:   make(chan string, prefetchQueueSize),
+		prefetchPending: make(map[string]struct{}),
+		pathGen:         make(map[string]uint64),
 	}
 
 	// Set up eviction callbacks (bigcache doesn't have direct OnEvicted, but we can track via stats)
 	dirCache.OnEvicted(cache.onDirEvicted)
 	metaCache.OnEvicted(cache.onMetaEvicted)
 
-	// Start prefetch worker goroutine
+	cache.prefetchWG.Add(1)
 	go cache.prefetchWorker()
 
 	return cache, nil
@@ -242,7 +263,7 @@ func (c *IntelligentCache) SetFileIfGeneration(path string, content []byte, meta
 	}
 	c.fileBytesLen[path] = n
 	c.residentBytes += n
-	c.metaCache.Set(fileStatKey(path), meta, gocache.DefaultExpiration)
+	c.metaCache.Set(fileStatKey(path), meta, c.fileTTL)
 	return true
 }
 
@@ -460,98 +481,10 @@ func (c *IntelligentCache) Flush() {
 	c.pathGen = make(map[string]uint64)
 }
 
-// Close gracefully shuts down the cache
-func (c *IntelligentCache) Close() error {
-	close(c.prefetchQueue) // Signal prefetch worker to stop
-	err := c.fileCache.Close()
-	c.Flush()
-	return err
-}
-
-// prefetchWorker runs in background to prefetch frequently accessed files
-func (c *IntelligentCache) prefetchWorker() {
-	for path := range c.prefetchQueue {
-		if _, hit := c.lookupFresh(path, lookupPrefetch); hit {
-			continue
-		}
-		_ = c.prefetchFile(path)
-	}
-}
-
-func (c *IntelligentCache) prefetchFile(path string) error {
-	content, meta, stable, err := ReadFileStable(path)
-	if err != nil {
-		return err
-	}
-	if !stable {
-		return nil
-	}
-	if c.SetFileIfGeneration(path, content, meta, c.CaptureGeneration(path)) {
-		c.stats.mu.Lock()
-		c.stats.PrefetchFills++
-		c.stats.mu.Unlock()
-	}
-	return nil
-}
-
-// TrackAccess records file access pattern for predictive prefetching
-func (c *IntelligentCache) TrackAccess(path string) {
-	c.patternMu.Lock()
-	c.accessPattern[path]++
-	count := c.accessPattern[path]
-	c.patternMu.Unlock()
-
-	// After 3 accesses, consider prefetching related files
-	if count >= 3 {
-		c.suggestPrefetch(path)
-	}
-}
-
-// suggestPrefetch suggests files to prefetch based on access patterns
-func (c *IntelligentCache) suggestPrefetch(path string) {
-	// Get directory of accessed file
-	dir := filepath.Dir(path)
-
-	// Try to prefetch sibling files (common pattern in code editing)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-
-	// Prefetch up to 3 related files
-	prefetched := 0
-	for _, entry := range entries {
-		if entry.IsDir() || prefetched >= 3 {
-			continue
-		}
-
-		siblingPath := filepath.Join(dir, entry.Name())
-		if siblingPath == path {
-			continue
-		}
-
-		// Check file size - only prefetch small files
-		info, err := entry.Info()
-		if err != nil || info.Size() > 100*1024 {
-			continue
-		}
-
-		// Non-blocking send to prefetch queue
-		select {
-		case c.prefetchQueue <- siblingPath:
-			prefetched++
-		default:
-			// Queue full, skip
-		}
-	}
-}
-
-// GetAccessStats returns access pattern statistics
 func (c *IntelligentCache) GetAccessStats() map[string]int64 {
 	c.patternMu.RLock()
 	defer c.patternMu.RUnlock()
 
-	// Return copy to avoid race conditions
 	stats := make(map[string]int64, len(c.accessPattern))
 	for k, v := range c.accessPattern {
 		stats[k] = v

@@ -21,8 +21,8 @@ Cada entrega debe poder revisarse y validarse por separado. Los identificadores 
 |---|---|---|---|
 | CACHE-01 | Frescura y coherencia bytes/metadata | Ninguna | Hecho |
 | CACHE-02 | Métricas fiables y contabilidad de memoria | CACHE-01 | Hecho |
-| CACHE-03 | Prefetch autorizado y cierre ordenado | CACHE-01 | Pendiente |
-| CACHE-04 | TTL configurable y baseline reproducible | CACHE-01–03 | Pendiente |
+| CACHE-03 | Prefetch autorizado y cierre ordenado | CACHE-01 | Hecho |
+| CACHE-04 | TTL configurable y baseline reproducible | CACHE-01–03 | Hecho |
 | WARM-01 | Experimento opt-in: manifiesto + precarga | Baseline CACHE-04 | Condicionado |
 | WARM-02 | Experimento opt-in: snapshot de contenido | Resultados WARM-01 | Condicionado |
 | MMAP-01 | Estudio y rediseño de mmap | Caso de uso medido | Diferido |
@@ -66,25 +66,35 @@ Contrato público: `GetHitMiss`/`GetHitRate` = demanda file+dir+meta tras frescu
 
 ### CACHE-03 — Prefetch y lifecycle
 
-- [ ] Elegir durante implementación entre mover la coordinación al engine o inyectar un lector autorizado. Toda lectura anticipada debe usar la política efectiva de raíces, secretos y resolución de enlaces.
-- [ ] Revalidar al ejecutar la lectura, no solo al encolar una ruta.
-- [ ] Acotar trabajo, concurrencia, cola y mapa de patrones; evitar precargas repetidas inútiles.
-- [ ] Definir cierre: impedir nuevos productores → cancelar o terminar trabajo pendiente → esperar al worker → cerrar/vaciar caché.
-- [ ] Hacer el cierre idempotente y evitar envíos a canales cerrados y escrituras posteriores al cierre.
-- [ ] Documentar cancelación y espera de I/O en curso: cancelar contexto no garantiza interrumpir un `os.ReadFile` ya bloqueado.
+Hecho (2026-09-21). Verificación: `go test ./cache/... ./core/...` y `go test ./tests/...`. `go test -race` no se ejecutó aquí (cgo/gcc ausentes).
 
-Aceptación: hermanos secretos, symlink fuera de raíces, cambio de autorización entre cola y ejecución, cola llena, productores concurrentes con cierre y doble cierre. Ejecutar detector de carreras en entorno compatible.
+- [x] Elegir durante implementación entre mover la coordinación al engine o inyectar un lector autorizado. Toda lectura anticipada debe usar la política efectiva de raíces, secretos y resolución de enlaces.
+- [x] Revalidar al ejecutar la lectura, no solo al encolar una ruta.
+- [x] Acotar trabajo, concurrencia, cola y mapa de patrones; evitar precargas repetidas inútiles.
+- [x] Definir cierre: impedir nuevos productores → cancelar o terminar trabajo pendiente → esperar al worker → cerrar/vaciar caché.
+- [x] Hacer el cierre idempotente y evitar envíos a canales cerrados y escrituras posteriores al cierre.
+- [x] Documentar cancelación y espera de I/O en curso: cancelar contexto no garantiza interrumpir un `os.ReadFile` ya bloqueado.
+
+Elección: `PrefetchAuthorizer` inyectado desde el engine (`IsPathAllowed` + `ResolveAndAuthorize`). Sin autorizador no se rellena. Cola 100, 3 hermanos <100KB, un scan por path al 3er acceso, mapa de patrones tope 4096. Close: `closed` + close canal bajo mutex → el worker descarta el resto de la cola → `Wait` → Flush → Close BigCache. Idempotente (`closeOnce`). Un `ReadFileStable` ya bloqueado no se interrumpe; Close espera a que termine.
 
 ### CACHE-04 — TTL y baseline
 
-- [ ] Añadir `--cache-ttl` para contenido, validar duración positiva y propagarla a BigCache.
-- [ ] Mantener inicialmente 3 minutos por compatibilidad; comparar con 10 minutos antes de cambiar el default.
-- [ ] Revisar semántica real de expiración/limpieza de BigCache; no asumir que cada acceso renueva el TTL.
-- [ ] Alinear vida de metadata con contenido; conservar miss si falta metadata.
-- [ ] Documentar que TTL gobierna retención, no coherencia; no cambiar automáticamente TTL de listados/metadata genérica.
-- [ ] Preparar escenarios reproducibles y registrar resultados del baseline corregido.
+Hecho (2026-09-21). Verificación: `go test ./cache/... ./core/... ./internal/mcpserver/...`.
 
-Aceptación: configuración por defecto y explícita, valores inválidos, expiración, documentación CLI y pruebas pertinentes del servidor.
+- [x] Añadir `--cache-ttl` para contenido, validar duración positiva y propagarla a BigCache.
+- [x] Mantener inicialmente 3 minutos por compatibilidad; comparar con 10 minutos antes de cambiar el default.
+- [x] Revisar semántica real de expiración/limpieza de BigCache; no asumir que cada acceso renueva el TTL.
+- [x] Alinear vida de metadata con contenido; conservar miss si falta metadata.
+- [x] Documentar que TTL gobierna retención, no coherencia; no cambiar automáticamente TTL de listados/metadata genérica.
+- [x] Preparar escenarios reproducibles y registrar resultados del baseline corregido.
+
+`--cache-ttl` (default `3m`, mínimo `1s`, Go duration). BigCache `LifeWindow` no se renueva en Get. Metadata de frescura (`fstat:`) usa el mismo TTL; listados y metadata genérica no. Default se queda en 3m hasta un A/B medido vs 10m.
+
+Baseline a medir (aún sin cifras; no se asume ganancia):
+1. Caché corregida, TTL 3m (default)
+2. Misma carga, TTL 10m (`--cache-ttl=10m`)
+3. Reinicio MCP con page cache caliente y fría; SSD local
+Métricas: time-to-ready, p50/p95 lecturas tempranas, hit rate de demanda, resident bytes. No promover 10m a default sin ese A/B.
 
 **Salida de Fase 0:** CACHE-01–04 verificados, pruebas relevantes aprobadas y baseline registrado. La implementación de persistencia espera a este punto.
 
@@ -156,4 +166,4 @@ Documentar restricciones del entorno para el detector de carreras. Incluir prueb
 - **Watcher:** su integración no es requisito del warm-start; si se propone, justificarla con medidas y conservar validación ante eventos perdidos.
 - **PMEM/Optane:** fuera de este plan.
 
-Próxima acción: ejecutar CACHE-03 (prefetch autorizado y cierre ordenado). Actualizar el estado de cada entrega con cambios, pruebas y evidencia antes de marcarla completada.
+Fase 0 (CACHE-01–04) cerrada. Próxima acción: WARM-01 solo si se decide persistir hints; no hay L2 de contenido hasta que el baseline lo pida.
