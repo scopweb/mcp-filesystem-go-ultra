@@ -1,7 +1,7 @@
 # Plan de ataque — Caché fiable y warm-start medido
 
 Fecha: 2026-09-21
-Estado: diseño consensuado; implementación pendiente.
+Estado: CACHE-01–04 implementados; baseline local real completado el 2026-09-21. Persistencia condicionada a evidencia adicional.
 
 ## Objetivo y decisión
 
@@ -79,7 +79,7 @@ Elección: `PrefetchAuthorizer` inyectado desde el engine (`IsPathAllowed` + `Re
 
 ### CACHE-04 — TTL y baseline
 
-Hecho (2026-09-21). Verificación: `go test ./cache/... ./core/... ./internal/mcpserver/...`.
+Hecho (2026-09-21), ahora con ejecución real de `-suite cache`. El cierre anterior era incorrecto: había TTL configurable y tests, pero no baseline con cifras. Ver [informe reproducible](examples/harness/benchmark/cache-baseline-20260921.md).
 
 - [x] Añadir `--cache-ttl` para contenido, validar duración positiva y propagarla a BigCache.
 - [x] Mantener inicialmente 3 minutos por compatibilidad; comparar con 10 minutos antes de cambiar el default.
@@ -90,11 +90,9 @@ Hecho (2026-09-21). Verificación: `go test ./cache/... ./core/... ./internal/mc
 
 `--cache-ttl` (default `3m`, mínimo `1s`, Go duration). BigCache `LifeWindow` no se renueva en Get. Metadata de frescura (`fstat:`) usa el mismo TTL; listados y metadata genérica no. Default se queda en 3m hasta un A/B medido vs 10m.
 
-Baseline a medir (aún sin cifras; no se asume ganancia):
-1. Caché corregida, TTL 3m (default)
-2. Misma carga, TTL 10m (`--cache-ttl=10m`)
-3. Reinicio MCP con page cache caliente y fría; SSD local
-Métricas: time-to-ready, p50/p95 lecturas tempranas, hit rate de demanda, resident bytes. No promover 10m a default sin ese A/B.
+Baseline ejecutado: 3 repeticiones por TTL, orden 3m/10m alternado, 24 archivos idénticos (1.038.336 bytes), 576 lecturas verificadas y 0 errores. Edad real acotada entre 190,728 y 191,416 segundos desde inserciones iniciales; prefetch medido = 0. p50/p95 MCP agrupados en relectura envejecida: 3m = 4,326/8,065 ms (0 hits, 72 misses), 10m = 4,194/11,303 ms (72 hits, 0 misses). Reinicio: 3m = 2,201/3,587 ms; 10m = 2,142/3,397 ms; 72 misses cada uno. Contadores por proceso y muestras completas en `C:\temp\cache-baseline-20260921\cache-report.json`.
+
+No se purgó caché del SO: incluso el escenario inicial sigue a la creación del corpus. La caché del SO se deja caliente, sin medir directamente su residencia. No se ejecutó escenario SO frío. La dispersión y el p95 no justifican cambiar el default ni adoptar persistencia. `resident_bytes_tracked` es contabilidad perezosa, no RSS ni prueba de que una entrada siga viva.
 
 **Salida de Fase 0:** CACHE-01–04 verificados, pruebas relevantes aprobadas y baseline registrado. La implementación de persistencia espera a este punto.
 
@@ -157,7 +155,7 @@ go test -race ./cache/... ./core/... ./internal/mcpserver/...
 go build ./cmd/filesystem-ultra
 ```
 
-Documentar restricciones del entorno para el detector de carreras. Incluir pruebas de regresión relevantes en cada entrega y verificar los contratos existentes si se modifican métricas expuestas. Estas comprobaciones están pendientes; este documento no acredita su ejecución.
+Documentar restricciones del entorno para el detector de carreras. Incluir pruebas de regresión relevantes en cada entrega y verificar los contratos existentes si se modifican métricas expuestas. En esta ejecución: `go test ./...` y builds de servidor/proxy/runner aprobados; suites wire `all` aprobadas. `go vet` de paquetes modificados aprobado; `go vet ./...` falla por cuatro copias de mutex preexistentes en `cache/accounting_test.go`. `go test -race ./cmd/proxy ./internal/benchclock` no pudo ejecutarse: cgo deshabilitado.
 
 ## Líneas separadas y cierre
 
@@ -166,4 +164,4 @@ Documentar restricciones del entorno para el detector de carreras. Incluir prueb
 - **Watcher:** su integración no es requisito del warm-start; si se propone, justificarla con medidas y conservar validación ante eventos perdidos.
 - **PMEM/Optane:** fuera de este plan.
 
-Fase 0 (CACHE-01–04) cerrada. Próxima acción: WARM-01 solo si se decide persistir hints; no hay L2 de contenido hasta que el baseline lo pida.
+Fase 0 (CACHE-01–04) cerrada para este baseline sintético local, ahora sustentada por cifras. Quedan fuera la evaluación en red, SO frío, otros sistemas y modelos reales. WARM-01 sigue condicionado: estos resultados no acreditan mejora consistente de latencia ni justifican L2.

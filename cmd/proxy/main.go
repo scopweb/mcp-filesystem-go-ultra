@@ -15,6 +15,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/mcp/filesystem-ultra/internal/benchclock"
 )
 
 type jsonRPCMessage struct {
@@ -49,6 +51,7 @@ type ProxyLogEntry struct {
 	TokensIn   int64     `json:"tokens_in"`
 	TokensOut  int64     `json:"tokens_out"`
 	DurationMs int64     `json:"duration_ms"`
+	DurationNs int64     `json:"duration_ns"`
 	Status     string    `json:"status"`
 	Error      string    `json:"error,omitempty"`
 	RequestID  string    `json:"request_id,omitempty"`
@@ -56,7 +59,7 @@ type ProxyLogEntry struct {
 
 type pendingCall struct {
 	entry ProxyLogEntry
-	start time.Time
+	start int64
 	rawID json.RawMessage
 	timer *time.Timer
 }
@@ -160,7 +163,7 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 		}
 		mu.Unlock()
 		for _, pc := range left {
-			pc.entry.DurationMs = time.Since(pc.start).Milliseconds()
+			pc.entry.setDuration(benchclock.Since(pc.start))
 			pc.entry.Status = status
 			pc.entry.Error = msg
 			logger.Log(pc.entry)
@@ -181,7 +184,7 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 		}
 		msg := fmt.Sprintf("proxy: %s timed out after %s (child did not respond)", pc.entry.Tool, cfg.callTimeout)
 		log.Printf("mcp-proxy: %s", msg)
-		pc.entry.DurationMs = time.Since(pc.start).Milliseconds()
+		pc.entry.setDuration(benchclock.Since(pc.start))
 		pc.entry.Status = "timeout"
 		pc.entry.Error = msg
 		logger.Log(pc.entry)
@@ -213,21 +216,10 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 			}
 
 			line := scanner.Bytes()
-			if _, err := childStdin.Write(line); err != nil {
-				log.Printf("mcp-proxy: child stdin write: %v", err)
-				shut()
-				return
-			}
-			if _, err := childStdin.Write([]byte("\n")); err != nil {
-				log.Printf("mcp-proxy: child stdin write: %v", err)
-				shut()
-				return
-			}
 
 			var msg jsonRPCMessage
-			if err := json.Unmarshal(line, &msg); err != nil {
-				continue
-			}
+			// Invalid JSON still passes through to the server for protocol errors.
+			_ = json.Unmarshal(line, &msg)
 
 			switch msg.Method {
 			case "initialize":
@@ -266,15 +258,21 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 						entry.Path = p
 					}
 
-					pc := &pendingCall{entry: entry, start: time.Now(), rawID: append(json.RawMessage(nil), msg.ID...)}
+					pc := &pendingCall{entry: entry, start: benchclock.Now(), rawID: append(json.RawMessage(nil), msg.ID...)}
 					mu.Lock()
 					pending[reqID] = pc
-					mu.Unlock()
 					if cfg.callTimeout > 0 {
 						id := reqID
 						pc.timer = time.AfterFunc(cfg.callTimeout, func() { onCallTimeout(id) })
 					}
+					mu.Unlock()
 				}
+			}
+			// Register before forwarding so a fast child cannot outrun pending.
+			if _, err := childStdin.Write(append(append([]byte(nil), line...), '\n')); err != nil {
+				log.Printf("mcp-proxy: child stdin write: %v", err)
+				shut()
+				return
 			}
 		}
 		if err := scanner.Err(); err != nil {
@@ -339,9 +337,8 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 			}
 			mu.Unlock()
 
-			writeClient(line)
 			if ok {
-				pc.entry.DurationMs = time.Since(pc.start).Milliseconds()
+				pc.entry.setDuration(benchclock.Since(pc.start))
 				pc.entry.BytesOut = int64(len(line))
 				pc.entry.TokensOut = int64(len(line)) / 4
 
@@ -374,6 +371,7 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 
 				logger.Log(pc.entry)
 			}
+			writeClient(line)
 		} else {
 			writeClient(line)
 		}
@@ -392,6 +390,11 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 	}
 	_ = cmd.Wait()
 	return 0
+}
+
+func (e *ProxyLogEntry) setDuration(d time.Duration) {
+	e.DurationNs = d.Nanoseconds()
+	e.DurationMs = d.Milliseconds()
 }
 
 func toolErrorReply(rawID json.RawMessage, msg string) []byte {

@@ -43,7 +43,7 @@ Everything after `--` is the target MCP server command.
 
 ## Log format (`proxy.jsonl`)
 
-One JSON line per call: `ts`, `model`, `client`, `tool`, `path`, `bytes_in/out`, `tokens_in/out` (≈ bytes/4), `duration_ms`, `status`, `request_id`.
+One JSON line per call: `ts`, `model`, `client`, `tool`, `path`, `bytes_in/out`, `tokens_in/out` (≈ bytes/4), `duration_ms`, additive `duration_ns`, `status`, `request_id`. Windows timings use QPC; other platforms use Go's monotonic clock. `duration_ms` remains available for existing consumers.
 
 Rotates at 10 MB, keeps last 3.
 
@@ -66,4 +66,4 @@ On Windows the child is assigned to a Job Object (`KILL_ON_JOB_CLOSE`) so it die
 
 - `model` comes from the `--model` flag (MCP protocol doesn't transmit it).
 - `client` is auto-detected from the `initialize` handshake (e.g. `Claude Desktop/0.9.2`).
-- Zero latency impact — lines are forwarded before logging.
+- Calls are registered before forwarding to avoid losing fast replies. Successful responses are logged before client forwarding, so a received reply has a corresponding log entry. `duration_ns` ends before response logging/forwarding; end-to-end runner latency includes that overhead. No zero-overhead claim.

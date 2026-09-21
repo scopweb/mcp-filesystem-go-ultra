@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -14,16 +15,32 @@ func main() {
 	server := flag.String("server", "", "Path to filesystem-ultra binary")
 	out := flag.String("out", "sample-report.json", "Output report path")
 	keep := flag.Bool("keep-workdir", false, "Keep the generated workspace")
-	suite := flag.String("suite", "pr0", "pr0 | reliability | all")
+	suite := flag.String("suite", "pr0", "pr0 | reliability | all | cache")
+	cacheDir := flag.String("cache-dir", "", "Retained cache experiment directory (required for cache)")
+	cacheWait := flag.Duration("cache-wait", 190*time.Second, "Cache age wait: strictly >3m and <10m")
+	cacheReps := flag.Int("cache-repetitions", 3, "Repetitions per TTL")
+	cacheSummary := flag.String("cache-summary", "", "Summarize an existing complete cache report without executing MCP")
 	flag.Parse()
+	if *cacheSummary != "" {
+		if err := writeCacheSummary(*cacheSummary, *out); err != nil {
+			fail(err)
+		}
+		return
+	}
 	if *proxy == "" || *server == "" {
-		fmt.Fprintln(os.Stderr, "Usage: go run . -proxy <mcp-proxy> -server <filesystem-ultra> [-suite pr0|reliability|all] [-out report.json]")
+		fmt.Fprintln(os.Stderr, "Usage: go run . -proxy <mcp-proxy> -server <filesystem-ultra> [-suite pr0|reliability|all|cache] [-out report.json]")
 		os.Exit(2)
+	}
+	if *suite == "cache" {
+		if err := runCacheBaseline(*proxy, *server, *cacheDir, *out, *cacheWait, *cacheReps); err != nil {
+			fail(err)
+		}
+		return
 	}
 	switch *suite {
 	case "pr0", "reliability", "all":
 	default:
-		fmt.Fprintf(os.Stderr, "invalid -suite %q (want pr0|reliability|all)\n", *suite)
+		fmt.Fprintf(os.Stderr, "invalid -suite %q (want pr0|reliability|all|cache)\n", *suite)
 		os.Exit(2)
 	}
 
@@ -77,64 +94,64 @@ func main() {
 	}
 
 	if needPr0 {
-	run("explore_2k", func() error {
-		if _, err := client.tool("list_allowed_directories", map[string]any{}); err != nil {
+		run("explore_2k", func() error {
+			if _, err := client.tool("list_allowed_directories", map[string]any{}); err != nil {
+				return err
+			}
+			if _, err := client.tool("directory_tree", map[string]any{"path": workDir, "max_depth": 2, "max_nodes": 500}); err != nil {
+				return err
+			}
+			_, err := client.tool("search_files", map[string]any{"path": workDir, "pattern": "needle", "include_content": true, "file_types": ".go", "max_results": 20})
 			return err
-		}
-		if _, err := client.tool("directory_tree", map[string]any{"path": workDir, "max_depth": 2, "max_nodes": 500}); err != nil {
-			return err
-		}
-		_, err := client.tool("search_files", map[string]any{"path": workDir, "pattern": "needle", "include_content": true, "file_types": ".go", "max_results": 20})
-		return err
-	})
+		})
 
-	occPath := filepath.Join(workDir, "occ.txt")
-	run("occ_clash", func() error {
-		if _, err := client.tool("write_file", map[string]any{"path": occPath, "content": "original\n"}); err != nil {
-			return err
-		}
-		read, err := client.tool("read_file", map[string]any{"path": occPath})
-		if err != nil {
-			return err
-		}
-		hash, _ := structured(read)["content_hash"].(string)
-		if hash == "" {
-			return fmt.Errorf("read_file returned no content_hash")
-		}
-		if err := os.WriteFile(occPath, []byte("external change\n"), 0600); err != nil {
-			return err
-		}
-		res, err := client.tool("edit_file", map[string]any{"path": occPath, "old_text": "original", "new_text": "agent", "expected_hash": hash})
-		if err != nil {
-			return err
-		}
-		if !isError(res) || !strings.Contains(strings.ToLower(resultText(res)), "stale edit") {
-			return fmt.Errorf("expected stale OCC edit, got %q", resultText(res))
-		}
-		return nil
-	})
+		occPath := filepath.Join(workDir, "occ.txt")
+		run("occ_clash", func() error {
+			if _, err := client.tool("write_file", map[string]any{"path": occPath, "content": "original\n"}); err != nil {
+				return err
+			}
+			read, err := client.tool("read_file", map[string]any{"path": occPath})
+			if err != nil {
+				return err
+			}
+			hash, _ := structured(read)["content_hash"].(string)
+			if hash == "" {
+				return fmt.Errorf("read_file returned no content_hash")
+			}
+			if err := os.WriteFile(occPath, []byte("external change\n"), 0600); err != nil {
+				return err
+			}
+			res, err := client.tool("edit_file", map[string]any{"path": occPath, "old_text": "original", "new_text": "agent", "expected_hash": hash})
+			if err != nil {
+				return err
+			}
+			if !isError(res) || !strings.Contains(strings.ToLower(resultText(res)), "stale edit") {
+				return fmt.Errorf("expected stale OCC edit, got %q", resultText(res))
+			}
+			return nil
+		})
 
-	patchPath := filepath.Join(workDir, "patch.txt")
-	if err := os.WriteFile(patchPath, []byte("actual context\n"), 0600); err != nil {
-		fail(err)
-	}
-	run("patch_fail", func() error {
-		patch := "--- a/patch.txt\n+++ b/patch.txt\n@@ -1 +1 @@\n-wrong context\n+patched\n"
-		res, err := client.tool("apply_patch", map[string]any{"path": patchPath, "patch": patch})
-		if err != nil {
-			return err
+		patchPath := filepath.Join(workDir, "patch.txt")
+		if err := os.WriteFile(patchPath, []byte("actual context\n"), 0600); err != nil {
+			fail(err)
 		}
-		text := resultText(res)
-		if !isError(res) || (!strings.Contains(text, "PATCH_FAILED") && !strings.Contains(text, "PATCH_APPLY_FAILED")) {
-			return fmt.Errorf("expected PATCH_FAILED, got %q", text)
-		}
-		return nil
-	})
+		run("patch_fail", func() error {
+			patch := "--- a/patch.txt\n+++ b/patch.txt\n@@ -1 +1 @@\n-wrong context\n+patched\n"
+			res, err := client.tool("apply_patch", map[string]any{"path": patchPath, "patch": patch})
+			if err != nil {
+				return err
+			}
+			text := resultText(res)
+			if !isError(res) || (!strings.Contains(text, "PATCH_FAILED") && !strings.Contains(text, "PATCH_APPLY_FAILED")) {
+				return fmt.Errorf("expected PATCH_FAILED, got %q", text)
+			}
+			return nil
+		})
 
-	run("help_catalog", func() error {
-		_, err := client.tool("help", map[string]any{})
-		return err
-	})
+		run("help_catalog", func() error {
+			_, err := client.tool("help", map[string]any{})
+			return err
+		})
 	}
 
 	if needRel {

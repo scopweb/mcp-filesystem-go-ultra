@@ -16,11 +16,11 @@ type rpcClient struct {
 	id    int
 }
 
-func startRPC(proxy, logDir, server, workDir, profile string) (*rpcClient, error) {
+func startRPC(proxy, logDir, server, workDir, profile string, extraArgs ...string) (*rpcClient, error) {
 	if profile == "" {
 		profile = "strict"
 	}
-	cmd := exec.Command(proxy,
+	args := []string{
 		"--model", "pr0-baseline",
 		"--log-dir", logDir,
 		"--reap-stale=false",
@@ -29,8 +29,10 @@ func startRPC(proxy, logDir, server, workDir, profile string) (*rpcClient, error
 		"--profile", profile,
 		"--compact-mode",
 		"--roots-mode", "union",
-		workDir,
-	)
+	}
+	args = append(args, extraArgs...)
+	args = append(args, workDir)
+	cmd := exec.Command(proxy, args...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -76,8 +78,15 @@ func startRPC(proxy, logDir, server, workDir, profile string) (*rpcClient, error
 func (c *rpcClient) close() {
 	_ = c.stdin.Close()
 	if c.cmd != nil && c.cmd.Process != nil {
-		_ = c.cmd.Process.Kill()
-		_, _ = c.cmd.Process.Wait()
+		done := make(chan error, 1)
+		go func() { done <- c.cmd.Wait() }()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			_ = c.cmd.Process.Kill()
+			<-done
+		}
+		c.cmd = nil
 	}
 }
 

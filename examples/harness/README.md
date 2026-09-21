@@ -16,7 +16,7 @@ One MCP instance per workspace:
 | `--roots-mode=union` | Client Roots **add** to the CLI allowlist. Default `replace` wipes CLI paths (OpenCode does this). |
 | `--compact-mode` | Short responses (hashes, UNDO ids). |
 
-`--readonly` off unless the role is read-only. `--git-network` only if the agent must `git push`/`fetch`.
+`--readonly` off unless the role is read-only. `--git-network` only if the agent must `git push`/`fetch`. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`.
 
 OpenCode: set MCP `timeout` **≥ 30000**. Default 5s is too short for `tools/list`.
 
@@ -36,6 +36,10 @@ Never mix native Read/Edit with ultra `read_file`/`edit_file` in one subagent.
 ## Codex vs ultra `apply_patch`
 
 Codex `apply_patch` is `*** Begin Patch` / `*** Update File`. Ultra `apply_patch` is a **unified diff**, one file per call (`dry_run` + `expected_hash`). Do **not** feed Codex `*** Begin Patch` into ultra. Ultra is for Claude Code, OpenCode, and Claude Desktop. This pack does not ship a Begin-Patch adapter.
+
+## Measured cache baseline
+
+[benchmark/](benchmark/README.md) provides `-suite cache`: real 3m/10m TTLs, immediate/aged reads and MCP restart behind the proxy, with retained JSON and demand-cache counters. See the [2026-09-21 results](benchmark/cache-baseline-20260921.md) (576 verified reads; no consistent latency win for 10m). This is a scripted synthetic benchmark; real-model evaluation remains open.
 
 ## Handoff parent → child
 

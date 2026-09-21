@@ -14,6 +14,10 @@ type proxyEntry struct {
 	TokensIn   int64  `json:"tokens_in"`
 	TokensOut  int64  `json:"tokens_out"`
 	DurationMs int64  `json:"duration_ms"`
+	DurationNs int64  `json:"duration_ns"`
+	RequestID  string `json:"request_id"`
+	BytesIn    int64  `json:"bytes_in"`
+	BytesOut   int64  `json:"bytes_out"`
 	Status     string `json:"status"`
 	Error      string `json:"error,omitempty"`
 }

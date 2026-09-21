@@ -395,7 +395,7 @@ func registerPlatformTools(reg *toolRegistry) {
 			}
 
 			buildLine := fmt.Sprintf("build:%s (%s)\n", BuildCommit, BuildDate)
-			return mcp.NewToolResultText(buildLine + stats + telemetry + backupInfo), nil
+			return mcp.NewToolResultStructured(map[string]any{"cache": engine.CacheSnapshot()}, buildLine+stats+telemetry+backupInfo), nil
 
 		case "artifact":
 			subAction := "info"

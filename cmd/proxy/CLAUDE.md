@@ -116,7 +116,8 @@ Tokens are approximated as `bytes / 4` — not exact, but good enough for relati
 | `bytes_out` | int | Response line size |
 | `tokens_in` | int | Estimated: `bytes_in / 4` |
 | `tokens_out` | int | Estimated: `bytes_out / 4` |
-| `duration_ms` | int | Round-trip time (request → response) |
+| `duration_ms` | int | Request forwarding → response, truncated ms (compatibility) |
+| `duration_ns` | int | Same duration, high-resolution ns; excludes response log/forward overhead |
 | `status` | string | `"ok"` or `"error"` |
 | `error` | string | Error message (only if status is error) |
 | `request_id` | string | JSON-RPC request ID |
@@ -142,7 +143,7 @@ The dashboard's **Proxy / Tokens** page reads `proxy.jsonl` and shows:
 ## Key Implementation Details
 
 - **10 MB scanner buffer**: Both stdin and stdout scanners use 10 MB buffers to handle large JSON-RPC messages (e.g., `read_file` responses with big content).
-- **Zero latency impact on success**: Lines are forwarded immediately before parsing. Logging happens after forwarding.
+- **Timing**: register calls before forwarding; log responses before client forwarding. `duration_ns` uses QPC on Windows / monotonic time elsewhere and stops before response log/forward overhead. `duration_ms` is retained. Runner end-to-end latency includes logging/forwarding.
 - **Per-call timeout**: `--call-timeout` (default 60s) writes an MCP `isError` and swallows a late child reply. No pooling and no per-tool routing.
 - **Stale reap**: on start, terminate other hashes of the same logical server and same-hash orphans (parent dead). Living same-hash children of another proxy are kept (two clients).
 - **Job Object (Windows)**: `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` so the child cannot outlive the proxy.

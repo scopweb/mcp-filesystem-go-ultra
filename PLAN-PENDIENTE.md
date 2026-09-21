@@ -38,14 +38,14 @@ v4.7 operational reliability (FIABILIDAD-OPERATIVA) shipped engine telemetry tha
 
 ## Plan de ataque — Caché fiable y warm-start
 
-Plan consensuado: [PLAN-CACHE-WARM-START.md](PLAN-CACHE-WARM-START.md). Implementación pendiente.
+Plan: [PLAN-CACHE-WARM-START.md](PLAN-CACHE-WARM-START.md). CACHE-01–04 implementados y baseline local real ejecutado; [cifras y límites](examples/harness/benchmark/cache-baseline-20260921.md).
 
 - Fase 0: frescura bytes/metadata, métricas fiables, prefetch autorizado, cierre ordenado y TTL configurable con baseline.
 - Fase 1: experimento opt-in de manifiesto + precarga desde originales.
 - Fase 2: snapshot de contenido únicamente si las mediciones justifican el coste.
 - mmap y recibos e3 durables mantienen líneas separadas. No se presuponen mejoras de latencia.
 
-Fase 0 (CACHE-01–04) cerrada. Persistencia (WARM-01) condicionada a baseline.
+Corrección del cierre anterior: faltaba el baseline con cifras. Ahora completado (2026-09-21): 3 repeticiones por TTL, 576 lecturas, 0 errores; envejecido >3m: 3m = 72 misses, 10m = 72 hits. p50/p95 = 4,326/8,065 ms frente a 4,194/11,303 ms, sin ventaja consistente de latencia. Default 3m mantenido. Persistencia (WARM-01) sigue condicionada a evidencia adicional; no se midieron SO frío, red ni agentes reales.
 
 ## P2 — Recuperación durable
 
