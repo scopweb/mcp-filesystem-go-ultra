@@ -247,7 +247,7 @@ func TestProjectReplaceParams(t *testing.T) {
 		"literal": true, "case_sensitive": true,
 		"file_types": ".go", "preview": true,
 		"create_backup": true, "parallel": true,
-		"max_files": 100.0, "force": true,
+		"max_files": 100.0, "force": true, "detail": "full",
 	}
 	errs := core.ValidateToolParams("project_replace", params)
 	if len(errs) > 0 {

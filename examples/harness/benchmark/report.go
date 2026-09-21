@@ -69,9 +69,11 @@ func loadProxyLog(path string) ([]proxyEntry, error) {
 	return out, sc.Err()
 }
 
-func summarize(entries []proxyEntry, slices map[string][2]int) report {
+func summarize(entries []proxyEntry, slices map[string][2]int, names []string, decision string) report {
 	var rows []scenarioRow
-	names := []string{"explore_2k", "occ_clash", "patch_fail", "help_catalog"}
+	if len(names) == 0 {
+		names = []string{"explore_2k", "occ_clash", "patch_fail", "help_catalog"}
+	}
 	allTools := map[string]*toolRow{}
 	for _, name := range names {
 		rng, ok := slices[name]
@@ -114,10 +116,12 @@ func summarize(entries []proxyEntry, slices map[string][2]int) report {
 			expensive = append(expensive, tool.Tool)
 		}
 	}
-	decision := "PR-4 detail targets (highest tokens_out among eligible tools): " + strings.Join(expensive, ", ")
+	if decision == "" {
+		decision = "PR-4 detail targets (highest tokens_out among eligible tools): " + strings.Join(expensive, ", ")
+	}
 	return report{
 		Generated: time.Now().UTC().Format(time.RFC3339),
-		Note:      "paths redacted; tokens = proxy bytes/4 estimates; retries always 0 (harness does not replay)",
+		Note:      "paths redacted; tokens = proxy bytes/4 estimates; retries always 0 (harness does not replay); scripted MCP is not a real-model eval",
 		Scenarios: rows,
 		ByTool:    byTool,
 		Expensive: expensive,

@@ -345,6 +345,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"parallel":       {ParamBoolean, false},
 		"max_files":      {ParamNumber, false},
 		"force":          {ParamBoolean, false},
+		"detail":         {ParamString, false},
 	},
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -605,6 +606,7 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithBoolean("parallel", mcp.Description("Process files in parallel (default: true)")),
 		mcp.WithNumber("max_files", mcp.Description("Maximum files to process (safety cap, default: 1000)")),
 		mcp.WithBoolean("force", mcp.Description("Required to APPLY a HIGH/CRITICAL-risk batch (default: false). Without it, a HIGH/CRITICAL call is a pure preview: nothing is written and the result is marked BLOCKED.")),
+		mcp.WithString("detail", mcp.Description("summary|normal|full. summary/normal compact: counters only. full: include the per-file list. Verbose normal caps at 20 files; full lists all (cap 200)."), mcp.Enum("summary", "normal", "full")),
 	)
 	reg.addTool(projectReplaceTool, auditWrap(engine, "project_replace", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -655,6 +657,7 @@ func registerBatchTools(reg *toolRegistry) {
 		if f, ok := args["force"].(bool); ok {
 			force = f
 		}
+		detail := parseDetailArg(args)
 
 		// Parse include/exclude paths
 		var includePaths, excludePaths []string
@@ -676,64 +679,7 @@ func registerBatchTools(reg *toolRegistry) {
 		// with a trailing "Use force=true to proceed" read as if the batch had
 		// been refused when it had in fact already been applied — re-running
 		// with force=true then double-applied the replacement.
-		if engine.IsCompactMode() {
-			status := "APPLIED"
-			switch {
-			case result.Blocked:
-				status = "BLOCKED (no changes written)"
-			case result.DryRun:
-				status = "PREVIEW (no changes written)"
-			}
-			msg := fmt.Sprintf("%s: %s | find:'%s' | %d files | %d replacements", status, path, find, result.FilesChanged, result.TotalReplaced)
-			if result.BackupID != "" {
-				shortID := result.BackupID
-				if len(shortID) > 12 {
-					shortID = shortID[:12]
-				}
-				msg += fmt.Sprintf(" | UNDO:%s", shortID)
-			}
-			if result.RiskWarning != "" {
-				msg += " | " + strings.TrimPrefix(result.RiskWarning, "⚠️ ")
-			}
-			return mcp.NewToolResultText(msg), nil
-		}
-
-		// Verbose format
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("project_replace: '%s' → '%s'\n", find, replace))
-		sb.WriteString(fmt.Sprintf("Path: %s\n", path))
-		switch {
-		case result.Blocked:
-			sb.WriteString("Status: BLOCKED (risk gate) — no changes written; re-run with force=true to apply\n")
-		case result.DryRun:
-			sb.WriteString("Status: PREVIEW — no changes written\n")
-		default:
-			sb.WriteString("Status: APPLIED — changes written to disk\n")
-		}
-		sb.WriteString(fmt.Sprintf("Files changed: %d\n", result.FilesChanged))
-		sb.WriteString(fmt.Sprintf("Total replacements: %d\n", result.TotalReplaced))
-		if result.BackupID != "" {
-			sb.WriteString(fmt.Sprintf("✓ Backup/UNDO: %s\n", result.BackupID))
-		}
-		if result.RiskLevel != "" && result.RiskLevel != "LOW" {
-			sb.WriteString(fmt.Sprintf("⚠️ Risk: %s\n", result.RiskLevel))
-		}
-		if result.RiskWarning != "" {
-			sb.WriteString(result.RiskWarning + "\n")
-		}
-		if len(result.PerFileResults) > 0 && len(result.PerFileResults) <= 20 {
-			sb.WriteString("\nPer-file results:\n")
-			for _, fr := range result.PerFileResults {
-				sb.WriteString(fmt.Sprintf("  %s: %d replacements\n", fr.Path, fr.Replaced))
-			}
-		} else if len(result.PerFileResults) > 20 {
-			sb.WriteString(fmt.Sprintf("\n(Showing 20 of %d files — re-run with preview:true for a dry listing, or narrow file_types)\n", len(result.PerFileResults)))
-			for _, fr := range result.PerFileResults[:20] {
-				sb.WriteString(fmt.Sprintf("  %s: %d replacements\n", fr.Path, fr.Replaced))
-			}
-		}
-
-		return mcp.NewToolResultText(sb.String()), nil
+		return mcp.NewToolResultText(formatProjectReplace(engine.IsCompactMode(), path, find, replace, result, detail)), nil
 	}))
 
 	// ============================================================================
@@ -1258,4 +1204,101 @@ func registerBatchTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(fmt.Sprintf("Unknown action: %s. Valid: list, info, compare, cleanup, restore, undo_last, undo_chain, list_trash, restore_trash, purge_trash", action)), nil
 		}
 	}))
+}
+
+const projectReplaceFileListCap = 200
+
+func formatProjectReplace(compact bool, path, find, replace string, result *core.ProjectReplaceResult, detail string) string {
+	if result == nil {
+		return "project_replace: empty result"
+	}
+	files := sortedProjectReplaceFiles(result.PerFileResults)
+	if compact {
+		status := "APPLIED"
+		switch {
+		case result.Blocked:
+			status = "BLOCKED (no changes written)"
+		case result.DryRun:
+			status = "PREVIEW (no changes written)"
+		}
+		msg := fmt.Sprintf("%s: %s | find:'%s' | %d files | %d replacements", status, path, find, result.FilesChanged, result.TotalReplaced)
+		if result.BackupID != "" {
+			shortID := result.BackupID
+			if len(shortID) > 12 {
+				shortID = shortID[:12]
+			}
+			msg += fmt.Sprintf(" | UNDO:%s", shortID)
+		}
+		if result.RiskWarning != "" {
+			msg += " | " + strings.TrimPrefix(result.RiskWarning, "⚠️ ")
+		}
+		if detail == detailFull && len(files) > 0 {
+			msg += "\n" + formatProjectReplaceFileList(files, projectReplaceFileListCap, true)
+		}
+		return msg
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("project_replace: '%s' → '%s'\n", find, replace))
+	sb.WriteString(fmt.Sprintf("Path: %s\n", path))
+	switch {
+	case result.Blocked:
+		sb.WriteString("Status: BLOCKED (risk gate) — no changes written; re-run with force=true to apply\n")
+	case result.DryRun:
+		sb.WriteString("Status: PREVIEW — no changes written\n")
+	default:
+		sb.WriteString("Status: APPLIED — changes written to disk\n")
+	}
+	sb.WriteString(fmt.Sprintf("Files changed: %d\n", result.FilesChanged))
+	sb.WriteString(fmt.Sprintf("Total replacements: %d\n", result.TotalReplaced))
+	if result.BackupID != "" {
+		sb.WriteString(fmt.Sprintf("✓ Backup/UNDO: %s\n", result.BackupID))
+	}
+	if result.RiskLevel != "" && result.RiskLevel != "LOW" {
+		sb.WriteString(fmt.Sprintf("⚠️ Risk: %s\n", result.RiskLevel))
+	}
+	if result.RiskWarning != "" {
+		sb.WriteString(result.RiskWarning + "\n")
+	}
+	if len(files) == 0 || detail == detailSummary {
+		return sb.String()
+	}
+	sb.WriteString("\nPer-file results:\n")
+	if detail == detailFull {
+		sb.WriteString(formatProjectReplaceFileList(files, projectReplaceFileListCap, false))
+		return sb.String()
+	}
+	const normalCap = 20
+	if len(files) > normalCap {
+		sb.WriteString(fmt.Sprintf("(Showing %d of %d files — pass detail:\"full\" for the rest)\n", normalCap, len(files)))
+		sb.WriteString(formatProjectReplaceFileList(files[:normalCap], normalCap, false))
+		return sb.String()
+	}
+	sb.WriteString(formatProjectReplaceFileList(files, normalCap, false))
+	return sb.String()
+}
+
+func sortedProjectReplaceFiles(in []core.ProjectReplaceFileResult) []core.ProjectReplaceFileResult {
+	out := append([]core.ProjectReplaceFileResult(nil), in...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
+}
+
+func formatProjectReplaceFileList(files []core.ProjectReplaceFileResult, limit int, compact bool) string {
+	n := len(files)
+	if limit > 0 && limit < n {
+		n = limit
+	}
+	var sb strings.Builder
+	for i := 0; i < n; i++ {
+		if compact {
+			fmt.Fprintf(&sb, "%s: %d\n", files[i].Path, files[i].Replaced)
+			continue
+		}
+		fmt.Fprintf(&sb, "  %s: %d replacements\n", files[i].Path, files[i].Replaced)
+	}
+	if limit > 0 && len(files) > limit {
+		fmt.Fprintf(&sb, "… %d more — pass detail:\"full\" or narrow file_types\n", len(files)-limit)
+	}
+	return sb.String()
 }

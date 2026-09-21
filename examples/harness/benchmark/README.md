@@ -13,6 +13,16 @@ This is the v4.7 gate. It measures current wire behavior behind `cmd/proxy` befo
 
 The runner never retries a failed operation. `retries` therefore records actual replay attempts (currently zero), not a guess.
 
+## Suites
+
+| `-suite` | Profile | What |
+|----------|---------|------|
+| `pr0` (default) | strict | Original Failure Intelligence baseline |
+| `reliability` | ultra | Scripted gate for FIABILIDAD-OPERATIVA: search pagination, multi_edit diagnosis, `project_replace` `detail:full`, `git remote` |
+| `all` | ultra | Both |
+
+`reliability` is **not** a real-model eval. It proves the three field-report failures stay fixed on the wire. P1 in PLAN-PENDIENTE.md (Claude Code / Codex / OpenCode on a real repo) stays open.
+
 ## Run
 
 Build the server and proxy from the repository root:
@@ -21,6 +31,7 @@ Build the server and proxy from the repository root:
 go build -o .\filesystem-ultra.exe .\cmd\filesystem-ultra
 go build -o .\mcp-proxy.exe .\cmd\proxy
 go run .\examples\harness\benchmark -proxy .\mcp-proxy.exe -server .\filesystem-ultra.exe -out .\examples\harness\benchmark\sample-report.json
+go run .\examples\harness\benchmark -suite reliability -proxy .\mcp-proxy.exe -server .\filesystem-ultra.exe -out .\examples\harness\benchmark\reliability-report.json
 ```
 
 Linux/macOS:
@@ -29,6 +40,7 @@ Linux/macOS:
 go build -o ./filesystem-ultra ./cmd/filesystem-ultra
 go build -o ./mcp-proxy ./cmd/proxy
 go run ./examples/harness/benchmark -proxy ./mcp-proxy -server ./filesystem-ultra -out ./examples/harness/benchmark/sample-report.json
+go run ./examples/harness/benchmark -suite reliability -proxy ./mcp-proxy -server ./filesystem-ultra -out ./examples/harness/benchmark/reliability-report.json
 ```
 
 The generated workspace is temporary. The committed `sample-report.json` is redacted: no source paths or response bodies, only proxy metrics.

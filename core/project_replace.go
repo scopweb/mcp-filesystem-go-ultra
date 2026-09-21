@@ -194,6 +194,7 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 	// that actually contain matches. We do both in one read pass so the per-file
 	// counts stay in sync with the backup set we will snapshot below.
 	filesWithMatches := make([]string, 0, len(matchedFiles))
+	perFile := make([]ProjectReplaceFileResult, 0, len(matchedFiles))
 	var totalOccurrences int
 	for _, f := range matchedFiles {
 		content, err := os.ReadFile(f)
@@ -204,6 +205,7 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 		if count > 0 {
 			filesWithMatches = append(filesWithMatches, f)
 			totalOccurrences += count
+			perFile = append(perFile, ProjectReplaceFileResult{Path: f, Replaced: count})
 		}
 	}
 
@@ -217,9 +219,10 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 	}
 
 	result := &ProjectReplaceResult{
-		FilesChanged: len(filesWithMatches),
-		DryRun:       preview,
-		RiskLevel:    riskLevel,
+		FilesChanged:   len(filesWithMatches),
+		DryRun:         preview,
+		RiskLevel:      riskLevel,
+		PerFileResults: perFile,
 	}
 
 	if preview {
