@@ -206,6 +206,21 @@ func (e *UltraFastEngine) ReadSnapshot(ctx context.Context, path string) (FileSn
 		return FileSnapshot{}, e.AccessDeniedError("read", path)
 	}
 	canon := CanonicalPath(path)
+	if cached, hit := e.cache.GetFileFresh(path); hit {
+		raw := cached
+		mode := os.FileMode(0644)
+		if info, statErr := os.Stat(path); statErr == nil {
+			mode = info.Mode()
+		}
+		return FileSnapshot{
+			Path:   path,
+			Canon:  canon,
+			Bytes:  raw,
+			Hash:   contentHashFNV(string(raw)),
+			Mode:   mode,
+			Exists: true,
+		}, nil
+	}
 	raw, err := e.readFileBytesDeduped(ctx, path)
 	if err != nil {
 		return FileSnapshot{}, err

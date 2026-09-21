@@ -3,11 +3,11 @@ package core
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 
+	"github.com/mcp/filesystem-ultra/cache"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -20,7 +20,7 @@ var diskReadCount atomic.Int64
 // readFileBytesDeduped returns file content from cache or disk, deduplicating
 // concurrent loads for the same path via singleflight.
 func (e *UltraFastEngine) readFileBytesDeduped(ctx context.Context, path string) ([]byte, error) {
-	if cached, hit := e.cache.GetFileFresh(path); hit {
+	if cached, hit := e.cache.PeekFileFresh(path); hit {
 		return cached, nil
 	}
 
@@ -29,8 +29,8 @@ func (e *UltraFastEngine) readFileBytesDeduped(ctx context.Context, path string)
 		err  error
 	}
 
-	v, err, _ := readFlight.Do(path, func() (interface{}, error) {
-		if cached, hit := e.cache.GetFileFresh(path); hit {
+	v, err, shared := readFlight.Do(path, func() (interface{}, error) {
+		if cached, hit := e.cache.PeekFileFresh(path); hit {
 			return readResult{data: cached}, nil
 		}
 
@@ -38,18 +38,24 @@ func (e *UltraFastEngine) readFileBytesDeduped(ctx context.Context, path string)
 			return nil, &ContextError{Op: "read_file", Details: "operation cancelled before disk read"}
 		}
 
+		gen := e.cache.CaptureGeneration(path)
 		diskReadCount.Add(1)
-		data, readErr := os.ReadFile(path)
+		e.cache.RecordDiskLoad()
+		data, meta, stable, readErr := cache.ReadFileStable(path)
 		if readErr != nil {
 			return nil, &PathError{Op: "read", Path: path, Err: readErr}
 		}
-
-		e.cache.SetFile(path, data)
+		if stable {
+			e.cache.SetFileIfGeneration(path, data, meta, gen)
+		}
 		e.cache.TrackAccess(path)
 		return readResult{data: data}, nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	if shared {
+		e.cache.RecordCoalescedRead()
 	}
 
 	result := v.(readResult)

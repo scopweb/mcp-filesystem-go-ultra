@@ -36,6 +36,17 @@ v4.7 operational reliability (FIABILIDAD-OPERATIVA) shipped engine telemetry tha
 - Inyectar respuesta perdida de verdad (no solo repetir `operation_id`)
 - Escritor y revisor concurrentes de verdad (no secuencial)
 
+## Plan de ataque — Caché fiable y warm-start
+
+Plan consensuado: [PLAN-CACHE-WARM-START.md](PLAN-CACHE-WARM-START.md). Implementación pendiente.
+
+- Fase 0: frescura bytes/metadata, métricas fiables, prefetch autorizado, cierre ordenado y TTL configurable con baseline.
+- Fase 1: experimento opt-in de manifiesto + precarga desde originales.
+- Fase 2: snapshot de contenido únicamente si las mediciones justifican el coste.
+- mmap y recibos e3 durables mantienen líneas separadas. No se presuponen mejoras de latencia.
+
+CACHE-01 y CACHE-02 hechos. Próxima entrega: **CACHE-03 — Prefetch autorizado y cierre ordenado**.
+
 ## P2 — Recuperación durable
 
 - Recibos de retry (`e3-v1`) persistentes entre reinicios (hoy solo memoria, 24 h, prefijo de proceso)

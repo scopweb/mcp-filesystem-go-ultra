@@ -171,16 +171,16 @@ type PerformanceMetrics struct {
 	ListOperations   int64
 	SearchOperations int64
 
-	StartedAt           time.Time
-	MCPCalls            int64
-	MCPErrors           int64
-	MutationsApplied    int64
-	MutationsRejected   int64
-	MutationsSimulated  int64
-	LatencySum          time.Duration
-	LatencyCount        int64
-	lastMCPCalls        int64
-	mcpLatency          latencyRing
+	StartedAt          time.Time
+	MCPCalls           int64
+	MCPErrors          int64
+	MutationsApplied   int64
+	MutationsRejected  int64
+	MutationsSimulated int64
+	LatencySum         time.Duration
+	LatencyCount       int64
+	lastMCPCalls       int64
+	mcpLatency         latencyRing
 
 	// Telemetry: Track edit operations
 	// Used to detect full-file rewrites vs targeted edits
@@ -562,10 +562,8 @@ func (e *UltraFastEngine) updateMetrics() {
 	// Update cache hit rate
 	if e.cache != nil {
 		e.metrics.CacheHitRate = e.cache.GetHitRate()
+		e.metrics.MemoryUsage = e.cache.GetMemoryUsage()
 	}
-
-	// Update memory usage
-	e.metrics.MemoryUsage = e.cache.GetMemoryUsage()
 	e.metrics.LastUpdateTime = now
 }
 
@@ -1171,8 +1169,6 @@ func (e *UltraFastEngine) ListDirectoryJSON(ctx context.Context, path string) (s
 
 // EditFile implements intelligent file editing
 // MOVED to core/edit_operations.go
-
-
 
 // AllowedDirsSuffix returns a human-readable suffix listing the effective
 // allowed directories, for inclusion in access-denied error messages. When

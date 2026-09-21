@@ -25,14 +25,18 @@ type IntelligentCache struct {
 	stats *CacheStats
 
 	// Configuration
-	maxSize     int64
-	currentSize int64
-	mu          sync.RWMutex
+	maxSize       int64
+	residentBytes int64
+	fileBytesLen  map[string]int64
+	mu            sync.RWMutex
 
 	// Prefetch tracking for predictive caching
 	accessPattern map[string]int64 // path -> access count
 	prefetchQueue chan string      // paths to prefetch
 	patternMu     sync.RWMutex
+
+	globalGen uint64
+	pathGen   map[string]uint64
 }
 
 // CacheStats tracks cache performance metrics
@@ -50,7 +54,14 @@ type CacheStats struct {
 	// Eviction counters
 	Evictions int64
 
-	// Timing stats
+	StaleMisses     int64
+	PrefetchHits    int64
+	PrefetchMisses  int64
+	PrefetchFills   int64
+	CoalescedReads  int64
+	DiskLoads       int64
+	InternalLookups int64
+
 	LastAccess    time.Time
 	TotalAccesses int64
 }
@@ -84,9 +95,10 @@ func NewIntelligentCache(maxSize int64) (*IntelligentCache, error) {
 		metaCache:     metaCache,
 		stats:         &CacheStats{},
 		maxSize:       maxSize,
-		currentSize:   0,
+		fileBytesLen:  make(map[string]int64),
 		accessPattern: make(map[string]int64),
-		prefetchQueue: make(chan string, 100), // Buffer for prefetch requests
+		prefetchQueue: make(chan string, 100),
+		pathGen:       make(map[string]uint64),
 	}
 
 	// Set up eviction callbacks (bigcache doesn't have direct OnEvicted, but we can track via stats)
@@ -99,74 +111,139 @@ func NewIntelligentCache(maxSize int64) (*IntelligentCache, error) {
 	return cache, nil
 }
 
-type fileStatMeta struct {
-	Mtime time.Time
-	Size  int64
-}
-
 func fileStatKey(path string) string { return "fstat:" + path }
 
-// GetFile retrieves a file from cache
 func (c *IntelligentCache) GetFile(path string) ([]byte, bool) {
-	c.updateAccessStats()
-
-	item, err := c.fileCache.Get(path)
-	if err == nil {
-		c.stats.mu.Lock()
-		c.stats.FileHits++
-		c.stats.mu.Unlock()
-		return item, true
-	}
-
-	c.stats.mu.Lock()
-	c.stats.FileMisses++
-	c.stats.mu.Unlock()
-
-	return nil, false
+	return c.fileBytes(path)
 }
 
-// GetFileFresh is GetFile plus a size/mtime check so another process's write
-// is not served from this process's cache (multi-agent / bash).
+func (c *IntelligentCache) fileBytes(path string) ([]byte, bool) {
+	item, err := c.fileCache.Get(path)
+	if err != nil {
+		return nil, false
+	}
+	return item, true
+}
+
+func (c *IntelligentCache) fileMeta(path string) (FileStatMeta, bool) {
+	item, ok := c.metaCache.Get(fileStatKey(path))
+	if !ok {
+		return FileStatMeta{}, false
+	}
+	meta, ok := item.(FileStatMeta)
+	if !ok || !meta.Valid {
+		return FileStatMeta{}, false
+	}
+	return meta, true
+}
+
+// GetFileFresh serves cached bytes only when capture metadata is present and
+// still matches the original (size and mtime equality; file identity when the
+// OS Stat exposes it). Missing metadata, Stat errors, and mismatches are a
+// miss: the caller must read the original. Size+mtime cannot detect every
+// in-place rewrite that preserves both; this is not an atomic snapshot against
+// an arbitrary concurrent writer.
 func (c *IntelligentCache) GetFileFresh(path string) ([]byte, bool) {
-	cached, hit := c.GetFile(path)
-	if !hit {
+	return c.lookupFresh(path, lookupDemand)
+}
+
+func (c *IntelligentCache) PeekFileFresh(path string) ([]byte, bool) {
+	return c.lookupFresh(path, lookupInternal)
+}
+
+type lookupClass int
+
+const (
+	lookupDemand lookupClass = iota
+	lookupInternal
+	lookupPrefetch
+)
+
+func (c *IntelligentCache) lookupFresh(path string, kind lookupClass) ([]byte, bool) {
+	if kind == lookupDemand {
+		c.updateAccessStats()
+	}
+	cached, hasBytes := c.fileBytes(path)
+	meta, hasMeta := c.fileMeta(path)
+	if !hasBytes || !hasMeta {
+		if hasBytes || hasMeta {
+			c.InvalidateFile(path)
+		} else {
+			c.dropResident(path)
+		}
+		c.recordLookup(kind, false, false)
 		return nil, false
 	}
 	info, err := os.Stat(path)
 	if err != nil {
 		c.InvalidateFile(path)
+		c.recordLookup(kind, false, false)
 		return nil, false
 	}
-	if item, ok := c.metaCache.Get(fileStatKey(path)); ok {
-		meta := item.(fileStatMeta)
-		if info.Size() != meta.Size || info.ModTime().After(meta.Mtime) {
-			c.InvalidateFile(path)
-			return nil, false
-		}
-		return cached, true
-	}
-	if int64(len(cached)) != info.Size() {
+	live := MetaFromInfo(info)
+	if !meta.sameVersion(live) || int64(len(cached)) != meta.Size {
 		c.InvalidateFile(path)
+		c.recordLookup(kind, false, true)
 		return nil, false
 	}
+	c.recordLookup(kind, true, false)
 	return cached, true
 }
 
-// SetFile stores a file in cache with intelligent size management
-func (c *IntelligentCache) SetFile(path string, content []byte) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Bigcache handles size and eviction automatically
-	err := c.fileCache.Set(path, content)
-	if err == nil {
-		c.currentSize += int64(len(content)) // Approximate tracking
-		if info, statErr := os.Stat(path); statErr == nil {
-			c.metaCache.Set(fileStatKey(path), fileStatMeta{Mtime: info.ModTime(), Size: info.Size()}, gocache.DefaultExpiration)
+func (c *IntelligentCache) recordLookup(kind lookupClass, hit, stale bool) {
+	c.stats.mu.Lock()
+	defer c.stats.mu.Unlock()
+	switch kind {
+	case lookupInternal:
+		c.stats.InternalLookups++
+	case lookupPrefetch:
+		if hit {
+			c.stats.PrefetchHits++
 		} else {
-			c.metaCache.Set(fileStatKey(path), fileStatMeta{Mtime: time.Now(), Size: int64(len(content))}, gocache.DefaultExpiration)
+			c.stats.PrefetchMisses++
+		}
+	default:
+		if hit {
+			c.stats.FileHits++
+		} else {
+			c.stats.FileMisses++
+			if stale {
+				c.stats.StaleMisses++
+			}
 		}
 	}
+}
+
+func (c *IntelligentCache) CaptureGeneration(path string) FileGen {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return FileGen{Global: c.globalGen, Local: c.pathGen[path]}
+}
+
+func (c *IntelligentCache) SetFile(path string, content []byte, meta FileStatMeta) {
+	c.SetFileIfGeneration(path, content, meta, c.CaptureGeneration(path))
+}
+
+func (c *IntelligentCache) SetFileIfGeneration(path string, content []byte, meta FileStatMeta, gen FileGen) bool {
+	if !meta.Valid || int64(len(content)) != meta.Size {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.globalGen != gen.Global || c.pathGen[path] != gen.Local {
+		return false
+	}
+	if err := c.fileCache.Set(path, content); err != nil {
+		return false
+	}
+	n := int64(len(content))
+	if old, ok := c.fileBytesLen[path]; ok {
+		c.residentBytes -= old
+	}
+	c.fileBytesLen[path] = n
+	c.residentBytes += n
+	c.metaCache.Set(fileStatKey(path), meta, gocache.DefaultExpiration)
+	return true
 }
 
 // dirCacheEntry pairs a directory listing with the directory's mtime at cache time.
@@ -231,17 +308,28 @@ func (c *IntelligentCache) SetMetadata(key string, value interface{}) {
 	c.metaCache.Set(key, value, gocache.DefaultExpiration)
 }
 
-// InvalidateFile removes a file from cache
 func (c *IntelligentCache) InvalidateFile(path string) {
-	err := c.fileCache.Delete(path)
-	c.metaCache.Delete(fileStatKey(path))
-	if err == nil {
-		// Approximate size update
-		c.mu.Lock()
-		// Note: Without exact size, we might need to adjust tracking
-		c.currentSize -= 0 // Placeholder; bigcache doesn't provide evicted size
-		c.mu.Unlock()
+	c.mu.Lock()
+	c.pathGen[path]++
+	if n, ok := c.fileBytesLen[path]; ok {
+		c.residentBytes -= n
+		delete(c.fileBytesLen, path)
 	}
+	c.mu.Unlock()
+	_ = c.fileCache.Delete(path)
+	c.metaCache.Delete(fileStatKey(path))
+}
+
+func (c *IntelligentCache) dropResident(path string) {
+	c.mu.Lock()
+	if n, ok := c.fileBytesLen[path]; ok {
+		c.residentBytes -= n
+		delete(c.fileBytesLen, path)
+		c.stats.mu.Lock()
+		c.stats.Evictions++
+		c.stats.mu.Unlock()
+	}
+	c.mu.Unlock()
 }
 
 // InvalidateDirectory removes a directory listing from cache
@@ -264,7 +352,9 @@ func (c *IntelligentCache) updateAccessStats() {
 	c.stats.mu.Unlock()
 }
 
-// GetHitRate calculates the overall cache hit rate
+// GetHitMiss returns demand lookup counts after the freshness verdict
+// (file) plus directory and metadata lookups. Unit: events.
+// Prefetch and internal singleflight peeks are excluded.
 func (c *IntelligentCache) GetHitMiss() (hits, misses int64) {
 	c.stats.mu.RLock()
 	defer c.stats.mu.RUnlock()
@@ -273,6 +363,7 @@ func (c *IntelligentCache) GetHitMiss() (hits, misses int64) {
 	return
 }
 
+// GetHitRate is hits/(hits+misses) from GetHitMiss. Zero if no demand lookups.
 func (c *IntelligentCache) GetHitRate() float64 {
 	hits, misses := c.GetHitMiss()
 	total := hits + misses
@@ -282,29 +373,61 @@ func (c *IntelligentCache) GetHitRate() float64 {
 	return float64(hits) / float64(total)
 }
 
-// GetMemoryUsage returns current memory usage in bytes (approximate for bigcache)
-func (c *IntelligentCache) GetMemoryUsage() int64 {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.currentSize + int64(c.fileCache.Capacity()) // Use bigcache capacity as estimate
+type MemoryStats struct {
+	ResidentBytes int64
+	CapacityBytes int64
 }
 
-// GetStats returns detailed cache statistics (copy without mutex)
+func (c *IntelligentCache) Memory() MemoryStats {
+	c.mu.RLock()
+	resident := c.residentBytes
+	c.mu.RUnlock()
+	capBytes := int64(0)
+	if c.fileCache != nil {
+		capBytes = int64(c.fileCache.Capacity())
+	}
+	return MemoryStats{ResidentBytes: resident, CapacityBytes: capBytes}
+}
+
+// GetMemoryUsage returns tracked resident file-content bytes (not process RSS,
+// not BigCache reserved capacity). Unit: bytes.
+func (c *IntelligentCache) GetMemoryUsage() int64 {
+	return c.Memory().ResidentBytes
+}
+
 func (c *IntelligentCache) GetStats() CacheStats {
 	c.stats.mu.RLock()
 	defer c.stats.mu.RUnlock()
-	// Return a copy without the mutex
 	return CacheStats{
-		FileHits:      c.stats.FileHits,
-		FileMisses:    c.stats.FileMisses,
-		DirHits:       c.stats.DirHits,
-		DirMisses:     c.stats.DirMisses,
-		MetaHits:      c.stats.MetaHits,
-		MetaMisses:    c.stats.MetaMisses,
-		Evictions:     c.stats.Evictions,
-		LastAccess:    c.stats.LastAccess,
-		TotalAccesses: c.stats.TotalAccesses,
+		FileHits:        c.stats.FileHits,
+		FileMisses:      c.stats.FileMisses,
+		DirHits:         c.stats.DirHits,
+		DirMisses:       c.stats.DirMisses,
+		MetaHits:        c.stats.MetaHits,
+		MetaMisses:      c.stats.MetaMisses,
+		Evictions:       c.stats.Evictions,
+		StaleMisses:     c.stats.StaleMisses,
+		PrefetchHits:    c.stats.PrefetchHits,
+		PrefetchMisses:  c.stats.PrefetchMisses,
+		PrefetchFills:   c.stats.PrefetchFills,
+		CoalescedReads:  c.stats.CoalescedReads,
+		DiskLoads:       c.stats.DiskLoads,
+		InternalLookups: c.stats.InternalLookups,
+		LastAccess:      c.stats.LastAccess,
+		TotalAccesses:   c.stats.TotalAccesses,
 	}
+}
+
+func (c *IntelligentCache) RecordCoalescedRead() {
+	c.stats.mu.Lock()
+	c.stats.CoalescedReads++
+	c.stats.mu.Unlock()
+}
+
+func (c *IntelligentCache) RecordDiskLoad() {
+	c.stats.mu.Lock()
+	c.stats.DiskLoads++
+	c.stats.mu.Unlock()
 }
 
 // Eviction callbacks for non-bigcache caches
@@ -331,7 +454,10 @@ func (c *IntelligentCache) Flush() {
 	c.fileCache.Reset()
 	c.dirCache.Flush()
 	c.metaCache.Flush()
-	c.currentSize = 0
+	c.residentBytes = 0
+	c.fileBytesLen = make(map[string]int64)
+	c.globalGen++
+	c.pathGen = make(map[string]uint64)
 }
 
 // Close gracefully shuts down the cache
@@ -345,22 +471,26 @@ func (c *IntelligentCache) Close() error {
 // prefetchWorker runs in background to prefetch frequently accessed files
 func (c *IntelligentCache) prefetchWorker() {
 	for path := range c.prefetchQueue {
-		// Only prefetch if not already cached
-		if _, hit := c.GetFile(path); !hit {
-			// Prefetch file content in background
-			// This is a hint to the OS to read the file into page cache
-			_ = c.prefetchFile(path)
+		if _, hit := c.lookupFresh(path, lookupPrefetch); hit {
+			continue
 		}
+		_ = c.prefetchFile(path)
 	}
 }
 
-// prefetchFile reads a file into cache in the background
 func (c *IntelligentCache) prefetchFile(path string) error {
-	content, err := os.ReadFile(path)
+	content, meta, stable, err := ReadFileStable(path)
 	if err != nil {
 		return err
 	}
-	c.SetFile(path, content)
+	if !stable {
+		return nil
+	}
+	if c.SetFileIfGeneration(path, content, meta, c.CaptureGeneration(path)) {
+		c.stats.mu.Lock()
+		c.stats.PrefetchFills++
+		c.stats.mu.Unlock()
+	}
 	return nil
 }
 

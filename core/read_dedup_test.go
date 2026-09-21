@@ -72,6 +72,56 @@ func TestReadFileBytesDeduped_ConcurrentSingleDiskRead(t *testing.T) {
 	if got := diskReadCount.Load(); got != 1 {
 		t.Fatalf("expected 1 disk read, got %d", got)
 	}
+	st := engine.cache.GetStats()
+	if st.DiskLoads != 1 {
+		t.Fatalf("DiskLoads=%d", st.DiskLoads)
+	}
+	if st.CoalescedReads > workers {
+		t.Fatalf("CoalescedReads=%d", st.CoalescedReads)
+	}
+}
+
+func TestReadFileContent_DemandCountsOncePerCall(t *testing.T) {
+	engine, dir := setupDedupTestEngine(t)
+	path := filepath.Join(dir, "demand.txt")
+	content := "shared-load\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	const workers = 8
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	errCh := make(chan error, workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			got, err := engine.ReadFileContent(ctx, path)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if got != content {
+				errCh <- fmt.Errorf("content mismatch")
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	st := engine.cache.GetStats()
+	if st.FileHits+st.FileMisses != workers {
+		t.Fatalf("demand file lookups hits=%d misses=%d want %d", st.FileHits, st.FileMisses, workers)
+	}
+	if st.DiskLoads != 1 {
+		t.Fatalf("DiskLoads=%d", st.DiskLoads)
+	}
 }
 
 func TestReadFileRange_ConcurrentSingleDiskRead(t *testing.T) {

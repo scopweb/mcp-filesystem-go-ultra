@@ -113,8 +113,14 @@ func (e *UltraFastEngine) GetPerformanceStats() string {
 		e.metrics.LatencyCount, latencySampleCap)
 	fmt.Fprintf(&b, "Mutations applied/rejected/simulated: %d / %d / %d\n",
 		e.metrics.MutationsApplied, e.metrics.MutationsRejected, e.metrics.MutationsSimulated)
-	fmt.Fprintf(&b, "Cache hits/misses: %d / %d (hit rate %.2f%%)\n", hits, misses, e.metrics.CacheHitRate*100)
-	fmt.Fprintf(&b, "Memory Usage: %s\n", formatSize(e.metrics.MemoryUsage))
+	fmt.Fprintf(&b, "Cache hits/misses: %d / %d (hit rate %.2f%%; demand file+dir+meta lookups)\n", hits, misses, hitRate*100)
+	if e.cache != nil {
+		mem := e.cache.Memory()
+		fmt.Fprintf(&b, "Cache resident content: %s (tracked bytes); bigcache capacity: %s (reserved, not RSS)\n",
+			formatSize(mem.ResidentBytes), formatSize(mem.CapacityBytes))
+	} else {
+		fmt.Fprintf(&b, "Cache resident content: %s\n", formatSize(e.metrics.MemoryUsage))
+	}
 	fmt.Fprintf(&b, "Internal read/write/list/search: %d / %d / %d / %d\n",
 		e.metrics.ReadOperations, e.metrics.WriteOperations, e.metrics.ListOperations, e.metrics.SearchOperations)
 	fmt.Fprintf(&b, "Process edit ops: %d (not historical backups on disk)\n", e.metrics.EditOperations)
