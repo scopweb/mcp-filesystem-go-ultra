@@ -46,6 +46,14 @@ func TestCheckEditOp_StaleReadSuppressedWithExpectedHash(t *testing.T) {
 	}
 }
 
+func TestCheckEditOp_RecordReadSilencesFirstEdit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Mix.TXT")
+	RecordRead(path)
+	if s := CheckEditOp(path, "old", 100); s.Status != FeedbackOK {
+		t.Fatalf("read then first edit must not STALE_READ, got %v (%s)", s.Status, s.Message)
+	}
+}
+
 func TestCheckEditOp_RecordReadReArmsWarning(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rearm.txt")
 
@@ -64,9 +72,10 @@ func TestCheckEditOp_RecordReadReArmsWarning(t *testing.T) {
 
 	// Simulate the read expiring AND a fresh session state: clearing both the
 	// last-read timestamp and the warned flag must produce a warning again.
+	canon := CanonicalOCCKey(path)
 	globalSession.mu.Lock()
-	delete(globalSession.lastRead, path)
-	delete(globalSession.staleWarned, path)
+	delete(globalSession.lastRead, canon)
+	delete(globalSession.staleWarned, canon)
 	globalSession.mu.Unlock()
 	if s := CheckEditOp(path, "old", 100); s.Status != FeedbackWarn {
 		t.Errorf("after re-arm, a stale edit should warn again, got %v", s.Status)

@@ -72,6 +72,27 @@ func TestMetrics_CacheHitOnSecondRead(t *testing.T) {
 	}
 }
 
+func TestMetrics_CompactOpsPerSecUsesLifetime(t *testing.T) {
+	dir := t.TempDir()
+	c, _ := cache.NewIntelligentCache(4 * 1024 * 1024)
+	e, err := NewUltraFastEngine(&Config{Cache: c, AllowedPaths: []string{dir}, ParallelOps: 2, CompactMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	e.metrics.mu.Lock()
+	e.metrics.StartedAt = time.Now().Add(-2 * time.Second)
+	e.metrics.MCPCalls = 10
+	e.metrics.mu.Unlock()
+	text := e.GetPerformanceStats()
+	if !strings.Contains(text, "mcp:10") {
+		t.Fatalf("stats: %s", text)
+	}
+	if strings.Contains(text, "ops/s:0.0") {
+		t.Fatalf("lifetime ops/s should not be 0 after 10 calls: %s", text)
+	}
+}
+
 func TestMetrics_StatsSeparatesMCPAndInternal(t *testing.T) {
 	dir := t.TempDir()
 	c, _ := cache.NewIntelligentCache(4 * 1024 * 1024)

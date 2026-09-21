@@ -78,16 +78,22 @@ func (e *UltraFastEngine) GetPerformanceStats() string {
 	p50 := e.metrics.mcpLatency.percentile(0.50)
 	p95 := e.metrics.mcpLatency.percentile(0.95)
 	hits, misses := int64(0), int64(0)
+	hitRate := e.metrics.CacheHitRate
 	if e.cache != nil {
 		hits, misses = e.cache.GetHitMiss()
+		hitRate = e.cache.GetHitRate()
+	}
+	lifetimeOps := 0.0
+	if sec := uptime.Seconds(); sec > 0 {
+		lifetimeOps = float64(e.metrics.MCPCalls) / sec
 	}
 
 	if e.config.CompactMode {
 		return fmt.Sprintf("mcp:%d intern:%d ops/s:%.1f hit:%.1f%% p50:%s applied:%d rejected:%d simulated:%d",
 			e.metrics.MCPCalls,
 			e.metrics.OperationsTotal,
-			e.metrics.OperationsPerSecond,
-			e.metrics.CacheHitRate*100,
+			lifetimeOps,
+			hitRate*100,
 			p50.Truncate(time.Microsecond),
 			e.metrics.MutationsApplied,
 			e.metrics.MutationsRejected,
@@ -98,10 +104,10 @@ func (e *UltraFastEngine) GetPerformanceStats() string {
 	fmt.Fprintf(&b, "Performance Statistics:\n")
 	fmt.Fprintf(&b, "Process started: %s\n", e.metrics.StartedAt.UTC().Format(time.RFC3339))
 	fmt.Fprintf(&b, "Uptime: %s\n", uptime.Truncate(time.Second))
-	fmt.Fprintf(&b, "Measurement window: last metrics interval (ops/s uses MCP-call deltas)\n")
+	fmt.Fprintf(&b, "Measurement window: process lifetime for ops/s; ticker interval also shown\n")
 	fmt.Fprintf(&b, "MCP calls: %d (errors %d) — this stats query is included\n", e.metrics.MCPCalls, e.metrics.MCPErrors)
 	fmt.Fprintf(&b, "Internal engine ops: %d (sub-operations, not MCP calls)\n", e.metrics.OperationsTotal)
-	fmt.Fprintf(&b, "Operations/Second: %.2f (MCP calls / last interval)\n", e.metrics.OperationsPerSecond)
+	fmt.Fprintf(&b, "Operations/Second: %.2f (MCP calls / uptime); interval %.2f (last ticker)\n", lifetimeOps, e.metrics.OperationsPerSecond)
 	fmt.Fprintf(&b, "Latency avg/p50/p95: %s / %s / %s (MCP handler samples, n=%d, cap %d)\n",
 		avg.Truncate(time.Microsecond), p50.Truncate(time.Microsecond), p95.Truncate(time.Microsecond),
 		e.metrics.LatencyCount, latencySampleCap)

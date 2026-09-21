@@ -85,6 +85,7 @@ medición.
 ## Abierto
 
 **Eval real con modelo** sigue abierto ([PLAN-PENDIENTE.md](PLAN-PENDIENTE.md) § P1).
+Primera sesión OpenCode sobre este repo: [examples/harness/benchmark/eval-opencode-20260921.md](examples/harness/benchmark/eval-opencode-20260921.md).
 
 Hay un gate **scriptado** (no es un modelo):
 
