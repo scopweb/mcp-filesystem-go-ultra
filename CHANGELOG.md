@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### docs: `--git-remote-allow` is optional
+
+Empty allowlist is the supported default (any configured remote). Documented GitHub+GitLab as `--git-remote-allow=github.com,gitlab.com`. Seeing the push URL remains the default safety.
+
 ### fix(stats): compact ops/s is MCP calls / uptime
 
 The compact `ops/s` line used the last 5s ticker window, so a stats call after a burst showed `0.0`. It now uses lifetime MCP-call rate; hit% is live cache, not the ticker snapshot. Verbose still prints the interval rate.

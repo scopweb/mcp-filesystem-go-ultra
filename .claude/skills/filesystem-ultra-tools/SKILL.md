@@ -7,7 +7,7 @@ description: Tool catalog for filesystem-ultra MCP server v4.7.1. 25 tools ultra
 
 ## Recommended server flags
 
-`--profile=strict --compact-mode --roots-mode=union` (`--readonly` off). `--git-network` only if the agent must `git push`/`fetch`. `--git-remote-allow` if network is on and destinations must be constrained. `--profile=ultra` (default) keeps all 25 tools including `analyze_code`.
+`--profile=strict --compact-mode --roots-mode=union` (`--readonly` off). `--git-network` only if the agent must `git push`/`fetch`. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 25 tools including `analyze_code`.
 
 ## Bind each project to one filesystem tool family
 
@@ -55,7 +55,7 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 
 `copy_file`, `project_replace`, `batch_operations`, `analyze_operation`, `wsl`, `git`, `minify_js`, `analyze_code`, `server_info`.
 
-- `git` — local only unless `--git-network` (then `push`/`fetch` and `openWorldHint=true`). `git(action:"remote")` is read-only and works without `--git-network`; it shows effective fetch/push URLs (credentials redacted). Push/fetch print that destination, not only `origin`. `--git-remote-allow` matches the effective URL (`host`, `host/org`, or repo); empty = any destination; `force:true` does not bypass. Path must be inside a repo (or `init`). Branch delete requires `delete:true`. Commit `risk` is informational and does not block.
+- `git` — local only unless `--git-network` (then `push`/`fetch` and `openWorldHint=true`). `git(action:"remote")` is read-only and works without `--git-network`; it shows effective fetch/push URLs (credentials redacted). Push/fetch print that destination, not only `origin`. `--git-remote-allow` is optional (omit = any configured remote; GitHub+GitLab: `github.com,gitlab.com`). Matches the effective URL; `force:true` does not bypass. Path must be inside a repo (or `init`). Branch delete requires `delete:true`. Commit `risk` is informational and does not block.
 - `minify_js` — exists in ultra; not in handshake instructions.
 - `analyze_code` — ultra only. For editing: `apply_patch`/`edit_file`. For understanding code: `analyze_code`. Do not use git grep or bash. Actions: `symbols`, `lint`, `sec`, `impact`. Impact is a text search, not a callgraph.
 - Dry-run impact preview → `analyze_operation` (ultra). In strict use `edit_file`/`apply_patch`/`multi_edit` with `dry_run:true`.
