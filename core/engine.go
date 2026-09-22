@@ -765,14 +765,19 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 		finalContent = hookResult.ModifiedContent
 	}
 
-	// EOL preservation (Bug #33): if the file already exists, detect its EOL
-	// style and convert finalContent to match. For new files, leave content as-is
-	// (let the caller decide the EOL style).
 	if existing, statErr := os.Stat(path); statErr == nil && !existing.IsDir() {
-		if existingEOL, eolErr := detectFileEOL(path); eolErr == nil && existingEOL != "\n" {
-			// Normalize finalContent to LF first (it may already be LF, or carry CRLF
-			// from the LLM), then restore the file's original EOL.
-			finalContent = restoreEOL(normalizeLineEndings(finalContent), existingEOL)
+		if snap := txn.Snapshot(); len(snap.Bytes) > 0 {
+			ex := string(snap.Bytes)
+			crlf, lf, cr := countEOLStyles(ex)
+			mixed := (crlf > 0 && lf > 0) || (crlf > 0 && cr > 0) || (lf > 0 && cr > 0)
+			if !mixed {
+				eol := dominantEOL(ex)
+				inCRLF, inLF, inCR := countEOLStyles(finalContent)
+				inMixed := (inCRLF > 0 && inLF > 0) || (inCRLF > 0 && inCR > 0) || (inLF > 0 && inCR > 0)
+				if !inMixed && eol != "\n" {
+					finalContent = restoreEOL(normalizeLineEndings(finalContent), eol)
+				}
+			}
 		}
 	}
 

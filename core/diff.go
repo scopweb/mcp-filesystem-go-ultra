@@ -440,7 +440,7 @@ func splitLines(s string) []string {
 	}
 	result := make([]string, len(lines))
 	for i, l := range lines {
-		result[i] = l
+		result[i] = strings.TrimSuffix(l, "\r")
 	}
 	return result
 }

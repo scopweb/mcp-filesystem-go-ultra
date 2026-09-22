@@ -717,7 +717,7 @@ func (m *BatchOperationManager) executeSearchAndReplace(ctx context.Context, op 
 	}
 	replacements := strings.Count(string(content), op.OldText)
 	if replacements > 0 {
-		if err := m.commitBytes(ctx, op.Path, []byte(strings.ReplaceAll(string(content), op.OldText, op.NewText))); err != nil {
+		if err := m.commitBytes(ctx, op.Path, []byte(ReplaceLiteralPreservingEOL(string(content), op.OldText, op.NewText))); err != nil {
 			return err
 		}
 	}

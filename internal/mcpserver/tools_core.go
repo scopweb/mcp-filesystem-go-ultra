@@ -678,7 +678,7 @@ func registerCoreTools(reg *toolRegistry) {
 		}
 		if writeMode == "append" {
 			if existing, err := os.ReadFile(normPath); err == nil {
-				content = string(existing) + content
+				content = core.AppendPreservingEOL(string(existing), content)
 			}
 			err = engine.WriteFileContent(ctx, path, content)
 			if err != nil {

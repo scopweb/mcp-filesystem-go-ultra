@@ -11,7 +11,9 @@ type ctxEditPolicyKey struct{}
 // Path-aware risk floors live in path_risk.go (PathFloorFor / ApplyPathFloor).
 
 // EditPolicy is the opt-in E4 strict-matching contract. Default (zero value)
-// preserves historical fallback behaviour.
+// preserves historical fallback behaviour. Strict matching is exact except
+// CRLF/LF (normalized only for search); tab/space folding requires
+// tolerant_whitespace.
 type EditPolicy struct {
 	Strict          bool
 	ExpectedMatches *int
@@ -35,16 +37,13 @@ func MatchLineNumbers(content, needle string) []int {
 	if needle == "" {
 		return nil
 	}
-	var lines []int
-	start := 0
-	for {
-		i := strings.Index(content[start:], needle)
-		if i < 0 {
-			break
-		}
-		abs := start + i
-		lines = append(lines, strings.Count(content[:abs], "\n")+1)
-		start = abs + len(needle)
+	ranges := findEOLTolerantRanges(content, needle)
+	if len(ranges) == 0 {
+		return nil
+	}
+	lines := make([]int, 0, len(ranges))
+	for _, r := range ranges {
+		lines = append(lines, lineNumberAtOrig(content, r[0]))
 	}
 	return lines
 }

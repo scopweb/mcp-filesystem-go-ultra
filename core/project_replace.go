@@ -294,7 +294,7 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 
 		if literal {
 			if caseSensitive {
-				newContent = strings.ReplaceAll(string(content), literalText, replace)
+				newContent = ReplaceLiteralPreservingEOL(string(content), literalText, replace)
 			} else {
 				re := regexp.MustCompile("(?i)" + regexp.QuoteMeta(literalText))
 				newContent = re.ReplaceAllString(string(content), replace)

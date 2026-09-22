@@ -147,18 +147,56 @@ func parseHunkRange(spec string) (start, count int) {
 	return
 }
 
+type origLine struct {
+	body string
+	term string
+}
+
+func splitOrigLines(s string) []origLine {
+	var out []origLine
+	i := 0
+	for i < len(s) {
+		j := i
+		for j < len(s) && s[j] != '\n' && s[j] != '\r' {
+			j++
+		}
+		body := s[i:j]
+		term := ""
+		if j < len(s) {
+			if s[j] == '\r' && j+1 < len(s) && s[j+1] == '\n' {
+				term = "\r\n"
+				j += 2
+			} else if s[j] == '\r' {
+				term = "\r"
+				j++
+			} else {
+				term = "\n"
+				j++
+			}
+		}
+		out = append(out, origLine{body, term})
+		i = j
+	}
+	return out
+}
+
+func joinOrigLines(lines []origLine) string {
+	var b strings.Builder
+	for _, l := range lines {
+		b.WriteString(l.body)
+		b.WriteString(l.term)
+	}
+	return b.String()
+}
+
 func ApplyUnifiedPatch(oldContent, patch string) (string, error) {
 	parsed, err := ParseUnifiedDiff(patch)
 	if err != nil {
 		return "", err
 	}
-	eol := "\n"
-	if strings.Contains(oldContent, "\r\n") {
-		eol = "\r\n"
-	}
-	oldNorm := strings.ReplaceAll(oldContent, "\r\n", "\n")
-	oldLines := splitKeepLast(oldNorm)
-	var out []string
+	eol := dominantEOL(oldContent)
+	oldLines := splitOrigLines(oldContent)
+	var out []origLine
 	pos := 0
 	for hi, hunk := range parsed.Hunks {
 		idx := hunk.OldStart - 1
@@ -182,30 +220,31 @@ func ApplyUnifiedPatch(oldContent, patch string) (string, error) {
 			kind, body := raw[0], raw[1:]
 			switch kind {
 			case ' ':
-				if pos >= len(oldLines) || oldLines[pos] != body {
+				if pos >= len(oldLines) || oldLines[pos].body != body {
 					return "", &PatchError{HunkIndex: hi + 1, Reason: PatchReasonContextNotFound, LineHint: pos + 1,
 						Msg: fmt.Sprintf("hunk %d: context mismatch at line %d", hi+1, pos+1)}
 				}
-				out = append(out, body)
+				out = append(out, oldLines[pos])
 				pos++
 			case '-':
-				if pos >= len(oldLines) || oldLines[pos] != body {
+				if pos >= len(oldLines) || oldLines[pos].body != body {
 					return "", &PatchError{HunkIndex: hi + 1, Reason: PatchReasonContextNotFound, LineHint: pos + 1,
 						Msg: fmt.Sprintf("hunk %d: deletion mismatch at line %d", hi+1, pos+1)}
 				}
 				pos++
 			case '+':
-				out = append(out, body)
+				out = append(out, origLine{body, eol})
 			}
 		}
 	}
 	out = append(out, oldLines[pos:]...)
-	joined := strings.Join(out, "\n")
-	if strings.HasSuffix(oldNorm, "\n") && !strings.HasSuffix(joined, "\n") {
-		joined += "\n"
-	}
-	if eol == "\r\n" {
-		joined = strings.ReplaceAll(joined, "\n", "\r\n")
+	joined := joinOrigLines(out)
+	if len(oldLines) > 0 {
+		lastHad := oldLines[len(oldLines)-1].term != ""
+		if lastHad && len(out) > 0 && out[len(out)-1].term == "" {
+			out[len(out)-1].term = eol
+			joined = joinOrigLines(out)
+		}
 	}
 	return joined, nil
 }
