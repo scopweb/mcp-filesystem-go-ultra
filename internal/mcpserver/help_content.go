@@ -189,7 +189,8 @@ git
 - Key params: action, path, paths, output, rev, max_lines, delete, prune, remote
 - remote lists effective fetch/push URLs (credentials redacted) without --git-network
 - commit risk is informational (staged file/insertion counts); it does not block the commit
-- push/fetch show the effective destination, not only the remote name. --git-remote-allow checks that URL; force:true does not bypass it
+- push/fetch show the effective destination, not only the remote name
+- --git-remote-allow is optional; omit it to allow any configured remote. Example: github.com,gitlab.com. force:true does not bypass
 
 minify_js
 - Purpose: Pure-Go JavaScript minification without Node

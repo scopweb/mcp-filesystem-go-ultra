@@ -59,13 +59,10 @@ puede haber saltos o duplicados: reiniciar en `offset:0`.
 `hidden_count` = exclusión por filtros, no resultados pendientes.
 `match_count` es total exacto solo si el walk terminó.
 
-**Allowlist vacía = cualquier destino.** Compatibilidad: sin
-`--git-remote-allow`, push/fetch no se restringen más allá de
-`--git-network`. La visibilidad de la URL no impide un envío al remoto
-equivocado; la prevención exige allowlist no vacía.
-
-**Mostrar la URL ≠ prevenir.** Consultar con `git(action:"remote")` y
-validar el destino efectivo **antes** de `push`.
+**Allowlist vacía = cualquier destino (por diseño).** `--git-remote-allow`
+es opcional. Sin él, push/fetch van a la URL de `origin`; esa URL se
+imprime. GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com` (o el
+host interno). No hace falta restringir repo.
 
 **517 backups ≠ 517 edits de esta sesión.** `ops:N` de motor no es
 el recuento de llamadas MCP del cliente. Impresiones de rapidez no son
@@ -73,9 +70,8 @@ medición.
 
 ## Residual (sigue siendo cierto)
 
-- **Allowlist por defecto abierta.** En entornos con GitHub y GitLab
-  interno, hay que pasar `--git-remote-allow`. Si no, el agente puede
-  empujar a cualquier URL configurada una vez hay `--git-network`.
+- **Allowlist opcional.** Vacía = ningún candado extra. Quien quiera
+  limitar hosts: `--git-remote-allow=github.com,gitlab.com`.
 - **Compact `project_replace`** lista ficheros con `detail:"full"`
   (Unreleased). El default compacto sigue siendo solo contadores.
 - **Entrega 1 incompleta como registro.** No hay ficha del binario/schema
@@ -113,5 +109,5 @@ El agente en v4.7.1 puede:
 3. Consultar el destino Git sin red y ver la URL en `push`/`fetch`.
 4. Interpretar stats sin mezclar proceso, sesión e histórico.
 
-No puede, por defecto, **bloquear** un push al remoto equivocado:
-hace falta `--git-remote-allow`.
+Por defecto **no bloquea** un push: muestra la URL. El bloqueo de host
+es `--git-remote-allow`, opcional.

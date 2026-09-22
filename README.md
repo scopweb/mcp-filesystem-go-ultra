@@ -37,7 +37,7 @@ See [Build](#build) and [Configuration](#configuration) below for more.
 - **Failure Intelligence** — errors are a JSON envelope with `code`, `retryable`, `suggestion`, and typed `details`. Do not replay when `retryable` is false (`PATCH_FAILED`, `BUDGET_EXCEEDED`, `VALIDATION`, …)
 - **Unambiguous multi_edit rollback** — every counted failure (including `ambiguous`) appears in the diagnosis; the file is not written
 - **Search pagination** — `max_results` is the page size; `offset` continues. No hidden 10/20 presentation cap. Structured `continuation` says how to continue
-- **Git destinations** — `git(action:"remote")` without `--git-network`; push/fetch print the effective URL (credentials redacted). `--git-remote-allow` matches that URL (`force:true` does not bypass; empty allowlist = any destination)
+- **Git destinations** — `git(action:"remote")` without `--git-network`; push/fetch print the effective URL (credentials redacted). `--git-remote-allow` is **optional**. Omit it: any configured remote is allowed. Set it only to extra-lock hosts (e.g. `github.com,gitlab.com`). `force:true` does not bypass.
 - **Verifiable stats** — `server_info(action:"stats")` splits MCP calls vs internal ops, applied/rejected/simulated mutations, and process vs historical backups; ops/s is an interval delta; latency is avg/p50/p95
 - **Mutation budget** — `--mutation-budget=N` (default off) caps applied mutations per process; dry-run does not count
 - **Explicit `detail`** — `summary|normal|full` on `directory_tree`, `search_files`, `read_file` (batch), and `help` (catalog). Default `normal`. Compact-mode trims text; `detail` trims structuredContent
@@ -239,12 +239,13 @@ Allowed paths: positional args after the flags, **or** one `--allowed-paths` wit
 | `--roots-mode` | replace | How MCP client Roots combine with CLI paths: `replace`, `union`, `ignore` |
 | `--profile` | ultra | `ultra` = all 25 tools; `strict` = 16-tool agent core (includes `backup`) |
 | `--git-network` | off | Enable `git` push/fetch. Off the critical path; ignored in `strict` |
-| `--git-remote-allow` | empty | Comma-separated allowed push/fetch destinations (`host`, `host/org`, or repo URL). Empty = any. `git(action:"remote")` still works without `--git-network` |
+| `--git-remote-allow` | empty (any destination) | Optional extra lock on push/fetch. See below. |
 | `--readonly` | off | Reject mutating tools |
 | `--mutation-budget` | 0 (off) | Max applied mutations per process. Shared by all stdio clients. `BUDGET_EXCEEDED` when exceeded |
 | `--allow-secrets` | off | Allow `.env` / keys (audited) |
 | `--compact-mode` | off | Reduced-token responses |
 | `--cache-size` | 100MB | In-memory file cache limit |
+| `--cache-ttl` | 3m | File content cache life (Go duration). Retention only; freshness is size/mtime. Does not change directory-listing TTL. Get does not refresh BigCache life. |
 | `--parallel-ops` | 2×CPU (max 16) | Max concurrent operations |
 | `--backup-dir` | system temp | Directory for automatic backups |
 | `--backup-max-age` | 72h | Maximum backup retention |
@@ -256,6 +257,23 @@ Allowed paths: positional args after the flags, **or** one `--allowed-paths` wit
 | `--log-dir` | — | Directory for audit logs and metrics (enables logging) |
 | `--log-level` | info | Log level: debug, info, warn, error |
 | `--debug` | off | Verbose debug logging |
+
+### Git network (`--git-network` / `--git-remote-allow`)
+
+`--git-network` (default **off**) is what enables `push`/`fetch`. `git(action:"remote")` works without it and prints the effective URL (credentials redacted). Push/fetch also print that URL — that is the default safety.
+
+`--git-remote-allow` is **optional**. Do not set it unless you want an extra host lock.
+
+| You pass | Push/fetch may go to |
+|----------|----------------------|
+| nothing (default) | Whatever `origin` (or `pushurl`) is. No extra check. |
+| `github.com,gitlab.com` | Those two hosts only (typical GitHub + GitLab setup) |
+| `github.com/scopweb` | Repos under that org/user only |
+| a full repo URL | That repository only |
+
+The name `origin` is never enough to authorize: the **effective URL** is matched (`pushurl`, `insteadOf`, multiple push URLs). `force:true` does not bypass. `git(action:"remote")` still works without `--git-network`.
+
+Omit the flag if seeing the URL is enough.
 
 ---
 
