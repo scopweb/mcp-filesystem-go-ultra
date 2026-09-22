@@ -38,7 +38,7 @@ func countOccurrencesTolerant(haystack, needle string, tolerantWhitespace bool) 
 		return 0
 	}
 	if !tolerantWhitespace {
-		return strings.Count(haystack, needle)
+		return len(findEOLTolerantRanges(haystack, needle))
 	}
 	hay := normalizeLineEndings(strings.ReplaceAll(haystack, "\t", "    "))
 	ndl := normalizeLineEndings(strings.ReplaceAll(needle, "\t", "    "))
@@ -118,10 +118,6 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 		return nil, fmt.Errorf("file too large for editing")
 	}
 
-	// Detect original EOL style to preserve it on write (Bug #33: EOL preservation)
-	// performIntelligentEdit normalizes to LF in memory; we restore before writing.
-	originalEOL := detectEOL(string(content))
-
 	// Validate context: Check if surrounding content suggests file has changed
 	// This prevents overwriting recent modifications.
 	// Bug #28: validateEditContext is a soft gate — if it can't confirm the match,
@@ -186,25 +182,20 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 		return nil, err
 	}
 
-	// Bug #32: dry_run returns result without writing to disk
 	if dryRun {
-		predicted := restoreEOL(result.ModifiedContent, originalEOL)
-		result.ModifiedContent = predicted
-		result.NewHash = contentHashFNV(predicted)
-		result.TotalLines = CountLines(predicted)
+		result.NewHash = contentHashFNV(result.ModifiedContent)
+		result.TotalLines = CountLines(result.ModifiedContent)
 		if impact.IsRisky {
 			result.RiskWarning = impact.FormatRiskNotice("", path)
 		}
 		return result, nil
 	}
 
-	// Apply hook modifications if any
 	finalContent := result.ModifiedContent
 	if hookResult != nil && hookResult.ModifiedContent != "" {
 		finalContent = hookResult.ModifiedContent
 	}
-
-	finalContent = restoreEOL(finalContent, originalEOL)
+	result.ModifiedContent = finalContent
 
 	backupID, err = txn.Commit(ctx, []byte(finalContent), false, "edit_file",
 		fmt.Sprintf("Edit: %d occurrences, %.1f%% change, risk=%s",
@@ -444,10 +435,8 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 		return nil, fmt.Errorf("old_text cannot be empty")
 	}
 
-	// Normalize line endings once
-	content = normalizeLineEndings(content)
-	oldText = normalizeLineEndings(oldText)
-	newText = normalizeLineEndings(newText)
+	original := content
+	adaptedNew := adaptInsertedEOL(newText, dominantEOL(original))
 
 	// OPTIMIZATION 0: Whitespace-tolerant match (explicit, opt-in).
 	// Runs FIRST when the caller passed tolerantWhitespace=true. We skip
@@ -462,19 +451,19 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 	// 2-space indent still differs from a 4-space indent (caller can do that
 	// explicitly with normalize_file if needed).
 	if tolerantWhitespace {
-		matches := findAllTolerantMatches(content, oldText)
+		matches := findAllTolerantMatches(original, oldText)
 		if len(matches) > 0 {
-			newContent, applied := applyTolerantMatches(content, matches, newText)
+			newContent, applied := applyTolerantMatches(original, matches, adaptedNew)
 			if applied > 0 {
 				startOrig := matches[0].StartOrig
 				endOrig := matches[len(matches)-1].EndOrig
-				startLine := strings.Count(content[:startOrig], "\n") + 1
-				endLine := strings.Count(content[:endOrig], "\n") + 1
-				linesAffected := strings.Count(newContent, "\n") - strings.Count(content, "\n")
+				startLine := lineNumberAtOrig(original, startOrig)
+				endLine := lineNumberAtOrig(original, endOrig)
+				linesAffected := strings.Count(newContent, "\n") - strings.Count(original, "\n")
 				if linesAffected < 0 {
 					linesAffected = -linesAffected
 				}
-				if !strings.Contains(newText, "\n") && !strings.Contains(content[startOrig:endOrig], "\n") {
+				if !strings.Contains(adaptedNew, "\n") && !strings.Contains(original[startOrig:endOrig], "\n") {
 					linesAffected = 1
 				}
 				return &EditResult{
@@ -489,67 +478,22 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 			}
 		}
 		if strict {
-			return nil, formatMatchCountError(content, oldText, 0, 1)
+			return nil, formatMatchCountError(original, oldText, 0, 1)
 		}
 	}
 
-	// OPTIMIZATION 1: Fast path for exact match (most common case - ~80% of edits)
-	// Uses strings.Index which is highly optimized with SIMD on modern CPUs
-	if idx := strings.Index(content, oldText); idx >= 0 {
-		replacements := strings.Count(content, oldText)
-
-		// Pre-allocate result with exact size for zero-copy
-		sizeDiff := len(newText) - len(oldText)
-		newLen := len(content) + (sizeDiff * replacements)
-
-		var sb strings.Builder
-		sb.Grow(newLen)
-
-		// Track start/end line for clickable link annotation
-		firstIdx := strings.Index(content, oldText)
-		startLine := strings.Count(content[:firstIdx], "\n") + 1
-		var endOffset int
-		linesAffected := 0
-		last := 0
-		firstMatch := true
-		for {
-			idx := strings.Index(content[last:], oldText)
-			if idx < 0 {
-				break
-			}
-			matchStart := last + idx
-			matchEnd := matchStart + len(oldText)
-			// Count newlines in affected region for line tracking
-			if strings.Contains(content[matchStart:matchEnd], "\n") {
-				linesAffected += strings.Count(content[matchStart:matchEnd], "\n")
-			} else {
-				linesAffected++
-			}
-			if firstMatch {
-				endOffset = matchEnd
-				firstMatch = false
-			}
-			sb.WriteString(content[last:matchStart])
-			sb.WriteString(preserveBoundaryNewline(content, matchEnd, oldText, newText))
-			last = matchEnd
-		}
-		sb.WriteString(content[last:])
-		endLine := strings.Count(content[:endOffset], "\n") + 1
-
-		return &EditResult{
-			ModifiedContent:  sb.String(),
-			ReplacementCount: replacements,
-			MatchConfidence:  "high",
-			MatchMethod:      "exact",
-			LinesAffected:    linesAffected,
-			StartLine:        startLine,
-			EndLine:          endLine,
-		}, nil
+	if ranges := findEOLTolerantRanges(original, oldText); len(ranges) > 0 {
+		newContent := splicePreserve(original, ranges, adaptedNew)
+		return editResultFromRanges(original, ranges, newContent, "exact", "high"), nil
 	}
 
 	if strict {
-		return nil, formatMatchCountError(content, oldText, 0, 1)
+		return nil, formatMatchCountError(original, oldText, 0, 1)
 	}
+
+	oldText = normalizeLineEndings(oldText)
+	newText = adaptedNew
+	content = original
 
 	// OPTIMIZATION 2: Pre-compute normalized variants once
 	normalizedOld := strings.TrimSpace(oldText)
@@ -886,29 +830,7 @@ func normalizeLineEndings(s string) string {
 // preserve the original EOL style when writing the file back to disk.
 // See restoreEOL.
 func detectEOL(content string) string {
-	crlf := strings.Count(content, "\r\n")
-	lfTotal := strings.Count(content, "\n")
-	crTotal := strings.Count(content, "\r")
-	lf := lfTotal - crlf // "\n" not part of "\r\n"
-	cr := crTotal - crlf // "\r" not part of "\r\n"
-
-	switch {
-	case crlf > 0 && lf == 0 && cr == 0:
-		return "\r\n"
-	case lf > 0 && crlf == 0 && cr == 0:
-		return "\n"
-	case cr > 0 && crlf == 0 && lf == 0:
-		return "\r"
-	case crlf+lf+cr == 0:
-		// No line breaks at all — single-line file. Default to LF.
-		return "\n"
-	default:
-		// Mixed line endings. Log a warning and default to LF.
-		// (We could pick the most common style but mixed files are
-		// already broken from a tooling perspective; LF is the safer
-		// default that won't surprise downstream tools.)
-		return "\n"
-	}
+	return dominantEOL(content)
 }
 
 // detectFileEOL returns the dominant line-ending style of an on-disk file by
@@ -1261,9 +1183,6 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 	content := txn.Snapshot().Bytes
 	originalContent := string(content)
 
-	// Detect original EOL style to preserve it on write (Bug #33: EOL preservation)
-	originalEOL := detectEOL(originalContent)
-
 	// Context validation (Bug #17 — parity with EditFile)
 	// In multi_edit, individual edits may legitimately fail (partial success).
 	// Only hard-block if NO edit passes context validation and none are "already_present".
@@ -1557,9 +1476,6 @@ func (e *UltraFastEngine) MultiEdit(ctx context.Context, path string, edits []Mu
 		finalContent = hookResult.ModifiedContent
 	}
 
-	// Restore original EOL style before writing (Bug #33: EOL preservation)
-	finalContent = restoreEOL(finalContent, originalEOL)
-
 	backupID, err = txn.Commit(ctx, []byte(finalContent), false, "multi_edit",
 		fmt.Sprintf("MultiEdit: %d edits, risk=%s", len(edits), aggregateImpact.RiskLevel))
 	if err != nil {
@@ -1779,8 +1695,6 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	// Detect original EOL style and work on LF-normalized content (Bug #33: EOL preservation)
-	// strings.Split/Join below would otherwise eat the \r in CRLF files.
 	originalEOL := detectEOL(string(content))
 	contentNormalized := normalizeLineEndings(string(content))
 

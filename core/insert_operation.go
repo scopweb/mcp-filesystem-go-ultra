@@ -41,61 +41,52 @@ func (e *UltraFastEngine) InsertAtAnchor(ctx context.Context, path, anchor, text
 	defer txn.Release()
 	path = txn.Snapshot().Path
 	raw := txn.Snapshot().Bytes
-	originalEOL := detectEOL(string(raw))
-	content := normalizeLineEndings(string(raw))
-	anchorN := normalizeLineEndings(anchor)
-	textN := normalizeLineEndings(text)
-
-	count := strings.Count(content, anchorN)
-	if count == 0 {
+	original := string(raw)
+	eol := dominantEOL(original)
+	ranges := findEOLTolerantRanges(original, anchor)
+	if len(ranges) == 0 {
 		return nil, fmt.Errorf("anchor not found: %q", anchor)
 	}
-	if count > 1 {
-		return nil, fmt.Errorf("anchor matches %d times (expected 1). Quote more surrounding context to make it unique", count)
+	if len(ranges) > 1 {
+		return nil, fmt.Errorf("anchor matches %d times (expected 1). Quote more surrounding context to make it unique", len(ranges))
 	}
-
-	matchStart := strings.Index(content, anchorN)
-	matchEnd := matchStart + len(anchorN)
+	matchStart, matchEnd := ranges[0][0], ranges[0][1]
+	anchorOrig := original[matchStart:matchEnd]
+	textN := adaptInsertedEOL(text, eol)
 
 	var combined string
 	if position == "before" {
 		insert := textN
-		if !strings.HasSuffix(insert, "\n") {
-			insert += "\n"
+		if trailingEOL(insert) == "" {
+			insert += eol
 		}
-		// Anchor not at a line start → push it onto its own new line.
-		if matchStart > 0 && content[matchStart-1] != '\n' {
-			insert = "\n" + insert
+		if matchStart > 0 && original[matchStart-1] != '\n' {
+			insert = eol + insert
 		}
-		combined = insert + anchorN
+		combined = insert + anchorOrig
 	} else {
-		combined = anchorN + textN
-		if !strings.HasSuffix(anchorN, "\n") {
-			combined = anchorN + "\n" + textN
+		combined = anchorOrig + textN
+		if trailingEOL(anchorOrig) == "" {
+			combined = anchorOrig + eol + textN
 		}
-		// Keep whatever follows the anchor on its own line. If the suffix
-		// already starts with "\n" (the anchor's own line ending), no extra
-		// separator is needed.
-		if matchEnd < len(content) && !strings.HasSuffix(combined, "\n") && content[matchEnd] != '\n' {
-			combined += "\n"
+		if matchEnd < len(original) && trailingEOL(combined) == "" && original[matchEnd] != '\n' && original[matchEnd] != '\r' {
+			combined += eol
 		}
 	}
 
-	newContent := content[:matchStart] + combined + content[matchEnd:]
+	newContent := original[:matchStart] + combined + original[matchEnd:]
 
 	result := &EditResult{
 		ModifiedContent:  newContent,
 		ReplacementCount: 1,
 		MatchConfidence:  "high",
 		LinesAffected:    strings.Count(textN, "\n") + 1,
-		StartLine:        strings.Count(content[:matchStart], "\n") + 1,
+		StartLine:        lineNumberAtOrig(original, matchStart),
 	}
 
 	if dryRun {
-		predicted := restoreEOL(newContent, originalEOL)
-		result.ModifiedContent = predicted
-		result.NewHash = contentHashFNV(predicted)
-		result.TotalLines = CountLines(predicted)
+		result.NewHash = contentHashFNV(newContent)
+		result.TotalLines = CountLines(newContent)
 		return result, nil
 	}
 
@@ -122,7 +113,6 @@ func (e *UltraFastEngine) InsertAtAnchor(ctx context.Context, path, anchor, text
 	if hookResult != nil && hookResult.ModifiedContent != "" {
 		finalContent = hookResult.ModifiedContent
 	}
-	finalContent = restoreEOL(finalContent, originalEOL)
 
 	backupID, err := txn.Commit(ctx, []byte(finalContent), false, "edit_file",
 		fmt.Sprintf("Insert %s anchor: %d lines", position, strings.Count(textN, "\n")+1))
