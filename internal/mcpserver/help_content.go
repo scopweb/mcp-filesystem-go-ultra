@@ -387,14 +387,15 @@ batch_operations(rename_json='{
 }')
 
 ## Batch Operation Types
-- write, edit, copy, move, delete, create_directory
+- write, edit, copy, move, delete, create_dir, extract
+- create_dir is rejected when atomic:true (directories are not journaled)
 
 ## Pipeline Actions
 - search, read_ranges, count_occurrences, edit, multi_edit
 - regex_transform, copy, rename, delete, aggregate, diff, merge
 
 ## Options
-- atomic: true = All succeed or all rollback
+- atomic: true = file ops succeed or roll back together. create_dir is rejected; use create_directory or a non-atomic batch, then atomic writes.
 - create_backup: true = Backup before changes
 - validate_only: true = Dry run (no changes)
 `)
@@ -477,9 +478,9 @@ multi_edit("src/config.py", edits_json='[
 edit_file("src/main.py", old_text="TODO", new_text="DONE", occurrence=-1)
 
 ## Example 4: Create multiple files atomically
+create_directory("src/components")
 batch_operations(request_json='{
   "operations": [
-    {"type": "create_directory", "path": "src/components"},
     {"type": "write", "path": "src/components/Button.tsx", "content": "..."},
     {"type": "write", "path": "src/components/Input.tsx", "content": "..."}
   ],

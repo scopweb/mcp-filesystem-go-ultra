@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### docs: atomic create_dir is a permanent limit
+
+`batch_operations` with `atomic:true` rejects `create_dir`. The journal recovers regular files by byte snapshot, not `MkdirAll` trees. Use `create_directory` or a non-atomic batch, then atomic file ops.
+
+**Verification:** `TestE3AtomicCreateDirRejected` · `TestE3_Handler_AtomicCreateDirRejected`
+
 ### feat(e3): persistent retry receipts with `--receipt-dir`
 
 `operation_id` + `retry_contract:"e3-v1"` receipts survive process restart when `--receipt-dir` is set. Same id+args replay the stored result; unknown epoch, different args, truncated/pending receipts, errors, expiry and the 4096 cap still refuse a second mutation. Empty `--receipt-dir` stays process-local.
