@@ -372,3 +372,11 @@ func TestRollbackIncompleteResultSurfacesPartial(t *testing.T) {
 		t.Fatal(text)
 	}
 }
+
+func TestPatchFailedMissingBaseDoesNotAskToRegenerate(t *testing.T) {
+	res := patchFailedResult(`C:\missing`, &core.PatchError{Reason: core.PatchReasonMalformed, Msg: "base directory does not exist"}, nil)
+	text := resultText(t, res)
+	if strings.Contains(text, "regenerate the patch") || !strings.Contains(text, "base directory does not exist") || !strings.Contains(text, suggestionBaseMissing) {
+		t.Fatal(text)
+	}
+}

@@ -29,6 +29,7 @@ const (
 
 const (
 	suggestionPatchFailed    = "re-read the file and regenerate the patch"
+	suggestionBaseMissing    = "create the directory or pass an existing directory; the patch is fine"
 	suggestionRewriteBlocked = "use write_file or allow_rewrite:true"
 	suggestionNotAllowed     = "call list_allowed_directories"
 	suggestionHashRequired   = "Read the file and resend the mutation with expected_hash."
@@ -133,7 +134,11 @@ func patchFailedResult(path string, err error, extra map[string]string) *mcp.Cal
 	if msg == "" && err != nil {
 		msg = err.Error()
 	}
-	return pathErrorResultDetails(errCodePatchFailed, msg, path, details, suggestionPatchFailed)
+	suggestion := suggestionPatchFailed
+	if msg == "base directory does not exist" || strings.HasPrefix(msg, "cannot stat base directory:") {
+		suggestion = suggestionBaseMissing
+	}
+	return pathErrorResultDetails(errCodePatchFailed, msg, path, details, suggestion)
 }
 
 func rewriteBlockedResult(path, message string, oldLen, newLen int) *mcp.CallToolResult {
