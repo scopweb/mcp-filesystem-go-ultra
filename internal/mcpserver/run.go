@@ -86,6 +86,18 @@ var (
 	BuildDate   = "unknown"
 )
 
+func newFilesystemMCPServer() *server.MCPServer {
+	return server.NewMCPServer(
+		"filesystem-ultra",
+		serverVersion,
+		server.WithToolCapabilities(true),
+		server.WithRoots(),
+		server.WithResourceCapabilities(false, true),
+		server.WithLogging(),
+		server.WithInstructions(serverInstructions),
+	)
+}
+
 // Run is the server entry point, invoked by cmd/filesystem-ultra.
 func Run() {
 	config := DefaultConfiguration()
@@ -272,16 +284,7 @@ func Run() {
 	}
 	defer engine.Close()
 
-	// Create MCP server using mark3labs SDK
-	s := server.NewMCPServer(
-		"filesystem-ultra",
-		serverVersion,
-		server.WithToolCapabilities(true), // listChanged=true enables tools/list_changed notifications
-		server.WithRoots(),
-		server.WithResourceCapabilities(false, true),
-		server.WithLogging(),
-		server.WithInstructions(serverInstructions),
-	)
+	s := newFilesystemMCPServer()
 
 	activeProfile, profErr := parseToolProfile(*profileFlag)
 	if profErr != nil {

@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### docs: completions is a permanent limit
+
+Spec 2025-11-25 `completion/complete` only covers `ref/prompt` and `ref/resource`. The SDK (`mark3labs/mcp-go` v1.0.0) has no `ref/tool`. Tool paths and actions have no legal ref, so the server does not declare `completions`. Actions stay on the tool schema enums; paths are discovered with `list_allowed_directories` and `directory_tree`. `completion/complete` is `METHOD_NOT_FOUND`.
+
+**Verification:** `TestCompletions_NotAdvertised` · `TestCompletions_CompleteMethodNotFound`
+
 ### feat(apply_patch): multi-file in-process transaction
 
 A unified diff with several files is validated in full, then applied all-or-nothing in this process (journal rollback; not crash-durable). Single-file diffs keep the existing contract. `path` is the directory root for multi-file; destinations must already exist (no mkdir, no create_dir mix). `expected_hash` remains single-file only. Same parser and single-file applicator; `PATCH_FAILED` stays `retryable:false`.
