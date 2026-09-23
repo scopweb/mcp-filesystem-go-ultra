@@ -10,18 +10,21 @@ import (
 )
 
 const (
-	errCodeNotAllowed     = "NOT_ALLOWED"
-	errCodeNotFound       = "NOT_FOUND"
-	errCodeOCCMismatch    = "OCC_MISMATCH"
-	errCodeRewriteBlocked = "REWRITE_BLOCKED"
-	errCodeRootsEmpty     = "ROOTS_EMPTY"
-	errCodeSecretDenied   = "SECRET_DENIED"
-	errCodeReadOnly       = "READONLY"
-	errCodePatchFailed    = "PATCH_FAILED"
-	errCodeInvalidParams  = "VALIDATION"
-	errCodeHashRequired   = "HASH_REQUIRED"
-	errCodeUnavailable    = "TOOL_UNAVAILABLE"
-	errCodeBudgetExceeded = "BUDGET_EXCEEDED"
+	errCodeNotAllowed       = "NOT_ALLOWED"
+	errCodeNotFound         = "NOT_FOUND"
+	errCodeOCCMismatch      = "OCC_MISMATCH"
+	errCodeRewriteBlocked   = "REWRITE_BLOCKED"
+	errCodeRootsEmpty       = "ROOTS_EMPTY"
+	errCodeSecretDenied     = "SECRET_DENIED"
+	errCodeReadOnly         = "READONLY"
+	errCodePatchFailed      = "PATCH_FAILED"
+	errCodeInvalidParams    = "VALIDATION"
+	errCodeHashRequired     = "HASH_REQUIRED"
+	errCodeUnavailable      = "TOOL_UNAVAILABLE"
+	errCodeBudgetExceeded   = "BUDGET_EXCEEDED"
+	errCodeRollbackPartial  = "ROLLBACK_PARTIAL"
+	errCodeRollbackFailed   = "ROLLBACK_FAILED"
+	errCodeRollbackComplete = "ROLLBACK_COMPLETE"
 )
 
 const (
