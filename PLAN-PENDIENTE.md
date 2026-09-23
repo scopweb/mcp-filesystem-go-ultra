@@ -20,7 +20,7 @@ Canonical: [ROADMAP-v4.7-Failure-Intelligence.md](ROADMAP-v4.7-Failure-Intellige
 | PR-5 | Mutation budget per process (default off) | done |
 | PR-6 | Path-aware risk on `impact_analyzer` | done |
 
-Shipped in v4.7.0. P1 eval with a real model stays P1 of the product. P2 e3 receipts persist with `--receipt-dir` (below). `atomic create_dir` is a permanent limit (below). Multi-file `apply_patch` is an in-process transaction (below). Completions stay open.
+Shipped in v4.7.0. P1 eval with a real model stays P1 of the product. P2 e3 receipts persist with `--receipt-dir` (below). `atomic create_dir` is a permanent limit (below). Multi-file `apply_patch` is an in-process transaction (below). Completions closed as a permanent limit (below).
 
 ## P1 — Evaluación real con agentes
 
@@ -91,10 +91,20 @@ Transacción **en proceso**, no durabilidad ante crash. Un diff unificado con va
 
 **Verification:** `TestApplyMultiFilePatch_TwoFiles` · `TestApplyMultiFilePatch_SecondHunkFailsFirstIntact` · `TestApplyPatch_MultiFile_*`
 
+### completions — decisión (2026-09-23)
+
+**Salida 1 — Límite.** No se declara la capability `completions`. No hay handler.
+
+`mark3labs/mcp-go` v1.0.0 (`CompleteParams.UnmarshalJSON`) y la spec 2025-11-25 aceptan solo `ref/prompt` y `ref/resource` en `completion/complete`. No existe `ref/tool` ni `tools/complete`. Rutas y acciones de tools no tienen un ref legal. Resources/Prompts no se abren como producto para este cierre.
+
+Las acciones (`git action`, `backup action`, `server_info action`) ya están en los enum del schema. Las rutas se descubren con `list_allowed_directories` y `directory_tree`. Un prefijo vacío no debe volcar el disco; al no anunciar la capability, `completion/complete` responde `-32601` (METHOD_NOT_FOUND).
+
+**Verification:** `TestCompletions_NotAdvertised` · `TestCompletions_CompleteMethodNotFound`
+
 ## P2 — Comodidad de edición
 
 - ~~Parche multiarchivo estilo Codex sobre el núcleo transaccional E2~~ (hecho: transacción in-process, ver arriba)
-- Autocompletado MCP (`completions`) de rutas y acciones
+- ~~Autocompletado MCP (`completions`) de rutas y acciones~~ (límite permanente: ver arriba)
 
 ## Fuera de alcance cercano
 
