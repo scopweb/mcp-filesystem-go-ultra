@@ -119,6 +119,7 @@ func Run() {
 
 		// Backup configuration
 		backupDir      = flag.String("backup-dir", "", "Directory for backup storage (default: temp/mcp-batch-backups)")
+		receiptDir     = flag.String("receipt-dir", "", "Directory for e3-v1 retry receipts (empty = process-local memory only)")
 		backupMaxAge   = flag.Int("backup-max-age", 7, "Max age of backups in days")
 		backupMaxCount = flag.Int("backup-max-count", 100, "Max number of backups to keep")
 
@@ -253,6 +254,7 @@ func Run() {
 		// Logging
 		LogDir:              *logDir,
 		NormalizerRulesPath: *normalizerRules,
+		ReceiptDir:          *receiptDir,
 
 		// Risk thresholds
 		RiskThresholdMedium:   *riskThresholdMedium,

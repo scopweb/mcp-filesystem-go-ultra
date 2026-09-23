@@ -75,12 +75,13 @@ func (pe *PipelineExecutor) Execute(ctx context.Context, request PipelineRequest
 	return result, runErr
 }
 
-// E3 retry contract: process-local, 24-hour results, no eviction/re-execution.
-// Expired entries become tombstones. Restart changes the namespace, so an old
-// identifier is rejected instead of silently executing an uncertain write.
+// E3 retry contract: 24-hour results, no eviction/re-execution. With
+// --receipt-dir the epoch and receipts survive restart; without it the
+// namespace is process-local and a prior lifetime's id is rejected.
 type operationRetries struct {
 	mu      sync.Mutex
 	epoch   string
+	dir     string
 	entries map[string]*operationReceipt
 }
 type operationReceipt struct {
@@ -89,6 +90,7 @@ type operationReceipt struct {
 	completed time.Time
 	result    []byte
 	err       error
+	unknown   bool
 }
 
 func (e *UltraFastEngine) runOnce(ctx context.Context, kind, id string, args any, run func() ([]byte, error)) ([]byte, error) {
@@ -103,16 +105,30 @@ func (e *UltraFastEngine) runOnce(ctx context.Context, kind, id string, args any
 		r.epoch = secureRandomSuffix()
 		r.entries = make(map[string]*operationReceipt)
 	}
+	if r.entries == nil {
+		r.entries = make(map[string]*operationReceipt)
+	}
 	if !strings.HasPrefix(id, r.epoch+":") || len(id) <= len(r.epoch)+1 || len(id) > 200 {
 		prefix := r.epoch
 		r.mu.Unlock()
-		return nil, fmt.Errorf("operation_id must use this server lifetime's prefix %s:<unique-id>; an ID from a prior server lifetime cannot be retried safely", prefix)
+		return nil, fmt.Errorf("operation_id must use this receipt namespace's prefix %s:<unique-id>; an ID from an unknown epoch cannot be retried safely", prefix)
 	}
 	key := sessionIDFrom(ctx) + "\x00" + kind + "\x00" + id
-	if receipt := r.entries[key]; receipt != nil {
+	receipt := r.entries[key]
+	if receipt == nil {
+		receipt = r.loadDiskLocked(key)
+	}
+	if receipt != nil {
 		if receipt.args != hash {
+			err := receipt.err
 			r.mu.Unlock()
-			return nil, fmt.Errorf("operation_id reused with different arguments")
+			if receipt.unknown || receipt.args == ([32]byte{}) {
+				if err == nil {
+					err = errReceiptUnreadable
+				}
+				return nil, err
+			}
+			return nil, errReceiptArgsReuse
 		}
 		r.mu.Unlock()
 		select {
@@ -122,25 +138,34 @@ func (e *UltraFastEngine) runOnce(ctx context.Context, kind, id string, args any
 		}
 		r.mu.Lock()
 		defer r.mu.Unlock()
+		if receipt.unknown {
+			return nil, receipt.err
+		}
 		if time.Since(receipt.completed) > 24*time.Hour {
 			receipt.result = nil
-			return nil, fmt.Errorf("operation_id expired; outcome must be reconciled before a new operation")
+			return nil, errReceiptExpired
 		}
 		return append([]byte(nil), receipt.result...), receipt.err
 	}
-	if len(r.entries) >= 4096 {
+	if r.receiptCountLocked() >= 4096 {
 		r.mu.Unlock()
-		return nil, fmt.Errorf("operation receipt capacity reached; no mutation executed")
+		return nil, errReceiptCapacity
 	}
-	receipt := &operationReceipt{args: hash, done: make(chan struct{})}
+	receipt = &operationReceipt{args: hash, done: make(chan struct{})}
 	r.entries[key] = receipt
+	if err := r.writeDiskLocked(key, receipt); err != nil {
+		delete(r.entries, key)
+		r.mu.Unlock()
+		return nil, err
+	}
 	r.mu.Unlock()
-	// Always resolve waiters, even if a downstream panic interrupts the action.
 	defer func() {
 		r.mu.Lock()
 		if receipt.completed.IsZero() {
-			receipt.err = fmt.Errorf("operation interrupted; outcome unknown, reconcile before retrying")
+			receipt.err = errOutcomeUnknown
+			receipt.unknown = true
 			receipt.completed = time.Now()
+			_ = r.writeDiskLocked(key, receipt)
 			close(receipt.done)
 		}
 		r.mu.Unlock()
@@ -150,6 +175,7 @@ func (e *UltraFastEngine) runOnce(ctx context.Context, kind, id string, args any
 	receipt.result = append([]byte(nil), result...)
 	receipt.err = runErr
 	receipt.completed = time.Now()
+	_ = r.writeDiskLocked(key, receipt)
 	close(receipt.done)
 	r.mu.Unlock()
 	return result, runErr

@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### feat(e3): persistent retry receipts with `--receipt-dir`
+
+`operation_id` + `retry_contract:"e3-v1"` receipts survive process restart when `--receipt-dir` is set. Same id+args replay the stored result; unknown epoch, different args, truncated/pending receipts, errors, expiry and the 4096 cap still refuse a second mutation. Empty `--receipt-dir` stays process-local.
+
+**Verification:** `TestE3ReceiptsSurviveProcessRestart` · `TestE3ReceiptStoreReplaysErrorWithoutRerun` · `TestE3ReceiptStorePendingExpiredAndCapacity`
+
 ### docs: `--git-remote-allow` is optional
 
 Empty allowlist is the supported default (any configured remote). Documented GitHub+GitLab as `--git-remote-allow=github.com,gitlab.com`. Seeing the push URL remains the default safety.
