@@ -121,6 +121,27 @@ func TestApplyMultiFilePatch_MissingDestRejected(t *testing.T) {
 	e3Content(t, filepath.Join(dir, "a.txt"), "a\n")
 }
 
+func TestApplyMultiFilePatch_MissingBaseIsNotNotADirectory(t *testing.T) {
+	dir := t.TempDir()
+	e := newTestEngine(dir)
+	defer e.Close()
+	files, err := ParseUnifiedDiffs(twoFilePatch())
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "gone")
+	_, err = e.ApplyMultiFilePatch(context.Background(), files, MultiFilePatchOpts{BaseDir: missing})
+	if err == nil || err.Error() != "base directory does not exist" || strings.Contains(err.Error(), "requires path to be a directory") {
+		t.Fatalf("got %v", err)
+	}
+	file := filepath.Join(dir, "notdir.txt")
+	e3File(t, file, "x\n")
+	_, err = e.ApplyMultiFilePatch(context.Background(), files, MultiFilePatchOpts{BaseDir: file})
+	if err == nil || !strings.Contains(err.Error(), "requires path to be a directory") {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestApplyMultiFilePatch_NoMkdir(t *testing.T) {
 	dir := t.TempDir()
 	e := newTestEngine(dir)

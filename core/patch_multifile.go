@@ -93,6 +93,13 @@ func patchFileHeader(p ParsedPatch) string {
 	return p.OldFile
 }
 
+func patchBaseStatError(err error) error {
+	if os.IsNotExist(err) {
+		return &PatchError{Reason: PatchReasonMalformed, Msg: "base directory does not exist"}
+	}
+	return &PatchError{Reason: PatchReasonMalformed, Msg: fmt.Sprintf("cannot stat base directory: %v", err)}
+}
+
 func (e *UltraFastEngine) ApplyMultiFilePatch(ctx context.Context, files []ParsedPatch, opts MultiFilePatchOpts) (*MultiFilePatchResult, error) {
 	if len(files) < 2 {
 		return nil, &PatchError{Reason: PatchReasonMalformed, Msg: "multi-file patch requires at least two files"}
@@ -106,7 +113,7 @@ func (e *UltraFastEngine) ApplyMultiFilePatch(ctx context.Context, files []Parse
 	}
 	info, err := os.Lstat(base)
 	if err != nil {
-		return nil, &PatchError{Reason: PatchReasonMalformed, Msg: "multi-file patch requires path to be a directory"}
+		return nil, patchBaseStatError(err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		resolved, rerr := e.ResolveAndAuthorize("mutate", base)
@@ -116,7 +123,7 @@ func (e *UltraFastEngine) ApplyMultiFilePatch(ctx context.Context, files []Parse
 		base = resolved
 		info, err = os.Lstat(base)
 		if err != nil {
-			return nil, &PatchError{Reason: PatchReasonMalformed, Msg: "multi-file patch requires path to be a directory"}
+			return nil, patchBaseStatError(err)
 		}
 	}
 	if !info.IsDir() {
