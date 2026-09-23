@@ -54,7 +54,7 @@ See [Build](#build) and [Configuration](#configuration) below for more.
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
 - **Hook system** — 16 pre/post events (write, edit, delete, create, move, copy, read, search)
 - **Pipeline system** — 12 actions with conditions, templates, and DAG-based parallel execution; reduces client/server round-trips for multi-step refactors
-- **Atomic batch operations** — grouped file operations with journal rollback (`complete`/`partial`/`failed`); recover-on-error in-process, not crash-durable. Opt-in retries: `operation_id` + `retry_contract:"e3-v1"`
+- **Atomic batch operations** — grouped file operations with journal rollback (`complete`/`partial`/`failed`); recover-on-error in-process, not crash-durable. Opt-in retries: `operation_id` + `retry_contract:"e3-v1"` (persist across restart with `--receipt-dir`)
 - **Compact mode** — reduced-token responses for high-volume sessions
 - **Log tail without bash** — `read_file(mode:"tail", max_lines:40)` replaces `tail | cut`; each line auto-cut to 300 chars (`max_line_length` to override)
 - **Audit logging** — JSON Lines operation log + metrics snapshots

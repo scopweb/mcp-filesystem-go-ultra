@@ -51,6 +51,9 @@ type Config struct {
 	// Logging
 	LogDir string // Directory for audit logs and metrics snapshots (empty = disabled)
 
+	// ReceiptDir persists e3-v1 retry receipts across process restarts (empty = memory only)
+	ReceiptDir string
+
 	// Normalizer
 	NormalizerRulesPath string // Path to external normalizer rules JSON file (optional)
 
@@ -363,6 +366,13 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 	}
 	engine.normalizer = normalizer
 	slog.Info("Request normalizer initialized", "rules", normalizer.RulesCount())
+
+	if dir := strings.TrimSpace(config.ReceiptDir); dir != "" {
+		if err := engine.initReceiptStore(dir); err != nil {
+			engine.Close()
+			return nil, fmt.Errorf("receipt store: %w", err)
+		}
+	}
 
 	return engine, nil
 }
