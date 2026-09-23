@@ -28,6 +28,32 @@ type MultiFilePatchResult struct {
 	Files []MultiFilePatchFileResult
 }
 
+// RollbackError is the commit failure plus the recovery outcome. Status complete means the bytes this call wrote were restored.
+type RollbackError struct {
+	Status   string
+	Failures []string
+	Err      error
+}
+
+func (e *RollbackError) Error() string {
+	if e.Status == "complete" {
+		return fmt.Sprintf("rollback complete: %v", e.Err)
+	}
+	return fmt.Sprintf("rollback %s: %v: %v", e.Status, e.Failures, e.Err)
+}
+
+func (e *RollbackError) Unwrap() error { return e.Err }
+
+func attachRollback(commitErr error, status string, failures []string) error {
+	if commitErr == nil {
+		return nil
+	}
+	return &RollbackError{Status: status, Failures: append([]string(nil), failures...), Err: commitErr}
+}
+
+// commitProbe runs immediately before each Commit. Tests use it to fail a later commit and to change an already written file. Production leaves it nil.
+var commitProbe func(i int, path string)
+
 type RewriteBlockedError struct {
 	Path           string
 	Message        string
@@ -212,10 +238,13 @@ func (e *UltraFastEngine) ApplyMultiFilePatch(ctx context.Context, files []Parse
 		if !opts.CreateBackup {
 			txns[i].SkipBackup()
 		}
+		if commitProbe != nil {
+			commitProbe(i, p.dest)
+		}
 		backupID, err := txns[i].Commit(ctx, p.newBytes, false, "apply_patch", "")
 		if err != nil {
-			journal.rollback(ctx, e)
-			return nil, err
+			status, failures := journal.rollback(ctx, e)
+			return nil, attachRollback(err, status, failures)
 		}
 		out.Files[i].BackupID = backupID
 	}

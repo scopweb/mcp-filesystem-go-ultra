@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mcp/filesystem-ultra/core"
 )
 
 func callPatchTool(t *testing.T, reg *toolRegistry, name string, args map[string]any) *mcp.CallToolResult {
@@ -350,5 +352,23 @@ func TestWriteFile_Append(t *testing.T) {
 	raw, _ := os.ReadFile(p)
 	if string(raw) != "one\ntwo\n" {
 		t.Fatalf("got %q", raw)
+	}
+}
+
+func TestRollbackIncompleteResultSurfacesPartial(t *testing.T) {
+	res := rollbackIncompleteResult(`C:\repo`, &core.RollbackError{
+		Status: "partial", Failures: []string{`C:\repo\a.txt: changed`}, Err: fmt.Errorf("write conflict"),
+	})
+	if res == nil || !res.IsError {
+		t.Fatal(res)
+	}
+	text := resultText(t, res)
+	if !strings.Contains(text, `"code":"ROLLBACK_PARTIAL"`) || !strings.Contains(text, `"retryable":false`) || !strings.Contains(text, "a.txt") {
+		t.Fatal(text)
+	}
+	complete := rollbackIncompleteResult(`C:\repo`, &core.RollbackError{Status: "complete", Err: &core.OCCMismatchError{Expected: "old", Actual: "new"}})
+	text = resultText(t, complete)
+	if !strings.Contains(text, `"code":"ROLLBACK_COMPLETE"`) || !strings.Contains(text, `"rollback_status":"complete"`) || strings.Contains(text, `"code":"OCC_MISMATCH"`) {
+		t.Fatal(text)
 	}
 }

@@ -249,6 +249,26 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 	}
 }
 
+func rollbackIncompleteResult(base string, err error) *mcp.CallToolResult {
+	var rolled *core.RollbackError
+	if !errors.As(err, &rolled) {
+		return nil
+	}
+	code := errCodeRollbackFailed
+	suggestion := "inspect the listed paths; do not assume the patch was fully reverted"
+	switch rolled.Status {
+	case "partial":
+		code = errCodeRollbackPartial
+	case "complete":
+		code = errCodeRollbackComplete
+		suggestion = "the patch was reverted; re-read and regenerate, do not retry the same patch"
+	}
+	return pathErrorResultDetails(code, rolled.Error(), base, map[string]any{
+		"rollback_status": rolled.Status,
+		"rollback_errors": rolled.Failures,
+	}, suggestion)
+}
+
 func handleMultiFilePatch(ctx context.Context, engine *core.UltraFastEngine, base string, files []core.ParsedPatch, dryRun, allowRewrite, createBackup bool, expectedHash string) (*mcp.CallToolResult, error) {
 	if expectedHash != "" {
 		return validationResult("expected_hash is only valid for a single-file patch", "expected_hash", "omitted for multi-file"), nil
@@ -260,6 +280,9 @@ func handleMultiFilePatch(ctx context.Context, engine *core.UltraFastEngine, bas
 		CreateBackup: createBackup,
 	})
 	if err != nil {
+		if res := rollbackIncompleteResult(base, err); res != nil {
+			return res, nil
+		}
 		var occ *core.OCCMismatchError
 		if errors.As(err, &occ) {
 			return occMismatchResult("content hash != expected_hash", base, occ.Expected, occ.Actual, occ.Conflict), nil
