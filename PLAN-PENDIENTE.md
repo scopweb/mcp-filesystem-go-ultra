@@ -20,7 +20,7 @@ Canonical: [ROADMAP-v4.7-Failure-Intelligence.md](ROADMAP-v4.7-Failure-Intellige
 | PR-5 | Mutation budget per process (default off) | done |
 | PR-6 | Path-aware risk on `impact_analyzer` | done |
 
-Shipped in v4.7.0. P1 eval with a real model stays P1 of the product. P2 e3 receipts persist with `--receipt-dir` (below). `atomic create_dir` / multi-file patch / completions stay open.
+Shipped in v4.7.0. P1 eval with a real model stays P1 of the product. P2 e3 receipts persist with `--receipt-dir` (below). `atomic create_dir` is a permanent limit (below). Multi-file patch / completions stay open.
 
 ## P1 — Evaluación real con agentes
 
@@ -75,7 +75,15 @@ Contrato que no cambia: clave `sesión + kind + id`; SHA-256 de los argumentos; 
 
 **Prueba.** `TestE3ReceiptsSurviveProcessRestart` arranca un proceso hijo, aplica, termina, arranca otro con el mismo almacén y el mismo id; el archivo no cambia. Cubre epoch ajeno, argumentos distintos y recibo truncado. No se declara durabilidad sin ese reinicio real.
 
-`atomic create_dir` sigue rechazado. Documentar el límite o definirlo queda abierto.
+### atomic create_dir — decisión (2026-09-23)
+
+Límite permanente. `batch_operations` con `atomic:true` sigue rechazando `create_dir`. No se cambia el código de ejecución.
+
+El journal restaura archivos regulares por snapshot de bytes (`recoverySnapshot` exige un fichero). `create_dir` es `MkdirAll`: crea padres. Deshacer exactamente esos directorios sería recuperar un árbol (no borrar lo que ya existía, no seguir symlinks, revertir cada ancestro creado). Eso no cabe en el journal. Un crash a medias no es durabilidad: el journal sigue siendo recover-on-error en proceso.
+
+`create_dir` sin `atomic` y `create_directory` no cambian. Flujo: crear el directorio fuera del batch atómico, luego el batch de archivos.
+
+Prueba: `TestE3AtomicCreateDirRejected` y `TestE3_Handler_AtomicCreateDirRejected` (el rechazo, no un rollback de directorio).
 
 ## P2 — Comodidad de edición
 
