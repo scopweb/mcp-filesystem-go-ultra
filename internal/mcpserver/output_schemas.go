@@ -174,6 +174,7 @@ var applyPatchOutputSchema = json.RawMessage(`{
   "properties": {
     "status": {"type": "string", "description": "applied or simulated (dry_run)"},
     "path": {"type": "string"},
+    "files": {"type": "array", "description": "Per-file results for a multi-file patch", "items": {"type": "object"}},
     "lines_added": {"type": "integer"},
     "lines_removed": {"type": "integer"},
     "content_hash": {"type": "string", "description": "Post-write OCC hash when applied and verified"},

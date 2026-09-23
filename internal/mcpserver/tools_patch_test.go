@@ -233,6 +233,111 @@ func TestApplyPatch_NewFileFromDevNull(t *testing.T) {
 	}
 }
 
+func twoFilePatch(aOld, aNew, bOld, bNew string) string {
+	return "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-" + aOld + "\n+" + aNew + "\n--- a/b.txt\n+++ b/b.txt\n@@ -1 +1 @@\n-" + bOld + "\n+" + bNew + "\n"
+}
+
+func TestApplyPatch_MultiFile_TwoFiles(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.txt")
+	b := filepath.Join(dir, "b.txt")
+	_ = os.WriteFile(a, []byte("a\n"), 0644)
+	_ = os.WriteFile(b, []byte("b\n"), 0644)
+	reg := newHelpTestRegistry(t, dir)
+	res := callPatchTool(t, reg, "apply_patch", map[string]any{"path": dir, "patch": twoFilePatch("a", "A", "b", "B")})
+	if res.IsError {
+		t.Fatalf("%s", resultText(t, res))
+	}
+	rawA, _ := os.ReadFile(a)
+	rawB, _ := os.ReadFile(b)
+	if string(rawA) != "A\n" || string(rawB) != "B\n" {
+		t.Fatalf("got %q %q", rawA, rawB)
+	}
+}
+
+func TestApplyPatch_MultiFile_SecondHunkFailsFirstIntact(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.txt")
+	b := filepath.Join(dir, "b.txt")
+	_ = os.WriteFile(a, []byte("a\n"), 0644)
+	_ = os.WriteFile(b, []byte("b\n"), 0644)
+	reg := newHelpTestRegistry(t, dir)
+	res := callPatchTool(t, reg, "apply_patch", map[string]any{"path": dir, "patch": twoFilePatch("a", "A", "NOPE", "B")})
+	text := resultText(t, res)
+	if !res.IsError || !strings.Contains(text, `"code":"PATCH_FAILED"`) || !strings.Contains(text, `"retryable":false`) {
+		t.Fatalf("got %s", text)
+	}
+	rawA, _ := os.ReadFile(a)
+	rawB, _ := os.ReadFile(b)
+	if string(rawA) != "a\n" || string(rawB) != "b\n" {
+		t.Fatalf("first file must stay intact, got %q %q", rawA, rawB)
+	}
+}
+
+func TestApplyPatch_MultiFile_StaleHash(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.txt")
+	b := filepath.Join(dir, "b.txt")
+	_ = os.WriteFile(a, []byte("a\n"), 0644)
+	_ = os.WriteFile(b, []byte("b\n"), 0644)
+	reg := newHelpTestRegistry(t, dir)
+	res := callPatchTool(t, reg, "apply_patch", map[string]any{
+		"path": dir, "patch": twoFilePatch("a", "A", "b", "B"), "expected_hash": "deadbeef",
+	})
+	text := resultText(t, res)
+	if !res.IsError || !strings.Contains(text, `"retryable":false`) {
+		t.Fatalf("got %s", text)
+	}
+	rawA, _ := os.ReadFile(a)
+	rawB, _ := os.ReadFile(b)
+	if string(rawA) != "a\n" || string(rawB) != "b\n" {
+		t.Fatalf("stale hash must not write, got %q %q", rawA, rawB)
+	}
+}
+
+func TestApplyPatch_MultiFile_DryRunNoWrites(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.txt")
+	b := filepath.Join(dir, "b.txt")
+	_ = os.WriteFile(a, []byte("a\n"), 0644)
+	_ = os.WriteFile(b, []byte("b\n"), 0644)
+	reg := newHelpTestRegistry(t, dir)
+	res := callPatchTool(t, reg, "apply_patch", map[string]any{"path": dir, "patch": twoFilePatch("a", "A", "b", "B"), "dry_run": true})
+	if res.IsError || !strings.Contains(resultText(t, res), "DRY_RUN") {
+		t.Fatalf("dry_run: %s", resultText(t, res))
+	}
+	rawA, _ := os.ReadFile(a)
+	rawB, _ := os.ReadFile(b)
+	if string(rawA) != "a\n" || string(rawB) != "b\n" {
+		t.Fatalf("dry_run must not write, got %q %q", rawA, rawB)
+	}
+}
+
+func TestApplyPatch_MultiFile_PatchFailedNotRetried(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.txt")
+	b := filepath.Join(dir, "b.txt")
+	_ = os.WriteFile(a, []byte("a\n"), 0644)
+	_ = os.WriteFile(b, []byte("b\n"), 0644)
+	reg := newHelpTestRegistry(t, dir)
+	args := map[string]any{"path": dir, "patch": twoFilePatch("a", "A", "NOPE", "B")}
+	res1 := callPatchTool(t, reg, "apply_patch", args)
+	text1 := resultText(t, res1)
+	if !res1.IsError || !strings.Contains(text1, `"code":"PATCH_FAILED"`) || !strings.Contains(text1, `"retryable":false`) {
+		t.Fatalf("first: %s", text1)
+	}
+	res2 := callPatchTool(t, reg, "apply_patch", args)
+	text2 := resultText(t, res2)
+	if !res2.IsError || !strings.Contains(text2, `"code":"PATCH_FAILED"`) || !strings.Contains(text2, `"retryable":false`) {
+		t.Fatalf("retry same patch: %s", text2)
+	}
+	rawA, _ := os.ReadFile(a)
+	rawB, _ := os.ReadFile(b)
+	if string(rawA) != "a\n" || string(rawB) != "b\n" {
+		t.Fatalf("retry must not apply, got %q %q", rawA, rawB)
+	}
+}
+
 func TestWriteFile_Append(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "log.txt")

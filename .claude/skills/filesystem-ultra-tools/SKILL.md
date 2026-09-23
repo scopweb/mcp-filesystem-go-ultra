@@ -43,7 +43,7 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 | `write_file` | New files or whole-file rewrite. `mode:"append"` skips rewrite-guard |
 | `edit_file` | Targeted edits. Override rewrite-guard with `allow_rewrite:true` (not `force`) |
 | `multi_edit` | Several anchors in one file. Ambiguous `old_text` (>1 match) rejects the batch (file unchanged). The error lists each edit (index, `FAILED`/`AMBIGUOUS`); do not treat `Failed: .` as empty |
-| `apply_patch` | One file per call. Happy path: `dry_run` + `expected_hash`. Dest EOL wins. If `PATCH_FAILED`: `read_file` and regenerate the hunk; do not retry the same patch |
+| `apply_patch` | One file: `path` is the dest. Several files: `path` is the directory root; in-process all-or-nothing (not crash-durable). Happy path: `dry_run` + `expected_hash` (single-file). Dest EOL wins. If `PATCH_FAILED`: `read_file` and regenerate; do not retry the same patch |
 | `diff_files` | Preview before `apply_patch`, or two paths / `against:"backup"` |
 | `create_directory` | `mkdir -p` |
 | `move_file` | Move or rename |
@@ -115,7 +115,7 @@ Windows is case-insensitive at the FS layer. Passing `estats.razor` for `Estats.
 | Whole-file rewrite | `write_file` |
 | Multiple targeted changes same file | `multi_edit` |
 | Delete/replace known line range | `edit_file` `delete_range` / `replace_range` |
-| One-file unified diff | `apply_patch` (regenerate on `PATCH_FAILED`) |
+| Unified diff (one file or multi-file transaction) | `apply_patch` (regenerate on `PATCH_FAILED`) |
 | Rename token project-wide | `project_replace` (ultra) |
 
 ## Disabled (not registered)

@@ -20,7 +20,7 @@ Canonical: [ROADMAP-v4.7-Failure-Intelligence.md](ROADMAP-v4.7-Failure-Intellige
 | PR-5 | Mutation budget per process (default off) | done |
 | PR-6 | Path-aware risk on `impact_analyzer` | done |
 
-Shipped in v4.7.0. P1 eval with a real model stays P1 of the product. P2 e3 receipts persist with `--receipt-dir` (below). `atomic create_dir` is a permanent limit (below). Multi-file patch / completions stay open.
+Shipped in v4.7.0. P1 eval with a real model stays P1 of the product. P2 e3 receipts persist with `--receipt-dir` (below). `atomic create_dir` is a permanent limit (below). Multi-file `apply_patch` is an in-process transaction (below). Completions stay open.
 
 ## P1 — Evaluación real con agentes
 
@@ -85,9 +85,15 @@ El journal restaura archivos regulares por snapshot de bytes (`recoverySnapshot`
 
 Prueba: `TestE3AtomicCreateDirRejected` y `TestE3_Handler_AtomicCreateDirRejected` (el rechazo, no un rollback de directorio).
 
+### apply_patch multiarchivo — decisión (2026-09-23)
+
+Transacción **en proceso**, no durabilidad ante crash. Un diff unificado con varios archivos se valida entero (path permitido, hunk aplicable, destino existente) y luego se escribe; un fallo revierte lo ya aplicado en este proceso vía el journal E2. No es `atomic create_dir`: el orden del diff no autoriza a crear directorios. Destino ausente → rechazo. Un solo archivo en el diff conserva el contrato actual (`path` = fichero, `/dev/null` create, `expected_hash`). Varios archivos: `path` es el directorio raíz; `expected_hash` no aplica (un hash no cubre N ficheros). Mismo parser/aplicador de un archivo; `PATCH_FAILED` sigue `retryable:false` (releer y regenerar, no reintentar el mismo hunk).
+
+**Verification:** `TestApplyMultiFilePatch_TwoFiles` · `TestApplyMultiFilePatch_SecondHunkFailsFirstIntact` · `TestApplyPatch_MultiFile_*`
+
 ## P2 — Comodidad de edición
 
-- Parche multiarchivo estilo Codex sobre el núcleo transaccional E2 (un `apply_patch` por archivo hasta entonces)
+- ~~Parche multiarchivo estilo Codex sobre el núcleo transaccional E2~~ (hecho: transacción in-process, ver arriba)
 - Autocompletado MCP (`completions`) de rutas y acciones
 
 ## Fuera de alcance cercano

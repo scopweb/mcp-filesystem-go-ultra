@@ -56,16 +56,55 @@ type ParsedPatch struct {
 }
 
 func ParseUnifiedDiff(patch string) (*ParsedPatch, error) {
+	files, err := parseUnifiedDiffFiles(patch)
+	if err != nil {
+		return nil, err
+	}
+	if len(files) > 1 {
+		return nil, &PatchError{Reason: PatchReasonMalformed, Msg: "multi-file patch not supported; split into N apply_patch calls"}
+	}
+	if len(files) != 1 {
+		return nil, &PatchError{Reason: PatchReasonMalformed, Msg: "not a unified diff (need --- / +++ / @@ hunks)"}
+	}
+	return &files[0], nil
+}
+
+func ParseUnifiedDiffs(patch string) ([]ParsedPatch, error) {
+	files, err := parseUnifiedDiffFiles(patch)
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, &PatchError{Reason: PatchReasonMalformed, Msg: "not a unified diff (need --- / +++ / @@ hunks)"}
+	}
+	return files, nil
+}
+
+func parseUnifiedDiffFiles(patch string) ([]ParsedPatch, error) {
 	patch = strings.ReplaceAll(patch, "\r\n", "\n")
 	lines := strings.Split(patch, "\n")
-	p := &ParsedPatch{}
+	var files []ParsedPatch
+	p := ParsedPatch{}
+	flush := func() error {
+		if p.OldFile == "" && p.NewFile == "" && len(p.Hunks) == 0 {
+			return nil
+		}
+		if p.OldFile == "" || p.NewFile == "" || len(p.Hunks) == 0 {
+			return &PatchError{Reason: PatchReasonMalformed, Msg: "not a unified diff (need --- / +++ / @@ hunks)"}
+		}
+		files = append(files, p)
+		p = ParsedPatch{}
+		return nil
+	}
 	i := 0
 	for i < len(lines) {
 		line := lines[i]
 		switch {
 		case strings.HasPrefix(line, "--- "):
 			if p.OldFile != "" && len(p.Hunks) > 0 {
-				return nil, &PatchError{Reason: PatchReasonMalformed, Msg: "multi-file patch not supported; split into N apply_patch calls"}
+				if err := flush(); err != nil {
+					return nil, err
+				}
 			}
 			p.OldFile = strings.TrimSpace(strings.TrimPrefix(line, "--- "))
 			i++
@@ -83,10 +122,10 @@ func ParseUnifiedDiff(patch string) (*ParsedPatch, error) {
 			i++
 		}
 	}
-	if p.OldFile == "" || p.NewFile == "" || len(p.Hunks) == 0 {
-		return nil, &PatchError{Reason: PatchReasonMalformed, Msg: "not a unified diff (need --- / +++ / @@ hunks)"}
+	if err := flush(); err != nil {
+		return nil, err
 	}
-	return p, nil
+	return files, nil
 }
 
 func parseHunk(lines []string, i int) (PatchHunk, int, error) {
@@ -193,6 +232,13 @@ func ApplyUnifiedPatch(oldContent, patch string) (string, error) {
 	parsed, err := ParseUnifiedDiff(patch)
 	if err != nil {
 		return "", err
+	}
+	return applyParsedPatch(oldContent, parsed)
+}
+
+func applyParsedPatch(oldContent string, parsed *ParsedPatch) (string, error) {
+	if parsed == nil {
+		return "", &PatchError{Reason: PatchReasonMalformed, Msg: "not a unified diff (need --- / +++ / @@ hunks)"}
 	}
 	eol := dominantEOL(oldContent)
 	oldLines := splitOrigLines(oldContent)

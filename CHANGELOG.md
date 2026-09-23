@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### feat(apply_patch): multi-file in-process transaction
+
+A unified diff with several files is validated in full, then applied all-or-nothing in this process (journal rollback; not crash-durable). Single-file diffs keep the existing contract. `path` is the directory root for multi-file; destinations must already exist (no mkdir, no create_dir mix). `expected_hash` remains single-file only. Same parser and single-file applicator; `PATCH_FAILED` stays `retryable:false`.
+
+**Verification:** `TestApplyMultiFilePatch_TwoFiles` · `TestApplyPatch_MultiFile_SecondHunkFailsFirstIntact` · `TestApplyPatch_MultiFile_PatchFailedNotRetried`
+
 ### docs: atomic create_dir is a permanent limit
 
 `batch_operations` with `atomic:true` rejects `create_dir`. The journal recovers regular files by byte snapshot, not `MkdirAll` trees. Use `create_directory` or a non-atomic batch, then atomic file ops.
