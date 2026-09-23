@@ -75,6 +75,13 @@ func TestParseUnifiedDiff_RejectsMultiFile(t *testing.T) {
 	if _, err := ParseUnifiedDiff(patch); err == nil || !strings.Contains(err.Error(), "multi-file") {
 		t.Fatalf("got %v", err)
 	}
+	files, err := ParseUnifiedDiffs(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 || PatchHeaderPath(files[0].NewFile) != "a.txt" || PatchHeaderPath(files[1].NewFile) != "b.txt" {
+		t.Fatalf("%+v", files)
+	}
 }
 
 func TestPatchHeaderMatches(t *testing.T) {

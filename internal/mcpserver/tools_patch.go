@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -94,14 +95,14 @@ func registerPatchTools(reg *toolRegistry) {
 	patchTool := mcp.NewTool("apply_patch",
 		mcp.WithTitleAnnotation("Apply Patch"),
 		mcp.WithRawOutputSchema(applyPatchOutputSchema),
-		mcp.WithDescription("apply_patch — Apply a unified diff to one file. dry_run previews. expected_hash for OCC. "+
-			"Fail-closed: no fuzzy match, one file per call. Destination EOL wins (CRLF file + LF patch keeps CRLF). "+
+		mcp.WithDescription("apply_patch — Apply a unified diff. One file: path is the destination. Several files: path is the directory root and the patch is an in-process transaction (all or nothing; not crash-durable). "+
+			"dry_run previews. expected_hash for OCC on a single file. Fail-closed: no fuzzy match. Destination EOL wins (CRLF file + LF patch keeps CRLF). "+
 			"If PATCH_FAILED: read_file and regenerate the hunk; do not retry the same patch. Related: diff_files, edit_file, backup."),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithString("path", mcp.Required(), mcp.Description("Destination file")),
-		mcp.WithString("patch", mcp.Required(), mcp.Description("Unified diff")),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Destination file (single-file patch) or directory root (multi-file patch)")),
+		mcp.WithString("patch", mcp.Required(), mcp.Description("Unified diff (one or more files)")),
 		mcp.WithBoolean("dry_run", mcp.Description("Preview without writing (default: false)")),
 		mcp.WithString("expected_hash", mcp.Description("OCC token from last read_file")),
 		mcp.WithString("detail", mcp.Description("Set to full to include a bounded diff in an OCC conflict."), mcp.Enum("full")),
@@ -112,6 +113,7 @@ func registerPatchTools(reg *toolRegistry) {
 	reg.addTool(patchTool, auditWrap(engine, "apply_patch", handleApplyPatch(engine)),
 		`apply_patch(path:"file.go", patch:"--- a/file.go\n+++ b/file.go\n@@ -1 +1 @@\n-old\n+new\n")`,
 		`apply_patch(path:"file.go", patch:"...", dry_run:true)`,
+		`apply_patch(path:"proj/", patch:"--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-a\n+A\n--- a/b.go\n+++ b/b.go\n@@ -1 +1 @@\n-b\n+B\n")`,
 	)
 }
 
@@ -142,10 +144,14 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 		if !engine.IsPathAllowed(path) {
 			return notAllowedResult(engine, path), nil
 		}
-		parsed, err := core.ParseUnifiedDiff(patch)
+		files, err := core.ParseUnifiedDiffs(patch)
 		if err != nil {
 			return patchFailedResult(path, err, nil), nil
 		}
+		if len(files) > 1 {
+			return handleMultiFilePatch(ctx, engine, path, files, dryRun, allowRewrite, createBackup, expectedHash)
+		}
+		parsed := &files[0]
 		if !core.PatchHeaderMatches(parsed.NewFile, path) && !core.PatchHeaderMatches(parsed.OldFile, path) {
 			return patchFailedResult(path, &core.PatchError{
 				Reason: core.PatchReasonMalformed,
@@ -241,4 +247,74 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 		}
 		return mcp.NewToolResultStructured(sc, msg), nil
 	}
+}
+
+func handleMultiFilePatch(ctx context.Context, engine *core.UltraFastEngine, base string, files []core.ParsedPatch, dryRun, allowRewrite, createBackup bool, expectedHash string) (*mcp.CallToolResult, error) {
+	if expectedHash != "" {
+		return validationResult("expected_hash is only valid for a single-file patch", "expected_hash", "omitted for multi-file"), nil
+	}
+	res, err := engine.ApplyMultiFilePatch(ctx, files, core.MultiFilePatchOpts{
+		BaseDir:      base,
+		DryRun:       dryRun,
+		AllowRewrite: allowRewrite,
+		CreateBackup: createBackup,
+	})
+	if err != nil {
+		var occ *core.OCCMismatchError
+		if errors.As(err, &occ) {
+			return occMismatchResult("content hash != expected_hash", base, occ.Expected, occ.Actual, occ.Conflict), nil
+		}
+		var blocked *core.RewriteBlockedError
+		if errors.As(err, &blocked) {
+			return rewriteBlockedResult(blocked.Path, blocked.Message, blocked.OldLen, blocked.NewLen), nil
+		}
+		var pe *core.PathError
+		if errors.As(err, &pe) && pe != nil && strings.Contains(strings.ToLower(pe.Error()), "access denied") {
+			return notAllowedResult(engine, pe.Path), nil
+		}
+		var patchErr *core.PatchError
+		if errors.As(err, &patchErr) {
+			return patchFailedResult(base, err, nil), nil
+		}
+		return mcp.NewToolResultError(formatToolError(err)), nil
+	}
+
+	filesOut := make([]map[string]any, 0, len(res.Files))
+	added, removed := 0, 0
+	var b strings.Builder
+	if dryRun {
+		b.WriteString("DRY_RUN")
+	} else {
+		b.WriteString("PATCHED")
+	}
+	fmt.Fprintf(&b, " %d files", len(res.Files))
+	for _, f := range res.Files {
+		added += f.Added
+		removed += f.Removed
+		entry := map[string]any{
+			"path": f.Path, "lines_added": f.Added, "lines_removed": f.Removed,
+		}
+		if f.NewHash != "" {
+			entry["content_hash"] = f.NewHash
+		}
+		if f.BackupID != "" {
+			entry["backup_id"] = f.BackupID
+		}
+		if dryRun {
+			entry["current_hash"] = f.OldHash
+			entry["predicted_hash"] = f.NewHash
+		} else if f.NewHash != "" {
+			core.RecordWriteHash(f.Path, f.NewHash)
+		}
+		filesOut = append(filesOut, entry)
+		fmt.Fprintf(&b, " | %s +%d -%d", filepath.Base(f.Path), f.Added, f.Removed)
+	}
+	msg := b.String()
+	payload := map[string]any{
+		"path": base, "files": filesOut, "lines_added": added, "lines_removed": removed, "message": msg,
+	}
+	if dryRun {
+		return mcp.NewToolResultStructured(markSimulated(payload, "", ""), msg), nil
+	}
+	return mcp.NewToolResultStructured(markApplied(payload), msg), nil
 }

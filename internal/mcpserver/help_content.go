@@ -178,8 +178,8 @@ diff_files
 - Key params: path_a, path_b, path, against
 
 apply_patch
-- Purpose: Apply a one-file unified diff. dry_run + expected_hash is the happy path. Destination EOL wins. If PATCH_FAILED: read_file and regenerate; do not retry the same patch.
-- When: surgical one-file edits after diff_files or a generated hunk
+- Purpose: Apply a unified diff. One file: path is the destination. Several files: path is the directory root; all files are validated then applied as an in-process transaction (not crash-durable). dry_run + expected_hash is the happy path for one file. Destination EOL wins. If PATCH_FAILED: read_file and regenerate; do not retry the same patch.
+- When: surgical edits after diff_files or a generated hunk
 - Key params: path, patch, dry_run, expected_hash, allow_rewrite, create_backup
 
 ## Version Control, JavaScript, Analysis, and Discovery (4)
