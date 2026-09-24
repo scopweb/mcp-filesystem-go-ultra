@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### chore(deps): drop fsnotify, go-cache, and ants
+
+`fsnotify` only backed `core/watcher.go`, which nothing called. Directory and metadata TTLs are an internal map. Search, pipeline, and `project_replace` use an internal worker pool capped at `ParallelOps`. `bigcache`, `mcp-go`, `x/sys`, and `singleflight` stay.
+
+**Verification:** `TestDirectoryCacheExpiresAndRefresh` · `TestWorkerPoolCapsConcurrency`
+
 ### fix(edit_file): replacement without new_text does not delete
 
 Default mode ignored `replacement` and applied an empty `new_text`, which wiped the file (trial 3, `price.go`). The call is rejected with `recovery: fix_arguments` and the file is unchanged. An explicit `new_text:""` is still a delete. `old_str`/`new_str` are applied as aliases.

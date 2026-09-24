@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/mcp/filesystem-ultra/cache"
-	"github.com/panjf2000/ants/v2"
 )
 
 // Config holds configuration for the ultra-fast engine
@@ -80,7 +79,7 @@ type UltraFastEngine struct {
 
 	// Parallel operation management
 	semaphore  chan struct{}
-	workerPool *ants.Pool
+	workerPool *workerPool
 
 	// Artifact buffer
 	lastArtifact  string
@@ -256,8 +255,7 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 		engine.allowedSource = AllowedSourceInsecure
 	}
 
-	// Initialize worker pool for parallel operations
-	workerPool, err := ants.NewPool(config.ParallelOps, ants.WithPreAlloc(true))
+	workerPool, err := newWorkerPool(config.ParallelOps)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize worker pool: %w", err)
 	}
