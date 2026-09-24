@@ -226,11 +226,15 @@ func registerBatchTools(reg *toolRegistry) {
 		var staleWarning string
 		normPath := core.NormalizePath(path)
 		if info, statErr := os.Stat(normPath); statErr == nil {
-			editSignal := core.CheckEditOp(normPath, "", info.Size(), expectedHash != "")
-			if editSignal.Status == core.FeedbackWarn && editSignal.Pattern == core.PatternStaleRead {
-				staleWarning = "\n⚠️  [STALE_READ] " + editSignal.Message +
-					"\n   → " + editSignal.Suggestion +
-					"\n   (multi_edit will still run — re-read once to silence this warning.)"
+			// A unique exact old_text is itself proof the anchor is current.
+			// STALE_READ on that case is noise.
+			if !editsMatchOnce(normPath, edits) {
+				editSignal := core.CheckEditOp(normPath, "", info.Size(), expectedHash != "")
+				if editSignal.Status == core.FeedbackWarn && editSignal.Pattern == core.PatternStaleRead {
+					staleWarning = "\n⚠️  [STALE_READ] " + editSignal.Message +
+						"\n   → " + editSignal.Suggestion +
+						"\n   (multi_edit will still run — re-read once to silence this warning.)"
+				}
 			}
 		}
 		if expectedHash == "" {
@@ -380,6 +384,7 @@ func registerBatchTools(reg *toolRegistry) {
 			if staleWarning != "" {
 				msg += staleWarning
 			}
+			msg += syntaxWarning(normPath)
 			// diff_format (parity with edit_file): aggregate diff of the whole batch
 			if diffText := core.RenderDiff(result.OriginalContent, result.FinalContent, path, diffFormat); diffText != "" {
 				msg += "\n" + diffText
@@ -408,6 +413,10 @@ func registerBatchTools(reg *toolRegistry) {
 		// Fix #4 (v4.5.26): stale-read hint on success path (verbose format)
 		if staleWarning != "" {
 			sb.WriteString(staleWarning)
+			sb.WriteString("\n")
+		}
+		if warn := syntaxWarning(normPath); warn != "" {
+			sb.WriteString(warn)
 			sb.WriteString("\n")
 		}
 
@@ -590,8 +599,8 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
-		mcp.WithDescription("project_replace — Find and replace across an entire project tree in a single call. "+
-			"Replaces N calls to multi_edit with 1 call. Creates single consolidated backup. "+
+		mcp.WithDescription("project_replace — Find and replace across a project tree, or the same find/replace on an explicit paths list, in one call. "+
+			"preview:true is the global dry_run. Replaces N multi_edit calls. Creates one backup. "+
 			"Related: multi_edit (single file), edit_file (one edit), search_files (discovery)."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Root directory to scan (WSL or Windows format)")),
 		mcp.WithString("find", mcp.Required(), mcp.Description("Text or regex pattern to find")),
@@ -600,6 +609,7 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive matching (default: true)")),
 		mcp.WithString("file_types", mcp.Description("Comma-separated file extensions to include (e.g. '.php,.html')")),
 		mcp.WithString("include_paths", mcp.Description("JSON array of glob patterns to include")),
+		mcp.WithArray("paths", mcp.WithStringItems(), mcp.Description("Explicit files to edit (skips the tree walk). Same find/replace on each. Relative to path or absolute.")),
 		mcp.WithString("exclude_paths", mcp.Description("JSON array of glob patterns to exclude (e.g. 'jotajotape/**')")),
 		mcp.WithBoolean("preview", mcp.Description("Preview changes without writing (default: false)")),
 		mcp.WithBoolean("create_backup", mcp.Description("Create single consolidated backup (default: true)")),
@@ -666,6 +676,13 @@ func registerBatchTools(reg *toolRegistry) {
 		}
 		if exc, ok := args["exclude_paths"].(string); ok && exc != "" {
 			json.Unmarshal([]byte(exc), &excludePaths)
+		}
+		if v, ok := args["paths"]; ok && v != nil {
+			decoded, decErr := core.DecodePaths(v)
+			if decErr != nil {
+				return mcp.NewToolResultError(decErr.Error()), nil
+			}
+			includePaths = append(includePaths, decoded...)
 		}
 
 		result, err := engine.ProjectReplace(ctx, path, find, replace, literal, caseSensitive, fileTypes, includePaths, excludePaths, preview, createBackup, parallel, maxFiles, force)
@@ -1207,6 +1224,23 @@ func registerBatchTools(reg *toolRegistry) {
 }
 
 const projectReplaceFileListCap = 200
+
+func editsMatchOnce(path string, edits []core.MultiEditOperation) bool {
+	if len(edits) == 0 {
+		return false
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	content := string(b)
+	for _, ed := range edits {
+		if ed.OldText == "" || strings.Count(content, ed.OldText) != 1 {
+			return false
+		}
+	}
+	return true
+}
 
 func formatProjectReplace(compact bool, path, find, replace string, result *core.ProjectReplaceResult, detail string) string {
 	if result == nil {

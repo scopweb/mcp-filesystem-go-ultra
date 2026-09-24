@@ -995,9 +995,7 @@ func (bm *BackupManager) SoftDeleteFile(path string) (*SoftDeleteInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("source file not found: %w", err)
 	}
-	if fileInfo.IsDir() {
-		return nil, fmt.Errorf("cannot soft-delete a directory: %s", cleanPath)
-	}
+	isDir := fileInfo.IsDir()
 
 	// Generate SD-ID and prepare the per-deletion directory.
 	sdID := generateSoftDeleteID()
@@ -1027,22 +1025,30 @@ func (bm *BackupManager) SoftDeleteFile(path string) (*SoftDeleteInfo, error) {
 		return nil, fmt.Errorf("failed to move file to trash: %w", err)
 	}
 
-	// Compute hash of the moved file for integrity verification on restore.
-	hash, err := hashFile(destPath)
-	if err != nil {
-		// Move succeeded but hash failed — file is in trash, metadata is partial.
-		// Log loudly; the metadata write below will still record what we have.
-		slog.Warn("Failed to hash soft-deleted file", "path", destPath, "error", err)
+	// Directories move as a tree (os.Rename). Skip content hash — hashFile
+	// opens a single file. Restore uses the same rename and does not require it.
+	hash := ""
+	size := fileInfo.Size()
+	kind := "soft_delete"
+	if isDir {
+		kind = "soft_delete_dir"
+		size = dirTreeSize(destPath)
+	} else {
+		var hashErr error
+		hash, hashErr = hashFile(destPath)
+		if hashErr != nil {
+			slog.Warn("Failed to hash soft-deleted file", "path", destPath, "error", hashErr)
+		}
 	}
 
 	info := &SoftDeleteInfo{
 		SDID:         sdID,
 		OriginalPath: cleanPath,
 		DestPath:     destPath,
-		Size:         fileInfo.Size(),
+		Size:         size,
 		Hash:         hash,
 		Timestamp:    time.Now(),
-		Kind:         "soft_delete",
+		Kind:         kind,
 	}
 
 	// Write metadata sidecar. If this fails, the file is in the trash but
@@ -1269,6 +1275,18 @@ func (bm *BackupManager) saveSoftDeleteMetadata(sdDir string, info *SoftDeleteIn
 // separation.
 func generateSoftDeleteID() string {
 	return "sd-" + generateBackupID()
+}
+
+func dirTreeSize(root string) int64 {
+	var n int64
+	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return nil
+		}
+		n += info.Size()
+		return nil
+	})
+	return n
 }
 
 // hashFile computes the SHA-256 hex digest of a single file's contents.

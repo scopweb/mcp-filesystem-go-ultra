@@ -267,6 +267,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"force":     {ParamBoolean, false}, // branch: with delete, true → -D; push: --force-with-lease
 		"remote":    {ParamString, false},  // push/fetch: remote name (default origin)
 		"prune":     {ParamBoolean, false}, // fetch: true → --prune
+		"update":    {ParamBoolean, false}, // add: true → git add -u (tracked only)
 	},
 
 	// ---- ALIASES ----
@@ -340,6 +341,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"file_types":     {ParamString, false},
 		"include_paths":  {ParamString, false},
 		"exclude_paths":  {ParamString, false},
+		"paths":          {ParamArray, false},
 		"preview":        {ParamBoolean, false},
 		"create_backup":  {ParamBoolean, false},
 		"parallel":       {ParamBoolean, false},

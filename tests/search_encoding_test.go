@@ -383,7 +383,7 @@ line 6: HandlerHttp
 
 		result := resp.Content[0].Text
 		// Should find all variations: HttpClientHandler, HttpClient, httpclienthandler, HTTPClient
-		count := strings.Count(result, "regex_test.txt:")
+		count := strings.Count(strings.ToLower(result), "httpclient")
 		if count < 4 {
 			t.Errorf("Expected at least 4 case-insensitive matches, got %d. Result: %s", count, result)
 		}

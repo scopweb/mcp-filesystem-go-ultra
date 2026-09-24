@@ -60,12 +60,15 @@ func TestRipgrepFormat_FewMatches(t *testing.T) {
 	}
 	out := resp.Content[0].Text
 
-	// Expected: ripgrep-style lines
-	if !strings.Contains(out, "a.txt:1:hello world") {
-		t.Errorf("expected ripgrep line for a.txt, got: %q", out)
+	// Expected: grouped path header + line:text (path is not repeated on the row)
+	if !strings.Contains(out, "a.txt") || !strings.Contains(out, "1:hello world") {
+		t.Errorf("expected grouped line for a.txt, got: %q", out)
 	}
-	if !strings.Contains(out, "b.txt:1:hello again") {
-		t.Errorf("expected ripgrep line for b.txt, got: %q", out)
+	if !strings.Contains(out, "b.txt") || !strings.Contains(out, "1:hello again") {
+		t.Errorf("expected grouped line for b.txt, got: %q", out)
+	}
+	if strings.Contains(out, "a.txt:1:hello world") {
+		t.Errorf("path should be a header, not repeated on the row, got: %q", out)
 	}
 	// NOT expected: verbose header or emoji marker
 	if strings.Contains(out, "🔍 Found") {
@@ -101,11 +104,11 @@ func TestRipgrepFormat_ManyMatchesFallsBackVerbose(t *testing.T) {
 	}
 	out := resp.Content[0].Text
 
-	if !strings.Contains(out, "🔍 Found") {
-		t.Errorf("expected verbose header for >5 matches, got: %q", out)
+	if strings.Contains(out, "🔍 Found") || strings.Contains(out, "📁") {
+		t.Errorf("auto format must stay grouped past 5 matches, got: %q", out)
 	}
-	if !strings.Contains(out, "📁") {
-		t.Errorf("expected emoji marker for verbose path, got: %q", out)
+	if !strings.Contains(out, "1:match line 0") {
+		t.Errorf("expected grouped line, got: %q", out)
 	}
 }
 
@@ -131,11 +134,14 @@ func TestRipgrepFormat_ContextForcesVerbose(t *testing.T) {
 	}
 	out := resp.Content[0].Text
 
-	if !strings.Contains(out, "Context:") {
-		t.Errorf("include_context should force verbose with Context: block, got: %q", out)
+	alpha := strings.Index(out, "alpha")
+	match := strings.Index(out, "MATCH")
+	delta := strings.Index(out, "delta")
+	if alpha < 0 || match < 0 || delta < 0 || !(alpha < match && match < delta) {
+		t.Errorf("context lines out of order, got: %q", out)
 	}
-	if !strings.Contains(out, "🔍 Found") {
-		t.Errorf("include_context should preserve verbose header, got: %q", out)
+	if strings.Contains(out, "🔍 Found") {
+		t.Errorf("include_context should stay grouped, got: %q", out)
 	}
 }
 
@@ -196,13 +202,16 @@ func TestRipgrepFormat_ThresholdBoundary(t *testing.T) {
 			}
 			out := resp.Content[0].Text
 
-			isRipgrep := strings.Contains(out, "x.txt:1:hit")
+			isRipgrep := strings.Contains(out, "1:hit")
 			isVerbose := strings.Contains(out, "🔍 Found")
 			if n == 5 && !isRipgrep {
-				t.Errorf("n=5 should use ripgrep-style, got: %q", out)
+				t.Errorf("n=5 should use grouped line:text, got: %q", out)
 			}
-			if n == 6 && !isVerbose {
-				t.Errorf("n=6 should use verbose, got: %q", out)
+			if n == 6 && isVerbose {
+				t.Errorf("n=6 should stay grouped, got: %q", out)
+			}
+			if n == 6 && !isRipgrep && !strings.Contains(out, "1:hit") {
+				t.Errorf("n=6 should use grouped line:text, got: %q", out)
 			}
 		})
 	}

@@ -55,9 +55,9 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 
 `copy_file`, `project_replace`, `batch_operations`, `analyze_operation`, `wsl`, `git`, `minify_js`, `analyze_code`, `server_info`.
 
-- `git` — local only unless `--git-network` (then `push`/`fetch` and `openWorldHint=true`). `git(action:"remote")` is read-only and works without `--git-network`; it shows effective fetch/push URLs (credentials redacted). Push/fetch print that destination, not only `origin`. `--git-remote-allow` is optional (omit = any configured remote; GitHub+GitLab: `github.com,gitlab.com`). Matches the effective URL; `force:true` does not bypass. Path must be inside a repo (or `init`). Branch delete requires `delete:true`. Commit `risk` is informational and does not block.
+- `git` — local only unless `--git-network` (then `push`/`fetch` and `openWorldHint=true`). `git(action:"remote")` is read-only and works without `--git-network`; it shows effective fetch/push URLs (credentials redacted). Push/fetch print that destination, not only `origin`. `--git-remote-allow` is optional (omit = any configured remote; GitHub+GitLab: `github.com,gitlab.com`). Matches the effective URL; `force:true` does not bypass. Path must be inside a repo (or `init`). Branch delete requires `delete:true`. `git(action:"add", update:true)` is `git add -u` (tracked files only; does not stage `.agent/`). Commit `risk` is informational and does not block.
 - `minify_js` — exists in ultra; not in handshake instructions.
-- `analyze_code` — ultra only. For editing: `apply_patch`/`edit_file`. For understanding code: `analyze_code`. Do not use git grep or bash. Actions: `symbols`, `lint`, `sec`, `impact`. Impact is a text search, not a callgraph.
+- `analyze_code` — ultra only. For editing: `apply_patch`/`edit_file`. For understanding code: `analyze_code`. Do not use git grep or bash. Actions: `symbols`, `lint`, `sec`, `impact`. `symbols`: Go via AST; JS/TS/C#/SQL via regex (name + line). Impact is a text search, not a callgraph.
 - Dry-run impact preview → `analyze_operation` (ultra). In strict use `edit_file`/`apply_patch`/`multi_edit` with `dry_run:true`.
 
 ## Never bash for filesystem
@@ -68,7 +68,7 @@ Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `gr
 |------|------|
 | Last 40 log lines | `read_file(path, mode:"tail", max_lines:40)` |
 | First N lines | `read_file(path, max_lines:N)` (mode omitted/`"all"`) or `mode:"head"` |
-| Exact line range | `read_file(path, start_line, end_line)` |
+| Exact line range | `read_file(path, start_line, end_line)` — also honored on `paths[]` |
 | Line cut override | `max_line_length:N` or `0` to disable |
 
 ## search_files aliases
@@ -76,9 +76,9 @@ Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `gr
 | Native | Alias | Purpose |
 |--------|-------|---------|
 | `file_types` | `include` | Glob (e.g. `*.go`) |
-| `output_format` | `output` | `"text"` or `"json"`. Omit for auto (ripgrep-style `path:line:content` if ≤5 matches). Legacy `content`/`files_with_matches`/`count` are **not** implemented. |
+| `output_format` | `output` | `"text"` or `"json"`. Omit for grouped `path` header + `line:text` (any match count, including context). `"text"` is the legacy emoji layout. Legacy `content`/`files_with_matches`/`count` are **not** implemented. |
 
-`include_context:true` forces verbose layout. `output_format:"json"` uses ripgrep when `rg` is on PATH or embedded (`embed_rg`). When truncated, call the same search with `offset` from `continuation` — do not reformulate. There is no hidden 10/20 presentation cap.
+`include_context:true` stays in that grouped layout; context lines are ordered. `output_format:"json"` uses ripgrep when `rg` is on PATH or embedded (`embed_rg`). When truncated, call the same search with `offset` from `continuation` — do not reformulate. There is no hidden 10/20 presentation cap.
 
 ## Key behaviors (strict-safe)
 
@@ -86,15 +86,15 @@ Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `gr
 - **Several edits same file** → `multi_edit` (each `old_text` unique in the original file). On atomic rollback, read the per-edit causes; the file was not written.
 - **Dry-run** → `edit_file(dry_run:true)` / `multi_edit(dry_run:true)` / `apply_patch(dry_run:true)`.
 - **OCC** → every successful read/edit returns `content_hash`; pass as `expected_hash` on the next mutation. `--auto-occ` `off`/`warn` (default)/`block` flags *external* changes only.
-- **STALE_READ** (`edit_file` only): non-blocking. Consecutive edits on the same file do not need re-reads.
+- **STALE_READ** (`edit_file` / `multi_edit`): non-blocking. Suppressed when every `old_text` matches once. Consecutive edits on the same file do not need re-reads.
 - **Structured results** → prefer `structuredContent`: `status` (`applied`/`simulated`/`empty`/`partial`), `truncated`, `hidden_count`, hashes. Empty search is `status:empty` (`isError=false`). Errors have `retryable` — do not auto-retry when false.
 - **Line-based edits** → `edit_file` `mode:"delete_range"` / `"replace_range"` (1-based inclusive).
 - **Undo** → `backup(action:"undo_last")` / `undo_chain` / `restore` with `backup_id`.
-- **Soft-delete recovery** → `backup(action:"list_trash")`; restore with `backup(action:"restore_trash", sd_id:"...")` (not `backup_id`); purge with `purge_trash`.
+- **Soft-delete recovery** → `backup(action:"list_trash")`; restore with `backup(action:"restore_trash", sd_id:"...")` (not `backup_id`); purge with `purge_trash`. `delete_file` soft-deletes files and directories.
 
 ## Ultra behaviors (only if those tools are registered)
 
-- **Project-wide token rename** → `project_replace` (1 call). `create_backup:true` snapshots before writes.
+- **Project-wide token rename** → `project_replace` (1 call). Pass `paths` for an explicit file list (skips the walk). `preview:true` is the dry run. `create_backup:true` snapshots before writes.
 - **Batch / pipeline / extract** → `batch_operations`. `extract` moves lines `[start_line,end_line]` from source to destination atomically.
 - **Impact preview** → `analyze_operation`.
 
@@ -124,4 +124,4 @@ Aliases `read_text_file`, `search`, `edit`, `write`, `create_file`, `View`, `Edi
 
 ## project_replace (ultra)
 
-`path`, `find`, `replace` required. `literal` default true. `file_types` e.g. `.php`. `exclude_paths` globs. `preview` / `create_backup` (default true) / `parallel` / `max_files` (default 1000). Compact default is counters only; `detail:"full"` lists each file.
+`path`, `find`, `replace` required. `literal` default true. `file_types` e.g. `.php`. `paths` is an explicit file list (skips the walk). `exclude_paths` globs. `preview` / `create_backup` (default true) / `parallel` / `max_files` (default 1000). Compact default is counters only; `detail:"full"` lists each file. JSON/XML/`.csproj` edits append a non-blocking syntax warning if the file is left ill-formed.

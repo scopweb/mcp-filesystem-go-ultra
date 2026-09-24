@@ -154,11 +154,11 @@ func TestSmoke_SearchFiles_FewMatches(t *testing.T) {
 	})
 	t.Logf("output:\n%s", out)
 
-	if !strings.Contains(out, "a.txt:1:hello world") {
-		t.Errorf("expected ripgrep line for a.txt, got: %q", out)
+	if !strings.Contains(out, "a.txt") || !strings.Contains(out, "1:hello world") {
+		t.Errorf("expected grouped line for a.txt, got: %q", out)
 	}
-	if !strings.Contains(out, "b.txt:1:hello there") {
-		t.Errorf("expected ripgrep line for b.txt, got: %q", out)
+	if !strings.Contains(out, "b.txt") || !strings.Contains(out, "1:hello there") {
+		t.Errorf("expected grouped line for b.txt, got: %q", out)
 	}
 	if strings.Contains(out, "🔍 Found") {
 		t.Errorf("did not expect verbose header for ≤5 matches, got: %q", out)
@@ -188,8 +188,11 @@ func TestSmoke_SearchFiles_ManyMatchesVerbose(t *testing.T) {
 	})
 	t.Logf("output (first 400 chars):\n%s", out[:min(400, len(out))])
 
-	if !strings.Contains(out, "🔍 Found") {
-		t.Errorf("expected verbose header for >5 matches, got: %q", out)
+	if strings.Contains(out, "🔍 Found") {
+		t.Errorf("auto format must stay grouped past 5 matches, got: %q", out)
+	}
+	if !strings.Contains(out, "1:match line 0") {
+		t.Errorf("expected grouped line, got: %q", out)
 	}
 }
 

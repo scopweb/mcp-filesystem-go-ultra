@@ -14,7 +14,7 @@ func registerAnalyzeTools(reg *toolRegistry) {
 	tool := mcp.NewTool("analyze_code",
 		mcp.WithTitleAnnotation("Analyze Code"),
 		mcp.WithRawOutputSchema(analyzeCodeOutputSchema),
-		mcp.WithDescription("analyze_code — Read-only code analysis (symbols, lint, local sec, impact). "+
+		mcp.WithDescription("analyze_code — Read-only code analysis (symbols, lint, local sec, impact). symbols: Go via AST; JS/TS/C#/SQL via regex (name + line). "+
 			"For editing use apply_patch/edit_file. For understanding code use analyze_code. Do not use git grep or bash. "+
 			"Ultra profile only. Related: search_files, read_file, help."),
 		mcp.WithReadOnlyHintAnnotation(true),
