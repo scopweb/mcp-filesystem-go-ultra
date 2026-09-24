@@ -484,9 +484,6 @@ tests/                      Black-box suite over the exported core API
 |---------|---------|---------|
 | `github.com/mark3labs/mcp-go` | v1.0.0 | MCP server SDK |
 | `github.com/allegro/bigcache/v3` | v3.2.0 | File content cache |
-| `github.com/patrickmn/go-cache` | v2.1.0 | Directory and metadata cache |
-| `github.com/panjf2000/ants/v2` | v2.12.1 | Goroutine pool |
-| `github.com/fsnotify/fsnotify` | v1.10.1 | File system event watching |
 
 ---
 

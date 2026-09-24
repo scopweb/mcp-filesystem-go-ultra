@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/allegro/bigcache/v3"
-	gocache "github.com/patrickmn/go-cache"
 )
 
 // IntelligentCache provides high-performance caching with intelligent eviction
@@ -16,10 +15,10 @@ type IntelligentCache struct {
 	fileCache *bigcache.BigCache
 
 	// Directory listing cache
-	dirCache *gocache.Cache
+	dirCache *ttlMap
 
 	// Metadata cache (file info, stats, etc.)
-	metaCache *gocache.Cache
+	metaCache *ttlMap
 
 	// Cache statistics
 	stats *CacheStats
@@ -105,13 +104,8 @@ func NewIntelligentCacheTTL(maxSize int64, fileTTL time.Duration) (*IntelligentC
 		return nil, err
 	}
 
-	dirCache := gocache.New(3*time.Minute, 1*time.Minute)
-	metaCache := gocache.New(10*time.Minute, 2*time.Minute)
-
 	cache := &IntelligentCache{
 		fileCache:       fileCache,
-		dirCache:        dirCache,
-		metaCache:       metaCache,
 		stats:           &CacheStats{},
 		maxSize:         maxSize,
 		fileTTL:         fileTTL,
@@ -121,10 +115,8 @@ func NewIntelligentCacheTTL(maxSize int64, fileTTL time.Duration) (*IntelligentC
 		prefetchPending: make(map[string]struct{}),
 		pathGen:         make(map[string]uint64),
 	}
-
-	// Set up eviction callbacks (bigcache doesn't have direct OnEvicted, but we can track via stats)
-	dirCache.OnEvicted(cache.onDirEvicted)
-	metaCache.OnEvicted(cache.onMetaEvicted)
+	cache.dirCache = newTTLMap(3*time.Minute, time.Minute, cache.onDirEvicted)
+	cache.metaCache = newTTLMap(10*time.Minute, time.Minute, cache.onMetaEvicted)
 
 	cache.prefetchWG.Add(1)
 	go cache.prefetchWorker()
@@ -287,7 +279,7 @@ func (c *IntelligentCache) GetDirectory(path string) (string, time.Time, bool) {
 
 		entry := item.(dirCacheEntry)
 		// Refresh TTL without changing the stored mtime
-		c.dirCache.Set(path, entry, gocache.DefaultExpiration)
+		c.dirCache.Set(path, entry, 0)
 
 		return entry.Listing, entry.Mtime, true
 	}
@@ -302,7 +294,7 @@ func (c *IntelligentCache) GetDirectory(path string) (string, time.Time, bool) {
 // SetDirectory stores a directory listing in cache together with the directory's
 // current mtime so that stale entries can be detected on the next read.
 func (c *IntelligentCache) SetDirectory(path string, listing string, mtime time.Time) {
-	c.dirCache.Set(path, dirCacheEntry{Listing: listing, Mtime: mtime}, gocache.DefaultExpiration)
+	c.dirCache.Set(path, dirCacheEntry{Listing: listing, Mtime: mtime}, 0)
 }
 
 // GetMetadata retrieves metadata from cache
@@ -326,7 +318,7 @@ func (c *IntelligentCache) GetMetadata(key string) (interface{}, bool) {
 
 // SetMetadata stores metadata in cache
 func (c *IntelligentCache) SetMetadata(key string, value interface{}) {
-	c.metaCache.Set(key, value, gocache.DefaultExpiration)
+	c.metaCache.Set(key, value, 0)
 }
 
 func (c *IntelligentCache) InvalidateFile(path string) {
@@ -453,14 +445,14 @@ func (c *IntelligentCache) RecordDiskLoad() {
 
 // Eviction callbacks for non-bigcache caches
 
-func (c *IntelligentCache) onDirEvicted(key string, value interface{}) {
+func (c *IntelligentCache) onDirEvicted() {
 	// Directory listings are typically small, but we still track evictions
 	c.stats.mu.Lock()
 	c.stats.Evictions++
 	c.stats.mu.Unlock()
 }
 
-func (c *IntelligentCache) onMetaEvicted(key string, value interface{}) {
+func (c *IntelligentCache) onMetaEvicted() {
 	// Metadata is typically small, but we still track evictions
 	c.stats.mu.Lock()
 	c.stats.Evictions++

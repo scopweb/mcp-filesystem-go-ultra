@@ -151,6 +151,12 @@ func (c *IntelligentCache) Close() error {
 		close(c.prefetchQueue)
 		c.prefetchMu.Unlock()
 		c.prefetchWG.Wait()
+		if c.dirCache != nil {
+			c.dirCache.stopSweep()
+		}
+		if c.metaCache != nil {
+			c.metaCache.stopSweep()
+		}
 		c.Flush()
 		closeErr = c.fileCache.Close()
 	})
