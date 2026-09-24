@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,9 +57,22 @@ func TestSearch_PaginationNoDupNoGap(t *testing.T) {
 	if len(hits1) != 5 {
 		t.Fatalf("page1 len=%d", len(hits1))
 	}
-	cont, _ := m1["continuation"].(string)
-	if !strings.Contains(cont, "offset:5") {
-		t.Fatalf("continuation: %s", cont)
+	cont, ok := m1["continuation"].(map[string]any)
+	if !ok {
+		t.Fatalf("continuation type %T value %#v", m1["continuation"], m1["continuation"])
+	}
+	if !integralEquals(cont["next_offset"], 5) {
+		t.Fatalf("next_offset=%v (%T)", cont["next_offset"], cont["next_offset"])
+	}
+	if !integralEquals(cont["max_results"], 5) {
+		t.Fatalf("max_results=%v", cont["max_results"])
+	}
+	hint, _ := cont["hint"].(string)
+	if !strings.Contains(hint, "offset:5") {
+		t.Fatalf("hint: %s", hint)
+	}
+	if !strings.Contains(resultText(t, page1), "offset:5") {
+		t.Fatalf("text lost the readable continuation:\n%s", resultText(t, page1))
 	}
 	page2 := callNamed(t, reg, context.Background(), "search_files", map[string]interface{}{
 		"path": dir, "pattern": "token", "include_content": true, "max_results": float64(5), "offset": float64(5),
@@ -130,5 +144,18 @@ func TestSearch_IncludeContextNumbered(t *testing.T) {
 		if !strings.Contains(text, "2 |") {
 			t.Fatalf("expected numbered match line:\n%s", text)
 		}
+	}
+}
+
+func integralEquals(v any, want int) bool {
+	switch n := v.(type) {
+	case int:
+		return n == want
+	case int64:
+		return int(n) == want
+	case float64:
+		return n == float64(want) && n == math.Trunc(n)
+	default:
+		return false
 	}
 }

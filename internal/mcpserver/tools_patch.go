@@ -144,6 +144,9 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 		if !engine.IsPathAllowed(path) {
 			return notAllowedResult(engine, path), nil
 		}
+		if strings.Contains(patch, "*** Begin Patch") {
+			return beginPatchResult(path), nil
+		}
 		files, err := core.ParseUnifiedDiffs(patch)
 		if err != nil {
 			return patchFailedResult(path, err, nil), nil

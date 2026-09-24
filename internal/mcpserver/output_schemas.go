@@ -98,7 +98,7 @@ var searchFilesOutputSchema = json.RawMessage(`{
     "hidden_count": {"type": "integer", "description": "Entries skipped by .gitignore/.cursorignore/.fsultraignore (0 when no_ignore:true)"},
     "matches": {"type": "array", "description": "Structured hits {path, line, text}. Empty on filename-only/count_only when not parseable as line hits.", "items": {"type": "object"}},
     "scope": {"type": "object", "description": "Path/pattern/filters actually used"},
-    "continuation": {"type": "string", "description": "When truncated: search_files(..., offset:N, max_results:M) with the same path/pattern. Never means retry the same mutation."},
+    "continuation": {"type": "object", "description": "When truncated: next page of the same path/pattern. next_offset and max_results are integers. hint is the readable instruction. Never means retry the same mutation.", "properties": {"next_offset": {"type": "integer"}, "max_results": {"type": "integer"}, "hint": {"type": "string"}}},
     "message": {"type": "string", "description": "Human-readable text fallback, identical to the text content block"}
   },
   "required": ["status", "match_count", "truncated", "hidden_count", "message"]
@@ -149,9 +149,12 @@ var listAllowedDirectoriesOutputSchema = json.RawMessage(`{
     "roots_mode": {"type": "string", "description": "How MCP client Roots combine with CLI paths: replace | union | ignore"},
     "readonly": {"type": "boolean", "description": "True when --readonly is set"},
     "tool_count": {"type": "integer", "description": "Number of tools registered on this server"},
+    "version": {"type": "string", "description": "Server version. initialize already sends it; this is the copy the model sees."},
+    "commit": {"type": "string", "description": "Build commit, or dev when go build did not stamp -ldflags."},
+    "build_date": {"type": "string", "description": "Build date stamped at link time, or unknown."},
     "message": {"type": "string", "description": "Human-readable listing, identical to the text content block"}
   },
-  "required": ["status", "paths", "message"]
+  "required": ["status", "paths", "version", "commit", "build_date", "message"]
 }`)
 
 var diffFilesOutputSchema = json.RawMessage(`{

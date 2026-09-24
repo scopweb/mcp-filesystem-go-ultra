@@ -1,6 +1,6 @@
 # Codex + filesystem-ultra
 
-Do not treat ultra `apply_patch` as Codex `*** Begin Patch`. Ultra wants a unified diff, one file per call. No Begin-Patch adapter in this pack. Ultra is for Claude Code / OpenCode / Desktop.
+Do not treat ultra `apply_patch` as Codex `*** Begin Patch`. Ultra wants a unified diff. A file path is one diff; a directory path is a multi-file unified diff (in-process transaction, not crash-durable). `expected_hash` is single-file only. No Begin-Patch adapter in this pack. A binary that returns `multi-file patch not supported` is an older build, not this main. Ultra is for Claude Code / OpenCode / Desktop.
 
 `~/.codex/config.toml` (placeholders — one instance per workspace):
 

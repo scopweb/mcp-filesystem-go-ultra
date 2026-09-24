@@ -436,16 +436,18 @@ All tools auto-convert paths:
 
 ## Failure Intelligence error envelope
 
-Errors use {"error":{"code","retryable","message",...}}. retryable:true means use the envelope data before another call; never replay the same mutation blindly.
+Errors use {"error":{"code","retryable","recovery","message",...}}. recovery is retry_same | fix_arguments | read_and_rebase | check_already_applied. retryable:true means use the envelope data before another call; never replay the same mutation blindly. There is no next_call.
 
 | Code | Next action |
 |------|-------------|
-| OCC_MISMATCH | Rebase against current_hash, then retry. |
-| HASH_REQUIRED | read_file, then resend with expected_hash. |
-| PATCH_FAILED | Do not replay the patch; read_file and regenerate its hunk. |
-| REWRITE_BLOCKED | Use write_file for a rewrite, or make a smaller edit. |
-| NOT_ALLOWED / NOT_FOUND | Check roots or list the host path. |
-| READONLY / VALIDATION | Remove --readonly or correct the arguments. |
+| OCC_MISMATCH | recovery read_and_rebase. Rebase against current_hash, then retry. |
+| HASH_REQUIRED | recovery read_and_rebase. read_file, then resend with expected_hash. |
+| PATCH_FAILED | recovery read_and_rebase. Do not replay the patch; read_file and regenerate its hunk. |
+| BEGIN_PATCH | recovery fix_arguments. Do not retry. Send a unified diff, not *** Begin Patch. |
+| REWRITE_BLOCKED | recovery fix_arguments. Use write_file for a rewrite, or make a smaller edit. |
+| NOT_ALLOWED / NOT_FOUND | recovery fix_arguments. Check roots or list the host path. |
+| READONLY / VALIDATION | recovery fix_arguments. Remove --readonly or correct the arguments. |
+| ROLLBACK_PARTIAL / ROLLBACK_FAILED / ROLLBACK_COMPLETE | recovery check_already_applied. Inspect the paths; do not assume the write is absent. |
 
 ## "Tool not found: create_file"
 FIX: Use write_file instead (it creates files too)

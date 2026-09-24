@@ -35,7 +35,7 @@ Never mix native Read/Edit with ultra `read_file`/`edit_file` in one subagent.
 
 ## Codex vs ultra `apply_patch`
 
-Codex `apply_patch` is `*** Begin Patch` / `*** Update File`. Ultra `apply_patch` is a **unified diff**, one file per call (`dry_run` + `expected_hash`). Do **not** feed Codex `*** Begin Patch` into ultra. Ultra is for Claude Code, OpenCode, and Claude Desktop. This pack does not ship a Begin-Patch adapter.
+Codex `apply_patch` is `*** Begin Patch` / `*** Update File`. Ultra `apply_patch` is a **unified diff**. A file path applies one diff (`dry_run` + `expected_hash`). A directory path applies a multi-file unified diff as an in-process transaction (not crash-durable); `expected_hash` is single-file only. Do **not** feed Codex `*** Begin Patch` into ultra. There is no Begin-Patch adapter. A binary that returns `multi-file patch not supported` is an older build, not this main. Ultra is for Claude Code, OpenCode, and Claude Desktop.
 
 ## Measured cache baseline
 

@@ -111,7 +111,7 @@ func TestListAllowedDirectories_StructuredShape(t *testing.T) {
 	if !ok {
 		t.Fatalf("StructuredContent is %T", res.StructuredContent)
 	}
-	for _, key := range []string{"paths", "source", "insecure_open", "profile", "roots_mode", "readonly", "tool_count"} {
+	for _, key := range []string{"paths", "source", "insecure_open", "profile", "roots_mode", "readonly", "tool_count", "version", "commit", "build_date"} {
 		if _, ok := m[key]; !ok {
 			t.Errorf("missing %q in %#v", key, m)
 		}
@@ -245,4 +245,74 @@ func TestListAllowedDirectories_ReconsultsRoots(t *testing.T) {
 	if !strings.Contains(text, "source: roots") {
 		t.Fatalf("expected source: roots:\n%s", text)
 	}
+	if !strings.Contains(text, "version: "+serverVersion) || !strings.Contains(text, "commit: "+BuildCommit) {
+		t.Fatalf("identity missing from text:\n%s", text)
+	}
+}
+
+func TestListAllowedDirectories_StrictCompactIncludesIdentity(t *testing.T) {
+	dir := t.TempDir()
+	reg := newStrictCatalogRegistry(t, dir)
+	reg.engine.GetConfig().CompactMode = true
+	res := callListAllowed(t, reg, nil)
+	if res.IsError {
+		t.Fatal(resultText(t, res))
+	}
+	text := resultText(t, res)
+	if !strings.Contains(text, "version: "+serverVersion) {
+		t.Fatalf("strict text missing version:\n%s", text)
+	}
+	if !strings.Contains(text, "commit: "+BuildCommit) {
+		t.Fatalf("strict text missing commit:\n%s", text)
+	}
+	if BuildCommit == "dev" && !strings.Contains(text, "not stamped; go build without -ldflags") {
+		t.Fatalf("unstamped note missing:\n%s", text)
+	}
+	m, ok := res.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("StructuredContent %T", res.StructuredContent)
+	}
+	if m["version"] != serverVersion || m["commit"] != BuildCommit || m["build_date"] != BuildDate {
+		t.Fatalf("structured identity %#v", m)
+	}
+	if _, ok := reg.handlers["server_info"]; ok {
+		t.Fatal("strict must not register server_info")
+	}
+}
+
+func newStrictCatalogRegistry(t *testing.T, allowedDir string) *toolRegistry {
+	t.Helper()
+	cacheInstance, err := cache.NewIntelligentCache(4 * 1024 * 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := core.NewUltraFastEngine(&core.Config{
+		Cache:        cacheInstance,
+		AllowedPaths: []string{allowedDir},
+		ParallelOps:  2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { engine.Close() })
+	s := server.NewMCPServer("test", "0.0.0")
+	reg := &toolRegistry{
+		server:         s,
+		engine:         engine,
+		handlers:       make(map[string]toolHandler),
+		regexTransform: core.NewRegexTransformer(engine),
+		profile:        profileStrict,
+	}
+	registerCoreTools(reg)
+	registerSearchTools(reg)
+	registerFileTools(reg)
+	registerBatchTools(reg)
+	registerPlatformTools(reg)
+	registerGitTools(reg)
+	registerMinifyTools(reg)
+	registerAnalyzeTools(reg)
+	registerDiscoveryTools(reg)
+	registerPatchTools(reg)
+	registerHelpTool(reg)
+	return reg
 }

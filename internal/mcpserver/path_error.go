@@ -25,6 +25,14 @@ const (
 	errCodeRollbackPartial  = "ROLLBACK_PARTIAL"
 	errCodeRollbackFailed   = "ROLLBACK_FAILED"
 	errCodeRollbackComplete = "ROLLBACK_COMPLETE"
+	errCodeBeginPatch       = "BEGIN_PATCH"
+)
+
+const (
+	recoveryRetrySame           = "retry_same"
+	recoveryFixArguments        = "fix_arguments"
+	recoveryReadAndRebase       = "read_and_rebase"
+	recoveryCheckAlreadyApplied = "check_already_applied"
 )
 
 const (
@@ -36,6 +44,8 @@ const (
 	suggestionValidation     = "Correct the listed parameters; do not retry with the same arguments"
 	suggestionOCCMismatch    = "Rebase against current content; retry with current_hash."
 	suggestionBudgetExceeded = "Raise --mutation-budget or start a new server process."
+	suggestionBeginPatch     = "send a unified diff; do not retry this patch"
+	beginPatchExample        = "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
 )
 
 type pathErrorBody struct {
@@ -48,6 +58,7 @@ type pathErrorBody struct {
 	Conflict     *core.OCCConflictReport `json:"conflict,omitempty"`
 	Suggestion   string                  `json:"suggestion,omitempty"`
 	Retryable    bool                    `json:"retryable"`
+	Recovery     string                  `json:"recovery,omitempty"`
 }
 
 type pathErrorEnvelope struct {
@@ -73,6 +84,7 @@ func marshalPathError(code, message, path string, details map[string]any, sugges
 		Details:    details,
 		Suggestion: suggestion,
 		Retryable:  retryableForCode(code),
+		Recovery:   recoveryForCode(code),
 	}}
 	b, err := json.Marshal(env)
 	if err != nil {
@@ -110,12 +122,30 @@ func pathErrorJSONWithOCC(message, path, expectedHash, currentHash string, confl
 		Conflict:     &conflict,
 		Suggestion:   suggestionOCCMismatch,
 		Retryable:    true,
+		Recovery:     recoveryForCode(errCodeOCCMismatch),
 	}}
 	b, err := json.Marshal(env)
 	if err != nil {
 		return message
 	}
 	return string(b)
+}
+
+func recoveryForCode(code string) string {
+	switch code {
+	case errCodeOCCMismatch, errCodeHashRequired, errCodePatchFailed:
+		return recoveryReadAndRebase
+	case errCodeRollbackPartial, errCodeRollbackFailed, errCodeRollbackComplete:
+		return recoveryCheckAlreadyApplied
+	default:
+		return recoveryFixArguments
+	}
+}
+
+func beginPatchResult(path string) *mcp.CallToolResult {
+	return pathErrorResult(errCodeBeginPatch,
+		"patch looks like Codex *** Begin Patch, not a unified diff. Do not retry this patch. Example:\n"+beginPatchExample,
+		path, map[string]string{"field": "patch", "expected": "unified diff"}, suggestionBeginPatch)
 }
 
 func patchFailedResult(path string, err error, extra map[string]string) *mcp.CallToolResult {

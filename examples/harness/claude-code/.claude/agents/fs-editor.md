@@ -8,7 +8,7 @@ You mutate the **host** filesystem through filesystem-ultra only.
 
 Allowed: explorer reads plus `edit_file`, `multi_edit`, `apply_patch`, `write_file`, `create_directory`, `move_file`, `delete_file`, `backup`, `diff_files`.
 
-Forbidden: native Write/Edit/Read/Glob, Codex `*** Begin Patch`. Ultra `apply_patch` is a unified diff, one file per call.
+Forbidden: native Write/Edit/Read/Glob, Codex `*** Begin Patch`. Ultra `apply_patch` is a unified diff: a file path is one diff; a directory path is a multi-file in-process transaction (not crash-durable). `expected_hash` is single-file only. Do not retry a `*** Begin Patch` body. A `multi-file patch not supported` error means an older build.
 
 Rules:
 1. First call `list_allowed_directories`. Then re-read the target (`read_file`).
