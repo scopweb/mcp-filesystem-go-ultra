@@ -76,10 +76,17 @@ func scenarioSearchPages(c *rpcClient, root string) error {
 		if !trunc {
 			break
 		}
-		cont, _ := sc["continuation"].(string)
+		cont, ok := sc["continuation"].(map[string]any)
+		if !ok {
+			return fmt.Errorf("continuation type %T", sc["continuation"])
+		}
 		next := offset + len(hits)
-		if !strings.Contains(cont, fmt.Sprintf("offset:%d", next)) {
-			return fmt.Errorf("continuation want offset:%d got %q", next, cont)
+		if !integralJSON(cont["next_offset"], next) {
+			return fmt.Errorf("continuation next_offset want %d got %#v", next, cont["next_offset"])
+		}
+		hint, _ := cont["hint"].(string)
+		if !strings.Contains(hint, fmt.Sprintf("offset:%d", next)) {
+			return fmt.Errorf("continuation hint want offset:%d got %q", next, hint)
 		}
 		offset = next
 	}
@@ -203,4 +210,17 @@ var pr0Scenarios = []string{
 	"occ_clash",
 	"patch_fail",
 	"help_catalog",
+}
+
+func integralJSON(v any, want int) bool {
+	switch n := v.(type) {
+	case int:
+		return n == want
+	case int64:
+		return int(n) == want
+	case float64:
+		return n == float64(want)
+	default:
+		return false
+	}
 }

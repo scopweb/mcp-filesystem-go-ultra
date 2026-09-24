@@ -199,9 +199,24 @@ func searchStructuredFromOutcome(out core.SearchOutcome, scope map[string]any, e
 		if next == 0 {
 			next = out.Offset + len(out.Matches)
 		}
-		m["continuation"] = core.SearchContinuationHint(next, page, reason)
+		m["continuation"] = searchContinuationObject(next, page, reason)
 	}
 	return m
+}
+
+func searchContinuationObject(next, page int, reason string) map[string]any {
+	if page <= 0 {
+		page = 50
+	}
+	hint := core.SearchContinuationHint(next, page, reason)
+	if reason == "" {
+		hint = searchContinuationHint + " " + hint
+	}
+	return map[string]any{
+		"next_offset": next,
+		"max_results": page,
+		"hint":        hint,
+	}
 }
 
 func searchStructured(text string, scope map[string]any, matches []map[string]any, matchCount int, truncated bool, hiddenCount int) map[string]any {
@@ -224,9 +239,6 @@ func searchStructured(text string, scope map[string]any, matches []map[string]an
 	}
 	if scope != nil {
 		m["scope"] = scope
-	}
-	if truncated {
-		m["continuation"] = searchContinuationHint
 	}
 	return m
 }

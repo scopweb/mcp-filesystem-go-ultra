@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -16,7 +17,7 @@ func registerDiscoveryTools(reg *toolRegistry) {
 	tool := mcp.NewTool("list_allowed_directories",
 		mcp.WithTitleAnnotation("List Allowed Directories"),
 		mcp.WithRawOutputSchema(listAllowedDirectoriesOutputSchema),
-		mcp.WithDescription("list_allowed_directories — Return the sandbox roots this server may read and write. Call this before the first read. Zero parameters. Structured also includes profile, roots_mode, readonly, tool_count for subagent handoff. Related: list_directory, read_file, help."),
+		mcp.WithDescription("list_allowed_directories — Return the sandbox roots this server may read and write. Call this before the first read. Zero parameters. Text and structuredContent include version, commit, and build_date (commit dev means the binary was not stamped). Structured also includes profile, roots_mode, readonly, tool_count for subagent handoff. Related: list_directory, read_file, help."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -37,19 +38,31 @@ func formatAllowedDirectories(engine *core.UltraFastEngine) string {
 	paths := engine.ListedAllowedPaths()
 	source := engine.AllowedSource()
 	if len(paths) == 0 {
+		body := insecureOpenWarning + "\n\n*"
 		if engine.IsCompactMode() {
-			return insecureOpenWarning + "\n*"
+			body = insecureOpenWarning + "\n*"
 		}
-		return insecureOpenWarning + "\n\n*\n"
+		return body + buildIdentitySuffix()
 	}
+	var body string
 	if engine.IsCompactMode() {
-		return strings.Join(paths, "\n")
+		body = strings.Join(paths, "\n")
+	} else {
+		header := "Allowed directories"
+		if source != "" && source != core.AllowedSourceInsecure {
+			header += " (source: " + source + ")"
+		}
+		body = header + ":\n" + strings.Join(paths, "\n")
 	}
-	header := "Allowed directories"
-	if source != "" && source != core.AllowedSourceInsecure {
-		header += " (source: " + source + ")"
+	return body + buildIdentitySuffix()
+}
+
+func buildIdentitySuffix() string {
+	note := ""
+	if BuildCommit == "dev" {
+		note = " (not stamped; go build without -ldflags)"
 	}
-	return header + ":\n" + strings.Join(paths, "\n") + "\n"
+	return fmt.Sprintf("\nversion: %s\ncommit: %s%s\nbuild_date: %s\n", serverVersion, BuildCommit, note, BuildDate)
 }
 
 func allowedDirectoriesStructured(reg *toolRegistry, text string) map[string]any {
@@ -84,6 +97,9 @@ func allowedDirectoriesStructured(reg *toolRegistry, text string) map[string]any
 		"roots_mode":    rootsMode,
 		"readonly":      engine.IsReadOnly(),
 		"tool_count":    toolCount,
+		"version":       serverVersion,
+		"commit":        BuildCommit,
+		"build_date":    BuildDate,
 		"message":       text,
 	}
 }

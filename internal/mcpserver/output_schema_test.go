@@ -10,8 +10,8 @@ package mcpserver
 //   3. Every key actually emitted by the builder exists in `properties`
 //      (catches NEW keys added to the payload but not to the schema).
 //   4. Type spot-checks for the fields the schema declares: string keys must
-//      hold strings, integer keys must hold numbers (json.Unmarshal yields
-//      float64 for numeric JSON values, so we accept either int or float64).
+//      hold strings, integer keys must be integral (int or float64 where
+//      n == math.Trunc(n); a fractional float64 is rejected).
 //   5. The "variable-site foot-gun": when edit_file sets
 //      sc["external_change"] AND then calls attachParentBackup(sc, ...), both
 //      keys survive (the second helper must not rebuild the map).
@@ -25,6 +25,7 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 
@@ -95,13 +96,13 @@ func assertPayloadConforms(t *testing.T, schema schemaInfo, payload map[string]a
 			if _, ok := val.(string); !ok {
 				t.Errorf("schema says %q is string, payload has %T", key, val)
 			}
-		case "integer", "number":
-			switch v := val.(type) {
-			case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64,
-				float32, float64:
-				_ = v
-			default:
-				t.Errorf("schema says %q is %s, payload has %T", key, expectedType, val)
+		case "number":
+			if !numericIsNumber(val) {
+				t.Errorf("schema says %q is number, payload has %T", key, val)
+			}
+		case "integer":
+			if !numericIsIntegral(val) {
+				t.Errorf("schema says %q is integer, payload has non-integral %T (%v)", key, val, val)
 			}
 		}
 	}
@@ -352,6 +353,38 @@ func TestAllSchemas_PropertiesHaveDescription(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func numericIsNumber(v any) bool {
+	switch v.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return true
+	default:
+		return false
+	}
+}
+
+func numericIsIntegral(v any) bool {
+	switch n := v.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return true
+	case float64:
+		return !math.IsNaN(n) && !math.IsInf(n, 0) && n == math.Trunc(n)
+	case float32:
+		f := float64(n)
+		return !math.IsNaN(f) && !math.IsInf(f, 0) && f == math.Trunc(f)
+	default:
+		return false
+	}
+}
+
+func TestSchemaInteger_IntegralFloatOKFractionNot(t *testing.T) {
+	if !numericIsIntegral(float64(2)) || !numericIsIntegral(3) {
+		t.Fatal("integral values must pass")
+	}
+	if numericIsIntegral(1.5) || numericIsIntegral(math.NaN()) {
+		t.Fatal("fraction and NaN must fail")
 	}
 }
 

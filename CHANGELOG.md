@@ -4,6 +4,42 @@
 
 ## [Unreleased]
 
+### fix(edit_file): replacement without new_text does not delete
+
+Default mode ignored `replacement` and applied an empty `new_text`, which wiped the file (trial 3, `price.go`). The call is rejected with `recovery: fix_arguments` and the file is unchanged. An explicit `new_text:""` is still a delete. `old_str`/`new_str` are applied as aliases.
+
+**Verification:** `TestEdit_ReplacementWithoutNewText_Trial3PriceGo` · `TestEdit_ExplicitEmptyNewTextStillDeletes` · `TestEdit_NewStrAliasIsNotADelete`
+
+### fix(errors): recovery is a closed enum
+
+Path, OCC, validation, and patch errors include `recovery`: `retry_same` | `fix_arguments` | `read_and_rebase` | `check_already_applied`. No `next_call`. Current codes emit the last three; `retry_same` is reserved.
+
+**Verification:** `TestErrorEnvelope_RecoveryClosedEnum`
+
+### fix(apply_patch): reject Codex Begin Patch
+
+A body that contains `*** Begin Patch` returns `BEGIN_PATCH` (`retryable: false`, `recovery: fix_arguments`) and a minimal unified-diff example. The file is not modified. There is still no adapter.
+
+**Verification:** `TestApplyPatch_BeginPatch_TrialShapeRejected`
+
+### fix(search_files): truncated continuation is an object
+
+`continuation` is `{next_offset, max_results, hint}`. `next_offset` is an integer. The text fallback still says how to continue. Integer schema values must be integral; an integral `float64` remains valid.
+
+**Verification:** `TestSearch_PaginationNoDupNoGap` · `TestSchemaInteger_IntegralFloatOKFractionNot`
+
+### feat(list_allowed_directories): version, commit, and build_date
+
+Text and structuredContent include them, including `--profile=strict` and compact mode. `commit: dev` says the binary was not stamped. `initialize` already sent the version; the model did not see it.
+
+**Verification:** `TestListAllowedDirectories_StrictCompactIncludesIdentity`
+
+### docs: harness matches main apply_patch
+
+The three harness pages no longer say "one file per call". A file path is one diff; a directory path is the in-process multi-file transaction. `batch_operations` field lists sit on the native `request`, `pipeline`, and `rename` objects. The JSON strings stay legacy adapters. No `oneOf`.
+
+**Verification:** `TestHarnessDocs_NoOneFilePerCall` · `TestBatchRequestDescription_ListsOperationTypes`
+
 ### fix(read_file): batch reads honor the line range
 
 `paths` plus `start_line`/`end_line`/`max_lines` used to return each file in full. The same projection as a single-file read now applies, including the 300-line cap and truncation footer.

@@ -141,6 +141,32 @@ func TestApplyPatch_OCCMismatch(t *testing.T) {
 	}
 }
 
+func TestApplyPatch_BeginPatch_TrialShapeRejected(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "f.txt")
+	original := "keep\n"
+	if err := os.WriteFile(p, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	reg := newHelpTestRegistry(t, dir)
+	patch := "*** Begin Patch\n*** Update File: f.txt\n@@\n-keep\n+gone\n*** End Patch\n"
+	res := callPatchTool(t, reg, "apply_patch", map[string]any{"path": p, "patch": patch})
+	text := resultText(t, res)
+	if !res.IsError || !strings.Contains(text, `"code":"BEGIN_PATCH"`) || !strings.Contains(text, `"recovery":"fix_arguments"`) || !strings.Contains(text, `"retryable":false`) {
+		t.Fatalf("got %s", text)
+	}
+	if !strings.Contains(text, "--- a/file.txt") || strings.Contains(text, "next_call") {
+		t.Fatalf("want a unified-diff example and no next_call: %s", text)
+	}
+	got, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Fatalf("file changed: %q", got)
+	}
+}
+
 func TestApplyPatch_PathEscapeHeader(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "f.txt")

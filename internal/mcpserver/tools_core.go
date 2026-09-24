@@ -849,7 +849,7 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithNumber("line_count", mcp.Description("Number of lines from start_line, as an alternative to end_line. Used by mode:\"delete_range\" and mode:\"replace_range\" — e.g. start_line:100, line_count:50 targets lines 100-149.")),
 		// search_replace mode params
 		mcp.WithString("pattern", mcp.Description("Regex or literal pattern. In search_replace mode: literal pattern, all occurrences. In regex mode: regex pattern (synthesized into a single-pattern transformation if patterns_json is not provided).")),
-		mcp.WithString("replacement", mcp.Description("Replacement text. Used in search_replace mode, and in regex mode when pattern is provided without patterns_json.")),
+		mcp.WithString("replacement", mcp.Description("Replacement text for mode search_replace, and for regex when pattern is set without patterns_json. Not an alias for new_text. In default mode, replacement without new_text or new_str is rejected and the file is not modified.")),
 		// regex mode params
 		mcp.WithArray("patterns", mcp.Description("Native array of regex patterns: [{\"pattern\":\"regex\",\"replacement\":\"$1\",\"limit\":-1}]. Legacy adapter: patterns_json."),
 			mcp.Items(map[string]any{
@@ -937,6 +937,31 @@ func registerCoreTools(reg *toolRegistry) {
 			case "replace", "search_replace", "regex", "delete_range", "replace_range", "insert":
 			default:
 				return mcp.NewToolResultError(fmt.Sprintf(`parameter "mode": invalid value %q (valid: replace, search_replace, regex, delete_range, replace_range, insert)`, mode)), nil
+			}
+		}
+		if args != nil {
+			if _, hasOld := args["old_text"]; !hasOld {
+				if s, ok := args["old_str"].(string); ok {
+					oldText = s
+				}
+			}
+			if _, hasNew := args["new_text"]; !hasNew {
+				if s, ok := args["new_str"].(string); ok {
+					newText = s
+				}
+			}
+			if mode == "" || mode == "replace" {
+				if repl, ok := args["replacement"].(string); ok && repl != "" {
+					_, hasNew := args["new_text"]
+					_, hasStr := args["new_str"]
+					if !hasNew && !hasStr {
+						return pathErrorResult(errCodeInvalidParams,
+							`mode replace got replacement without new_text; pass new_text, or mode:"search_replace" to use replacement. The file was not modified.`,
+							path,
+							map[string]string{"field": "new_text", "expected": "new_text or mode search_replace"},
+							suggestionValidation), nil
+					}
+				}
 			}
 		}
 		strict := false
