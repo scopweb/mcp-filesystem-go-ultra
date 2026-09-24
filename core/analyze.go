@@ -150,8 +150,11 @@ func AnalyzeSymbols(path, query string, maxFindings int) AnalyzeResult {
 		return res
 	}
 	if len(files) == 0 {
+		if alt, ok := analyzeTextSymbols(path, query, maxFindings); ok {
+			return alt
+		}
 		res.Status = "empty"
-		res.Message = "no Go files"
+		res.Message = "no supported source files (go, js, jsx, ts, tsx, cs, sql)"
 		return res
 	}
 	fset := token.NewFileSet()

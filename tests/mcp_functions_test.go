@@ -540,7 +540,7 @@ func TestAdvancedTextSearchCaseSensitive(t *testing.T) {
 		}
 
 		result := resp.Content[0].Text
-		matchCount := strings.Count(result, "test.txt:")
+		matchCount := strings.Count(strings.ToLower(result), "hello")
 		if matchCount < 3 {
 			t.Errorf("Expected at least 3 matches for case-insensitive search, got %d. Result: %s", matchCount, result)
 		}
@@ -562,7 +562,7 @@ func TestAdvancedTextSearchCaseSensitive(t *testing.T) {
 
 		result := resp.Content[0].Text
 		if !strings.Contains(result, "No matches") {
-			matchCount := strings.Count(result, "test.txt:")
+			matchCount := strings.Count(result, "hello world")
 			if matchCount != 1 {
 				t.Errorf("Expected exactly 1 match for case-sensitive 'hello', got %d. Result: %s", matchCount, result)
 			}
@@ -619,8 +619,8 @@ func TestAdvancedTextSearchWithContext(t *testing.T) {
 		}
 
 		result := resp.Content[0].Text
-		if !strings.Contains(result, "Context:") {
-			t.Errorf("Expected to include context when include_context=true, got: %s", result)
+		if !strings.Contains(result, ">3 |") && !strings.Contains(result, "MATCH HERE") {
+			t.Errorf("Expected numbered context when include_context=true, got: %s", result)
 		}
 
 		if !strings.Contains(result, "line 2") || !strings.Contains(result, "line 4") {

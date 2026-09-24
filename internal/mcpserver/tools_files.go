@@ -53,7 +53,7 @@ func registerFileTools(reg *toolRegistry) {
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithDescription("delete_file — Delete files from the real host filesystem (the user's actual disk, e.g. C:\\, D:\\, /mnt/...). "+
 			"Use delete_file for ALL project file deletions — never use the runtime's built-in delete tools for host paths. "+
-			"Default: soft-delete (to trash folder), permanent:true for hard delete. "+
+			"Default: soft-delete (to trash folder), including directories. permanent:true for hard delete. "+
 			"Batch: pass paths (JSON array) to delete multiple files in one call. Related: copy_file, move_file, edit_file, backup."),
 		mcp.WithString("path", mcp.Description("Path to the file or directory to delete. Required unless paths is provided.")),
 		mcp.WithArray("paths", mcp.WithStringItems(), mcp.Description("Native array of paths, or a JSON array string (legacy adapter). e.g. [\"a.txt\",\"b.txt\"]")),

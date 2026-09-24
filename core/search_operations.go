@@ -119,10 +119,8 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 	wholeWord, _ := request.Arguments["whole_word"].(bool)
 	includeContext, _ := request.Arguments["include_context"].(bool)
 	outputFormat, _ := request.Arguments["output_format"].(string)
-	// Default: "auto" — ripgrep-style 'path:line:content' for ≤5 matches,
-	// verbose with emojis for more. Empty string from the handler means the
-	// caller did not specify output_format (the common case).
-	// Explicit "text" is preserved as backward-compatible verbose/compact.
+	// Default: "auto" — grouped path + line:text (ripgrep-style), including
+	// context. Explicit "text" keeps the legacy verbose emoji layout.
 	if outputFormat == "" {
 		outputFormat = "auto"
 	}
@@ -264,10 +262,8 @@ func (e *UltraFastEngine) formatAdvancedSearchOutput(matches []SearchMatch, patt
 	}
 	var result strings.Builder
 	n := len(matches)
-	const ripgrepThreshold = 5
-	useRipgrep := outputFormat == "auto" && !includeContext && n <= ripgrepThreshold
-	if useRipgrep {
-		result.WriteString(formatSearchMatchesRipgrep(matches, n))
+	if outputFormat == "auto" {
+		result.WriteString(formatSearchGrouped(matches, includeContext, contextLines))
 	} else if e.config.CompactMode && outputFormat != "text" {
 		if totalBeforeCap > n {
 			result.WriteString(fmt.Sprintf("%d matches (showing %d-%d)\n", totalBeforeCap, offset+1, offset+n))
@@ -309,12 +305,20 @@ func formatNumberedContext(match SearchMatch, contextLines int, compact bool) st
 	if len(match.Context) == 0 {
 		return ""
 	}
-	nBefore := contextLines
-	if nBefore <= 0 {
-		nBefore = len(match.Context) / 2
+	var nBefore int
+	if match.ContextSplit {
+		nBefore = match.ContextBefore
+	} else {
+		nBefore = contextLines
+		if nBefore <= 0 {
+			nBefore = len(match.Context) / 2
+		}
+		if match.LineNumber-1 < nBefore {
+			nBefore = match.LineNumber - 1
+		}
 	}
-	if match.LineNumber-1 < nBefore {
-		nBefore = match.LineNumber - 1
+	if nBefore < 0 {
+		nBefore = 0
 	}
 	if nBefore > len(match.Context) {
 		nBefore = len(match.Context)
@@ -365,6 +369,30 @@ func formatSearchMatchesRipgrep(matches []SearchMatch, maxToShow int) string {
 	}
 	if len(matches) > maxToShow {
 		fmt.Fprintf(&b, "... (%d more matches)\n", len(matches)-maxToShow)
+	}
+	return b.String()
+}
+
+// formatSearchGrouped prints one path header, then line:text rows. Context,
+// when present, is numbered from ContextBefore so before/after stay in order.
+func formatSearchGrouped(matches []SearchMatch, includeContext bool, contextLines int) string {
+	var b strings.Builder
+	if len(matches) == 0 {
+		return ""
+	}
+	b.WriteString(fmt.Sprintf("%d matches\n", len(matches)))
+	last := ""
+	for _, m := range matches {
+		if m.File != last {
+			b.WriteString(m.File)
+			b.WriteByte('\n')
+			last = m.File
+		}
+		if includeContext && len(m.Context) > 0 {
+			b.WriteString(formatNumberedContext(m, contextLines, true))
+			continue
+		}
+		fmt.Fprintf(&b, "  %d:%s\n", m.LineNumber, strings.TrimRight(m.Line, "\r\n"))
 	}
 	return b.String()
 }
@@ -798,10 +826,12 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 
 						for i := start; i < end; i++ {
 							if i != lineNum {
-								context = append(context, truncateSearchLine(strings.TrimSpace(lines[i]), 0))
+								context = append(context, truncateSearchLine(strings.TrimRight(lines[i], "\r"), 0))
 							}
 						}
 						match.Context = context
+						match.ContextBefore = lineNum - start
+						match.ContextSplit = true
 
 						localMatches = append(localMatches, match)
 					}

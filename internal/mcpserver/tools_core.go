@@ -381,7 +381,7 @@ func registerCoreTools(reg *toolRegistry) {
 			"If the model asks for read_multiple_files or read_text_file, use read_file (paths[] / mode head|tail). "+
 			"Logs: mode=\"tail\" max_lines=40 (each line auto-cut to 300 chars; max_line_length:0 disables). "+
 			"Range: start_line/end_line (absolute, inclusive) OR start_line/max_lines (count). "+
-			"max_lines without start_line/end_line and mode omitted/all: first N consecutive lines. Binary: encoding=\"base64\". Batch: paths JSON array. "+
+			"max_lines without start_line/end_line and mode omitted/all: first N consecutive lines. Binary: encoding=\"base64\". Batch: paths JSON array (same range and the 300-line cap apply to every file; leer fichero). "+
 			"To MODIFY files use edit_file."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -426,14 +426,27 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 		}
 
-		// If paths is set and we should NOT use path+range, process batch
+		// If paths is set and we should NOT use path+range, process batch.
+		// Range params apply to every file. Omitting them still uses projectRead
+		// so a large file is capped the same way as a single-file read.
 		if len(paths) > 0 && !usePathRange {
 			if len(paths) == 0 {
 				return mcp.NewToolResultError("paths array is empty"), nil
 			}
+			startLine, endLine, maxLines, mode, lineLimit, lineLimitSet := readRangeArgs(args)
+			if startLine > 0 && endLine == 0 && maxLines > 0 {
+				endLine = startLine + maxLines - 1
+				maxLines = 0
+				mode = "all"
+			}
+			if endLine > 0 && startLine == 0 {
+				startLine = 1
+				maxLines = 0
+				mode = "all"
+			}
 			var results strings.Builder
 			files := make([]map[string]any, 0, len(paths))
-			anyOK, anyFail := false, false
+			anyOK, anyFail, anyTrunc := false, false, false
 			for i, p := range paths {
 				p = core.NormalizePath(p)
 				snap, err := engine.ReadFileSnapshot(ctx, p)
@@ -448,21 +461,37 @@ func registerCoreTools(reg *toolRegistry) {
 					entry["error"] = err.Error()
 				} else {
 					anyOK = true
-					content := string(snap.Bytes)
-					results.WriteString(content)
-					if !strings.HasSuffix(content, "\n") {
+					ll := lineLimit
+					if !lineLimitSet && (mode == "head" || mode == "tail") {
+						ll = defaultHeadTailLineLength
+					}
+					proj := projectRead(string(snap.Bytes), p, startLine, endLine, maxLines, mode, ll)
+					if proj.Truncated {
+						anyTrunc = true
+					}
+					results.WriteString(proj.Text)
+					if !strings.HasSuffix(proj.Text, "\n") {
 						results.WriteString("\n")
 					}
-					entry["content"] = content
+					entry["content"] = proj.Text
 					entry["content_hash"] = snap.Hash
+					entry["truncated"] = proj.Truncated
+					entry["total_lines"] = proj.TotalLines
+					if proj.StartLine > 0 {
+						entry["start_line"] = proj.StartLine
+					}
+					if proj.EndLine > 0 {
+						entry["end_line"] = proj.EndLine
+					}
 					core.RecordReadHash(p, snap.Hash)
+					core.RecordRead(p)
 				}
 				files = append(files, entry)
 			}
 			combined := results.String()
 			detail := parseDetailArg(args)
 			files, combined = applyBatchReadDetail(files, combined, detail)
-			sc := readStructured("", combined, "", false, 0, 0, files)
+			sc := readStructured("", combined, "", anyTrunc, startLine, endLine, files)
 			return structuredOrError(anyOK || !anyFail, sc, combined), nil
 		}
 
@@ -1551,6 +1580,7 @@ func registerCoreTools(reg *toolRegistry) {
 			if unifiedDiff != "" {
 				msg += "\n" + unifiedDiff
 			}
+			msg += syntaxWarning(normPath)
 			sc := editStructured(path, result)
 			if autoOCCWarn != "" {
 				sc["external_change"] = autoOCCWarn
@@ -1574,6 +1604,7 @@ func registerCoreTools(reg *toolRegistry) {
 		// Append feedback signals (non-blocking)
 		msg = core.FormatFeedback(editSignal, msg)
 		msg = core.FormatFeedback(newTextSignal, msg)
+		msg += syntaxWarning(normPath)
 		// Append unified diff
 		if unifiedDiff != "" {
 			msg += "\n\nDiff:\n" + unifiedDiff

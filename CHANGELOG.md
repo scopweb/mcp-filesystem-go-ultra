@@ -4,6 +4,38 @@
 
 ## [Unreleased]
 
+### fix(read_file): batch reads honor the line range
+
+`paths` plus `start_line`/`end_line`/`max_lines` used to return each file in full. The same projection as a single-file read now applies, including the 300-line cap and truncation footer.
+
+**Verification:** `TestReadFile_BatchHonorsRange`
+
+### fix(search_files): grouped output by default, context in order
+
+Auto format is a path header plus `line:text`, including when there are more than 5 matches or context is requested. `output_format:"text"` keeps the emoji layout. Context before/after is taken from the recorded split, not guessed from `context_lines`.
+
+### fix(multi_edit): no STALE_READ when every old_text matches once
+
+### feat(delete_file): soft-delete a directory in one call
+
+The tree moves to trash and restores with `backup(action:"restore_trash")`.
+
+### feat(analyze_code): symbols for JS, TS, C#, and SQL
+
+Go stays on the AST. The other languages use regex (name and line). No lookahead.
+
+### feat(git): `add` with `update:true` is `git add -u`
+
+Tracked modifications only. Untracked folders such as `.agent/` are not staged.
+
+### feat(project_replace): `paths` limits the replace to those files
+
+`preview:true` is the dry run. An explicit file list skips the tree walk.
+
+### feat(edit): warn when a JSON or XML edit leaves the file ill-formed
+
+Non-blocking. Covers `.json`, `.xml`, `.csproj`, `.config`, `.resx`.
+
 ### docs: one living roadmap
 
 The repo root keeps a single plan, [ROADMAP.md](ROADMAP.md). Closed plans (agent reliability, operational reliability, cache phase 0, Failure Intelligence, the old pending plan) are local copies under `docs/history/`. That folder stays gitignored. Shipped behavior remains in this changelog.

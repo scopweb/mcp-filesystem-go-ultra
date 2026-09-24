@@ -169,7 +169,7 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 			pendingContext = pendingContext[:0]
 			continue
 		case "context":
-			ctxLine := truncateSearchLine(strings.TrimSpace(strings.TrimRight(rgMatch.Data.Lines.Text, "\r\n")), 0)
+			ctxLine := truncateSearchLine(strings.TrimRight(rgMatch.Data.Lines.Text, "\r\n"), 0)
 			if includeContext && contextLines > 0 {
 				// Trailing context of the previous match (cap at contextLines
 				// after the match line: leading + match + trailing ≈ 2N).
@@ -202,11 +202,13 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 			match.MatchEnd = rgMatch.Data.Submatches[0].End
 		}
 		if includeContext && contextLines > 0 && len(pendingContext) > 0 {
+			match.ContextBefore = len(pendingContext)
 			match.Context = append(match.Context, pendingContext...)
 			pendingContext = pendingContext[:0]
 		} else {
 			pendingContext = pendingContext[:0]
 		}
+		match.ContextSplit = includeContext && contextLines > 0
 
 		matches = append(matches, match)
 	}

@@ -51,6 +51,7 @@ func registerGitTools(reg *toolRegistry) {
 		mcp.WithBoolean("delete", mcp.Description("branch: true → delete name (git branch -d). Required to delete; name alone never deletes.")),
 		mcp.WithBoolean("force", mcp.Description("branch: with delete:true, true → -D (else -d). push: true → --force-with-lease (never plain --force). Other actions: ignored.")),
 		mcp.WithBoolean("prune", mcp.Description("fetch: true → --prune (drop stale remote-tracking refs). Default: false.")),
+		mcp.WithBoolean("update", mcp.Description("add: true → git add -u (tracked modifications only; does not stage untracked paths such as .agent/). paths optional.")),
 	}
 	gitTool := mcp.NewTool("git", gitOpts...)
 
@@ -602,10 +603,11 @@ func gitAdd(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 		return errRes, nil
 	}
 
-	if len(paths) == 0 {
+	update := getBoolArg(args, "update")
+	if len(paths) == 0 && !update {
 		return usageError(
-			"git add requires explicit 'paths' (no implicit 'add .')",
-			`git(action:"add", paths:["src/file.php"])`), nil
+			"git add requires explicit 'paths' or update:true (git add -u, tracked files only)",
+			`git(action:"add", update:true) or git(action:"add", paths:["src/file.php"])`), nil
 	}
 
 	// Normalize. "--" separator is REQUIRED: without it a path like "-A" or
@@ -627,7 +629,14 @@ func gitAdd(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 		return mcp.NewToolResultError(fmt.Sprintf("git add denied by hook: %v", err)), nil
 	}
 
-	cmdArgs := append([]string{"add", "--"}, normalized...)
+	cmdArgs := []string{"add"}
+	if update {
+		cmdArgs = append(cmdArgs, "-u")
+	}
+	if len(normalized) > 0 {
+		cmdArgs = append(cmdArgs, "--")
+		cmdArgs = append(cmdArgs, normalized...)
+	}
 	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
 	if werr != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git add failed: %v\n%s", werr, output)), nil

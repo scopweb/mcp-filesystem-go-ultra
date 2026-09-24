@@ -421,6 +421,30 @@ func rangeFooter(path string, startLine, endLine, total int) string {
 	return footer
 }
 
+func readRangeArgs(args map[string]interface{}) (startLine, endLine, maxLines int, mode string, lineLimit int, lineLimitSet bool) {
+	mode = "all"
+	if args == nil {
+		return
+	}
+	if ml, ok := args["max_lines"].(float64); ok {
+		maxLines = int(ml)
+	}
+	if m, ok := args["mode"].(string); ok && m != "" {
+		mode = m
+	}
+	if sl, ok := args["start_line"].(float64); ok {
+		startLine = int(sl)
+	}
+	if el, ok := args["end_line"].(float64); ok {
+		endLine = int(el)
+	}
+	if mll, ok := args["max_line_length"].(float64); ok {
+		lineLimit = int(mll)
+		lineLimitSet = true
+	}
+	return
+}
+
 func projectRead(content, path string, startLine, endLine, maxLines int, mode string, lineLimit int) readProjection {
 	lines := splitContentLines(content)
 	total := len(lines)

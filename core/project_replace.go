@@ -56,6 +56,37 @@ type ProjectReplaceFileResult struct {
 //     flag was advertised in the schema and in the risk warning but never
 //     enforced, so a CRITICAL replace applied silently and re-running with
 //     force=true applied it a SECOND time)
+//
+// explicitExistingFiles reports ok when every include entry is an existing file
+// under root (no globs). Callers then skip the tree walk.
+func explicitExistingFiles(root string, includes []string) ([]string, bool) {
+	if len(includes) == 0 {
+		return nil, false
+	}
+	root = filepath.Clean(root)
+	out := make([]string, 0, len(includes))
+	for _, inc := range includes {
+		if strings.ContainsAny(inc, "*?[") {
+			return nil, false
+		}
+		p := inc
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(root, inc)
+		}
+		p = filepath.Clean(p)
+		rel, err := filepath.Rel(root, p)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, false
+		}
+		st, err := os.Stat(p)
+		if err != nil || st.IsDir() {
+			return nil, false
+		}
+		out = append(out, p)
+	}
+	return out, true
+}
+
 func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replace string, literal, caseSensitive bool, fileTypes string, includePaths, excludePaths []string, preview, createBackup, parallel bool, maxFiles int, force bool) (*ProjectReplaceResult, error) {
 	// Normalize path
 	path = NormalizePath(path)
@@ -106,80 +137,85 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 		}
 	}
 
-	// Discover files
+	// Discover files. An explicit list of existing files skips the tree walk.
 	var matchedFiles []string
-	err := filepath.Walk(path, func(filePath string, info os.FileInfo, walkErr error) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if walkErr != nil {
-			return nil // Skip errors
-		}
+	var err error
+	if files, ok := explicitExistingFiles(path, includePaths); ok {
+		matchedFiles = files
+	} else {
+		err = filepath.Walk(path, func(filePath string, info os.FileInfo, walkErr error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if walkErr != nil {
+				return nil // Skip errors
+			}
 
-		if info.IsDir() {
-			// Check if this directory should be excluded
-			rel, err := filepath.Rel(path, filePath)
-			if err == nil {
-				for _, excl := range excludePaths {
-					// Handle ** globs (e.g., "jotajotape/**" matches all subdirs)
-					if strings.HasSuffix(excl, "/**") || strings.HasSuffix(excl, "\\**") {
-						prefix := excl[:len(excl)-3] // Remove /**
-						if strings.HasPrefix(rel, prefix+"/") || rel == prefix {
+			if info.IsDir() {
+				// Check if this directory should be excluded
+				rel, err := filepath.Rel(path, filePath)
+				if err == nil {
+					for _, excl := range excludePaths {
+						// Handle ** globs (e.g., "jotajotape/**" matches all subdirs)
+						if strings.HasSuffix(excl, "/**") || strings.HasSuffix(excl, "\\**") {
+							prefix := excl[:len(excl)-3] // Remove /**
+							if strings.HasPrefix(rel, prefix+"/") || rel == prefix {
+								return filepath.SkipDir
+							}
+						} else if matched, _ := filepath.Match(excl, rel); matched {
+							return filepath.SkipDir
+						} else if strings.HasPrefix(rel, excl) {
 							return filepath.SkipDir
 						}
-					} else if matched, _ := filepath.Match(excl, rel); matched {
-						return filepath.SkipDir
-					} else if strings.HasPrefix(rel, excl) {
-						return filepath.SkipDir
 					}
 				}
+				return nil
 			}
-			return nil
-		}
 
-		// Check max files limit
-		if maxFiles > 0 && len(matchedFiles) >= maxFiles {
-			return nil
-		}
+			// Check max files limit
+			if maxFiles > 0 && len(matchedFiles) >= maxFiles {
+				return nil
+			}
 
-		// Check file type filter
-		if len(extensions) > 0 {
-			ext := strings.ToLower(filepath.Ext(filePath))
-			matchedExt := false
-			for _, e := range extensions {
-				if strings.ToLower(e) == ext {
-					matchedExt = true
-					break
+			// Check file type filter
+			if len(extensions) > 0 {
+				ext := strings.ToLower(filepath.Ext(filePath))
+				matchedExt := false
+				for _, e := range extensions {
+					if strings.ToLower(e) == ext {
+						matchedExt = true
+						break
+					}
+				}
+				if !matchedExt {
+					return nil
 				}
 			}
-			if !matchedExt {
-				return nil
-			}
-		}
 
-		// Check include paths
-		if len(includePaths) > 0 {
-			rel, err := filepath.Rel(path, filePath)
-			if err != nil {
-				return nil
-			}
-			matched := false
-			for _, incl := range includePaths {
-				if m, _ := filepath.Match(incl, rel); m {
-					matched = true
-					break
+			// Check include paths
+			if len(includePaths) > 0 {
+				rel, err := filepath.Rel(path, filePath)
+				if err != nil {
+					return nil
+				}
+				matched := false
+				for _, incl := range includePaths {
+					if m, _ := filepath.Match(incl, rel); m {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					return nil
 				}
 			}
-			if !matched {
-				return nil
-			}
-		}
 
-		matchedFiles = append(matchedFiles, filePath)
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to discover files: %w", err)
+			matchedFiles = append(matchedFiles, filePath)
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to discover files: %w", err)
+		}
 	}
 
 	if len(matchedFiles) == 0 {

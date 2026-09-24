@@ -320,21 +320,21 @@ Copy [examples/harness/](examples/harness/) — do not guess flags. One MCP inst
 | `edit_file` | Exact / regex / range / insert. Backup + OCC. **strict** | Targeted edits (`allow_rewrite` not `force` for rewrite-guard) |
 | `multi_edit` | Multiple replacements on one file. **strict** | Several anchors in the same file |
 | `list_directory` | Directory listing. **strict** | Copy exact paths (case) before edits |
-| `search_files` | Name or content. Gitignore ON (`no_ignore=false`). Page with `max_results` + `offset`. **strict** | Find, then edit. `truncated` + `hidden_count` + `continuation` |
+| `search_files` | Name or content. Gitignore ON. Default text is grouped `path` + `line:text` (context included). `output_format:"text"` is the legacy layout. **strict** | Find, then edit. `truncated` + `hidden_count` + `continuation` |
 | `get_file_info` | Size, dates, type. Batch `paths[]`. **strict** | Verify after a host mutation |
 | `create_directory` | `mkdir -p`. **strict** | New folders |
 | `move_file` | Move or rename. **strict** | Relocate |
-| `delete_file` | Soft-delete default; `permanent:true` hard. **strict** | Remove |
+| `delete_file` | Soft-delete default, files and directories; `permanent:true` hard. **strict** | Remove |
 | `help` | Live catalog; `help(tool:"X")` schema + examples. **strict** | On demand — not at startup |
 | `copy_file` | Recursive copy | ultra |
-| `project_replace` | Token rename across a tree | ultra |
+| `project_replace` | Token rename across a tree, or `paths` for an explicit list. `preview:true` dry-runs | ultra |
 | `batch_operations` | Atomic ops / pipelines / rename | ultra |
 | `backup` | Undo / restore / trash. **strict** | After a bad edit: `undo_last` / `restore` / `restore_trash` |
 | `analyze_operation` | Dry-run risk preview | ultra |
 | `wsl` | WSL ↔ Windows sync | ultra |
-| `git` | Local git. `remote` is read-only (no `--git-network`). `push`/`fetch` need `--git-network` | ultra |
+| `git` | Local git. `add` + `update:true` is `git add -u`. `remote` is read-only (no `--git-network`). `push`/`fetch` need `--git-network` | ultra |
 | `minify_js` | Pure-Go JS minify (no Node) | ultra |
-| `analyze_code` | Read-only symbols / lint / sec / impact. Not a writer. | ultra — understand code; edit with `apply_patch`/`edit_file`. Do not use git grep or bash |
+| `analyze_code` | Read-only symbols / lint / sec / impact. Symbols: Go AST; JS/TS/C#/SQL regex. Not a writer. | ultra — understand code; edit with `apply_patch`/`edit_file`. Do not use git grep or bash |
 | `server_info` | Stats / static help / artifacts | ultra |
 
 ---
