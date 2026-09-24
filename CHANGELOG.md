@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+### docs: one living roadmap
+
+The repo root keeps a single plan, [ROADMAP.md](ROADMAP.md). Closed plans (agent reliability, operational reliability, cache phase 0, Failure Intelligence, the old pending plan) are local copies under `docs/history/`. That folder stays gitignored. Shipped behavior remains in this changelog.
+
+### fix(apply_patch): incomplete multi-file rollback is reported
+
+A later commit failure returns `ROLLBACK_PARTIAL`, `ROLLBACK_FAILED`, or `ROLLBACK_COMPLETE` (`retryable: false`) instead of hiding the journal result. `complete` keeps `rollback_status` even when the inner error is an OCC mismatch.
+
+**Verification:** `TestApplyMultiFilePatch_ThirdCommitConflictIsPartial` · `TestApplyMultiFilePatch_SecondCommitFailRollsBackComplete` · `TestRollbackIncompleteResultSurfacesPartial`
+
+### fix(apply_patch): a missing multi-file base is not "not a directory"
+
+`os.IsNotExist` on the base returns `base directory does not exist` and does not ask the client to regenerate the patch. A file used as the base still returns `multi-file patch requires path to be a directory`.
+
+**Verification:** `TestApplyMultiFilePatch_MissingBaseIsNotNotADirectory` · `TestPatchFailedMissingBaseDoesNotAskToRegenerate`
+
+### perf(cache): phase 0 closed, TTL stays 3m
+
+CACHE-01–04 shipped (byte/metadata freshness, metrics, authorized prefetch, orderly shutdown, configurable TTL). Local baseline: 3 repeats per TTL, 576 reads, 0 errors; aged past 3m, 3m = 72 misses and 10m = 72 hits; p50/p95 4,326/8,065 ms vs 4,194/11,303 ms, no consistent latency win. Default TTL remains 3m. WARM-01 paused, WARM-02 not started, mmap deferred.
+
 ### docs: completions is a permanent limit
 
 Spec 2025-11-25 `completion/complete` only covers `ref/prompt` and `ref/resource`. The SDK (`mark3labs/mcp-go` v1.0.0) has no `ref/tool`. Tool paths and actions have no legal ref, so the server does not declare `completions`. Actions stay on the tool schema enums; paths are discovered with `list_allowed_directories` and `directory_tree`. `completion/complete` is `METHOD_NOT_FOUND`.

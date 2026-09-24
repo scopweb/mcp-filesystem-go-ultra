@@ -21,7 +21,7 @@ The runner never retries a failed operation. `retries` therefore records actual 
 | `reliability` | ultra | Scripted gate for FIABILIDAD-OPERATIVA: search pagination, multi_edit diagnosis, `project_replace` `detail:full`, `git remote` |
 | `all` | ultra | Both |
 
-`reliability` is **not** a real-model eval. It proves the three field-report failures stay fixed on the wire. P1 in PLAN-PENDIENTE.md (Claude Code / Codex / OpenCode on a real repo) stays open.
+`reliability` is **not** a real-model eval. It proves the three field-report failures stay fixed on the wire. P1 in ROADMAP.md (Claude Code / Codex / OpenCode on a real repo) stays open.
 
 ## Run
 

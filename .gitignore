@@ -53,6 +53,7 @@ test_output/
 .DS_Store
 Thumbs.db
 ehthumbs.db
+desktop.ini
 
 # ------------------------------------------------------------
 # Logs, temp & cache
@@ -135,7 +136,7 @@ IMPLEMENTATION_VERIFICATION.md
 PIPELINE_IMPLEMENTATION_SUMMARY.md
 PipelinePlan.md
 COMPETITIVE_ANALYSIS.md
-ROADMAP.md
+CONCLULSIONES-FINALES.md
 
 # ------------------------------------------------------------
 # docs-website (has its own git history / is a separate concern)
