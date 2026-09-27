@@ -142,6 +142,7 @@ func Run() {
 		// Auto-OCC (new point 4): automatic optimistic-concurrency check on edits
 		// without an explicit expected_hash. off | warn (default) | block.
 		autoOCC = flag.String("auto-occ", "warn", "Auto optimistic-concurrency on edits: off|warn|block (default warn)")
+		fileSecurityConfig = flag.String("file-security-config", "", "Path to a JSON file security policy. Invalid config aborts startup. Immutable for the process lifetime.")
 
 		// Risk thresholds
 		riskThresholdMedium   = flag.Float64("risk-threshold-medium", 20.0, "Percentage change threshold for medium risk")
@@ -283,6 +284,25 @@ func Run() {
 		log.Fatalf("Failed to initialize engine: %v", err)
 	}
 	defer engine.Close()
+	if strings.TrimSpace(*fileSecurityConfig) != "" {
+		policy, perr := core.LoadFilePolicy(*fileSecurityConfig)
+		if perr != nil {
+			fmt.Fprintln(os.Stderr, perr.Error())
+			os.Exit(2)
+		}
+		if *insecureOpen {
+			if perr = policy.RejectInsecureOpen(); perr != nil {
+				fmt.Fprintln(os.Stderr, perr.Error())
+				os.Exit(2)
+			}
+		}
+		if perr = policy.PinConfig(*fileSecurityConfig); perr != nil {
+			fmt.Fprintln(os.Stderr, perr.Error())
+			os.Exit(2)
+		}
+		engine.SetFilePolicy(policy)
+		log.Printf("File security policy loaded (immutable until restart)")
+	}
 
 	s := newFilesystemMCPServer()
 

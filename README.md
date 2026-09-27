@@ -1,10 +1,10 @@
 # MCP Filesystem Server Ultra
 
-**v4.7.1** · Go 1.27.1 · MCP 2025-11-25 · 25 tools ultra / 16 strict (agent core)
+**v4.7.1** · Go 1.27.1 · MCP 2025-11-25 · 26 tools ultra / 17 strict (agent core)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
-Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are disabled. Default `--profile=ultra` registers all 25 tools; `--profile=strict` registers the 16-tool agent core (includes `backup` for undo; no `analyze_code`, no `git` network).
+Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are disabled. Default `--profile=ultra` registers all 26 tools; `--profile=strict` registers the 17-tool agent core (includes `backup` for undo and `security_policy`; no `analyze_code`, no `git` network).
 
 ---
 
@@ -50,7 +50,7 @@ See [Build](#build) and [Configuration](#configuration) below for more.
 
 ### Productivity
 
-- **25 tools (ultra)** — 17 core + `git` + `minify_js` + `analyze_code` + `help` + discovery/patch. `--profile=strict` registers the 16-tool agent core (includes `backup` for undo; no `analyze_code`).
+- **26 tools (ultra)** — 17 core + `git` + `minify_js` + `analyze_code` + `help` + `security_policy` + discovery/patch. `--profile=strict` registers the 17-tool agent core (includes `backup` and `security_policy`; no `analyze_code`).
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
 - **Hook system** — 16 pre/post events (write, edit, delete, create, move, copy, read, search)
 - **Pipeline system** — 12 actions with conditions, templates, and DAG-based parallel execution; reduces client/server round-trips for multi-step refactors
@@ -110,7 +110,7 @@ Keep this trio in the MCP `args` (and leave `--readonly` off so the agent can wr
 
 | Flag | Why |
 |------|-----|
-| `--profile=strict` | Registers the 16-tool agent core (`list_allowed_directories`, `directory_tree`, `read_file` / `write_file` / `edit_file` / `apply_patch`, `backup` for undo, …). Omits `git`, `wsl`, `minify_js`, `analyze_code`, `batch_operations`, `copy_file`, `server_info`, … so `tools/list` stays small and lazy-loading clients actually see the useful set. Default is `ultra` (25 tools) so existing configs do not break. |
+| `--profile=strict` | Registers the 17-tool agent core (`list_allowed_directories`, `directory_tree`, `read_file` / `write_file` / `edit_file` / `apply_patch`, `backup` for undo, `security_policy`, …). Omits `git`, `wsl`, `minify_js`, `analyze_code`, `batch_operations`, `copy_file`, `server_info`, … so `tools/list` stays small and lazy-loading clients actually see the useful set. Default is `ultra` (26 tools) so existing configs do not break. |
 | `--compact-mode` | Short token-efficient responses (hashes, UNDO ids, no emoji walls). |
 | `--roots-mode=union` | MCP client Roots are **added** to the CLI allowlist. Default `replace` is wrong for OpenCode: it sends the workspace as Roots and **wipes** every other CLI path, so `list_allowed_directories` only shows one folder. |
 
@@ -237,7 +237,8 @@ Allowed paths: positional args after the flags, **or** one `--allowed-paths` wit
 | `--allowed-paths` | (required) | Comma-separated allowed roots; or pass paths as positional args |
 | `--insecure-open` | off | Labs only: disable the sandbox (entire disk). Fail-closed by default since v4.6.0. |
 | `--roots-mode` | replace | How MCP client Roots combine with CLI paths: `replace`, `union`, `ignore` |
-| `--profile` | ultra | `ultra` = all 25 tools; `strict` = 16-tool agent core (includes `backup`) |
+| `--profile` | ultra | `ultra` = all 26 tools; `strict` = 17-tool agent core (includes `backup` and `security_policy`) |
+| `--file-security-config` | empty | JSON policy layered on allowed-paths. Invalid file exits 2. Immutable until restart. See below. |
 | `--git-network` | off | Enable `git` push/fetch. Off the critical path; ignored in `strict` |
 | `--git-remote-allow` | empty (any destination) | Optional extra lock on push/fetch. See below. |
 | `--readonly` | off | Reject mutating tools |
@@ -257,6 +258,40 @@ Allowed paths: positional args after the flags, **or** one `--allowed-paths` wit
 | `--log-dir` | — | Directory for audit logs and metrics (enables logging) |
 | `--log-level` | info | Log level: debug, info, warn, error |
 | `--debug` | off | Verbose debug logging |
+
+## File security policy
+
+`--file-security-config` adds an owner-controlled layer on top of allowed-paths. Without the flag, behavior is unchanged. The file is loaded at startup and is immutable until the process restarts. A missing, malformed, or invalid file exits 2. The server does not continue without the policy.
+
+```json
+{
+  "version": 1,
+  "rules": [
+    { "pattern": ".env", "level": "hidden" },
+    { "pattern": ".env.*", "level": "hidden" },
+    { "pattern": "*.ini", "level": "protected" },
+    { "pattern": "settings.json", "level": "read_only" },
+    { "pattern": "**/secrets/**", "level": "hidden" }
+  ]
+}
+```
+
+```bash
+filesystem-ultra.exe --allowed-paths C:\proj --file-security-config C:\proj\policy.json
+```
+
+| Level | List name | Read content | Mutate | Copy out |
+|-------|-----------|--------------|--------|----------|
+| `normal` | yes | yes | yes | yes |
+| `read_only` | yes | yes | no | yes |
+| `protected` | name, type, level only | no | no | no |
+| `hidden` | no | no (looks missing) | no | no |
+
+The most restrictive matching rule wins (`normal < read_only < protected < hidden`). A directory rule is inherited by descendants; a child rule cannot weaken it. Patterns without `/` match the name at any depth. Patterns with separators are relative to each effective sandbox root (`*`, `?`, `**`). `\` is a separator. Absolute paths, `..`, `$`, `~`, and character classes are rejected. Case follows the platform (`\` means case-insensitive). `--insecure-open` plus a separator pattern is rejected.
+
+`security_policy` is read-only and does not list patterns or paths. `force`, `allow_rewrite`, and `dry_run` do not bypass the policy. While a policy is active, `git` is unavailable, WSL sync and auto-sync are disabled, and `.git` trees are not readable through these tools (objects can hold historical bytes). The dashboard is a separate process: pass the same `--file-security-config` and `--allowed-paths` or it can still serve backup bytes.
+
+This policy controls tools and processes that implement it. It is not an OS sandbox. Another shell, MCP, or program with filesystem permission can still read the files. Hard links, concurrent external changes, and OS case-sensitivity differences are not fully closed.
 
 ### Git network (`--git-network` / `--git-remote-allow`)
 

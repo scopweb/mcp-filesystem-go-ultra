@@ -12,6 +12,28 @@ import (
 	"github.com/mcp/filesystem-ultra/core"
 )
 
+func policyResult(err error) *mcp.CallToolResult {
+	if err == nil {
+		return nil
+	}
+	return mcp.NewToolResultError(formatToolError(err))
+}
+
+func enforcePolicy(engine *core.UltraFastEngine, op core.PolicyOp, paths ...string) *mcp.CallToolResult {
+	if engine == nil || !engine.PolicyEnabled() {
+		return nil
+	}
+	for _, p := range paths {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		if err := engine.Authorize(op, p); err != nil {
+			return policyResult(err)
+		}
+	}
+	return nil
+}
+
 // usageError formats an error response with a usage example, per docs/git-tool-spec.md §4.
 //
 // Always returns (result, nil) — never a non-nil error — so the caller goes through the
@@ -39,6 +61,17 @@ func filesystemMismatchSuffix(err error) string {
 // known (NOT_ALLOWED, SECRET_DENIED, NOT_FOUND). Other errors keep the
 // existing "Error:" prefix so callers that match on that string stay stable.
 func formatToolError(err error) string {
+	var fpe *core.FilePolicyError
+	if errors.As(err, &fpe) {
+		if fpe.Hidden {
+			return pathErrorJSON(errCodeNotFound, fpe.Error(), fpe.Path, nil, filesystemMismatchHint)
+		}
+		msg := fpe.Error()
+		if msg == "" {
+			msg = "operation denied by file policy"
+		}
+		return pathErrorJSON(errCodePolicyDenied, msg, fpe.Path, nil, "the file security policy denies this operation")
+	}
 	var pe *core.PathError
 	path := ""
 	if errors.As(err, &pe) {

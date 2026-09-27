@@ -462,6 +462,20 @@ func (pe *PipelineExecutor) executeEdit(ctx context.Context, step PipelineStep, 
 	result.FilesMatched = files
 	result.Counts = make(map[string]int)
 	totalEdits := 0
+	if pe.engine != nil && pe.engine.PolicyEnabled() {
+		visible := files[:0]
+		for _, filePath := range files {
+			if pe.engine.OmitFromDiscovery(filePath) {
+				continue
+			}
+			if err := pe.engine.Authorize(OpWrite, filePath); err != nil {
+				return err
+			}
+			visible = append(visible, filePath)
+		}
+		files = visible
+		result.FilesMatched = files
+	}
 
 	// Calculate batch impact for risk assessment
 	operations := make([]BatchImpactInfo, 0, len(files))

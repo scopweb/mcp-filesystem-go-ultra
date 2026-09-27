@@ -59,6 +59,7 @@ func newHelpTestRegistry(t *testing.T, allowedDir string) *toolRegistry {
 	registerDiscoveryTools(reg)
 	registerPatchTools(reg)
 	registerHelpTool(reg)
+	registerSecurityTools(reg)
 	return reg
 }
 

@@ -345,3 +345,38 @@ Punto de descubrimiento básico del conector. Si el cliente sólo recibe una ins
 | Trabajar con WSL | `wsl` |
 | Consultar servidor/ayuda temática | `server_info` |
 | Descubrimiento básico | `help` |
+| Consultar la política (sin patrones) | `security_policy` |
+
+## Política de protección de archivos
+
+Sin `--file-security-config` el comportamiento no cambia. El JSON se carga al arrancar y no se puede modificar hasta reiniciar. Si el fichero es inválido, el proceso termina con código 2.
+
+```json
+{
+  "version": 1,
+  "rules": [
+    { "pattern": ".env", "level": "hidden" },
+    { "pattern": ".env.*", "level": "hidden" },
+    { "pattern": "*.ini", "level": "protected" },
+    { "pattern": "settings.json", "level": "read_only" },
+    { "pattern": "**/secrets/**", "level": "hidden" }
+  ]
+}
+```
+
+```bash
+filesystem-ultra.exe --allowed-paths C:\proj --file-security-config C:\proj\policy.json
+```
+
+| Nivel | Listado | Contenido | Mutación |
+|-------|---------|-----------|----------|
+| `normal` | sí | sí | sí |
+| `read_only` | sí | sí | no (sí se puede copiar hacia un destino permitido) |
+| `protected` | solo nombre, tipo y nivel | no | no |
+| `hidden` | no aparece | parece inexistente | no |
+
+Gana la regla más restrictiva. Un directorio se hereda; un hijo no puede debilitar al padre. Un patrón sin separador coincide con el nombre a cualquier profundidad. Un patrón con separadores se evalúa respecto de cada raíz del sandbox. `**/secrets/**` cubre `secrets` en la raíz y todos sus descendientes. `--insecure-open` junto con un patrón relativo se rechaza.
+
+`security_policy` no lista patrones ni rutas. `force` y `dry_run` no anulan la política. Con la política activa, `git` y la sincronización WSL quedan bloqueados. El dashboard es otro proceso: hay que pasarle el mismo `--file-security-config` y `--allowed-paths`.
+
+Esto controla las herramientas que implementan la política. No impide que otro programa con permisos del sistema operativo lea los archivos.

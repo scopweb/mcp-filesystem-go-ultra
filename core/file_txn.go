@@ -68,8 +68,14 @@ func (e *UltraFastEngine) BeginFileTxn(ctx context.Context, path string, allowMi
 	if !e.IsPathAllowed(path) {
 		return ctx, nil, e.AccessDeniedError("mutate", path)
 	}
+	if err := e.PolicyCreateOrWrite(path); err != nil {
+		return ctx, nil, err
+	}
 	if resolved, err := e.ResolveAndAuthorize("mutate", path); err == nil {
 		path = resolved
+	}
+	if err := e.PolicyCreateOrWrite(path); err != nil {
+		return ctx, nil, err
 	}
 	canon := CanonicalPath(path)
 
@@ -111,6 +117,9 @@ func (e *UltraFastEngine) BeginFileTxn(ctx context.Context, path string, allowMi
 // agent-facing baseline API. It is safe to use while holding a file transaction lock.
 func (e *UltraFastEngine) FindOCCBaseline(path, expectedHash string) []byte {
 	if e == nil || e.backupManager == nil || expectedHash == "" {
+		return nil
+	}
+	if err := e.Authorize(OpRead, path); err != nil {
 		return nil
 	}
 	backups, err := e.backupManager.ListBackups(0, "all", path, 0)

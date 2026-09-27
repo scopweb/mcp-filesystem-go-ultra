@@ -184,6 +184,7 @@ func loadAllBackups(backupDir string) []BackupInfo {
 	sort.Slice(backups, func(i, j int) bool {
 		return backups[i].Timestamp.After(backups[j].Timestamp)
 	})
+	backups = redactDashboardBackups(backups)
 
 	bkCache.set(backups)
 	return backups
@@ -193,6 +194,8 @@ func main() {
 	logDir := flag.String("log-dir", "", "Directory containing MCP server logs (required)")
 	proxyLogDir := flag.String("proxy-log-dir", "", "Directory containing proxy logs (proxy.jsonl)")
 	backupDir := flag.String("backup-dir", "", "Directory containing MCP server backups")
+	fileSecurityConfig := flag.String("file-security-config", "", "Same JSON policy as the MCP server. Required to avoid serving protected backup bytes. Does not inherit the server flag.")
+	allowedPaths := flag.String("allowed-paths", "", "Comma-separated sandbox roots used to evaluate relative policy patterns. Required when the policy has separator patterns.")
 	port := flag.Int("port", 9100, "HTTP port to listen on")
 	host := flag.String("host", "127.0.0.1", "Host/interface to bind to (default: localhost only). Use 0.0.0.0 to expose on the network — NOT recommended: the dashboard has no authentication and serves audit logs and backup file contents.")
 	flag.Parse()
@@ -201,6 +204,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Error: --log-dir is required")
 		flag.Usage()
 		os.Exit(1)
+	}
+	if err := loadDashboardPolicy(*fileSecurityConfig, *allowedPaths); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(2)
 	}
 
 	mux := http.NewServeMux()
@@ -656,6 +663,9 @@ func backupContentSearchHandler(backupDir string) http.HandlerFunc {
 					continue
 				}
 
+				if dashBlocksBytes(f.OriginalPath) || dashHides(f.OriginalPath) {
+					continue
+				}
 				info, err := os.Stat(filePath)
 				if err != nil || info.Size() > maxFileSize {
 					continue
@@ -790,6 +800,14 @@ func backupFileHandler(backupDir string) http.HandlerFunc {
 		id, fileName := parts[0], parts[1]
 		if !safeIDRegex.MatchString(id) || strings.Contains(fileName, "..") || strings.ContainsAny(fileName, `/\`) {
 			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		if original, blocked := dashboardBackupBlocked(backupDir, id, fileName); blocked {
+			if dashHides(original) || original == "" {
+				http.Error(w, "file not found", http.StatusNotFound)
+				return
+			}
+			http.Error(w, "forbidden by file security policy", http.StatusForbidden)
 			return
 		}
 
@@ -2172,6 +2190,13 @@ func trashRestoreHandler(backupDir string) http.HandlerFunc {
 		}
 		if entry == nil {
 			http.Error(w, `{"error":"trash entry not found"}`, http.StatusNotFound)
+			return
+		}
+		if hidden, denied := dashRestoreDenied(entry.OriginalPath); hidden {
+			http.Error(w, `{"error":"trash entry not found"}`, http.StatusNotFound)
+			return
+		} else if denied {
+			http.Error(w, `{"error":"forbidden by file security policy"}`, http.StatusForbidden)
 			return
 		}
 		// Defense: confirmed dest_path is inside the trash root

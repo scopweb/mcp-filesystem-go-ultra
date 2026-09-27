@@ -660,8 +660,10 @@ func (e *UltraFastEngine) executeStreamingReplace(ctx context.Context, path, nee
 
 // GetFileAnalysis provides intelligent analysis for large files
 func (e *UltraFastEngine) GetFileAnalysis(ctx context.Context, path string) (string, error) {
-	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
+	if err := e.Authorize(OpRead, path); err != nil {
+		return "", err
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", err

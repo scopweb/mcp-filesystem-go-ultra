@@ -317,6 +317,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"detail": {ParamString, false},
 	},
 	"list_allowed_directories": {},
+	"security_policy":          {},
 	"minify_js": {
 		"path":                {ParamString, true},
 		"output_path":         {ParamString, false},

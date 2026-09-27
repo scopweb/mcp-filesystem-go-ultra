@@ -32,6 +32,7 @@ var strictToolSet = map[string]struct{}{
 	"delete_file":              {},
 	"backup":                   {},
 	"help":                     {},
+	"security_policy":          {},
 }
 
 func parseToolProfile(s string) (toolProfile, error) {

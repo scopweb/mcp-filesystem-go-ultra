@@ -40,6 +40,15 @@ func (e *UltraFastEngine) RenameFile(ctx context.Context, oldPath, newPath strin
 	if !e.IsPathAllowed(newPath) {
 		return fmt.Errorf("access denied: destination path '%s' is not in allowed paths%s", newPath, e.AllowedDirsSuffix())
 	}
+	if err := e.AuthorizeTree(OpMove, oldPath); err != nil {
+		return err
+	}
+	if err := e.PolicyCreateOrWrite(newPath); err != nil {
+		return err
+	}
+	if err := e.Authorize(OpMove, newPath); err != nil {
+		return err
+	}
 
 	// Check if source exists
 	if _, err := os.Stat(oldPath); os.IsNotExist(err) {
@@ -114,6 +123,9 @@ func (e *UltraFastEngine) SoftDeleteFile(ctx context.Context, path string) (*Sof
 	// Check if path is allowed (security + access control)
 	if !e.IsPathAllowed(path) {
 		return nil, fmt.Errorf("access denied: path '%s' is not in allowed paths%s", path, e.AllowedDirsSuffix())
+	}
+	if err := e.AuthorizeTree(OpDelete, path); err != nil {
+		return nil, err
 	}
 	// Prevent soft-deletion of allowed-path roots (would move entire tree to trash)
 	if len(e.config.AllowedPaths) > 0 && e.IsAllowedPathRoot(path) {
@@ -301,6 +313,9 @@ func (e *UltraFastEngine) CreateDirectory(ctx context.Context, path string) erro
 	if !e.IsPathAllowed(path) {
 		return fmt.Errorf("access denied: path '%s' is not in allowed paths%s", path, e.AllowedDirsSuffix())
 	}
+	if err := e.Authorize(OpCreate, path); err != nil {
+		return err
+	}
 
 	// Check if directory already exists
 	if info, err := os.Stat(path); err == nil {
@@ -354,6 +369,9 @@ func (e *UltraFastEngine) DeleteFile(ctx context.Context, path string) error {
 	// Check if path is allowed (security + access control)
 	if !e.IsPathAllowed(path) {
 		return fmt.Errorf("access denied: path '%s' is not in allowed paths%s", path, e.AllowedDirsSuffix())
+	}
+	if err := e.AuthorizeTree(OpDelete, path); err != nil {
+		return err
 	}
 	// Prevent deletion of allowed-path roots (would wipe entire tree via os.RemoveAll)
 	if len(e.config.AllowedPaths) > 0 && e.IsAllowedPathRoot(path) {
@@ -426,6 +444,12 @@ func (e *UltraFastEngine) MoveFile(ctx context.Context, sourcePath, destPath str
 	}
 	if !e.IsPathAllowed(destPath) {
 		return fmt.Errorf("access denied: destination path '%s' is not in allowed paths%s", destPath, e.AllowedDirsSuffix())
+	}
+	if err := e.AuthorizeTree(OpMove, sourcePath); err != nil {
+		return err
+	}
+	if err := e.Authorize(OpMove, destPath); err != nil {
+		return err
 	}
 	// Prevent moving an allowed-path root (would remove the entire tree from its location)
 	if len(e.config.AllowedPaths) > 0 && e.IsAllowedPathRoot(sourcePath) {
@@ -526,6 +550,12 @@ func (e *UltraFastEngine) CopyFile(ctx context.Context, sourcePath, destPath str
 	}
 	if !e.IsPathAllowed(destPath) {
 		return fmt.Errorf("access denied: destination path '%s' is not in allowed paths%s", destPath, e.AllowedDirsSuffix())
+	}
+	if err := e.AuthorizeTree(OpCopyRead, sourcePath); err != nil {
+		return err
+	}
+	if err := e.Authorize(OpCopyWrite, destPath); err != nil {
+		return err
 	}
 
 	// Check if source exists
@@ -848,6 +878,10 @@ func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string,
 	if !e.IsPathAllowed(path) {
 		return "", e.AccessDeniedError("stat", path)
 	}
+	level := e.ProtectionLevel(path)
+	if err := e.Authorize(OpMetadata, path); err != nil {
+		return "", err
+	}
 
 	// Get file info
 	info, err := os.Stat(path)
@@ -856,6 +890,13 @@ func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string,
 	}
 	if err != nil {
 		return "", fmt.Errorf("failed to stat file: %w", err)
+	}
+	if level >= LevelProtected {
+		kind := "file"
+		if info.IsDir() {
+			kind = "dir"
+		}
+		return fmt.Sprintf("%s %s [%s]\n", kind, info.Name(), level.String()), nil
 	}
 
 	// Build detailed info string
@@ -890,6 +931,9 @@ func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string,
 				fileCount := 0
 				dirCount := 0
 				for _, entry := range entries {
+					if e.OmitFromDiscovery(filepath.Join(path, entry.Name())) {
+						continue
+					}
 					if entry.IsDir() {
 						dirCount++
 					} else {

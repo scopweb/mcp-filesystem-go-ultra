@@ -23,6 +23,7 @@ type diskReceipt struct {
 	Completed string `json:"completed,omitempty"`
 	Result    string `json:"result,omitempty"`
 	Error     string `json:"error,omitempty"`
+	Policy    string `json:"policy,omitempty"`
 }
 
 func (e *UltraFastEngine) initReceiptStore(root string) error {
@@ -96,7 +97,7 @@ func (r *operationRetries) writeDiskLocked(key string, rec *operationReceipt) er
 	if r.dir == "" {
 		return nil
 	}
-	d := diskReceipt{V: receiptSchemaVersion, Args: hex.EncodeToString(rec.args[:])}
+	d := diskReceipt{V: receiptSchemaVersion, Args: hex.EncodeToString(rec.args[:]), Policy: rec.policyHash}
 	switch {
 	case rec.unknown:
 		d.Status = "unknown"
@@ -155,7 +156,7 @@ func parseDiskReceipt(raw []byte) *operationReceipt {
 	if err != nil || len(args) != 32 {
 		return unreadableReceipt()
 	}
-	rec := &operationReceipt{done: make(chan struct{})}
+	rec := &operationReceipt{done: make(chan struct{}), policyHash: d.Policy}
 	copy(rec.args[:], args)
 	close(rec.done)
 	switch d.Status {

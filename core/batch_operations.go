@@ -212,6 +212,11 @@ func (m *BatchOperationManager) validateOperations(operations []FileOperation) [
 	for i, op := range operations {
 		// Security: enforce allowed-paths on every path in the operation.
 		// Without this check, batch operations bypass --allowed-paths access control.
+		if m.engine != nil && m.engine.PolicyEnabled() {
+			if perr := m.policyAuthorize(op); perr != nil {
+				errors = append(errors, fmt.Sprintf("Op %d: %s", i, perr.Error()))
+			}
+		}
 		if m.engine != nil && len(m.engine.config.AllowedPaths) > 0 {
 			for _, p := range m.collectPaths(op) {
 				if p != "" && !m.engine.IsPathAllowed(p) {
@@ -818,6 +823,50 @@ func (m *BatchOperationManager) executeCreateDir(ctx context.Context, op FileOpe
 
 	_ = m.executeHooksForOperation(ctx, HookPostCreate, op)
 	return nil
+}
+
+func (m *BatchOperationManager) policyAuthorize(op FileOperation) error {
+	if m.engine == nil || !m.engine.PolicyEnabled() {
+		return nil
+	}
+	switch op.Type {
+	case "write":
+		return m.engine.PolicyCreateOrWrite(op.Path)
+	case "edit", "search_and_replace":
+		return m.engine.Authorize(OpWrite, op.Path)
+	case "delete":
+		return m.engine.AuthorizeTree(OpDelete, op.Path)
+	case "create_dir":
+		return m.engine.Authorize(OpCreate, op.Path)
+	case "copy":
+		if err := m.engine.AuthorizeTree(OpCopyRead, op.Source); err != nil {
+			return err
+		}
+		return m.engine.Authorize(OpCopyWrite, op.Destination)
+	case "move":
+		if err := m.engine.AuthorizeTree(OpMove, op.Source); err != nil {
+			return err
+		}
+		return m.engine.Authorize(OpMove, op.Destination)
+	case "extract":
+		if err := m.engine.Authorize(OpRead, op.Source); err != nil {
+			return err
+		}
+		if err := m.engine.Authorize(OpWrite, op.Source); err != nil {
+			return err
+		}
+		return m.engine.PolicyCreateOrWrite(op.Destination)
+	default:
+		for _, p := range m.collectPaths(op) {
+			if p == "" {
+				continue
+			}
+			if err := m.engine.Authorize(OpWrite, p); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 }
 
 // collectPaths returns all filesystem paths referenced by a single operation.

@@ -161,6 +161,9 @@ func AnalyzeSymbols(path, query string, maxFindings int) AnalyzeResult {
 	var parsed []*ast.File
 	pkgName := ""
 	for _, fpath := range files {
+		if analyzeBlocked(fpath) {
+			continue
+		}
 		f, err := parser.ParseFile(fset, fpath, nil, parser.ParseComments)
 		if err != nil {
 			continue
@@ -267,6 +270,9 @@ func AnalyzeSec(path string, maxFindings int) AnalyzeResult {
 		}
 	}
 	for _, fpath := range files {
+		if analyzeBlocked(fpath) {
+			continue
+		}
 		raw, err := os.ReadFile(fpath)
 		if err != nil {
 			continue
@@ -361,6 +367,9 @@ func parseVetOutput(res *AnalyzeResult, text, dir string) {
 		p := m[1]
 		if !filepath.IsAbs(p) {
 			p = filepath.Join(dir, p)
+		}
+		if analyzeBlocked(p) {
+			continue
 		}
 		res.Findings = append(res.Findings, AnalyzeFinding{
 			Path: p, Line: line, Col: col, Kind: "lint", Severity: "warning", Message: m[4],

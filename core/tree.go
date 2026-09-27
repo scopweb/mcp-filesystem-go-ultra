@@ -19,9 +19,10 @@ type TreeOpts struct {
 }
 
 type TreeEntry struct {
-	Path string
-	Type string
-	Size int64
+	Path       string
+	Type       string
+	Size       int64
+	Protection string
 }
 
 // TreeListing is the typed tree result. Handlers publish truncated and
@@ -37,6 +38,7 @@ type treeNode struct {
 	Name          string      `json:"name"`
 	Type          string      `json:"type"`
 	Size          int64       `json:"size,omitempty"`
+	Protection    string      `json:"protection,omitempty"`
 	Children      []*treeNode `json:"children,omitempty"`
 	Truncated     bool        `json:"truncated,omitempty"`
 	SkippedIgnore int         `json:"skipped_ignore,omitempty"`
@@ -68,6 +70,9 @@ func (e *UltraFastEngine) ListDirectoryTreeResult(ctx context.Context, path stri
 
 	if !e.IsPathAllowed(path) {
 		return TreeListing{}, fmt.Errorf("access denied: path '%s' is not in allowed paths%s", path, e.AllowedDirsSuffix())
+	}
+	if err := e.Authorize(OpRead, path); err != nil {
+		return TreeListing{}, err
 	}
 
 	var ign *IgnoreMatcher
@@ -129,6 +134,10 @@ func (e *UltraFastEngine) ListDirectoryTreeResult(ctx context.Context, path stri
 				continue
 			}
 			isDir := entry.IsDir()
+			if e.policySkipWalk(childPath, isDir) {
+				continue
+			}
+			level := e.ProtectionLevel(childPath)
 			if skipWalkDir(entry.Name(), childPath, path, isDir, ign, !opts.RespectIgnore) {
 				skippedIgnore++
 				continue
@@ -138,21 +147,33 @@ func (e *UltraFastEngine) ListDirectoryTreeResult(ctx context.Context, path stri
 				continue
 			}
 			if isDir {
+				if level >= LevelProtected {
+					nodes++
+					node.Children = append(node.Children, &treeNode{
+						Name:       entry.Name(),
+						Type:       "directory",
+						Protection: level.String(),
+					})
+					continue
+				}
 				child, err := build(childPath, depth+1)
 				if err == nil && child != nil {
 					node.Children = append(node.Children, child)
 				}
 			} else {
-				childInfo, err := entry.Info()
 				size := int64(0)
-				if err == nil {
+				protection := ""
+				if level >= LevelProtected {
+					protection = level.String()
+				} else if childInfo, err := entry.Info(); err == nil {
 					size = childInfo.Size()
 				}
 				nodes++
 				node.Children = append(node.Children, &treeNode{
-					Name: entry.Name(),
-					Type: "file",
-					Size: size,
+					Name:       entry.Name(),
+					Type:       "file",
+					Size:       size,
+					Protection: protection,
 				})
 			}
 		}
@@ -193,7 +214,7 @@ func collectTreeEntries(n *treeNode, parent string) []TreeEntry {
 	if parent != "" {
 		path = parent + "/" + n.Name
 	}
-	out := []TreeEntry{{Path: path, Type: n.Type, Size: n.Size}}
+	out := []TreeEntry{{Path: path, Type: n.Type, Size: n.Size, Protection: n.Protection}}
 	for _, ch := range n.Children {
 		out = append(out, collectTreeEntries(ch, path)...)
 	}

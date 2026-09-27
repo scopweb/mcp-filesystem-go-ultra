@@ -48,6 +48,9 @@ func registerMinifyTools(reg *toolRegistry) {
 		}
 
 		normPath := core.NormalizePath(path)
+		if denied := enforcePolicy(engine, core.OpWrite, normPath); denied != nil {
+			return denied, nil
+		}
 
 		// Access control
 		if !engine.IsPathAllowed(normPath) {

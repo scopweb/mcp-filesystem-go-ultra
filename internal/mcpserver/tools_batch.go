@@ -161,6 +161,9 @@ func registerBatchTools(reg *toolRegistry) {
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
 		}
+		if denied := enforcePolicy(engine, core.OpWrite, path); denied != nil {
+			return denied, nil
+		}
 
 		args, _ := request.Params.Arguments.(map[string]interface{})
 		editsJSON := ""

@@ -43,6 +43,9 @@ func registerPatchTools(reg *toolRegistry) {
 		if !engine.IsPathAllowed(pathA) {
 			return notAllowedResult(engine, pathA), nil
 		}
+		if denied := enforcePolicy(engine, core.OpRead, pathA); denied != nil {
+			return denied, nil
+		}
 
 		var contentA, contentB []byte
 		var err error
@@ -66,6 +69,9 @@ func registerPatchTools(reg *toolRegistry) {
 		pathB = core.NormalizePath(pathB)
 		if !engine.IsPathAllowed(pathB) {
 			return notAllowedResult(engine, pathB), nil
+		}
+		if denied := enforcePolicy(engine, core.OpRead, pathB); denied != nil {
+			return denied, nil
 		}
 		contentA, err = os.ReadFile(pathA)
 		if err != nil {
@@ -143,6 +149,9 @@ func handleApplyPatch(engine *core.UltraFastEngine) toolHandler {
 		path = core.NormalizePath(path)
 		if !engine.IsPathAllowed(path) {
 			return notAllowedResult(engine, path), nil
+		}
+		if denied := enforcePolicy(engine, core.OpWrite, path); denied != nil {
+			return denied, nil
 		}
 		if strings.Contains(patch, "*** Begin Patch") {
 			return beginPatchResult(path), nil
@@ -275,6 +284,23 @@ func rollbackIncompleteResult(base string, err error) *mcp.CallToolResult {
 func handleMultiFilePatch(ctx context.Context, engine *core.UltraFastEngine, base string, files []core.ParsedPatch, dryRun, allowRewrite, createBackup bool, expectedHash string) (*mcp.CallToolResult, error) {
 	if expectedHash != "" {
 		return validationResult("expected_hash is only valid for a single-file patch", "expected_hash", "omitted for multi-file"), nil
+	}
+	for _, f := range files {
+		target := f.NewFile
+		if target == "" || target == "/dev/null" {
+			target = f.OldFile
+		}
+		target = strings.TrimPrefix(target, "b/")
+		target = strings.TrimPrefix(target, "a/")
+		if target == "" || target == "/dev/null" {
+			continue
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(base, target)
+		}
+		if denied := enforcePolicy(engine, core.OpWrite, target); denied != nil {
+			return denied, nil
+		}
 	}
 	res, err := engine.ApplyMultiFilePatch(ctx, files, core.MultiFilePatchOpts{
 		BaseDir:      base,

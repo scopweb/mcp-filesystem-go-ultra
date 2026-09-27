@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### feat(security): file protection policy on top of allowed-paths
+
+`--file-security-config` loads an immutable JSON policy at startup. Invalid config exits 2. Without the flag, behavior is unchanged. Levels are `normal` < `read_only` < `protected` < `hidden`; the most restrictive match wins and a directory rule is inherited. Basename patterns match at any depth; separator patterns are relative to each sandbox root. `--insecure-open` plus a separator pattern is rejected.
+
+`read_only` can be listed and read, not mutated. `protected` listings return name, type, and level only. `hidden` is omitted from listings, searches, and counters; a direct access is `NOT_FOUND`. `force`, `allow_rewrite`, and `dry_run` do not bypass it. The config file, and backup/receipt/log directories, are pinned so tools cannot rewrite the policy or read stored copies. Old backups are re-checked before compare, restore, or trash restore.
+
+While a policy is active, `git` and WSL sync are unavailable, and `.git` trees are not readable through these tools. `security_policy` is experimental, registered in ultra and strict, and does not list patterns or paths. The dashboard is a separate process: pass the same `--file-security-config` and `--allowed-paths`. This is not an OS sandbox.
+
+**Verification:** `TestFilePolicy_InvalidConfig` · `TestFilePolicy_PrecedenceAndInheritance` · `TestFilePolicy_OverlappingRoots` · `TestFilePolicy_SymlinkTarget` · `TestFilePolicy_HandlerMatrix` · `TestFilePolicy_AbsentPreservesAccess`
+
 ### chore(deps): drop fsnotify, go-cache, and ants
 
 `fsnotify` only backed `core/watcher.go`, which nothing called. Directory and metadata TTLs are an internal map. Search, pipeline, and `project_replace` use an internal worker pool capped at `ParallelOps`. `bigcache`, `mcp-go`, `x/sys`, and `singleflight` stay.

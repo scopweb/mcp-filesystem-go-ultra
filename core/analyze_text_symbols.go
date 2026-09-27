@@ -35,6 +35,9 @@ func analyzeTextSymbols(path, query string, maxFindings int) (AnalyzeResult, boo
 		return res, false
 	}
 	for _, fpath := range files {
+		if analyzeBlocked(fpath) {
+			continue
+		}
 		b, err := os.ReadFile(fpath)
 		if err != nil {
 			continue

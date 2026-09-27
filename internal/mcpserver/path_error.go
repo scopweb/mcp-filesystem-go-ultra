@@ -16,6 +16,7 @@ const (
 	errCodeRewriteBlocked   = "REWRITE_BLOCKED"
 	errCodeRootsEmpty       = "ROOTS_EMPTY"
 	errCodeSecretDenied     = "SECRET_DENIED"
+	errCodePolicyDenied     = "FILE_POLICY_DENIED"
 	errCodeReadOnly         = "READONLY"
 	errCodePatchFailed      = "PATCH_FAILED"
 	errCodeInvalidParams    = "VALIDATION"
