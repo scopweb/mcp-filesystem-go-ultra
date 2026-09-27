@@ -60,8 +60,8 @@ func TestProfile_UltraHasFullCatalog(t *testing.T) {
 	dir := t.TempDir()
 	reg := newProfileRegistry(t, dir, registerOpts{Profile: profileUltra})
 	n := len(reg.server.ListTools())
-	if n != 25 {
-		t.Fatalf("ultra registered %d tools, want 25", n)
+	if n != 26 {
+		t.Fatalf("ultra registered %d tools, want 26", n)
 	}
 	for _, name := range []string{"git", "minify_js", "backup", "help", "apply_patch"} {
 		if _, ok := reg.server.ListTools()[name]; !ok {

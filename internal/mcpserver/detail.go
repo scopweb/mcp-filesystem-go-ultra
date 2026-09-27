@@ -30,7 +30,10 @@ func treeEntriesToMaps(entries []core.TreeEntry, detail string) []map[string]any
 	out := make([]map[string]any, 0, len(entries))
 	for _, e := range entries {
 		item := map[string]any{"path": e.Path, "type": e.Type}
-		if detail != detailSummary && e.Size > 0 {
+		if e.Protection != "" {
+			item["protection"] = e.Protection
+		}
+		if detail != detailSummary && e.Size > 0 && e.Protection != "protected" && e.Protection != "hidden" {
 			item["size"] = e.Size
 		}
 		out = append(out, item)

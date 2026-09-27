@@ -141,7 +141,17 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 	var matchedFiles []string
 	var err error
 	if files, ok := explicitExistingFiles(path, includePaths); ok {
-		matchedFiles = files
+		for _, filePath := range files {
+			if e.PolicyEnabled() {
+				if e.OmitFromDiscovery(filePath) {
+					continue
+				}
+				if err := e.Authorize(OpWrite, filePath); err != nil {
+					return nil, err
+				}
+			}
+			matchedFiles = append(matchedFiles, filePath)
+		}
 	} else {
 		err = filepath.Walk(path, func(filePath string, info os.FileInfo, walkErr error) error {
 			if err := ctx.Err(); err != nil {
@@ -152,6 +162,9 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 			}
 
 			if info.IsDir() {
+				if e.OmitFromDiscovery(filePath) {
+					return filepath.SkipDir
+				}
 				// Check if this directory should be excluded
 				rel, err := filepath.Rel(path, filePath)
 				if err == nil {
@@ -210,6 +223,14 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 				}
 			}
 
+			if e.PolicyEnabled() {
+				if e.OmitFromDiscovery(filePath) {
+					return nil
+				}
+				if err := e.Authorize(OpWrite, filePath); err != nil {
+					return err
+				}
+			}
 			matchedFiles = append(matchedFiles, filePath)
 			return nil
 		})

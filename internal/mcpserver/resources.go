@@ -24,6 +24,9 @@ func registerFileResources(s *server.MCPServer, engine *core.UltraFastEngine) {
 		if !engine.IsPathAllowed(path) {
 			return nil, fmt.Errorf("access denied: %s", path)
 		}
+		if err := engine.Authorize(core.OpRead, path); err != nil {
+			return nil, err
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err

@@ -137,6 +137,7 @@ func registerToolsOpts(s *server.MCPServer, engine *core.UltraFastEngine, opts r
 	// registerClaudeCodeAliases(reg)
 	// registerSuperTool(reg)
 	registerHelpTool(reg)
+	registerSecurityTools(reg)
 
 	log.Printf("Registered %d tools for v%s (profile=%s)", len(s.ListTools()), serverVersion, opts.Profile)
 	return nil
@@ -617,6 +618,9 @@ func registerCoreTools(reg *toolRegistry) {
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
 		}
+		if denied := enforcePolicy(engine, core.OpWrite, path); denied != nil {
+			return denied, nil
+		}
 
 		// Pre-flight path validation (surfaces specific error instead of engine's
 		// generic "access denied"). Catches pseudo-Linux paths on Windows, NTFS
@@ -882,6 +886,9 @@ func registerCoreTools(reg *toolRegistry) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
+		}
+		if denied := enforcePolicy(engine, core.OpWrite, path); denied != nil {
+			return denied, nil
 		}
 
 		// Extract all optional parameters

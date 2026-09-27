@@ -64,6 +64,7 @@ This server includes several built-in security measures:
 - **Path security layer** (`core/path_security.go`): Always-on checks for ADS, Unicode attacks, reserved names (see below)
 - **WSL path containment**: WSL paths subject to `--allowed-paths` like any other path (no blanket bypass)
 - **16-event hook system**: All file operations pre/post hookable for external policy enforcement
+- **File security policy** (`--file-security-config`): owner-controlled `normal` / `read_only` / `protected` / `hidden` rules. Not an OS sandbox. The dashboard must be given the same file; the server flag does not cover it. `git` and WSL sync are disabled while a policy is active.
 
 ---
 

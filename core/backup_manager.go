@@ -75,6 +75,8 @@ type BackupManager struct {
 	mutex         sync.RWMutex
 	metadataCache map[string]*BackupInfo
 	cacheLastScan time.Time
+	// policy is optional. It re-checks the original path before bytes are copied or returned.
+	policy func(path string, op PolicyOp) error
 }
 
 // NewBackupManager crea un nuevo BackupManager
@@ -105,6 +107,30 @@ func NewBackupManager(backupDir string, maxBackups int, maxAgeDays int) (*Backup
 	return bm, nil
 }
 
+// SetPolicy installs the file-security check used before backup bytes are
+// copied or returned. Nil disables the check.
+func (bm *BackupManager) SetPolicy(fn func(path string, op PolicyOp) error) {
+	if bm == nil {
+		return
+	}
+	bm.mutex.Lock()
+	bm.policy = fn
+	bm.mutex.Unlock()
+}
+
+func (bm *BackupManager) authorizeOriginal(path string, op PolicyOp) error {
+	if bm == nil || path == "" {
+		return nil
+	}
+	bm.mutex.RLock()
+	fn := bm.policy
+	bm.mutex.RUnlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(path, op)
+}
+
 // CreateBackup crea un backup de un archivo con metadata completa
 func (bm *BackupManager) CreateBackup(path string, operation string) (string, error) {
 	return bm.CreateBackupWithContext(path, operation, "")
@@ -117,6 +143,9 @@ func (bm *BackupManager) CreateBackupWithContext(path string, operation string, 
 
 // CreateBackupWithContextAndParent crea un backup con padre en cadena de undo
 func (bm *BackupManager) CreateBackupWithContextAndParent(path string, operation string, userContext string, previousBackupID string) (string, error) {
+	if err := bm.authorizeOriginal(path, OpBackupCreate); err != nil {
+		return "", err
+	}
 	bm.mutex.Lock()
 	defer bm.mutex.Unlock()
 
@@ -314,6 +343,7 @@ func (bm *BackupManager) ListBackups(limit int, filterOperation string, filterPa
 
 	bm.mutex.RLock()
 	defer bm.mutex.RUnlock()
+	policyFn := bm.policy
 
 	var results []BackupInfo
 	cutoffTime := time.Now().Add(-time.Duration(newerThanHours) * time.Hour)
@@ -352,6 +382,28 @@ func (bm *BackupManager) ListBackups(limit int, filterOperation string, filterPa
 	// Aplicar límite
 	if limit > 0 && len(results) > limit {
 		results = results[:limit]
+	}
+	if policyFn != nil {
+		filtered := results[:0]
+		for _, info := range results {
+			files := make([]BackupMetadata, 0, len(info.Files))
+			for _, file := range info.Files {
+				if err := policyFn(file.OriginalPath, OpDiscover); err != nil {
+					continue
+				}
+				if err := policyFn(file.OriginalPath, OpRead); err != nil {
+					file.Hash = ""
+					file.Size = 0
+				}
+				files = append(files, file)
+			}
+			if len(files) == 0 {
+				continue
+			}
+			info.Files = files
+			filtered = append(filtered, info)
+		}
+		results = filtered
 	}
 
 	return results, nil
@@ -429,6 +481,17 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 	info, err := bm.GetBackupInfo(backupID)
 	if err != nil {
 		return nil, "", err
+	}
+	for _, file := range info.Files {
+		if specificFile != "" && filepath.Clean(file.OriginalPath) != filepath.Clean(specificFile) {
+			continue
+		}
+		if err := bm.authorizeOriginal(file.OriginalPath, OpRestore); err != nil {
+			if pe, ok := err.(*FilePolicyError); ok && pe.Hidden {
+				return nil, "", &FilePolicyError{Op: "restore", Path: specificFile, Hidden: specificFile != "", Message: "operation denied by file policy"}
+			}
+			return nil, "", err
+		}
 	}
 
 	backupBaseDir := filepath.Join(bm.backupDir, backupID)
@@ -584,6 +647,12 @@ func (bm *BackupManager) CompareWithBackup(backupID string, filePath string) (st
 
 	info, err := bm.GetBackupInfo(backupID)
 	if err != nil {
+		return "", err
+	}
+	if err := bm.authorizeOriginal(filePath, OpRead); err != nil {
+		if pe, ok := err.(*FilePolicyError); ok && pe.Hidden {
+			return "", &FilePolicyError{Op: "compare", Path: filePath, Hidden: true}
+		}
 		return "", err
 	}
 
@@ -1066,6 +1135,7 @@ func (bm *BackupManager) SoftDeleteFile(path string) (*SoftDeleteInfo, error) {
 func (bm *BackupManager) ListTrash(limit int, filterPath string, olderThanDays int) ([]SoftDeleteInfo, error) {
 	bm.mutex.RLock()
 	defer bm.mutex.RUnlock()
+	trashPolicy := bm.policy
 
 	if bm.backupDir == "" {
 		return nil, nil
@@ -1126,6 +1196,20 @@ func (bm *BackupManager) ListTrash(limit int, filterPath string, olderThanDays i
 	if limit > 0 && len(results) > limit {
 		results = results[:limit]
 	}
+	if trashPolicy != nil {
+		filtered := results[:0]
+		for _, info := range results {
+			if err := trashPolicy(info.OriginalPath, OpDiscover); err != nil {
+				continue
+			}
+			if err := trashPolicy(info.OriginalPath, OpRead); err != nil {
+				info.Hash = ""
+				info.Size = 0
+			}
+			filtered = append(filtered, info)
+		}
+		results = filtered
+	}
 
 	return results, nil
 }
@@ -1140,6 +1224,9 @@ func (bm *BackupManager) RestoreTrash(sdID string) (string, error) {
 	if err := sanitizeSoftDeleteID(sdID); err != nil {
 		return "", err
 	}
+	bm.mutex.RLock()
+	trashPolicy := bm.policy
+	bm.mutex.RUnlock()
 
 	bm.mutex.Lock()
 	defer bm.mutex.Unlock()
@@ -1159,6 +1246,14 @@ func (bm *BackupManager) RestoreTrash(sdID string) (string, error) {
 	var info SoftDeleteInfo
 	if err := json.Unmarshal(data, &info); err != nil {
 		return "", fmt.Errorf("invalid trash metadata: %w", err)
+	}
+	if trashPolicy != nil {
+		if err := trashPolicy(info.OriginalPath, OpRestore); err != nil {
+			if pe, ok := err.(*FilePolicyError); ok && pe.Hidden {
+				return "", &FilePolicyError{Op: "restore", Message: "operation denied by file policy"}
+			}
+			return "", err
+		}
 	}
 
 	// Defense: confirm DestPath is inside trashRoot (defense against metadata

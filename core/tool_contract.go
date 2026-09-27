@@ -151,6 +151,9 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 			`read_file(path:"file.bin", encoding:"base64")`,
 		}
 	}
+	if c := cs["security_policy"]; c != nil {
+		c.Examples = []string{`security_policy()`}
+	}
 	if c := cs["analyze_code"]; c != nil {
 		c.Examples = []string{
 			`analyze_code(action:"symbols", path:"pkg/", query:"Foo")`,

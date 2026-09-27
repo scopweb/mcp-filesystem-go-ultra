@@ -153,6 +153,9 @@ type UltraFastEngine struct {
 
 	occMu        sync.Mutex
 	occBySession map[string]*sessionState
+
+	filePolicy   *FilePolicy
+	filePolicyMu sync.RWMutex
 }
 
 const sessionInactivityTimeout = 5 * time.Minute
@@ -639,6 +642,9 @@ func (e *UltraFastEngine) ReadFileSnapshot(ctx context.Context, path string) (Fi
 	start := time.Now()
 	defer e.releaseOperation("read", start)
 
+	if err := e.Authorize(OpRead, path); err != nil {
+		return FileSnapshot{}, err
+	}
 	if !e.IsPathAllowed(path) {
 		return FileSnapshot{}, e.AccessDeniedError("read", path)
 	}
@@ -647,6 +653,9 @@ func (e *UltraFastEngine) ReadFileSnapshot(ctx context.Context, path string) (Fi
 		return FileSnapshot{}, err
 	} else {
 		path = resolved
+	}
+	if err := e.Authorize(OpRead, path); err != nil {
+		return FileSnapshot{}, err
 	}
 
 	workingDir, _ := os.Getwd()
@@ -836,6 +845,9 @@ func (e *UltraFastEngine) WriteFileBytes(ctx context.Context, path string, data 
 	if !e.IsPathAllowed(path) {
 		return e.AccessDeniedError("write_bytes", path)
 	}
+	if err := e.PolicyCreateOrWrite(path); err != nil {
+		return err
+	}
 
 	// Check context before proceeding with write
 	if err := ctx.Err(); err != nil {
@@ -947,6 +959,9 @@ func (e *UltraFastEngine) ReadFileBytes(ctx context.Context, path string) ([]byt
 	if !e.IsPathAllowed(path) {
 		return nil, e.AccessDeniedError("read_bytes", path)
 	}
+	if err := e.Authorize(OpRead, path); err != nil {
+		return nil, err
+	}
 
 	// Check file info
 	info, err := os.Stat(path)
@@ -1013,40 +1028,45 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 	if !e.IsPathAllowed(path) {
 		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths%s", path, e.AllowedDirsSuffix())
 	}
+	if err := e.Authorize(OpRead, path); err != nil {
+		return "", err
+	}
 
 	// Stat the directory once; used both for existence check and mtime validation.
 	dirInfo, statErr := os.Stat(path)
 
 	// Try cache first, but validate against directory mtime to detect external writes
+	// Policy listings are not cached: a cached body could outlive a startup pin.
 	// (e.g. files copied by bash/cp outside the MCP server's control).
-	if cached, cachedMtime, hit := e.cache.GetDirectory(path); hit {
-		if statErr == nil && !dirInfo.ModTime().After(cachedMtime) {
-			if e.config.DebugMode {
-				slog.Debug("Directory cache hit", "path", path)
+	if !e.PolicyEnabled() {
+		if cached, cachedMtime, hit := e.cache.GetDirectory(path); hit {
+			if statErr == nil && !dirInfo.ModTime().After(cachedMtime) {
+				if e.config.DebugMode {
+					slog.Debug("Directory cache hit", "path", path)
+				}
+				return cached, nil
 			}
-			return cached, nil
+			if e.config.DebugMode {
+				slog.Debug("Directory cache invalidated (external write detected)", "path", path)
+			}
+			e.cache.InvalidateDirectory(path)
 		}
-		// Directory was modified externally since the cache was populated.
-		if e.config.DebugMode {
-			slog.Debug("Directory cache invalidated (external write detected)", "path", path)
-		}
-		e.cache.InvalidateDirectory(path)
 	}
 
 	// Read directory
 	if statErr != nil {
 		return "", fmt.Errorf("failed to read directory: %w", statErr)
 	}
-	entries, err := os.ReadDir(path)
+	rawEntries, err := os.ReadDir(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to read directory: %w", err)
 	}
+	entries := e.visibleDirEntries(path, rawEntries)
 
 	// Build response - compact or verbose mode
 	var result strings.Builder
 
 	if e.config.CompactMode {
-		// Compact mode: ls-style, AI-friendly
 		result.WriteString(fmt.Sprintf("%s |", path))
 
 		maxItems := e.config.MaxListItems
@@ -1058,25 +1078,27 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 			}
 
 			result.WriteString(" ")
-			if entry.IsDir() {
-				result.WriteString(entry.Name())
+			name := e.annotateName(entry.name, entry.level)
+			if entry.isDir {
+				result.WriteString(name)
 				result.WriteString("/")
+			} else if entry.level >= LevelProtected {
+				result.WriteString(name)
 			} else {
-				info, err := entry.Info()
-				if err == nil && info.Size() > 512 {
-					result.WriteString(fmt.Sprintf("%s(%s)", entry.Name(), formatSize(info.Size())))
+				info, infoErr := entry.entry.Info()
+				if infoErr == nil && info.Size() > 512 {
+					result.WriteString(fmt.Sprintf("%s(%s)", name, formatSize(info.Size())))
 				} else {
-					result.WriteString(entry.Name())
+					result.WriteString(name)
 				}
 			}
 			count++
 		}
 		result.WriteString(fmt.Sprintf(" | %d/%d", count, len(entries)))
 	} else {
-		// Verbose mode: ls -la style, AI-friendly
 		totalDirs, totalFiles := 0, 0
 		for _, entry := range entries {
-			if entry.IsDir() {
+			if entry.isDir {
 				totalDirs++
 			} else {
 				totalFiles++
@@ -1084,15 +1106,15 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 		}
 
 		for _, entry := range entries {
-			info, err := entry.Info()
-			if err != nil {
-				continue
-			}
-
-			if entry.IsDir() {
-				result.WriteString(fmt.Sprintf("DIR  %s/", entry.Name()))
+			name := e.annotateName(entry.name, entry.level)
+			if entry.isDir {
+				result.WriteString(fmt.Sprintf("DIR  %s/", name))
+			} else if entry.level >= LevelProtected {
+				result.WriteString(fmt.Sprintf("FILE %s", name))
+			} else if info, infoErr := entry.entry.Info(); infoErr == nil {
+				result.WriteString(fmt.Sprintf("FILE %s %s", name, formatSize(info.Size())))
 			} else {
-				result.WriteString(fmt.Sprintf("FILE %s %s", entry.Name(), formatSize(info.Size())))
+				result.WriteString(fmt.Sprintf("FILE %s", name))
 			}
 			result.WriteString(fmt.Sprintf(" | %s\n", path))
 		}
@@ -1102,9 +1124,9 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 
 	responseText := result.String()
 
-	// Cache the result together with the directory's current mtime so future
-	// reads can detect external modifications.
-	e.cache.SetDirectory(path, responseText, dirInfo.ModTime())
+	if !e.PolicyEnabled() {
+		e.cache.SetDirectory(path, responseText, dirInfo.ModTime())
+	}
 
 	return responseText, nil
 }
@@ -1124,31 +1146,37 @@ func (e *UltraFastEngine) ListDirectoryJSON(ctx context.Context, path string) (s
 	if !e.IsPathAllowed(path) {
 		return "", fmt.Errorf("access denied: path '%s' is not in allowed paths%s", path, e.AllowedDirsSuffix())
 	}
+	if err := e.Authorize(OpRead, path); err != nil {
+		return "", err
+	}
 
 	dirInfo, statErr := os.Stat(path)
 
-	// Separate cache key: same directory, different rendering.
 	cacheKey := path + "::json"
-	if cached, cachedMtime, hit := e.cache.GetDirectory(cacheKey); hit {
-		if statErr == nil && !dirInfo.ModTime().After(cachedMtime) {
-			return cached, nil
+	if !e.PolicyEnabled() {
+		if cached, cachedMtime, hit := e.cache.GetDirectory(cacheKey); hit {
+			if statErr == nil && !dirInfo.ModTime().After(cachedMtime) {
+				return cached, nil
+			}
+			e.cache.InvalidateDirectory(cacheKey)
 		}
-		e.cache.InvalidateDirectory(cacheKey)
 	}
 
 	if statErr != nil {
 		return "", fmt.Errorf("failed to read directory: %w", statErr)
 	}
-	entries, err := os.ReadDir(path)
+	rawEntries, err := os.ReadDir(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to read directory: %w", err)
 	}
+	entries := e.visibleDirEntries(path, rawEntries)
 
 	type dirEntry struct {
-		Name     string `json:"name"`
-		Type     string `json:"type"`
-		Size     int64  `json:"size,omitempty"`
-		Modified string `json:"modified,omitempty"`
+		Name       string `json:"name"`
+		Type       string `json:"type"`
+		Size       int64  `json:"size,omitempty"`
+		Modified   string `json:"modified,omitempty"`
+		Protection string `json:"protection,omitempty"`
 	}
 
 	out := struct {
@@ -1164,15 +1192,20 @@ func (e *UltraFastEngine) ListDirectoryJSON(ctx context.Context, path string) (s
 			out.Truncated = true
 			break
 		}
-		de := dirEntry{Name: entry.Name(), Type: "file"}
-		if entry.IsDir() {
+		de := dirEntry{Name: entry.name, Type: "file"}
+		if entry.isDir {
 			de.Type = "dir"
 		}
-		if info, infoErr := entry.Info(); infoErr == nil {
-			if !entry.IsDir() {
-				de.Size = info.Size()
+		if entry.level > LevelNormal {
+			de.Protection = entry.level.String()
+		}
+		if entry.level < LevelProtected {
+			if info, infoErr := entry.entry.Info(); infoErr == nil {
+				if !entry.isDir {
+					de.Size = info.Size()
+				}
+				de.Modified = info.ModTime().UTC().Format(time.RFC3339)
 			}
-			de.Modified = info.ModTime().UTC().Format(time.RFC3339)
 		}
 		out.Entries = append(out.Entries, de)
 	}
@@ -1182,7 +1215,9 @@ func (e *UltraFastEngine) ListDirectoryJSON(ctx context.Context, path string) (s
 		return "", fmt.Errorf("failed to marshal listing: %w", err)
 	}
 	responseText := string(data)
-	e.cache.SetDirectory(cacheKey, responseText, dirInfo.ModTime())
+	if !e.PolicyEnabled() {
+		e.cache.SetDirectory(cacheKey, responseText, dirInfo.ModTime())
+	}
 	return responseText, nil
 }
 
@@ -1363,8 +1398,14 @@ func (e *UltraFastEngine) authorizePrefetch(path string) (string, bool) {
 	if !e.IsPathAllowed(path) {
 		return "", false
 	}
+	if err := e.Authorize(OpRead, path); err != nil {
+		return "", false
+	}
 	resolved, err := e.ResolveAndAuthorize("prefetch", path)
 	if err != nil {
+		return "", false
+	}
+	if err := e.Authorize(OpRead, resolved); err != nil {
 		return "", false
 	}
 	return resolved, true
@@ -1657,6 +1698,12 @@ func (e *UltraFastEngine) IntelligentEdit(ctx context.Context, path, oldText, ne
 // CopyFileWithBuffer copies a file using the buffer pool for optimal performance
 // Uses io.CopyBuffer with a 64KB buffer from the pool
 func (e *UltraFastEngine) CopyFileWithBuffer(src, dst string) error {
+	if err := e.Authorize(OpCopyRead, src); err != nil {
+		return err
+	}
+	if err := e.Authorize(OpCopyWrite, dst); err != nil {
+		return err
+	}
 	sourceFile, err := os.Open(src)
 	if err != nil {
 		return &PathError{Op: "copy", Path: src, Err: err}

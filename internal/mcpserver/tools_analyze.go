@@ -40,6 +40,9 @@ func registerAnalyzeTools(reg *toolRegistry) {
 		if !engine.IsPathAllowed(path) {
 			return notAllowedResult(engine, path), nil
 		}
+		if denied := enforcePolicy(engine, core.OpRead, path); denied != nil {
+			return denied, nil
+		}
 		if _, statErr := os.Stat(path); statErr != nil {
 			return mcp.NewToolResultError(formatToolError(statErr)), nil
 		}
@@ -56,17 +59,24 @@ func registerAnalyzeTools(reg *toolRegistry) {
 
 		var result core.AnalyzeResult
 		switch action {
-		case "symbols":
-			result = core.AnalyzeSymbols(path, query, maxFindings)
-		case "lint":
-			result = core.AnalyzeLint(ctx, path, maxFindings)
-		case "sec":
-			result = core.AnalyzeSec(path, maxFindings)
-		case "impact":
-			result = core.AnalyzeImpact(ctx, engine, path, query, maxFindings)
+		case "symbols", "lint", "sec", "impact":
 		default:
 			return pathErrorResult(errCodeInvalidParams, "unknown action", path, nil, `action must be symbols|lint|sec|impact`), nil
 		}
+		core.WithAnalyzeBlock(func(p string) bool {
+			return engine.BlockContent(p) || engine.OmitFromDiscovery(p)
+		}, func() {
+			switch action {
+			case "symbols":
+				result = core.AnalyzeSymbols(path, query, maxFindings)
+			case "lint":
+				result = core.AnalyzeLint(ctx, path, maxFindings)
+			case "sec":
+				result = core.AnalyzeSec(path, maxFindings)
+			case "impact":
+				result = core.AnalyzeImpact(ctx, engine, path, query, maxFindings)
+			}
+		})
 		if result.Status == "unavailable" {
 			return pathErrorResult(errCodeUnavailable, result.Message, path, map[string]string{"tool": result.Tool},
 				"install the missing binary on PATH; analyze_code will not download it"), nil

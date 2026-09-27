@@ -46,6 +46,10 @@ func registerPlatformTools(reg *toolRegistry) {
 			}
 		}
 
+		if engine.PolicyEnabled() && action != "status" && action != "autosync_status" {
+			return policyResult(core.WSLPolicyBlock()), nil
+		}
+
 		switch action {
 		case "status":
 			status, err := engine.GetWSLWindowsStatus(ctx)

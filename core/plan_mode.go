@@ -46,6 +46,9 @@ type BatchChangeAnalysis struct {
 
 // AnalyzeWriteChange analyzes a proposed write operation without executing it
 func (e *UltraFastEngine) AnalyzeWriteChange(ctx context.Context, path, content string) (*ChangeAnalysis, error) {
+	if err := e.PolicyCreateOrWrite(path); err != nil {
+		return nil, err
+	}
 	analysis := &ChangeAnalysis{
 		FilePath:      path,
 		OperationType: "write",
@@ -124,6 +127,9 @@ func (e *UltraFastEngine) AnalyzeWriteChange(ctx context.Context, path, content 
 
 // AnalyzeEditChange analyzes a proposed edit operation without executing it
 func (e *UltraFastEngine) AnalyzeEditChange(ctx context.Context, path, oldText, newText string) (*ChangeAnalysis, error) {
+	if err := e.Authorize(OpWrite, path); err != nil {
+		return nil, err
+	}
 	analysis := &ChangeAnalysis{
 		FilePath:      path,
 		OperationType: "edit",
@@ -217,6 +223,9 @@ func (e *UltraFastEngine) AnalyzeEditChange(ctx context.Context, path, oldText, 
 
 // AnalyzeDeleteChange analyzes a proposed delete operation without executing it
 func (e *UltraFastEngine) AnalyzeDeleteChange(ctx context.Context, path string) (*ChangeAnalysis, error) {
+	if err := e.AuthorizeTree(OpDelete, path); err != nil {
+		return nil, err
+	}
 	analysis := &ChangeAnalysis{
 		FilePath:      path,
 		OperationType: "delete",

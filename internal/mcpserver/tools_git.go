@@ -66,6 +66,9 @@ func registerGitTools(reg *toolRegistry) {
 				"missing 'action' parameter",
 				actionHelp), nil
 		}
+		if engine.PolicyEnabled() {
+			return policyResult(core.GitPolicyBlock()), nil
+		}
 
 		// Normalize path
 		if path != "" {

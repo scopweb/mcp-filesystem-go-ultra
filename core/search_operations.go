@@ -450,6 +450,12 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 			return nil // Continue with other files
 		}
 
+		if e.policySkipWalk(currentPath, d.IsDir()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if skipWalkDir(d.Name(), currentPath, path, d.IsDir(), ign, noIgnore) {
 			hiddenCount++
 			if d.IsDir() {
@@ -458,6 +464,9 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 			return nil
 		}
 		if d.IsDir() {
+			return nil
+		}
+		if includeContent && e.BlockContent(currentPath) {
 			return nil
 		}
 
@@ -688,7 +697,7 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 	// large trees). Offsets (submatches), context lines (-C), and skip-dir
 	// exclusions are parsed for full parity with the native path; on any
 	// ripgrep failure we fall through to the native implementation.
-	if e.ripgrepAvailable {
+	if e.ripgrepAvailable && !e.PolicyEnabled() {
 		rgMatches, rgErr := e.RunRipgrepSearch(ctx, path, pattern, caseSensitive, wholeWord, includeContext, contextLines, noIgnore, fileTypes)
 		if rgErr == nil {
 			return rgMatches, 0, nil
@@ -720,6 +729,15 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 			return nil
 		}
 
+		if e.policySkipWalk(currentPath, d.IsDir()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if e.BlockContent(currentPath) {
+			return nil
+		}
 		if skipWalkDir(d.Name(), currentPath, path, d.IsDir(), ign, noIgnore) {
 			hiddenCount++
 			if d.IsDir() {
@@ -1147,12 +1165,18 @@ func (e *UltraFastEngine) countOccurrencesInDir(ctx context.Context, dirPath, pa
 			return ctx.Err()
 		}
 		if d.IsDir() {
+			if e.policySkipWalk(path, true) {
+				return filepath.SkipDir
+			}
 			if strings.HasPrefix(d.Name(), ".") && path != dirPath {
 				return filepath.SkipDir
 			}
 			if skipWalkDir(d.Name(), path, dirPath, true, ign, noIgnore) {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		if e.policySkipWalk(path, false) || e.BlockContent(path) {
 			return nil
 		}
 		if skipWalkDir(d.Name(), path, dirPath, false, ign, noIgnore) {

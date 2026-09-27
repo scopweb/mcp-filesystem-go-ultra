@@ -88,9 +88,10 @@ type operationReceipt struct {
 	args      [32]byte
 	done      chan struct{}
 	completed time.Time
-	result    []byte
-	err       error
-	unknown   bool
+	result     []byte
+	err        error
+	unknown    bool
+	policyHash string
 }
 
 func (e *UltraFastEngine) runOnce(ctx context.Context, kind, id string, args any, run func() ([]byte, error)) ([]byte, error) {
@@ -131,10 +132,16 @@ func (e *UltraFastEngine) runOnce(ctx context.Context, kind, id string, args any
 			return nil, errReceiptArgsReuse
 		}
 		r.mu.Unlock()
+		if e.receiptPolicyMismatch(receipt.policyHash) {
+			return nil, fmt.Errorf("retry receipt cannot be replayed under the current file security policy")
+		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-receipt.done:
+		}
+		if e.receiptPolicyMismatch(receipt.policyHash) {
+			return nil, fmt.Errorf("retry receipt cannot be replayed under the current file security policy")
 		}
 		r.mu.Lock()
 		defer r.mu.Unlock()
@@ -151,7 +158,7 @@ func (e *UltraFastEngine) runOnce(ctx context.Context, kind, id string, args any
 		r.mu.Unlock()
 		return nil, errReceiptCapacity
 	}
-	receipt = &operationReceipt{args: hash, done: make(chan struct{})}
+	receipt = &operationReceipt{args: hash, done: make(chan struct{}), policyHash: e.PolicyHash()}
 	r.entries[key] = receipt
 	if err := r.writeDiskLocked(key, receipt); err != nil {
 		delete(r.entries, key)

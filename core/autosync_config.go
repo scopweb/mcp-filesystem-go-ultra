@@ -43,9 +43,10 @@ type AutoSyncManager struct {
 	configMu     sync.RWMutex
 	isWSL        bool
 	winUser      string
-	enabled      bool
-	configPath   string
-	allowedPaths []string // Copied from engine for safety checks during sync
+	enabled       bool
+	policyBlocked bool
+	configPath    string
+	allowedPaths  []string // Copied from engine for safety checks during sync
 }
 
 // NewAutoSyncManager creates a new AutoSyncManager
@@ -282,9 +283,33 @@ func (m *AutoSyncManager) ShouldSyncPath(path string) bool {
 	return true
 }
 
+// DisableForPolicy stops automatic copies while a file security policy is
+// active. Sync can move bytes outside the tool authorization path.
+func (m *AutoSyncManager) DisableForPolicy() {
+	if m == nil {
+		return
+	}
+	m.configMu.Lock()
+	m.policyBlocked = true
+	m.enabled = false
+	if m.config != nil {
+		m.config.Enabled = false
+	}
+	m.configMu.Unlock()
+}
+
+func (m *AutoSyncManager) policyBlocksSync() bool {
+	if m == nil {
+		return false
+	}
+	m.configMu.RLock()
+	defer m.configMu.RUnlock()
+	return m.policyBlocked
+}
+
 // AfterWrite is called after a write operation to potentially auto-sync
 func (m *AutoSyncManager) AfterWrite(path string) error {
-	if !m.IsEnabled() || !m.config.SyncOnWrite {
+	if m.policyBlocksSync() || !m.IsEnabled() || !m.config.SyncOnWrite {
 		return nil
 	}
 
@@ -297,7 +322,7 @@ func (m *AutoSyncManager) AfterWrite(path string) error {
 
 // AfterEdit is called after an edit operation to potentially auto-sync
 func (m *AutoSyncManager) AfterEdit(path string) error {
-	if !m.IsEnabled() || !m.config.SyncOnEdit {
+	if m.policyBlocksSync() || !m.IsEnabled() || !m.config.SyncOnEdit {
 		return nil
 	}
 
@@ -310,7 +335,7 @@ func (m *AutoSyncManager) AfterEdit(path string) error {
 
 // AfterDelete is called after a delete operation to potentially auto-sync
 func (m *AutoSyncManager) AfterDelete(path string) error {
-	if !m.IsEnabled() || !m.config.SyncOnDelete {
+	if m.policyBlocksSync() || !m.IsEnabled() || !m.config.SyncOnDelete {
 		return nil
 	}
 

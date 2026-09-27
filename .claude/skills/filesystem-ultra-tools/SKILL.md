@@ -1,13 +1,13 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.7.1. 25 tools ultra / 16 strict. First call list_allowed_directories, then directory_tree or help(tool:X). Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=strict --compact-mode --roots-mode=union.
+description: Tool catalog for filesystem-ultra MCP server v4.7.1. 26 tools ultra / 17 strict. First call list_allowed_directories, then directory_tree or help(tool:X). Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=strict --compact-mode --roots-mode=union.
 ---
 
 # Filesystem Ultra v4.7.1 — Tool Discovery
 
 ## Recommended server flags
 
-`--profile=strict --compact-mode --roots-mode=union` (`--readonly` off). `--git-network` only if the agent must `git push`/`fetch`. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 25 tools including `analyze_code`.
+`--profile=strict --compact-mode --roots-mode=union` (`--readonly` off). `--git-network` only if the agent must `git push`/`fetch`. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 26 tools including `analyze_code`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
 
 ## Bind each project to one filesystem tool family
 
