@@ -10,6 +10,7 @@ document.querySelector('nav').addEventListener('click', (e) => {
   e.target.classList.add('active');
   $$('.page').forEach(p => p.classList.remove('active'));
   $(`#page-${e.target.dataset.page}`).classList.add('active');
+  refreshActivePage();
 });
 
 // Helpers
@@ -19,8 +20,10 @@ function formatTime(ts) {
 }
 
 function formatDuration(ms) {
-  if (ms < 1) return '<1ms';
-  if (ms < 1000) return ms + 'ms';
+  if (ms == null || Number.isNaN(Number(ms))) return '—';
+  if (ms > 0 && ms < 1) return Number(ms).toFixed(3) + 'ms';
+  if (ms === 0) return '<1ms';
+  if (ms < 1000) return Number(Number(ms).toFixed(1)) + 'ms';
   return (ms / 1000).toFixed(1) + 's';
 }
 
@@ -32,6 +35,7 @@ function formatBytes(b) {
 }
 
 function toolBadgeClass(tool) {
+  if (!tool) return '';
   if (tool.includes('read')) return 'read';
   if (tool.includes('write')) return 'write';
   if (tool.includes('edit')) return 'edit';
@@ -55,15 +59,16 @@ let opRowCounter = 0;
 let operationsPaused = false;
 
 function operationRow(op, extended) {
-  const statusClass = op.status === 'ok' ? 'ok' : op.status === 'warn' ? 'warn' : 'error';
-  const toolClass = toolBadgeClass(op.tool);
+  const statusClass = op.status === 'ok' ? 'ok' : (op.status === 'warn' || op.status === 'in_progress') ? 'warn' : 'error';
+  const toolClass = toolBadgeClass(op.tool || '');
   const rowId = 'op-row-' + (opRowCounter++);
+  const statusLabel = op.status === 'in_progress' ? 'Unfinished' : (op.status || '—');
 
   let cols = `
     <td>${formatTime(op.ts)}</td>
-    <td><span class="badge ${toolClass}">${op.tool}</span>${op.sub_op ? `<span class="sub-op">${op.sub_op}</span>` : ''}</td>
-    <td class="path" title="${op.path || ''}">${shortPath(op.path)}</td>
-    <td>${formatDuration(op.duration_ms)}</td>`;
+    <td><span class="badge ${toolClass}">${escapeHtml(op.tool || '')}</span>${op.sub_op ? `<span class="sub-op">${escapeHtml(op.sub_op)}</span>` : ''}</td>
+    <td class="path" title="${escapeHtml(op.path || '')}">${escapeHtml(shortPath(op.path))}</td>
+    <td>${op.status === 'in_progress' ? '—' : formatDuration(op.duration_ms)}</td>`;
 
   if (extended) {
     cols += `<td>${formatBytes(op.bytes_in)}</td>`;
@@ -71,53 +76,56 @@ function operationRow(op, extended) {
     cols += `<td>${formatBytes(op.file_size)}</td>`;
   }
 
-  cols += `<td><span class="badge ${statusClass}">${op.status}</span></td>`;
+  cols += `<td><span class="badge ${statusClass}">${escapeHtml(statusLabel)}</span></td>`;
 
   if (extended) {
-    cols += `<td style="color:var(--red);font-size:12px;">${op.error || ''}</td>`;
+    cols += `<td style="color:var(--red);font-size:12px;">${escapeHtml(op.error || '')}</td>`;
     cols += `<td><button class="btn-detail" onclick="toggleOpDetail('${rowId}', this)">View</button></td>`;
   }
 
-  let html = `<tr>${cols}</tr>`;
+  let html = `<tr data-req-id="${escapeHtml(op.req_id || '')}" data-status="${escapeHtml(op.status || '')}">${cols}</tr>`;
 
   if (extended) {
     // Build detail content
     let details = [];
-    if (op.sub_op) details.push(`<span class="detail-label">Sub-operation:</span> <span class="badge ${toolClass}">${op.sub_op}</span>`);
-    if (op.risk) details.push(`<span class="detail-label">Risk:</span> <span class="risk-badge risk-${op.risk.toLowerCase()}">${op.risk}</span>`);
+    if (op.req_id) details.push(`<span class="detail-label">Request:</span> ${escapeHtml(op.req_id)}`);
+    if (op.sd_id) details.push(`<span class="detail-label">Trash ID:</span> ${escapeHtml(op.sd_id)}`);
+    if (op.status === 'in_progress') details.push('No completion recorded: running or interrupted.');
+    if (op.sub_op) details.push(`<span class="detail-label">Sub-operation:</span> <span class="badge ${toolClass}">${escapeHtml(op.sub_op)}</span>`);
+    if (op.risk) details.push(`<span class="detail-label">Risk:</span> <span class="risk-badge risk-${escapeHtml(op.risk.toLowerCase())}">${escapeHtml(op.risk)}</span>`);
     if (op.feedback_pattern) {
       const fbClass = op.feedback_status === 'ko' ? 'error' : 'warn';
-      details.push(`<span class="detail-label">Pattern:</span> <span class="badge ${fbClass}">${op.feedback_pattern}</span>`);
+      details.push(`<span class="detail-label">Pattern:</span> <span class="badge ${fbClass}">${escapeHtml(op.feedback_pattern)}</span>`);
     }
     if (op.lines_changed) details.push(`<span class="detail-label">Lines changed:</span> ${op.lines_changed}`);
     if (op.diff_lines) details.push(`<span class="detail-label">Diff lines:</span> ${op.diff_lines}`);
     if (op.matches) details.push(`<span class="detail-label">Matches:</span> ${op.matches}`);
     if (op.cache_hit !== undefined && op.cache_hit !== null) details.push(`<span class="detail-label">Cache hit:</span> ${op.cache_hit ? 'Yes' : 'No'}`);
     if (op.backup_id) {
-      let backupInfo = `Backup: ${op.backup_id}`;
-      if (op.previous_backup_id) backupInfo += ` → parent ${op.previous_backup_id}`;
-      details.push(`<span class="detail-label">Undo chain:</span> <span class="backup-chain" title="Parent: ${op.previous_backup_id || 'none'}">${backupInfo}</span>`);
+      let backupInfo = `Backup: ${escapeHtml(op.backup_id)}`;
+      if (op.previous_backup_id) backupInfo += ` → parent ${escapeHtml(op.previous_backup_id)}`;
+      details.push(`<span class="detail-label">Undo chain:</span> <span class="backup-chain" title="Parent: ${escapeHtml(op.previous_backup_id || 'none')}">${backupInfo}</span>`);
     }
     if (op.integrity_status) {
       const invClass = op.integrity_status === 'OK' ? 'ok' : op.integrity_status === 'WARNING' ? 'warn' : 'error';
-      let invLabel = `Integrity: <span class="badge ${invClass}">${op.integrity_status}</span>`;
+      let invLabel = `Integrity: <span class="badge ${invClass}">${escapeHtml(op.integrity_status)}</span>`;
       if (op.integrity_warn) invLabel += ` — ${escapeHtml(op.integrity_warn)}`;
       details.push(invLabel);
     }
-    if (op.path) details.push(`<span class="detail-label">Full path:</span> <span class="path">${op.path}</span>`);
+    if (op.path) details.push(`<span class="detail-label">Full path:</span> <span class="path">${escapeHtml(op.path)}</span>`);
 
     // Args table
     let argsHtml = '';
     if (op.args && Object.keys(op.args).length > 0) {
       argsHtml = '<div class="op-args"><span class="detail-label">Arguments:</span><table class="args-table">';
       for (const [k, v] of Object.entries(op.args)) {
-        argsHtml += `<tr><td class="args-key">${k}</td><td class="args-val">${escapeHtml(String(v))}</td></tr>`;
+        argsHtml += `<tr><td class="args-key">${escapeHtml(k)}</td><td class="args-val">${escapeHtml(String(v))}</td></tr>`;
       }
       argsHtml += '</table></div>';
     }
 
     html += `<tr id="${rowId}" class="op-detail-row" style="display:none;">
-      <td colspan="${extended ? 11 : 5}">
+      <td colspan="${extended ? 10 : 5}">
         <div class="op-detail-content">
           <div class="op-detail-meta">${details.join('<span class="detail-sep">|</span>')}</div>
           ${argsHtml}
@@ -138,14 +146,25 @@ async function fetchMetrics() {
     const m = await res.json();
 
     if (m.error) {
-      $('#status').textContent = 'Waiting for data...';
+      metricsConnected = false;
+      $('#status').textContent = 'Metrics unavailable';
       $('#status').className = 'status';
+      const source = $('#metrics-source');
+      if (source) source.textContent = 'No metrics.json. Start the filesystem with the same --log-dir as this dashboard.';
+      const analysis = $('#analysis-source');
+      if (analysis) analysis.textContent = 'Edit Activity needs metrics.json. It is not in this log directory yet.';
       return;
     }
 
-    metricsConnected = true;
-    $('#status').textContent = 'Connected';
-    $('#status').className = 'status connected';
+    const updated = Date.parse(m.updated_at);
+    const fresh = Number.isFinite(updated) && Date.now() - updated < 90000;
+    metricsConnected = fresh;
+    $('#status').textContent = fresh ? 'Recent metrics' : 'Stale metrics';
+    $('#status').className = fresh ? 'status connected' : 'status';
+    const source = $('#metrics-source');
+    if (source) source.textContent = `Process snapshot${Number.isFinite(updated) ? ': ' + new Date(updated).toLocaleString() : ''}. The filesystem rewrites metrics.json every 30 seconds; this is not a live connection.`;
+    const analysis = $('#analysis-source');
+    if (analysis) analysis.textContent = m.edits ? 'Edit counters from the same metrics.json snapshot.' : 'This snapshot has no edit counters yet.';
 
     $('#m-ops-sec').textContent = (m.ops_per_sec || 0).toFixed(1);
     $('#m-cache').textContent = (m.cache_hit_rate || 0).toFixed(1) + '%';
@@ -172,9 +191,11 @@ async function fetchMetrics() {
       $('#pct-rewrites').textContent = rPct + '%';
     }
   } catch (e) {
-    $('#status').textContent = 'Disconnected';
+    $('#status').textContent = 'Dashboard unavailable';
     $('#status').className = 'status';
     metricsConnected = false;
+    const source = $('#metrics-source');
+    if (source) source.textContent = 'Metrics request failed. Values already shown may be stale.';
   }
 }
 
@@ -182,20 +203,21 @@ async function fetchMetrics() {
 async function fetchOperations() {
   try {
     const res = await fetch('/api/operations?limit=200&_t=' + Date.now());
+    if (!res.ok) throw new Error('operations HTTP ' + res.status);
     const ops = await res.json();
+    const source = $('#operations-source');
+    if (source) source.textContent = 'Current operations.jsonl. Matching starts are hidden after completion; Unfinished has no confirmed outcome.';
 
-    // Recent ops (dashboard — last 10)
     const recentHtml = ops.slice(0, 10).map(op => operationRow(op, false)).join('');
     $('#recent-ops').innerHTML = recentHtml || '<tr><td colspan="5" class="empty">No operations yet</td></tr>';
 
-    // All ops (operations page) — skip rewrite while paused so the user can
-    // inspect an expanded detail row without it being blown away.
     if (!operationsPaused) {
       const allHtml = ops.map(op => operationRow(op, true)).join('');
-      $('#all-ops').innerHTML = allHtml || '<tr><td colspan="10" class="empty">No operations yet</td></tr>';
+      $('#all-ops').innerHTML = allHtml || '<tr><td colspan="10" class="empty">No operations in the current log</td></tr>';
     }
   } catch (e) {
-    // silent
+    const source = $('#operations-source');
+    if (source) source.textContent = 'Could not load operations. Rows already shown may be stale.';
   }
 }
 
@@ -281,7 +303,8 @@ async function searchBackups() {
     // Pagination
     renderBackupPagination();
   } catch (e) {
-    // silent
+    const statusEl = $('#bk-status');
+    if (statusEl) statusEl.textContent = 'Could not load backups. Check --backup-dir.';
   }
 }
 
@@ -292,12 +315,14 @@ function renderBackupPagination() {
   const currentPage = Math.floor(backupPage.offset / backupPage.limit);
   if (totalPages <= 1) { el.innerHTML = ''; return; }
 
+  const startPage = Math.max(0, Math.min(currentPage - 4, totalPages - 10));
   let html = '';
-  for (let i = 0; i < totalPages && i < 10; i++) {
+  if (startPage > 0) html += '<button class="page-btn" onclick="goBackupPage(0)">First</button>';
+  for (let i = startPage; i < totalPages && i < startPage + 10; i++) {
     const active = i === currentPage ? ' active' : '';
     html += `<button class="page-btn${active}" onclick="goBackupPage(${i})">${i + 1}</button>`;
   }
-  if (totalPages > 10) html += `<span class="page-ellipsis">... (${totalPages} pages)</span>`;
+  if (startPage + 10 < totalPages) html += `<button class="page-btn" onclick="goBackupPage(${totalPages - 1})">Last (${totalPages})</button>`;
   el.innerHTML = html;
 }
 
@@ -343,7 +368,7 @@ async function searchBackupContent() {
 }
 
 function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function toggleOpDetail(rowId, btn) {
@@ -716,11 +741,10 @@ async function fetchProxyStats() {
     const res = await fetch('/api/proxy-stats');
     const s = await res.json();
 
-    if (!s.total_calls) {
-      $('#p-no-data').style.display = 'block';
-      return;
-    }
-    $('#p-no-data').style.display = 'none';
+    $('#p-no-data').style.display = s.available && s.total_calls ? 'none' : 'block';
+    const empty = $('#p-no-data .empty');
+    if (empty) empty.textContent = s.message || (s.total_calls ? '' : 'No completed calls in the current proxy.jsonl.');
+    if (!s.total_calls) return;
 
     $('#p-total-calls').textContent = (s.total_calls || 0).toLocaleString();
     $('#p-tokens-in').textContent = (s.total_tokens_in || 0).toLocaleString();
@@ -738,7 +762,7 @@ async function fetchProxyStats() {
       const errClass = m.error_rate > 5 ? 'color:var(--red)' : '';
       const total = m.tokens_in + m.tokens_out;
       return `<tr>
-        <td><span class="badge" style="background:${modelColors[i % modelColors.length]}22;color:${modelColors[i % modelColors.length]}">${name}</span></td>
+        <td><span class="badge" style="background:${modelColors[i % modelColors.length]}22;color:${modelColors[i % modelColors.length]}">${escapeHtml(name)}</span></td>
         <td>${m.count.toLocaleString()}</td>
         <td>${m.tokens_in.toLocaleString()}</td>
         <td>${m.tokens_out.toLocaleString()}</td>
@@ -773,7 +797,7 @@ async function fetchProxyStats() {
         const inPct = total > 0 ? (m.tokens_in / total * 100).toFixed(0) : 0;
         return `<div class="risk-item">
           <div class="risk-header">
-            <span style="color:${color}">${name}</span>
+            <span style="color:${color}">${escapeHtml(name)}</span>
             <span>${total.toLocaleString()} tokens (${pct}%) — ${inPct}% in / ${100-inPct}% out</span>
           </div>
           <div class="risk-track"><div class="risk-fill" style="width:${pct}%;background:${color}"></div></div>
@@ -788,11 +812,24 @@ async function fetchProxyStats() {
 }
 
 // SSE for real-time updates
+function dropUnfinished(reqId) {
+  if (!reqId) return;
+  const wanted = String(reqId);
+  document.querySelectorAll('tr[data-status="in_progress"]').forEach(row => {
+    if (row.getAttribute('data-req-id') !== wanted) return;
+    const next = row.nextElementSibling;
+    if (next && next.classList.contains('op-detail-row')) next.remove();
+    row.remove();
+  });
+}
+
 function connectSSE() {
   const source = new EventSource('/api/operations/live');
   source.onmessage = (event) => {
     try {
       const op = JSON.parse(event.data);
+      if (!op || op.status === 'in_progress') return;
+      dropUnfinished(op.req_id);
       // Prepend to recent ops (Dashboard page)
       const recentTbody = $('#recent-ops');
       if (recentTbody) {
@@ -890,6 +927,12 @@ async function fetchNormalizer() {
   try {
     const res = await fetch('/api/normalizer?_t=' + Date.now());
     const s = await res.json();
+    const source = $('#normalizer-source');
+    if (s.available === false) {
+      if (source) source.textContent = s.message || 'normalizer_stats.json is not available.';
+      return;
+    }
+    if (source) source.textContent = 'normalizer_stats.json, rewritten about every 30 seconds.';
 
     $('#n-total').textContent = (s.total_processed || 0).toLocaleString();
     $('#n-normalized').textContent = (s.total_normalized || 0).toLocaleString();
@@ -965,6 +1008,13 @@ async function fetchErrorPatterns() {
   try {
     const res = await fetch('/api/error-patterns?_t=' + Date.now());
     const s = await res.json();
+    const source = $('#error-source');
+    if (s.available === false) {
+      if (source) source.textContent = s.message || 'operations.jsonl is not available.';
+      $('#ep-patterns').innerHTML = `<tr><td colspan="7" class="empty">${escapeHtml(s.message || 'Log unavailable')}</td></tr>`;
+      return;
+    }
+    if (source) source.textContent = 'Grouped from errors in the current operations.jsonl. An empty table means no errors, not a missing page.';
 
     $('#ep-total').textContent = (s.total_errors || 0).toLocaleString();
     $('#ep-unique').textContent = (s.unique_patterns || 0).toLocaleString();
@@ -993,97 +1043,28 @@ async function fetchErrorPatterns() {
   }
 }
 
-// Initial load and polling
-fetchMetrics();
-fetchOperations();
-searchBackups();
-searchTrash();
-fetchStats();
-fetchProxyStats();
-fetchNormalizer();
-fetchErrorPatterns();
-fetchROI();
 connectSSE();
 
-// Poll every 5 seconds
-setInterval(fetchMetrics, 5000);
-setInterval(fetchOperations, 10000);
-setInterval(searchBackups, 30000);
-setInterval(searchTrash, 30000);
-setInterval(fetchStats, 15000);
-setInterval(fetchProxyStats, 15000);
-setInterval(fetchNormalizer, 10000);
-setInterval(fetchErrorPatterns, 30000);
-setInterval(fetchROI, 30000);
-
-// ─── ROI / Savings page ───────────────────────────────────────────────────────
-async function fetchROI() {
-  try {
-    const res = await fetch('/api/roi?_t=' + Date.now());
-    const d = await res.json();
-
-    const fmt = n => (n || 0).toLocaleString();
-    const pct = n => (n || 0).toFixed(1) + '%';
-    const kb  = n => n > 1024 ? (n/1024).toFixed(1) + ' KB' : n + ' B';
-
-    $('#roi-saved').textContent     = fmt(d.tokens_saved);
-    $('#roi-pct').textContent       = pct(d.savings_pct);
-    $('#roi-consumed').textContent  = fmt(d.tokens_consumed);
-    $('#roi-baseline').textContent  = fmt(d.tokens_baseline);
-    $('#roi-sessions').textContent  = fmt(d.session_count);
-    $('#roi-range-pct').textContent = pct(d.range_read_pct) + ' of reads';
-    $('#roi-avg-read-pct').textContent = pct(d.avg_read_pct);
-    $('#roi-timespan').textContent  = d.time_span || '—';
-
-    // By tool table
-    const byTool = d.by_tool || [];
-    $('#roi-by-tool').innerHTML = byTool.map(t => `<tr>
-      <td><span class="badge ${toolBadgeClass(t.tool)}">${t.tool}</span></td>
-      <td>${fmt(t.ops_count)}</td>
-      <td>${fmt(t.tokens_consumed)}</td>
-      <td>${fmt(t.tokens_baseline)}</td>
-      <td class="green">${fmt(t.tokens_saved)}</td>
-      <td>${pct(t.savings_pct)}</td>
-      <td>${t.avg_saved_per_op.toFixed(0)}</td>
-    </tr>`).join('') || '<tr><td colspan="7" class="empty">No ROI data yet — requires v4.3.3+ server</td></tr>';
-
-    // Top savings
-    const top = d.top_savings || [];
-    $('#roi-top-savings').innerHTML = top.map(op => `<tr>
-      <td>${formatTime(op.ts)}</td>
-      <td><span class="badge ${toolBadgeClass(op.tool)}">${op.tool}</span></td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(op.path||'')}">${escapeHtml(op.path||'—')}</td>
-      <td>${op.file_size ? kb(op.file_size) : '—'}</td>
-      <td>${fmt(op.tokens_baseline)}</td>
-      <td>${fmt(op.tokens_consumed)}</td>
-      <td class="green">${fmt(op.tokens_saved)}</td>
-    </tr>`).join('') || '<tr><td colspan="7" class="empty">No data</td></tr>';
-
-    // Sessions table
-    const sessions = d.sessions || [];
-    $('#roi-sessions-table').innerHTML = sessions.map(s => `<tr>
-      <td><code>${s.session_id}</code></td>
-      <td>${formatTime(s.first_op)}</td>
-      <td>${s.duration_min < 1 ? '<1 min' : s.duration_min.toFixed(0) + ' min'}</td>
-      <td>${fmt(s.ops_count)}</td>
-      <td>${fmt(s.tokens_consumed)}</td>
-      <td class="green">${fmt(s.tokens_saved)}</td>
-      <td>${pct(s.savings_pct)}</td>
-      <td>${s.errors > 0 ? `<span style="color:var(--red)">${s.errors}</span>` : '0'}</td>
-    </tr>`).join('') || '<tr><td colspan="8" class="empty">No session data yet</td></tr>';
-
-    // Anti-patterns
-    const ap = d.anti_patterns || {};
-    const apEntries = Object.entries(ap).sort((a,b) => b[1]-a[1]);
-    if (apEntries.length > 0) {
-      $('#roi-antipatterns-section').style.display = '';
-      $('#roi-antipatterns').innerHTML = apEntries.map(([k, v]) =>
-        `<tr><td>${escapeHtml(k)}</td><td>${v}</td></tr>`
-      ).join('');
-    } else {
-      $('#roi-antipatterns-section').style.display = 'none';
-    }
-  } catch(e) {
-    // silent
-  }
+function refreshActivePage() {
+  if (document.hidden) return;
+  const page = document.querySelector('nav button.active')?.dataset.page;
+  const loaders = {
+    dashboard: fetchOperations,
+    operations: fetchOperations,
+    backups: searchBackups,
+    trash: searchTrash,
+    stats: fetchStats,
+    proxy: fetchProxyStats,
+    analysis: fetchMetrics,
+    normalizer: fetchNormalizer,
+    'error-patterns': fetchErrorPatterns,
+  };
+  const load = loaders[page];
+  if (load) load();
 }
+
+fetchMetrics();
+refreshActivePage();
+setInterval(() => { if (!document.hidden) fetchMetrics(); }, 30000);
+setInterval(refreshActivePage, 10000);
+document.addEventListener('visibilitychange', refreshActivePage);

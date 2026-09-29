@@ -137,11 +137,19 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 
 	var mu sync.Mutex
 	pending := map[string]*pendingCall{}
-	timedOutIDs := map[string]struct{}{}
+	timedOutIDs := map[string]time.Time{}
 	detectedClient := ""
 	done := make(chan struct{})
 	var closeDone sync.Once
 	shut := func() { closeDone.Do(func() { close(done) }) }
+
+	var activityMu sync.Mutex
+	lastActivity := time.Now()
+	touchActivity := func() {
+		activityMu.Lock()
+		lastActivity = time.Now()
+		activityMu.Unlock()
+	}
 
 	var outMu sync.Mutex
 	writeClient := func(line []byte) {
@@ -176,13 +184,13 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 		pc, ok := pending[reqID]
 		if ok {
 			delete(pending, reqID)
-			timedOutIDs[reqID] = struct{}{}
+			noteTimedOut(timedOutIDs, reqID, time.Now())
 		}
 		mu.Unlock()
 		if !ok {
 			return
 		}
-		msg := fmt.Sprintf("proxy: %s timed out after %s (child did not respond)", pc.entry.Tool, cfg.callTimeout)
+		msg := fmt.Sprintf("proxy: %s timed out after %s (child did not respond). Execution outcome is unknown; the operation may still finish. Inspect the target before retrying.", pc.entry.Tool, cfg.callTimeout)
 		log.Printf("mcp-proxy: %s", msg)
 		pc.entry.setDuration(benchclock.Since(pc.start))
 		pc.entry.Status = "timeout"
@@ -193,6 +201,7 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+	defer signal.Stop(sigChan)
 	go func() {
 		select {
 		case <-sigChan:
@@ -216,6 +225,7 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 			}
 
 			line := scanner.Bytes()
+			touchActivity()
 
 			var msg jsonRPCMessage
 			// Invalid JSON still passes through to the server for protocol errors.
@@ -237,8 +247,8 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 
 			case "tools/call":
 				var params callToolParams
-				if err := json.Unmarshal(msg.Params, &params); err == nil {
-					reqID := extractID(msg.ID)
+				if err := json.Unmarshal(msg.Params, &params); err == nil && len(msg.ID) > 0 && string(msg.ID) != "null" {
+					reqID := requestKey(msg.ID)
 					argsBytes, _ := json.Marshal(params.Arguments)
 
 					mu.Lock()
@@ -252,7 +262,7 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 						Tool:      params.Name,
 						BytesIn:   int64(len(argsBytes)),
 						TokensIn:  int64(len(argsBytes)) / 4,
-						RequestID: reqID,
+						RequestID: extractID(msg.ID),
 					}
 					if p, ok := params.Arguments["path"].(string); ok {
 						entry.Path = p
@@ -294,7 +304,10 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 					mu.Lock()
 					hasPending := len(pending) > 0
 					mu.Unlock()
-					if hasPending {
+					activityMu.Lock()
+					idle := time.Since(lastActivity) >= cfg.idleTimeout
+					activityMu.Unlock()
+					if hasPending && idle {
 						log.Printf("mcp-proxy: idle timeout reached (%v) with pending requests, killing child", cfg.idleTimeout)
 						if cmd.Process != nil {
 							_ = cmd.Process.Kill()
@@ -318,13 +331,13 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 			break
 		}
 		line := scanner.Bytes()
+		touchActivity()
 		var msg jsonRPCMessage
 		if err := json.Unmarshal(line, &msg); err == nil && msg.ID != nil && msg.Method == "" {
-			reqID := extractID(msg.ID)
+			reqID := requestKey(msg.ID)
 
 			mu.Lock()
-			if _, late := timedOutIDs[reqID]; late {
-				delete(timedOutIDs, reqID)
+			if consumeLateTimeout(timedOutIDs, reqID, time.Now()) {
 				mu.Unlock()
 				continue
 			}
@@ -422,6 +435,57 @@ func toolErrorReply(rawID json.RawMessage, msg string) []byte {
 	return b
 }
 
+const (
+	maxTimedOutIDs = 1024
+	timedOutTTL    = 15 * time.Minute
+)
+
+// noteTimedOut remembers a call whose client already received a timeout.
+// Entries expire and the map is capped so a silent child cannot grow it forever.
+func noteTimedOut(ids map[string]time.Time, id string, now time.Time) {
+	ids[id] = now
+	pruneTimedOut(ids, now)
+}
+
+func pruneTimedOut(ids map[string]time.Time, now time.Time) {
+	for id, at := range ids {
+		if now.Sub(at) > timedOutTTL {
+			delete(ids, id)
+		}
+	}
+	for len(ids) > maxTimedOutIDs {
+		var oldest string
+		var oldestAt time.Time
+		first := true
+		for id, at := range ids {
+			if first || at.Before(oldestAt) {
+				oldest, oldestAt, first = id, at, false
+			}
+		}
+		delete(ids, oldest)
+	}
+}
+
+// consumeLateTimeout reports whether this response belongs to a call the proxy
+// already failed. An expired mark is dropped and the response is not swallowed.
+func consumeLateTimeout(ids map[string]time.Time, id string, now time.Time) bool {
+	at, ok := ids[id]
+	if !ok {
+		return false
+	}
+	delete(ids, id)
+	return now.Sub(at) <= timedOutTTL
+}
+
+// requestKey preserves the JSON-RPC distinction between numeric and string IDs.
+func requestKey(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return "string:" + s
+	}
+	return "number:" + string(raw)
+}
+
 func extractID(raw json.RawMessage) string {
 	if raw == nil {
 		return ""
@@ -465,6 +529,9 @@ func (l *proxyLogger) Log(entry ProxyLogEntry) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	if l.file == nil {
+		return
+	}
 	n, _ := l.file.Write(data)
 	l.written += int64(n)
 
@@ -497,8 +564,15 @@ func (l *proxyLogger) rotate() {
 }
 
 func (l *proxyLogger) Close() error {
-	if l == nil || l.file == nil {
+	if l == nil {
 		return nil
 	}
-	return l.file.Close()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.file == nil {
+		return nil
+	}
+	err := l.file.Close()
+	l.file = nil
+	return err
 }
