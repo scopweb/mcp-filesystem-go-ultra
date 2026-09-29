@@ -107,8 +107,8 @@ func TestCallTimeout_HangingChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := waitContains(t, out, "timed out", 3*time.Second)
-	if !strings.Contains(s, "apply_patch") {
-		t.Fatalf("timeout should name the tool: %s", s)
+	if !strings.Contains(s, "apply_patch") || !strings.Contains(s, "may still finish") {
+		t.Fatalf("timeout should name the tool and warn that execution is unknown: %s", s)
 	}
 	if !strings.Contains(s, `"isError":true`) {
 		t.Fatalf("expected MCP tool error, got %s", s)

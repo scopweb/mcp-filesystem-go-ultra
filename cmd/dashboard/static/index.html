@@ -18,16 +18,17 @@
     <button data-page="backups">Backups</button>
     <button data-page="trash">Trash</button>
     <button data-page="stats">Statistics</button>
-    <button data-page="proxy">Proxy / Tokens</button>
-    <button data-page="analysis">Edit Analysis</button>
+    <button data-page="proxy">Proxy</button>
+    <button data-page="analysis">Edit Activity</button>
     <button data-page="normalizer">Normalizer</button>
     <button data-page="error-patterns">Error Patterns</button>
-    <button data-page="roi">ROI / Savings</button>
+
   </nav>
 
   <main>
     <!-- Dashboard Page -->
     <div class="page active" id="page-dashboard">
+      <p class="search-status" id="metrics-source">Process metrics from metrics.json, refreshed by the filesystem every 30 seconds.</p>
       <div class="cards">
         <div class="card">
           <div class="label">Operations/sec</div>
@@ -79,6 +80,7 @@
 
     <!-- Operations Page -->
     <div class="page" id="page-operations">
+      <p class="search-status" id="operations-source">Current operations.jsonl. Starts and completions are combined; unfinished calls have no confirmed outcome.</p>
       <div class="section">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
           <h2 style="margin:0">Operation Log (last 200)</h2>
@@ -101,15 +103,15 @@
           <div class="value accent" id="bk-total">—</div>
         </div>
         <div class="card">
-          <div class="label">Total Size</div>
+          <div class="label">Size on This Page</div>
           <div class="value" id="bk-size">—</div>
         </div>
         <div class="card">
-          <div class="label">Latest Backup</div>
+          <div class="label">Latest on This Page</div>
           <div class="value green" id="bk-latest" style="font-size:16px;">—</div>
         </div>
         <div class="card">
-          <div class="label">Protected Files</div>
+          <div class="label">File Copies on This Page</div>
           <div class="value yellow" id="bk-files">—</div>
         </div>
       </div>
@@ -201,6 +203,7 @@
 
     <!-- Statistics Page -->
     <div class="page" id="page-stats">
+      <p class="search-status" id="stats-source">Completed calls in the current operations.jsonl. Pipeline steps are excluded from totals; warnings are not errors. Rotated history is not included.</p>
       <div class="cards">
         <div class="card">
           <div class="label">Total Operations</div>
@@ -257,7 +260,7 @@
       </div>
 
       <div class="section">
-        <h2>Operations per Hour (last 48h)</h2>
+        <h2>Operations per Hour (last 48 recorded buckets)</h2>
         <div id="s-hour-chart" class="hour-chart"></div>
       </div>
 
@@ -279,21 +282,22 @@
 
     <!-- Proxy / Tokens Page -->
     <div class="page" id="page-proxy">
+      <p class="search-status" id="proxy-source">Current proxy.jsonl. Tokens are approximate (bytes / 4), not model usage or billing. Input measures arguments; output includes the full JSON-RPC response, including structuredContent. Model is an optional manual tag.</p>
       <div class="cards">
         <div class="card">
           <div class="label">Total Tool Calls</div>
           <div class="value accent" id="p-total-calls">—</div>
         </div>
         <div class="card">
-          <div class="label">Tokens In</div>
+          <div class="label">~Tokens In</div>
           <div class="value" id="p-tokens-in">—</div>
         </div>
         <div class="card">
-          <div class="label">Tokens Out</div>
+          <div class="label">~Tokens Out</div>
           <div class="value yellow" id="p-tokens-out">—</div>
         </div>
         <div class="card">
-          <div class="label">Total Tokens</div>
+          <div class="label">~Total Tokens</div>
           <div class="value green" id="p-tokens-total">—</div>
         </div>
         <div class="card">
@@ -307,10 +311,10 @@
       </div>
 
       <div class="section">
-        <h2>By Model</h2>
+        <h2>By Client / Model Tag</h2>
         <table>
           <thead>
-            <tr><th>Model</th><th>Calls</th><th>Tokens In</th><th>Tokens Out</th><th>Total Tokens</th><th>Errors</th><th>Err%</th><th>Avg Duration</th></tr>
+            <tr><th>Client / Model Tag</th><th>Calls</th><th>Tokens In</th><th>Tokens Out</th><th>Total Tokens</th><th>Errors</th><th>Err%</th><th>Avg Duration</th></tr>
           </thead>
           <tbody id="p-by-model"></tbody>
         </table>
@@ -318,7 +322,7 @@
 
       <div class="stats-grid">
         <div class="section">
-          <h2>Tokens by Tool</h2>
+          <h2>Estimated Tokens by Tool</h2>
           <table>
             <thead>
               <tr><th>Tool</th><th>Calls</th><th>Tokens In</th><th>Tokens Out</th><th>Err%</th><th>Avg</th></tr>
@@ -328,7 +332,7 @@
         </div>
 
         <div class="section">
-          <h2>Token Distribution by Model</h2>
+          <h2>Estimated Token Distribution by Client / Tag</h2>
           <div id="p-model-chart" class="risk-bars"></div>
         </div>
       </div>
@@ -340,6 +344,7 @@
 
     <!-- Analysis Page -->
     <div class="page" id="page-analysis">
+      <p class="search-status" id="analysis-source">Edit counters from metrics.json. The filesystem writes that file about every 30 seconds.</p>
       <div class="cards">
         <div class="card">
           <div class="label">Total Edits</div>
@@ -360,7 +365,7 @@
       </div>
 
       <div class="section">
-        <h2>Efficiency Ratio</h2>
+        <h2>Recorded Edit Mix</h2>
         <div id="efficiency-bar" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;">
           <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
             <div style="flex:1;height:24px;border-radius:4px;overflow:hidden;display:flex;">
@@ -378,6 +383,7 @@
 
     <!-- Normalizer Page -->
     <div class="page" id="page-normalizer">
+      <p class="search-status" id="normalizer-source">Optional normalizer telemetry from normalizer_stats.json.</p>
       <div class="cards">
         <div class="card">
           <div class="label">Total Processed</div>
@@ -392,7 +398,7 @@
           <div class="value yellow" id="n-rate">—</div>
         </div>
         <div class="card">
-          <div class="label">Active Rules</div>
+          <div class="label">Rules Observed</div>
           <div class="value" id="n-rules">—</div>
         </div>
       </div>
@@ -426,6 +432,7 @@
 
     <!-- Error Patterns Page -->
     <div class="page" id="page-error-patterns">
+      <p class="search-status" id="error-source">Grouped from errors in the current operations.jsonl.</p>
       <div class="cards">
         <div class="card">
           <div class="label">Total Errors</div>
@@ -452,81 +459,6 @@
       </div>
     </div>
 
-    <!-- ROI / Savings Page -->
-    <div class="page" id="page-roi">
-      <div class="cards">
-        <div class="card">
-          <div class="label">Tokens Saved (est.)</div>
-          <div class="value green" id="roi-saved">—</div>
-        </div>
-        <div class="card">
-          <div class="label">Savings %</div>
-          <div class="value green" id="roi-pct">—</div>
-        </div>
-        <div class="card">
-          <div class="label">Tokens Consumed</div>
-          <div class="value" id="roi-consumed">—</div>
-        </div>
-        <div class="card">
-          <div class="label">Baseline (no FS)</div>
-          <div class="value yellow" id="roi-baseline">—</div>
-        </div>
-        <div class="card">
-          <div class="label">Sessions</div>
-          <div class="value" id="roi-sessions">—</div>
-        </div>
-        <div class="card">
-          <div class="label">Range Reads</div>
-          <div class="value" id="roi-range-pct">—</div>
-        </div>
-        <div class="card">
-          <div class="label">Avg % File Read</div>
-          <div class="value" id="roi-avg-read-pct">—</div>
-        </div>
-        <div class="card">
-          <div class="label">Time Span</div>
-          <div class="value" id="roi-timespan">—</div>
-        </div>
-      </div>
-
-      <div class="section">
-        <h2>Savings by Tool</h2>
-        <table>
-          <thead>
-            <tr><th>Tool</th><th>Ops</th><th>Tokens Used</th><th>Baseline</th><th>Saved</th><th>Savings %</th><th>Avg Saved/Op</th></tr>
-          </thead>
-          <tbody id="roi-by-tool"></tbody>
-        </table>
-      </div>
-
-      <div class="section">
-        <h2>Top 10 Most Efficient Operations</h2>
-        <table>
-          <thead>
-            <tr><th>Time</th><th>Tool</th><th>Path</th><th>File Size</th><th>Baseline</th><th>Used</th><th>Saved</th></tr>
-          </thead>
-          <tbody id="roi-top-savings"></tbody>
-        </table>
-      </div>
-
-      <div class="section">
-        <h2>Recent Sessions</h2>
-        <table>
-          <thead>
-            <tr><th>Session</th><th>Start</th><th>Duration</th><th>Ops</th><th>Tokens Used</th><th>Saved</th><th>Savings %</th><th>Errors</th></tr>
-          </thead>
-          <tbody id="roi-sessions-table"></tbody>
-        </table>
-      </div>
-
-      <div class="section" id="roi-antipatterns-section" style="display:none">
-        <h2>Anti-Patterns Detected</h2>
-        <table>
-          <thead><tr><th>Pattern</th><th>Count</th></tr></thead>
-          <tbody id="roi-antipatterns"></tbody>
-        </table>
-      </div>
-    </div>
   </main>
 
   <script src="app.js"></script>

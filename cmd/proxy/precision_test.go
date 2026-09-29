@@ -12,6 +12,37 @@ import (
 	"time"
 )
 
+func TestTimedOutIDsStayBounded(t *testing.T) {
+	ids := map[string]time.Time{}
+	start := time.Now()
+	for i := 0; i < maxTimedOutIDs+10; i++ {
+		noteTimedOut(ids, fmt.Sprintf("id-%d", i), start.Add(time.Duration(i)))
+	}
+	if len(ids) != maxTimedOutIDs {
+		t.Fatalf("len=%d, want cap %d", len(ids), maxTimedOutIDs)
+	}
+	noteTimedOut(ids, "stale", start.Add(-timedOutTTL-time.Second))
+	if _, ok := ids["stale"]; ok {
+		t.Fatal("expired timeout mark must not accumulate")
+	}
+	ids["late"] = start
+	if !consumeLateTimeout(ids, "late", start.Add(time.Minute)) {
+		t.Fatal("fresh timeout mark should swallow the late response")
+	}
+	if consumeLateTimeout(ids, "late", start) {
+		t.Fatal("mark must be consumed once")
+	}
+}
+
+func TestRequestKeyDistinguishesStringAndNumber(t *testing.T) {
+	if requestKey([]byte(`1`)) == requestKey([]byte(`"1"`)) {
+		t.Fatal("numeric and string JSON-RPC ids must not share a pending slot")
+	}
+	if extractID([]byte(`"abc"`)) != "abc" {
+		t.Fatal("logged request id should remain the raw id text")
+	}
+}
+
 func TestDurationPreservesSubMillisecond(t *testing.T) {
 	var e ProxyLogEntry
 	e.setDuration(123456 * time.Nanosecond)

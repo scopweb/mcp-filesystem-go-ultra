@@ -22,6 +22,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mcp/filesystem-ultra/core"
 )
 
 //go:embed static/*
@@ -232,7 +234,6 @@ func main() {
 	mux.HandleFunc("/api/normalizer", normalizerHandler(*logDir))
 	mux.HandleFunc("/api/error-patterns", errorPatternsHandler(*logDir))
 	mux.HandleFunc("/api/proxy-stats", proxyStatsHandler(*proxyLogDir))
-	mux.HandleFunc("/api/roi", roiHandler(*logDir))
 
 	// Serve embedded static files
 	staticFS, _ := fs.Sub(staticFiles, "static")
@@ -282,6 +283,9 @@ func operationsHandler(logDir string) http.HandlerFunc {
 		if l := r.URL.Query().Get("limit"); l != "" {
 			fmt.Sscanf(l, "%d", &limit)
 		}
+		if limit < 1 {
+			limit = 100
+		}
 		if limit > 1000 {
 			limit = 1000
 		}
@@ -293,7 +297,7 @@ func operationsHandler(logDir string) http.HandlerFunc {
 			return
 		}
 
-		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		lines := auditLines(data, true)
 
 		// Return last N lines (most recent operations)
 		start := 0
@@ -341,10 +345,13 @@ func operationsSSEHandler(logDir string) http.HandlerFunc {
 		logPath := filepath.Join(logDir, "operations.jsonl")
 
 		// Get initial file size to only send new entries
-		var offset int64
+		var tail logTail
 		if info, err := os.Stat(logPath); err == nil {
-			offset = info.Size()
+			tail.info = info
+			tail.offset = info.Size()
 		}
+		fmt.Fprint(w, ": connected\n\n")
+		flusher.Flush()
 
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
@@ -354,31 +361,18 @@ func operationsSSEHandler(logDir string) http.HandlerFunc {
 			case <-r.Context().Done():
 				return
 			case <-ticker.C:
-				info, err := os.Stat(logPath)
-				if err != nil || info.Size() <= offset {
-					continue
-				}
-
-				f, err := os.Open(logPath)
-				if err != nil {
-					continue
-				}
-
-				f.Seek(offset, 0)
-				buf := make([]byte, info.Size()-offset)
-				n, _ := f.Read(buf)
-				f.Close()
-
-				if n > 0 {
-					offset = info.Size()
-					lines := strings.Split(strings.TrimSpace(string(buf[:n])), "\n")
-					for _, line := range lines {
-						if strings.TrimSpace(line) != "" {
-							fmt.Fprintf(w, "data: %s\n\n", line)
-						}
+				for _, line := range tail.read(logPath) {
+					if !streamAuditLine(line) {
+						continue
 					}
-					flusher.Flush()
+					if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
+						return
+					}
 				}
+				if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
+					return
+				}
+				flusher.Flush()
 			}
 		}
 	}
@@ -855,35 +849,8 @@ type NormalizationApplied struct {
 	To     string `json:"to,omitempty"`
 }
 
-// AuditEntry mirrors the core audit entry for parsing operations.jsonl
-type AuditEntry struct {
-	Timestamp       time.Time              `json:"ts"`
-	Tool            string                 `json:"tool"`
-	Path            string                 `json:"path,omitempty"`
-	DurationMs      int64                  `json:"duration_ms"`
-	BytesIn         int64                  `json:"bytes_in,omitempty"`
-	BytesOut        int64                  `json:"bytes_out,omitempty"`
-	Status          string                 `json:"status"`
-	Error           string                 `json:"error,omitempty"`
-	RiskLevel       string                 `json:"risk,omitempty"`
-	FileSize        int64                  `json:"file_size,omitempty"`
-	Args            map[string]string      `json:"args,omitempty"`
-	LinesChanged    int                    `json:"lines_changed,omitempty"`
-	Matches         int                    `json:"matches,omitempty"`
-	CacheHit        *bool                  `json:"cache_hit,omitempty"`
-	Normalizations  []NormalizationApplied `json:"norms,omitempty"`
-	FeedbackPattern string                 `json:"feedback_pattern,omitempty"`
-	FeedbackStatus  string                 `json:"feedback_status,omitempty"`
-	// ROI / savings fields (v4.3.3+)
-	SessionID      string `json:"session_id,omitempty"`
-	FileLinesTotal int    `json:"file_lines_total,omitempty"`
-	LinesRead      int    `json:"lines_read,omitempty"`
-	TokensConsumed int64  `json:"tokens_consumed,omitempty"`
-	TokensBaseline int64  `json:"tokens_baseline,omitempty"`
-	TokensSaved    int64  `json:"tokens_saved,omitempty"`
-	// Soft-delete ID (v4.5.2+, issue #16) — populated by delete_file soft mode
-	SDID string `json:"sd_id,omitempty"`
-}
+// Use the producer's contract, including request IDs, backup chains and integrity.
+type AuditEntry = core.AuditEntry
 
 type ToolStats struct {
 	Count        int64   `json:"count"`
@@ -939,7 +906,7 @@ func statsHandler(logDir string) http.HandlerFunc {
 			return
 		}
 
-		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		lines := auditLines(data, false)
 
 		byTool := map[string]*ToolStats{}
 		byRisk := map[string]int64{}
@@ -998,7 +965,7 @@ func statsHandler(logDir string) http.HandlerFunc {
 			}
 			toolDurations[e.Tool] = append(toolDurations[e.Tool], e.DurationMs)
 
-			if e.Status != "ok" {
+			if e.Status == "error" {
 				totalErrors++
 				ts.Errors++
 			}
@@ -1140,6 +1107,8 @@ func statsHandler(logDir string) http.HandlerFunc {
 type ProxyLogEntry struct {
 	Timestamp  time.Time `json:"ts"`
 	Model      string    `json:"model,omitempty"`
+	Client     string    `json:"client,omitempty"`
+	DurationNs int64     `json:"duration_ns,omitempty"`
 	Tool       string    `json:"tool"`
 	Path       string    `json:"path,omitempty"`
 	BytesIn    int64     `json:"bytes_in"`
@@ -1170,6 +1139,8 @@ type ProxyToolStats struct {
 }
 
 type ProxyStatsResponse struct {
+	Available      bool                       `json:"available"`
+	Message        string                     `json:"message,omitempty"`
 	TotalCalls     int64                      `json:"total_calls"`
 	TotalTokensIn  int64                      `json:"total_tokens_in"`
 	TotalTokensOut int64                      `json:"total_tokens_out"`
@@ -1190,6 +1161,7 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 
 		emptyResp := ProxyStatsResponse{ByModel: map[string]*ModelStats{}, ByTool: map[string]*ProxyToolStats{}}
 		if proxyLogDir == "" {
+			emptyResp.Message = "Proxy logs not configured: set --proxy-log-dir to the proxy's --log-dir."
 			json.NewEncoder(w).Encode(emptyResp)
 			return
 		}
@@ -1197,6 +1169,7 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 		logPath := filepath.Join(proxyLogDir, "proxy.jsonl")
 		data, err := os.ReadFile(logPath)
 		if err != nil {
+			emptyResp.Message = "Cannot read proxy.jsonl; check the configured directory and permissions."
 			json.NewEncoder(w).Encode(emptyResp)
 			return
 		}
@@ -1207,10 +1180,11 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 		byTool := map[string]*ProxyToolStats{}
 		fileCounts := map[string]int64{}
 		hourCounts := map[string]int64{}
-		toolDurations := map[string][]int64{}
-		modelDurations := map[string][]int64{}
+		toolDurations := map[string][]float64{}
+		modelDurations := map[string][]float64{}
+		var preciseDuration float64
 
-		var totalCalls, totalTokensIn, totalTokensOut, totalErrors, totalDuration int64
+		var totalCalls, totalTokensIn, totalTokensOut, totalErrors int64
 		var earliest, latest time.Time
 
 		for _, line := range lines {
@@ -1225,7 +1199,11 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 			totalCalls++
 			totalTokensIn += e.TokensIn
 			totalTokensOut += e.TokensOut
-			totalDuration += e.DurationMs
+			duration := float64(e.DurationMs)
+			if e.DurationNs > 0 {
+				duration = float64(e.DurationNs) / 1e6
+			}
+			preciseDuration += duration
 
 			if earliest.IsZero() || e.Timestamp.Before(earliest) {
 				earliest = e.Timestamp
@@ -1236,7 +1214,10 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 
 			modelKey := e.Model
 			if modelKey == "" {
-				modelKey = "unknown"
+				modelKey = "Model not tagged"
+			}
+			if e.Client != "" {
+				modelKey = e.Client + " / " + modelKey
 			}
 			ms, ok := byModel[modelKey]
 			if !ok {
@@ -1246,7 +1227,7 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 			ms.Count++
 			ms.TokensIn += e.TokensIn
 			ms.TokensOut += e.TokensOut
-			modelDurations[modelKey] = append(modelDurations[modelKey], e.DurationMs)
+			modelDurations[modelKey] = append(modelDurations[modelKey], duration)
 			if e.Status != "ok" {
 				totalErrors++
 				ms.Errors++
@@ -1260,7 +1241,7 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 			ts.Count++
 			ts.TokensIn += e.TokensIn
 			ts.TokensOut += e.TokensOut
-			toolDurations[e.Tool] = append(toolDurations[e.Tool], e.DurationMs)
+			toolDurations[e.Tool] = append(toolDurations[e.Tool], duration)
 			if e.Status != "ok" {
 				ts.Errors++
 			}
@@ -1277,7 +1258,7 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 				ms.ErrorRate = float64(ms.Errors) / float64(ms.Count) * 100
 			}
 			if durations := modelDurations[model]; len(durations) > 0 {
-				var sum int64
+				var sum float64
 				for _, d := range durations {
 					sum += d
 				}
@@ -1289,7 +1270,7 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 				ts.ErrorRate = float64(ts.Errors) / float64(ts.Count) * 100
 			}
 			if durations := toolDurations[tool]; len(durations) > 0 {
-				var sum int64
+				var sum float64
 				for _, d := range durations {
 					sum += d
 				}
@@ -1339,10 +1320,11 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 
 		var avgDuration float64
 		if totalCalls > 0 {
-			avgDuration = float64(totalDuration) / float64(totalCalls)
+			avgDuration = preciseDuration / float64(totalCalls)
 		}
 
 		json.NewEncoder(w).Encode(ProxyStatsResponse{
+			Available:      true,
 			TotalCalls:     totalCalls,
 			TotalTokensIn:  totalTokensIn,
 			TotalTokensOut: totalTokensOut,
@@ -1374,8 +1356,9 @@ func normalizerHandler(logDir string) http.HandlerFunc {
 		statsPath := filepath.Join(logDir, "normalizer_stats.json")
 		data, err := os.ReadFile(statsPath)
 		if err != nil {
-			// No stats file yet — return empty stats
 			json.NewEncoder(w).Encode(map[string]interface{}{
+				"available":        false,
+				"message":          "normalizer_stats.json is not in this log directory. The filesystem writes it about every 30 seconds when started with the same --log-dir.",
 				"total_processed":  0,
 				"total_normalized": 0,
 				"by_tool":          map[string]int{},
@@ -1466,6 +1449,8 @@ func errorPatternsHandler(logDir string) http.HandlerFunc {
 		f, err := os.Open(opsPath)
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{
+				"available":        false,
+				"message":          "operations.jsonl is not in this log directory.",
 				"patterns":         []interface{}{},
 				"total_errors":     0,
 				"unique_patterns":  0,
@@ -1494,7 +1479,7 @@ func errorPatternsHandler(logDir string) http.HandlerFunc {
 			if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
 				continue
 			}
-			if entry.Status != "error" || entry.Error == "" {
+			if entry.Status != "error" || entry.Error == "" || strings.HasPrefix(entry.SubOp, "step:") {
 				continue
 			}
 			totalErrors++
@@ -1584,268 +1569,11 @@ func errorPatternsHandler(logDir string) http.HandlerFunc {
 		}
 
 		json.NewEncoder(w).Encode(map[string]interface{}{
+			"available":        true,
 			"patterns":         result,
 			"total_errors":     totalErrors,
 			"unique_patterns":  len(patterns),
 			"with_suggestions": withSuggestions,
-		})
-	}
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// ROI / Savings handler
-// ──────────────────────────────────────────────────────────────────────────────
-
-type SessionROI struct {
-	SessionID      string    `json:"session_id"`
-	FirstOp        time.Time `json:"first_op"`
-	LastOp         time.Time `json:"last_op"`
-	DurationMin    float64   `json:"duration_min"`
-	OpsCount       int64     `json:"ops_count"`
-	TokensConsumed int64     `json:"tokens_consumed"`
-	TokensBaseline int64     `json:"tokens_baseline"`
-	TokensSaved    int64     `json:"tokens_saved"`
-	SavingsPct     float64   `json:"savings_pct"`
-	Errors         int64     `json:"errors"`
-}
-
-type ToolROI struct {
-	Tool           string  `json:"tool"`
-	OpsCount       int64   `json:"ops_count"`
-	TokensConsumed int64   `json:"tokens_consumed"`
-	TokensBaseline int64   `json:"tokens_baseline"`
-	TokensSaved    int64   `json:"tokens_saved"`
-	SavingsPct     float64 `json:"savings_pct"`
-	AvgSavedPerOp  float64 `json:"avg_saved_per_op"`
-}
-
-type TopSavingOp struct {
-	Timestamp      time.Time `json:"ts"`
-	Tool           string    `json:"tool"`
-	Path           string    `json:"path,omitempty"`
-	TokensConsumed int64     `json:"tokens_consumed"`
-	TokensBaseline int64     `json:"tokens_baseline"`
-	TokensSaved    int64     `json:"tokens_saved"`
-	FileSize       int64     `json:"file_size,omitempty"`
-}
-
-type ROIResponse struct {
-	// Global totals
-	TotalOps       int64   `json:"total_ops"`
-	TokensConsumed int64   `json:"tokens_consumed"`
-	TokensBaseline int64   `json:"tokens_baseline"`
-	TokensSaved    int64   `json:"tokens_saved"`
-	SavingsPct     float64 `json:"savings_pct"`
-	// Range efficiency (read_file range vs full file)
-	RangeReadOps int64   `json:"range_read_ops"`
-	RangeReadPct float64 `json:"range_read_pct"` // % of reads that used range
-	AvgReadPct   float64 `json:"avg_read_pct"`   // avg % of file actually read
-	// Sessions
-	SessionCount int64        `json:"session_count"`
-	Sessions     []SessionROI `json:"sessions"`
-	// By tool
-	ByTool []ToolROI `json:"by_tool"`
-	// Top savings operations
-	TopSavings []TopSavingOp `json:"top_savings"`
-	// Anti-patterns detected
-	AntiPatterns map[string]int64 `json:"anti_patterns"`
-	TimeSpan     string           `json:"time_span"`
-}
-
-func roiHandler(logDir string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		logPath := filepath.Join(logDir, "operations.jsonl")
-		data, err := os.ReadFile(logPath)
-		if err != nil {
-			json.NewEncoder(w).Encode(ROIResponse{})
-			return
-		}
-		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-
-		// Parse all entries
-		var entries []AuditEntry
-		for _, line := range lines {
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
-			var e AuditEntry
-			if json.Unmarshal([]byte(line), &e) == nil {
-				entries = append(entries, e)
-			}
-		}
-
-		if len(entries) == 0 {
-			json.NewEncoder(w).Encode(ROIResponse{})
-			return
-		}
-
-		// Global accumulators
-		var totalConsumed, totalBaseline, totalSaved int64
-		var rangeReadOps int64
-		var sumReadPct float64
-		var readOpsWithLineInfo int64
-		antiPatterns := map[string]int64{}
-		toolMap := map[string]*ToolROI{}
-		sessionMap := map[string]*SessionROI{}
-		var topSavings []TopSavingOp
-		var earliest, latest time.Time
-
-		for i := range entries {
-			e := &entries[i]
-
-			// Time range
-			if earliest.IsZero() || e.Timestamp.Before(earliest) {
-				earliest = e.Timestamp
-			}
-			if latest.IsZero() || e.Timestamp.After(latest) {
-				latest = e.Timestamp
-			}
-
-			// Anti-patterns
-			if e.FeedbackPattern != "" {
-				antiPatterns[e.FeedbackPattern]++
-			}
-
-			// Token accumulators — only count ops with ROI data (v4.3.3+)
-			if e.TokensConsumed > 0 || e.TokensBaseline > 0 {
-				totalConsumed += e.TokensConsumed
-				totalBaseline += e.TokensBaseline
-				totalSaved += e.TokensSaved
-
-				// By tool
-				tr, ok := toolMap[e.Tool]
-				if !ok {
-					tr = &ToolROI{Tool: e.Tool}
-					toolMap[e.Tool] = tr
-				}
-				tr.OpsCount++
-				tr.TokensConsumed += e.TokensConsumed
-				tr.TokensBaseline += e.TokensBaseline
-				tr.TokensSaved += e.TokensSaved
-
-				// Top savings
-				if e.TokensSaved > 0 {
-					topSavings = append(topSavings, TopSavingOp{
-						Timestamp:      e.Timestamp,
-						Tool:           e.Tool,
-						Path:           e.Path,
-						TokensConsumed: e.TokensConsumed,
-						TokensBaseline: e.TokensBaseline,
-						TokensSaved:    e.TokensSaved,
-						FileSize:       e.FileSize,
-					})
-				}
-			}
-
-			// Range read efficiency
-			if (e.Tool == "read_file" || e.Tool == "read_text_file") && e.FileLinesTotal > 0 && e.LinesRead > 0 {
-				readOpsWithLineInfo++
-				pct := float64(e.LinesRead) / float64(e.FileLinesTotal) * 100
-				sumReadPct += pct
-				if e.LinesRead < e.FileLinesTotal {
-					rangeReadOps++
-				}
-			}
-
-			// Session aggregation
-			if e.SessionID != "" {
-				sr, ok := sessionMap[e.SessionID]
-				if !ok {
-					sr = &SessionROI{SessionID: e.SessionID, FirstOp: e.Timestamp, LastOp: e.Timestamp}
-					sessionMap[e.SessionID] = sr
-				}
-				sr.OpsCount++
-				sr.TokensConsumed += e.TokensConsumed
-				sr.TokensBaseline += e.TokensBaseline
-				sr.TokensSaved += e.TokensSaved
-				if e.Timestamp.Before(sr.FirstOp) {
-					sr.FirstOp = e.Timestamp
-				}
-				if e.Timestamp.After(sr.LastOp) {
-					sr.LastOp = e.Timestamp
-				}
-				if e.Status == "error" {
-					sr.Errors++
-				}
-			}
-		}
-
-		// Compute tool savings %
-		byTool := make([]ToolROI, 0, len(toolMap))
-		for _, tr := range toolMap {
-			if tr.OpsCount > 0 {
-				tr.AvgSavedPerOp = float64(tr.TokensSaved) / float64(tr.OpsCount)
-			}
-			if tr.TokensBaseline > 0 {
-				tr.SavingsPct = float64(tr.TokensSaved) / float64(tr.TokensBaseline) * 100
-			}
-			byTool = append(byTool, *tr)
-		}
-		sort.Slice(byTool, func(i, j int) bool { return byTool[i].TokensSaved > byTool[j].TokensSaved })
-
-		// Compute session stats
-		sessions := make([]SessionROI, 0, len(sessionMap))
-		for _, sr := range sessionMap {
-			sr.DurationMin = sr.LastOp.Sub(sr.FirstOp).Minutes()
-			if sr.TokensBaseline > 0 {
-				sr.SavingsPct = float64(sr.TokensSaved) / float64(sr.TokensBaseline) * 100
-			}
-			sessions = append(sessions, *sr)
-		}
-		sort.Slice(sessions, func(i, j int) bool { return sessions[i].FirstOp.After(sessions[j].FirstOp) })
-		if len(sessions) > 20 {
-			sessions = sessions[:20]
-		}
-
-		// Top savings ops (top 10)
-		sort.Slice(topSavings, func(i, j int) bool { return topSavings[i].TokensSaved > topSavings[j].TokensSaved })
-		if len(topSavings) > 10 {
-			topSavings = topSavings[:10]
-		}
-
-		// Global %
-		var savingsPct float64
-		if totalBaseline > 0 {
-			savingsPct = float64(totalSaved) / float64(totalBaseline) * 100
-		}
-
-		// Range read stats
-		var avgReadPct, rangeReadPct float64
-		if readOpsWithLineInfo > 0 {
-			avgReadPct = sumReadPct / float64(readOpsWithLineInfo)
-			rangeReadPct = float64(rangeReadOps) / float64(readOpsWithLineInfo) * 100
-		}
-
-		timeSpan := ""
-		if !earliest.IsZero() {
-			d := latest.Sub(earliest)
-			switch {
-			case d < time.Hour:
-				timeSpan = fmt.Sprintf("%.0f min", d.Minutes())
-			case d < 24*time.Hour:
-				timeSpan = fmt.Sprintf("%.1f h", d.Hours())
-			default:
-				timeSpan = fmt.Sprintf("%.1f days", d.Hours()/24)
-			}
-		}
-
-		json.NewEncoder(w).Encode(ROIResponse{
-			TotalOps:       int64(len(entries)),
-			TokensConsumed: totalConsumed,
-			TokensBaseline: totalBaseline,
-			TokensSaved:    totalSaved,
-			SavingsPct:     math.Round(savingsPct*10) / 10,
-			RangeReadOps:   rangeReadOps,
-			RangeReadPct:   math.Round(rangeReadPct*10) / 10,
-			AvgReadPct:     math.Round(avgReadPct*10) / 10,
-			SessionCount:   int64(len(sessionMap)),
-			Sessions:       sessions,
-			ByTool:         byTool,
-			TopSavings:     topSavings,
-			AntiPatterns:   antiPatterns,
-			TimeSpan:       timeSpan,
 		})
 	}
 }
