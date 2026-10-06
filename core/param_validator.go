@@ -250,7 +250,23 @@ var toolSchemas = map[string]ToolParamSchema{
 		"paths": {Type: ParamStringOrArray},
 	},
 
-	// ---- VERSION CONTROL (1) ----
+	// ---- VERSION CONTROL (2) ----
+	"github_issues": {
+		"action":    {ParamString, true},
+		"path":      {ParamString, false},
+		"repo":      {ParamString, false},
+		"hostname":  {ParamString, false},
+		"number":    {ParamNumber, false},
+		"state":     {ParamString, false},
+		"labels":    {ParamArray, false},
+		"assignee":  {ParamString, false},
+		"assignees": {ParamArray, false},
+		"title":     {ParamString, false},
+		"body":      {ParamString, false},
+		"reason":    {ParamString, false},
+		"limit":     {ParamNumber, false},
+		"cursor":    {ParamString, false},
+	},
 	"git": {
 		"action":    {ParamString, true},
 		"path":      {ParamString, false},

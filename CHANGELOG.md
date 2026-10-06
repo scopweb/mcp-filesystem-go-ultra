@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### feat(github_issues): manage GitHub issues via gh
+
+Experimental ultra-only tool `github_issues` with actions `list`, `view`, `create`, `comment`, `edit`, `close`, and `reopen`. Backend is `gh` with separate arguments and JSON stdin (no shell, no `gh auth login`, no issue delete). Reads work under `--readonly`; writes do not and are not retried after an ambiguous failure. `path` resolves HTTPS and SSH remotes; a non-github.com remote is not treated as GitHub. Explicit `repo` skips local git. While a file security policy is active, path resolution is `FILE_POLICY_DENIED` before any git or gh process; `GitPolicyBlock` is unchanged. `--git-remote-allow` applies and has no force bypass. Titles, bodies, and comments are marked untrusted external data. Omitted edit fields are left unchanged; an empty body or empty label/assignee array is an explicit clear; an empty title is rejected.
+
+**Verification:** `TestGitHubIssues_ListFromPathHTTPSAndSSH` · `TestGitHubIssues_ExplicitRepoNoLocalRemote` · `TestGitHubIssues_EnterpriseAndNonGitHub` · `TestGitHubIssues_EditOmittedVsEmpty` · `TestGitHubIssues_ErrorsAndNoWriteRetry` · `TestGitHubIssues_ValidationReadonlyPolicyAllowlist`
+
 ### feat(security): file protection policy on top of allowed-paths
 
 `--file-security-config` loads an immutable JSON policy at startup. Invalid config exits 2. Without the flag, behavior is unchanged. Levels are `normal` < `read_only` < `protected` < `hidden`; the most restrictive match wins and a directory rule is inherited. Basename patterns match at any depth; separator patterns are relative to each sandbox root. `--insecure-open` plus a separator pattern is rejected.

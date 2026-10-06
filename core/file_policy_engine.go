@@ -281,6 +281,16 @@ func WSLPolicyBlock() error {
 	}
 }
 
+// GitHubIssuesResolveBlock refuses working-tree repo discovery while a file
+// security policy is active. It does not weaken GitPolicyBlock. An explicit
+// owner/repo does not run git and is not a bypass of that block.
+func GitHubIssuesResolveBlock() error {
+	return &FilePolicyError{
+		Op:      "github_issues",
+		Message: "cannot resolve a GitHub repository from the working tree while a file security policy is active; git is unavailable. Pass repo (owner/repo) and hostname if the host is not github.com",
+	}
+}
+
 // ContainsPolicyPath reports whether text names a hidden path. Used to keep
 // aggregated errors from echoing a hidden descendant.
 func (e *UltraFastEngine) SanitizePolicyText(text, requested string) string {

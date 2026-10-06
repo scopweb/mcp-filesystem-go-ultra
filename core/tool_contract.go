@@ -87,7 +87,7 @@ func classFor(name string) ActionClass {
 		"copy_file", "create_directory", "batch_operations", "project_replace",
 		"minify_js", "apply_patch":
 		return ClassWrite
-	case "wsl", "git", "backup", "server_info":
+	case "wsl", "git", "backup", "server_info", "github_issues":
 		return ClassMixed
 	default:
 		return ClassRead
@@ -126,6 +126,9 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 	setEnum("analyze_code", "action", "symbols", "lint", "sec", "impact")
 	setEnum("wsl", "action", "sync", "status", "autosync_config", "autosync_status")
 	setEnum("server_info", "action", "help", "stats", "artifact")
+	setEnum("github_issues", "action", "list", "view", "create", "comment", "edit", "close", "reopen")
+	setEnum("github_issues", "state", "open", "closed", "all")
+	setEnum("github_issues", "reason", "completed", "not_planned")
 	setItems := func(tool, param, items string) {
 		c := cs[tool]
 		if c == nil {
@@ -139,6 +142,8 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 	setItems("delete_file", "paths", "string")
 	setItems("get_file_info", "paths", "string")
 	setItems("git", "paths", "string")
+	setItems("github_issues", "labels", "string")
+	setItems("github_issues", "assignees", "string")
 	setItems("multi_edit", "edits", "object")
 	setItems("edit_file", "patterns", "object")
 
@@ -243,6 +248,23 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 				return true
 			default:
 				return false
+			}
+		}
+	}
+	if c := cs["github_issues"]; c != nil {
+		c.Examples = []string{
+			`github_issues(action:"list", path:"C:/repo")`,
+			`github_issues(action:"view", path:"C:/repo", number:12)`,
+			`github_issues(action:"comment", repo:"owner/repo", number:12, body:"note")`,
+			`github_issues(action:"close", repo:"owner/repo", number:12, reason:"completed")`,
+		}
+		c.Mutating = func(args map[string]interface{}) bool {
+			a, _ := args["action"].(string)
+			switch a {
+			case "list", "view", "":
+				return false
+			default:
+				return true
 			}
 		}
 	}
