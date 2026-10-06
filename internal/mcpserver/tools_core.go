@@ -129,6 +129,7 @@ func registerToolsOpts(s *server.MCPServer, engine *core.UltraFastEngine, opts r
 	registerPlatformTools(reg)
 	registerGitTools(reg)
 	registerGitHubIssuesTools(reg)
+	registerGitLabIssuesTools(reg)
 	registerMinifyTools(reg)
 	registerAnalyzeTools(reg)
 	registerDiscoveryTools(reg)

@@ -251,6 +251,19 @@ var toolSchemas = map[string]ToolParamSchema{
 	},
 
 	// ---- VERSION CONTROL (2) ----
+	"gitlab_issues": {
+		"action":   {ParamString, true},
+		"path":     {ParamString, false},
+		"repo":     {ParamString, false},
+		"base_url": {ParamString, false},
+		"number":   {ParamNumber, false},
+		"state":    {ParamString, false},
+		"labels":   {ParamArray, false},
+		"assignee": {ParamString, false},
+		"body":     {ParamString, false},
+		"limit":    {ParamNumber, false},
+		"page":     {ParamNumber, false},
+	},
 	"github_issues": {
 		"action":    {ParamString, true},
 		"path":      {ParamString, false},

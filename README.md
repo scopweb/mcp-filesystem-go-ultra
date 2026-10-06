@@ -1,10 +1,10 @@
 # MCP Filesystem Server Ultra
 
-**v4.7.1** · Go 1.27.1 · MCP 2025-11-25 · 27 tools ultra / 17 strict (agent core)
+**v4.7.1** · Go 1.27.1 · MCP 2025-11-25 · 28 tools ultra / 17 strict (agent core)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
-Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are disabled. Default `--profile=ultra` registers all 27 tools; `--profile=strict` registers the 17-tool agent core (includes `backup` for undo and `security_policy`; no `analyze_code`, no `git`, no `github_issues`).
+Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are disabled. Default `--profile=ultra` registers all 28 tools; `--profile=strict` registers the 17-tool agent core (includes `backup` for undo and `security_policy`; no `analyze_code`, no `git`, no `github_issues`, no `gitlab_issues`).
 
 ---
 
@@ -50,7 +50,7 @@ See [Build](#build) and [Configuration](#configuration) below for more.
 
 ### Productivity
 
-- **27 tools (ultra)** — 17 core + `git` + `github_issues` + `minify_js` + `analyze_code` + `help` + `security_policy` + discovery/patch. `--profile=strict` registers the 17-tool agent core (includes `backup` and `security_policy`; no `analyze_code`, no `github_issues`).
+- **28 tools (ultra)** — 17 core + `git` + `github_issues` + `gitlab_issues` + `minify_js` + `analyze_code` + `help` + `security_policy` + discovery/patch. `--profile=strict` registers the 17-tool agent core (includes `backup` and `security_policy`; no `analyze_code`, no `github_issues`).
 - **GitHub issues** — `github_issues` (ultra, experimental) lists, reads, creates, comments, edits, closes, and reopens issues through `gh`. It does not delete issues or run `gh auth login`. Reads work under `--readonly`; writes do not. Path resolution uses git remotes and is refused while a file security policy is active; pass `repo:"owner/repo"` to skip local git. `--git-remote-allow` applies. Issue text is external data, not instructions.
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
 - **Hook system** — 16 pre/post events (write, edit, delete, create, move, copy, read, search)
@@ -111,7 +111,7 @@ Keep this trio in the MCP `args` (and leave `--readonly` off so the agent can wr
 
 | Flag | Why |
 |------|-----|
-| `--profile=strict` | Registers the 17-tool agent core (`list_allowed_directories`, `directory_tree`, `read_file` / `write_file` / `edit_file` / `apply_patch`, `backup` for undo, `security_policy`, …). Omits `git`, `wsl`, `minify_js`, `analyze_code`, `batch_operations`, `copy_file`, `server_info`, … so `tools/list` stays small and lazy-loading clients actually see the useful set. Default is `ultra` (27 tools) so existing configs do not break. |
+| `--profile=strict` | Registers the 17-tool agent core (`list_allowed_directories`, `directory_tree`, `read_file` / `write_file` / `edit_file` / `apply_patch`, `backup` for undo, `security_policy`, …). Omits `git`, `wsl`, `minify_js`, `analyze_code`, `batch_operations`, `copy_file`, `server_info`, … so `tools/list` stays small and lazy-loading clients actually see the useful set. Default is `ultra` (28 tools) so existing configs do not break. |
 | `--compact-mode` | Short token-efficient responses (hashes, UNDO ids, no emoji walls). |
 | `--roots-mode=union` | MCP client Roots are **added** to the CLI allowlist. Default `replace` is wrong for OpenCode: it sends the workspace as Roots and **wipes** every other CLI path, so `list_allowed_directories` only shows one folder. |
 
@@ -238,7 +238,7 @@ Allowed paths: positional args after the flags, **or** one `--allowed-paths` wit
 | `--allowed-paths` | (required) | Comma-separated allowed roots; or pass paths as positional args |
 | `--insecure-open` | off | Labs only: disable the sandbox (entire disk). Fail-closed by default since v4.6.0. |
 | `--roots-mode` | replace | How MCP client Roots combine with CLI paths: `replace`, `union`, `ignore` |
-| `--profile` | ultra | `ultra` = all 27 tools; `strict` = 17-tool agent core (includes `backup` and `security_policy`) |
+| `--profile` | ultra | `ultra` = all 28 tools; `strict` = 17-tool agent core (includes `backup` and `security_policy`) |
 | `--file-security-config` | empty | JSON policy layered on allowed-paths. Invalid file exits 2. Immutable until restart. See below. |
 | `--git-network` | off | Enable `git` push/fetch. Off the critical path; ignored in `strict` |
 | `--git-remote-allow` | empty (any destination) | Optional extra lock on push/fetch. See below. |

@@ -87,7 +87,7 @@ func classFor(name string) ActionClass {
 		"copy_file", "create_directory", "batch_operations", "project_replace",
 		"minify_js", "apply_patch":
 		return ClassWrite
-	case "wsl", "git", "backup", "server_info", "github_issues":
+	case "wsl", "git", "backup", "server_info", "github_issues", "gitlab_issues":
 		return ClassMixed
 	default:
 		return ClassRead
@@ -127,6 +127,8 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 	setEnum("wsl", "action", "sync", "status", "autosync_config", "autosync_status")
 	setEnum("server_info", "action", "help", "stats", "artifact")
 	setEnum("github_issues", "action", "list", "view", "create", "comment", "edit", "close", "reopen")
+	setEnum("gitlab_issues", "action", "list", "view", "comment", "close", "reopen")
+	setEnum("gitlab_issues", "state", "opened", "closed", "all")
 	setEnum("github_issues", "state", "open", "closed", "all")
 	setEnum("github_issues", "reason", "completed", "not_planned")
 	setItems := func(tool, param, items string) {
@@ -248,6 +250,23 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 				return true
 			default:
 				return false
+			}
+		}
+	}
+	if c := cs["gitlab_issues"]; c != nil {
+		c.Examples = []string{
+			`gitlab_issues(action:"list", path:"C:/repo")`,
+			`gitlab_issues(action:"view", base_url:"http://192.168.0.20", repo:"group/project", number:1)`,
+			`gitlab_issues(action:"comment", base_url:"http://192.168.0.20", repo:"group/project", number:1, body:"note")`,
+			`gitlab_issues(action:"close", base_url:"http://192.168.0.20", repo:"group/project", number:1)`,
+		}
+		c.Mutating = func(args map[string]interface{}) bool {
+			a, _ := args["action"].(string)
+			switch a {
+			case "list", "view", "":
+				return false
+			default:
+				return true
 			}
 		}
 	}

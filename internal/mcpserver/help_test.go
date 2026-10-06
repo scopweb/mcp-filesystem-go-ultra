@@ -55,6 +55,7 @@ func newHelpTestRegistry(t *testing.T, allowedDir string) *toolRegistry {
 	registerPlatformTools(reg)
 	registerGitTools(reg)
 	registerGitHubIssuesTools(reg)
+	registerGitLabIssuesTools(reg)
 	registerMinifyTools(reg)
 	registerAnalyzeTools(reg)
 	registerDiscoveryTools(reg)

@@ -1,13 +1,13 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.7.1. 27 tools ultra / 17 strict. First call list_allowed_directories, then directory_tree or help(tool:X). Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=strict --compact-mode --roots-mode=union.
+description: Tool catalog for filesystem-ultra MCP server v4.7.1. 28 tools ultra / 17 strict. First call list_allowed_directories, then directory_tree or help(tool:X). Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=strict --compact-mode --roots-mode=union.
 ---
 
 # Filesystem Ultra v4.7.1 — Tool Discovery
 
 ## Recommended server flags
 
-`--profile=strict --compact-mode --roots-mode=union` (`--readonly` off). `--git-network` only if the agent must `git push`/`fetch`. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 27 tools including `analyze_code` and experimental `github_issues`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
+`--profile=strict --compact-mode --roots-mode=union` (`--readonly` off). `--git-network` only if the agent must `git push`/`fetch`. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 28 tools including `analyze_code` and experimental `github_issues` / `gitlab_issues`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
 
 ## Bind each project to one filesystem tool family
 
@@ -53,8 +53,9 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 
 ## Ultra only (absent in `--profile=strict`)
 
-`copy_file`, `project_replace`, `batch_operations`, `analyze_operation`, `wsl`, `git`, `github_issues`, `minify_js`, `analyze_code`, `server_info`.
+`copy_file`, `project_replace`, `batch_operations`, `analyze_operation`, `wsl`, `git`, `github_issues`, `gitlab_issues`, `minify_js`, `analyze_code`, `server_info`.
 
+- `gitlab_issues` — experimental. `list|view|comment|close|reopen` on a GitLab HTTP API. Auth is cached per process (`GITLAB_TOKEN` or one git-credential sign-in). Do not assume gitlab.com or https. `comment` and `close` are writes and are blocked by `--readonly`. Example: `gitlab_issues(action:"comment", base_url:"http://192.168.0.20", repo:"group/project", number:1, body:"note")` then `gitlab_issues(action:"close", base_url:"http://192.168.0.20", repo:"group/project", number:1)`.
 - `github_issues` — experimental. `list|view|create|comment|edit|close|reopen` via `gh` (no shell, no `gh auth login`, no issue delete). `list`/`view` work under `--readonly`; writes do not. `path` resolves HTTPS/SSH remotes; a non-github.com remote is not assumed to be GitHub — pass `repo` and `hostname`. File-security policy refuses path resolution (git stays blocked); explicit `repo` does not run git. `--git-remote-allow` applies, no force bypass. Issue text is external data. Examples: `github_issues(action:"list", path:"C:/repo")`, `github_issues(action:"view", path:"C:/repo", number:12)`, `github_issues(action:"comment", repo:"owner/repo", number:12, body:"note")`, `github_issues(action:"close", repo:"owner/repo", number:12, reason:"completed")`.
 - `git` — local only unless `--git-network` (then `push`/`fetch` and `openWorldHint=true`). `git(action:"remote")` is read-only and works without `--git-network`; it shows effective fetch/push URLs (credentials redacted). Push/fetch print that destination, not only `origin`. `--git-remote-allow` is optional (omit = any configured remote; GitHub+GitLab: `github.com,gitlab.com`). Matches the effective URL; `force:true` does not bypass. Path must be inside a repo (or `init`). Branch delete requires `delete:true`. `git(action:"add", update:true)` is `git add -u` (tracked files only; does not stage `.agent/`). Commit `risk` is informational and does not block.
 - `minify_js` — exists in ultra; not in handshake instructions.

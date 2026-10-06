@@ -40,6 +40,7 @@ var experimentalFeatures = map[string]string{
 	"git:remote":      "4.7.1",
 	"security_policy": "4.7.1",
 	"github_issues":   "4.7.1",
+	"gitlab_issues":   "4.7.1",
 }
 
 // isExperimental reports whether featureKey is currently experimental and
