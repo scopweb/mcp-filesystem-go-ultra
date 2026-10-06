@@ -291,6 +291,14 @@ func GitHubIssuesResolveBlock() error {
 	}
 }
 
+// GitLabIssuesResolveBlock refuses working-tree discovery while a file security policy is active.
+func GitLabIssuesResolveBlock() error {
+	return &FilePolicyError{
+		Op:      "gitlab_issues",
+		Message: "cannot resolve a GitLab project from the working tree while a file security policy is active; git is unavailable. Pass repo (group/project) and base_url",
+	}
+}
+
 // ContainsPolicyPath reports whether text names a hidden path. Used to keep
 // aggregated errors from echoing a hidden descendant.
 func (e *UltraFastEngine) SanitizePolicyText(text, requested string) string {

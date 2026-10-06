@@ -39,6 +39,12 @@ const (
 	errCodeGHNotIssue       = "GH_NOT_ISSUE"
 	errCodeGHHostDenied     = "GH_HOST_DENIED"
 	errCodeGHFailed         = "GH_FAILED"
+	errCodeGLAuth           = "GL_AUTH_REQUIRED"
+	errCodeGLNotFound       = "GL_NOT_FOUND"
+	errCodeGLForbidden      = "GL_FORBIDDEN"
+	errCodeGLNetwork        = "GL_NETWORK"
+	errCodeGLAmbiguous      = "GL_AMBIGUOUS"
+	errCodeGLUnresolved     = "GL_REPO_UNRESOLVED"
 )
 
 const (
