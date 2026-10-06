@@ -27,6 +27,18 @@ const (
 	errCodeRollbackFailed   = "ROLLBACK_FAILED"
 	errCodeRollbackComplete = "ROLLBACK_COMPLETE"
 	errCodeBeginPatch       = "BEGIN_PATCH"
+	errCodeGHCLIMissing     = "GH_CLI_MISSING"
+	errCodeGHAuth           = "GH_AUTH_REQUIRED"
+	errCodeGHForbidden      = "GH_FORBIDDEN"
+	errCodeGHNotFound       = "GH_NOT_FOUND"
+	errCodeGHRateLimit      = "GH_RATE_LIMIT"
+	errCodeGHNetwork        = "GH_NETWORK"
+	errCodeGHAmbiguous      = "GH_AMBIGUOUS"
+	errCodeGHUnresolved     = "GH_REPO_UNRESOLVED"
+	errCodeGHOutputLimit    = "GH_OUTPUT_LIMIT"
+	errCodeGHNotIssue       = "GH_NOT_ISSUE"
+	errCodeGHHostDenied     = "GH_HOST_DENIED"
+	errCodeGHFailed         = "GH_FAILED"
 )
 
 const (
