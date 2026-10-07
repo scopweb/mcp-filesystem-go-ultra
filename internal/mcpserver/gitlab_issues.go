@@ -33,6 +33,7 @@ func (t glTarget) api(path string) string {
 type glSession struct {
 	base   string
 	token  string
+	csrf   string
 	client *http.Client
 }
 
@@ -595,9 +596,11 @@ func gitlabStatus(status int, body []byte, write bool) *mcp.CallToolResult {
 	}
 	switch status {
 	case http.StatusUnauthorized:
-		return ghFail(errCodeGLAuth, "GitLab authentication failed",
-			"Store a git credential for this host or set GITLAB_TOKEN. This tool does not print the secret and will not retry a write.",
-			false, map[string]any{"status": status})
+		sug := "Store a git credential for this host or set GITLAB_TOKEN with api scope. This tool does not print the secret and will not retry a write."
+		if write {
+			sug = "Reads can work with a session cookie; writes need X-CSRF-Token or GITLAB_TOKEN with api scope. Do not retry this write."
+		}
+		return ghFail(errCodeGLAuth, "GitLab authentication failed", sug, false, map[string]any{"status": status})
 	case http.StatusForbidden:
 		return ghFail(errCodeGLForbidden, clip(msg, 300), "The account lacks permission for this project or action.", false, map[string]any{"status": status})
 	case http.StatusNotFound:
@@ -669,47 +672,69 @@ func gitlabLogin(ctx context.Context, base string) (*glSession, *mcp.CallToolRes
 		return nil, ghFail(errCodeGLAuth, "cannot start a GitLab session", suggestionValidation, false, nil)
 	}
 	client := gitlabHTTPClient(jar)
-	if err := gitlabFormLogin(ctx, client, base, user, pass); err != nil {
+	csrf, err := gitlabFormLogin(ctx, client, base, user, pass)
+	if err != nil {
 		return nil, ghFail(errCodeGLAuth, "GitLab sign-in failed",
 			"Check the stored git credential for this host. The password is not included in this error.",
 			false, map[string]any{"base_url": base})
 	}
-	return &glSession{base: base, client: client}, nil
+	return &glSession{base: base, csrf: csrf, client: client}, nil
 }
 
 func looksLikeGitLabToken(pass string) bool {
-	p := strings.ToLower(pass)
-	return strings.HasPrefix(p, "glpat-") || strings.HasPrefix(p, "gldt-") || len(pass) >= 20
+	p := strings.ToLower(strings.TrimSpace(pass))
+	for _, prefix := range []string{"glpat-", "gldt-", "glptt-", "glrt-", "glsoat-"} {
+		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func gitlabHTTPClient(jar http.CookieJar) *http.Client {
 	return &http.Client{Timeout: gitlabTimeout, Jar: jar}
 }
 
-func gitlabFormLogin(ctx context.Context, client *http.Client, base, user, pass string) error {
+func extractGitLabCSRF(page string) string {
+	markers := []string{
+		`name="csrf-token" content="`,
+		`name='csrf-token' content='`,
+		`name="authenticity_token" value="`,
+		`name='authenticity_token' value='`,
+	}
+	for _, m := range markers {
+		i := strings.Index(page, m)
+		if i < 0 {
+			continue
+		}
+		rest := page[i+len(m):]
+		q := m[len(m)-1:]
+		end := strings.Index(rest, q)
+		if end > 0 {
+			return rest[:end]
+		}
+	}
+	return ""
+}
+
+func gitlabFormLogin(ctx context.Context, client *http.Client, base, user, pass string) (string, error) {
 	loginURL := strings.TrimRight(base, "/") + "/users/sign_in"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, loginURL, nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	page, err := readLimited(resp.Body, 1<<20)
 	resp.Body.Close()
 	if err != nil {
-		return err
+		return "", err
 	}
-	token := ""
-	if m := strings.Index(page, `name="authenticity_token" value="`); m >= 0 {
-		rest := page[m+len(`name="authenticity_token" value="`):]
-		if end := strings.Index(rest, `"`); end > 0 {
-			token = rest[:end]
-		}
-	}
+	token := extractGitLabCSRF(page)
 	if token == "" {
-		return fmt.Errorf("gitlab login page has no csrf token")
+		return "", fmt.Errorf("gitlab login page has no csrf token")
 	}
 	form := url.Values{}
 	form.Set("user[login]", user)
@@ -718,22 +743,36 @@ func gitlabFormLogin(ctx context.Context, client *http.Client, base, user, pass 
 	form.Set("user[remember_me]", "0")
 	post, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return err
+		return "", err
 	}
 	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err = client.Do(post)
 	if err != nil {
-		return err
+		return "", err
 	}
 	body, err := readLimited(resp.Body, 1<<20)
 	resp.Body.Close()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if strings.Contains(body, "Invalid login") || strings.Contains(body, "Invalid Login or password") {
-		return fmt.Errorf("invalid gitlab login")
+		return "", fmt.Errorf("invalid gitlab login")
 	}
-	return nil
+	csrf := extractGitLabCSRF(body)
+	if csrf == "" {
+		home, herr := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/", nil)
+		if herr == nil {
+			if hresp, herr := client.Do(home); herr == nil {
+				hbody, _ := readLimited(hresp.Body, 1<<20)
+				hresp.Body.Close()
+				csrf = extractGitLabCSRF(hbody)
+			}
+		}
+	}
+	if csrf == "" {
+		csrf = token
+	}
+	return csrf, nil
 }
 
 func (s *glSession) do(ctx context.Context, method, rawURL string, payload []byte) (int, http.Header, []byte, error) {
@@ -748,8 +787,15 @@ func (s *glSession) do(ctx context.Context, method, rawURL string, payload []byt
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("Accept", "application/json")
 	if s.token != "" {
 		req.Header.Set("PRIVATE-TOKEN", s.token)
+	} else if s.csrf != "" {
+		origin := strings.TrimRight(s.base, "/")
+		req.Header.Set("X-CSRF-Token", s.csrf)
+		req.Header.Set("X-Requested-With", "XMLHttpRequest")
+		req.Header.Set("Referer", origin+"/")
+		req.Header.Set("Origin", origin)
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
