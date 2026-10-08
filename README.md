@@ -1,10 +1,27 @@
 # MCP Filesystem Server Ultra
 
-**v4.8.0** · Go 1.27.1 · MCP 2025-11-25 · 29 tools ultra / 18 agent / 17 strict
+**v4.8.0** · Go 1.27.1 · MCP 2025-11-25 · stdio · 29 tools ultra / 18 agent / 17 strict
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
 Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are disabled. Default `--profile=ultra` registers all 29 tools; `--profile=agent` is the 17-tool core plus `git`; `--profile=strict` registers the 17-tool core (includes `backup` for undo and `security_policy`; no `analyze_code`, no `git`, no `context_pack`, no `github_issues`, no `gitlab_issues`).
+
+Transport is **stdio only**. Spec 2026-07-28 (Tasks, stateless Streamable HTTP) is out of scope.
+
+## Compared with the reference server
+
+Against [`@modelcontextprotocol/server-filesystem`](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem). The reference column is its README plus open issue [3174](https://github.com/modelcontextprotocol/servers/issues/3174). This column is what this tree does, not a promise about untested Windows edge cases.
+
+| | Reference server | filesystem-ultra |
+|---|---|---|
+| Windows roots | Client roots **replace** the CLI list. `file:///c%3A/temp` is skipped as invalid (issue 3174, open). | `file:///c%3A/temp` becomes `c:\temp`. `file://server/share/dir` becomes `\\server\share\dir`. `--roots-mode=union` keeps the CLI list and adds client roots. Reserved device names (`CON`, `NUL`, …) and NTFS ADS (`file.txt:stream`) are rejected. 8.3 short names are not rewritten. |
+| Search | `search_files` is a glob on **names**, not file contents. | Names by default. Content with `include_content:true`. |
+| Undo | No backup or undo tool. | `backup(action:"undo_last")` walks the chain. |
+| Dry-run / diff | `edit_file` has `dryRun` and returns a diff. | `dry_run` on edit and patch. Also `diff_files` and `apply_patch`. |
+
+## Claude Desktop extension (`.mcpb`)
+
+`scripts/pack-mcpb.ps1` builds a Windows bundle into `dist/` (gitignored). Double-click the `.mcpb` in Claude Desktop. The install dialog asks for allowed directories; the server exits if none are set. The bundle is **win32 only** and starts with `--profile=strict --compact-mode --roots-mode=union`. Sending it to the extension directory is a manual step.
 
 ---
 
@@ -529,7 +546,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest: v4.7.1 — operational recovery: multi_edit diagnosis, search pagination, git destinations, verifiable stats). Remaining work: [ROADMAP.md](ROADMAP.md).
+See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest: v4.8.0). Remaining work: [ROADMAP.md](ROADMAP.md).
 
 ---
 
