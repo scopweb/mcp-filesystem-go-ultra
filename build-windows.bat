@@ -26,17 +26,19 @@ if not exist %OUT_DIR% mkdir %OUT_DIR%
 REM ------------------------------------------------------------
 REM 1. Main server (standard, no embedded ripgrep)
 REM ------------------------------------------------------------
-echo [1/4] Building %OUT_DIR%\filesystem-ultra-v4.exe ...
+echo [1/5] Building %OUT_DIR%\filesystem-ultra-v4.exe ...
 if exist %OUT_DIR%\filesystem-ultra-v4.exe del %OUT_DIR%\filesystem-ultra-v4.exe
 go build "%GO_LDFLAGS%" %GO_FLAGS% -o %OUT_DIR%\filesystem-ultra-v4.exe .\cmd\filesystem-ultra
 if %ERRORLEVEL% neq 0 goto fail
+copy /Y %OUT_DIR%\filesystem-ultra-v4.exe %OUT_DIR%\filesystem-ultra.exe >nul
 echo   OK: %OUT_DIR%\filesystem-ultra-v4.exe
+echo   OK: %OUT_DIR%\filesystem-ultra.exe
 
 REM ------------------------------------------------------------
 REM 2. Main server with embedded ripgrep (recommended for Claude)
 REM ------------------------------------------------------------
 echo.
-echo [2/4] Building %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe (with embedded ripgrep)...
+echo [2/5] Building %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe (with embedded ripgrep)...
 if exist %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe del %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe
 go build "%GO_LDFLAGS%" %GO_FLAGS% -tags embed_rg -o %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe .\cmd\filesystem-ultra
 if %ERRORLEVEL% neq 0 goto fail
@@ -48,7 +50,7 @@ REM    This is the CORRECT way. The old -tags proxy build is dead.
 REM    Output name matches documentation (doc/MCP-PROXY.md).
 REM ------------------------------------------------------------
 echo.
-echo [3/4] Building %OUT_DIR%\mcp-proxy.exe (logging proxy)...
+echo [3/5] Building %OUT_DIR%\mcp-proxy.exe (logging proxy)...
 if exist %OUT_DIR%\mcp-proxy.exe del %OUT_DIR%\mcp-proxy.exe
 go build "%GO_LDFLAGS%" %GO_FLAGS% -o %OUT_DIR%\mcp-proxy.exe ./cmd/proxy
 if %ERRORLEVEL% neq 0 goto fail
@@ -58,11 +60,20 @@ REM ------------------------------------------------------------
 REM 4. Dashboard (separate binary for logs/metrics/backups)
 REM ------------------------------------------------------------
 echo.
-echo [4/4] Building %OUT_DIR%\filesystem-ultra-v4-dashboard.exe ...
+echo [4/5] Building %OUT_DIR%\filesystem-ultra-v4-dashboard.exe ...
 if exist %OUT_DIR%\filesystem-ultra-v4-dashboard.exe del %OUT_DIR%\filesystem-ultra-v4-dashboard.exe
 go build "%GO_LDFLAGS%" %GO_FLAGS% -o %OUT_DIR%\filesystem-ultra-v4-dashboard.exe ./cmd/dashboard/
 if %ERRORLEVEL% neq 0 goto fail
 echo   OK: %OUT_DIR%\filesystem-ultra-v4-dashboard.exe
+
+REM ------------------------------------------------------------
+REM 5. Claude Desktop bundle (.mcpb) from the server just built
+REM ------------------------------------------------------------
+echo.
+echo [5/5] Packing dist\filesystem-ultra-win32.mcpb ...
+powershell -NoProfile -File scripts\pack-mcpb.ps1 -Exe %OUT_DIR%\filesystem-ultra-v4.exe
+if %ERRORLEVEL% neq 0 goto fail
+echo   OK: dist\filesystem-ultra-*.mcpb
 
 echo.
 echo ==============================================
@@ -71,10 +82,12 @@ echo ==============================================
 echo.
 echo   All binaries created inside: %OUT_DIR%\
 echo.
+echo     %OUT_DIR%\filesystem-ultra.exe               (same server, .mcpb entry name)
 echo     %OUT_DIR%\filesystem-ultra-v4.exe
 echo     %OUT_DIR%\filesystem-ultra-v4-embed_rg.exe   (recommended for Claude)
 echo     %OUT_DIR%\mcp-proxy.exe                      (use this in Claude Desktop)
 echo     %OUT_DIR%\filesystem-ultra-v4-dashboard.exe
+echo     dist\filesystem-ultra-*-win32.mcpb
 echo.
 echo   IMPORTANT - Claude Desktop configuration:
 echo     Use "%OUT_DIR%\mcp-proxy.exe"

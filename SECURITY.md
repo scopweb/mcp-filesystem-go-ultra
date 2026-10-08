@@ -229,4 +229,4 @@ Edits still auto-proceed with backup. These path floors only raise `ChangeImpact
 | Pipeline regex_transform + large file hooks | LOW-MEDIUM | Partially mitigated (2026) | `regex_transform` now runs pre/post-edit hooks. Content is provided, but StreamingWriteFile for very large files only passes metadata. |
 | Git tool command injection on Windows | MEDIUM | **Mitigated (2026)** | Removed dangerous string concatenation in `execGitCommand` fallback. Arguments are now passed properly. |
 | Destructive Git operations without confirmation | MEDIUM | **Mitigated (2026)** | `restore` and `branch delete` now require `force=true`. Tool annotations updated to reflect destructiveness. |
-| ReDoS via regex patterns in `search_files` | LOW | Accepted | Regex compiled once per query; consider rate-limiting |
+| ReDoS via regex patterns in `search_files` | LOW | Mitigated | `CompileRegex` uses Go's RE2. Nested quantifiers stay linear. Backreferences are rejected. |
