@@ -2,6 +2,8 @@
 
 Living plan. Shipped work is [CHANGELOG.md](CHANGELOG.md). Closed plans are local copies in `docs/history/` (that folder is not in git).
 
+Protocol in this tree: **MCP 2025-11-25 over stdio**. Spec 2026-07-28 (Tasks, stateless Streamable HTTP) stays out of scope, same as the list below.
+
 ## Now — P1, real agent evaluation
 
 Still open. `TestE2E_E6_AgentEval` and `examples/harness/benchmark -suite reliability` are scripted. They do not close this.

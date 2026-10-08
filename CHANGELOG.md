@@ -2,6 +2,12 @@
 
 > **Note for humans**: This file grew to ~4700 lines. For changes before v4.6 see `git log --oneline`. Only recent releases are summarized here.
 
+## [Unreleased]
+
+### docs: comparison table, protocol line, and Windows `.mcpb`
+
+README table against `@modelcontextprotocol/server-filesystem` (Windows roots, name vs content search, undo, dry-run/diff). Protocol stated as MCP 2025-11-25 over stdio; 2026-07-28 stays out of scope. `bundle/manifest.json` plus `scripts/pack-mcpb.ps1` build a win32 `.mcpb` into `dist/` (not committed).
+
 ## [4.8.0] - 2026-10-08
 
 ### fix(search,regex): affected lines, merged context, and per-file tokens

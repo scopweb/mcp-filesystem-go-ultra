@@ -1,0 +1,52 @@
+{
+  "manifest_version": "0.3",
+  "name": "filesystem-ultra",
+  "display_name": "MCP Filesystem Ultra",
+  "version": "4.8.0",
+  "description": "Safe local filesystem for AI agents. MCP 2025-11-25, stdio, Windows binary.",
+  "long_description": "Backups with step-through undo, optimistic concurrency, and a fail-closed allowlist. This bundle is Windows-only. It does not implement MCP 2026-07-28 (Tasks, stateless Streamable HTTP). The canonical name is filesystem-ultra (github.com/scopweb/mcp-filesystem-go-ultra), not mcp-filesystem-server-ultra.",
+  "author": {
+    "name": "scopweb",
+    "url": "https://github.com/scopweb"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scopweb/mcp-filesystem-go-ultra"
+  },
+  "homepage": "https://filesystem.scopweb.com",
+  "documentation": "https://github.com/scopweb/mcp-filesystem-go-ultra#readme",
+  "support": "https://github.com/scopweb/mcp-filesystem-go-ultra/issues",
+  "license": "MIT",
+  "keywords": ["filesystem", "mcp", "windows", "stdio"],
+  "compatibility": {
+    "claude_desktop": ">=1.0.0",
+    "platforms": ["win32"]
+  },
+  "server": {
+    "type": "binary",
+    "entry_point": "server/filesystem-ultra.exe",
+    "mcp_config": {
+      "command": "${__dirname}/server/filesystem-ultra.exe",
+      "args": [
+        "--profile",
+        "strict",
+        "--compact-mode",
+        "--roots-mode",
+        "union",
+        "--log-level",
+        "error",
+        "${user_config.allowed_directories}"
+      ]
+    }
+  },
+  "user_config": {
+    "allowed_directories": {
+      "type": "directory",
+      "title": "Allowed directories",
+      "description": "Directories this server may read and write. At least one is required. Pick the project folder, not the whole disk.",
+      "multiple": true,
+      "required": true
+    }
+  },
+  "tools_generated": true
+}
