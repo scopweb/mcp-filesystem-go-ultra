@@ -514,8 +514,9 @@ func (e *UltraFastEngine) GetEnvironment() (isWSL bool, windowsUser string) {
 	return isWSL, windowsUser
 }
 
-// CompileRegex returns a cached compiled regex pattern or compiles and caches a new one
-// Avoids expensive regex.Compile calls in hot paths
+// CompileRegex returns a cached compiled regex pattern or compiles and caches a new one.
+// Avoids expensive regex.Compile calls in hot paths.
+// The compiler is Go's RE2: match time is linear in the input, and backreferences are rejected.
 func (e *UltraFastEngine) CompileRegex(pattern string) (*regexp.Regexp, error) {
 	// Check cache first (read lock)
 	e.regexCache.mu.RLock()

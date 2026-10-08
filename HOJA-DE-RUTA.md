@@ -22,10 +22,10 @@ Lo que decide si alguien cambia el server oficial por este.
 
 Hoy el bloqueo de secretos depende de un hook que el usuario tiene que montar. Los forks nuevos lo traen de serie.
 
-1. Denegar por defecto lectura y escritura de `.env`, `*.pem`, `id_rsa`, `*.pfx`, `credentials.json`. Flag `--allow-secrets` para opt-in.
-2. Sustituir el regex de `search_files` por RE2, o rechazar patrones con backtracking. El riesgo está aceptado en `SECURITY.md`.
-3. `openWorldHint: true` en `git`, `github_issues`, `gitlab_issues`.
-4. Test de identidad de fichero en edit/write: birthtime, hardlink y file id de NTFS sobreviven. El oficial pasó a in-place en POSIX (PR 4516) y dejó Windows en temp+rename. Si aquí también hay rename, documentarlo.
+1. Denegar por defecto lectura y escritura de `.env`, `*.pem`, `id_rsa`, `*.pfx`, `credentials.json`. Flag `--allow-secrets` para opt-in. Hecho: `IsSecretPath` + `IsPathAllowed`. No hace falta el hook.
+2. Sustituir el regex de `search_files` por RE2, o rechazar patrones con backtracking. Hecho: `CompileRegex` es el RE2 de Go. `SECURITY.md` ya no lo deja como aceptado.
+3. `openWorldHint: true` en `git`, `github_issues`, `gitlab_issues`. Hecho en los dos de issues. `git` solo con `--git-network`: un status local no es mundo abierto. No se fuerza a true.
+4. Test de identidad de fichero en edit/write: birthtime, hardlink y file id de NTFS sobreviven. El oficial pasó a in-place en POSIX (PR 4516) y dejó Windows en temp+rename. Aquí también hay rename, en todas las plataformas. No sobreviven: el test lo fija y README/SECURITY lo dicen.
 
 ## Fase C — paridad Windows que el oficial sigue fallando
 

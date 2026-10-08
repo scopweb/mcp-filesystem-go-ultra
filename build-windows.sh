@@ -34,8 +34,9 @@ build_native() {
 
     # Main server
     echo "[1/4] Building bin/filesystem-ultra-v4 ..."
-    rm -f bin/filesystem-ultra-v4
+    rm -f bin/filesystem-ultra-v4 bin/filesystem-ultra
     go build "$GO_LDFLAGS" $GO_FLAGS -o bin/filesystem-ultra-v4 ./cmd/filesystem-ultra
+    cp -f bin/filesystem-ultra-v4 bin/filesystem-ultra
 
     # Main server + embedded ripgrep (recommended)
     echo "[2/4] Building bin/filesystem-ultra-v4-embed_rg ..."
@@ -56,6 +57,7 @@ build_native() {
     echo "✅ Native build successful!"
     echo ""
     echo "   Binaries (in bin/):"
+    echo "     bin/filesystem-ultra              (same server, .mcpb entry name)"
     echo "     bin/filesystem-ultra-v4"
     echo "     bin/filesystem-ultra-v4-embed_rg   (recommended for Claude)"
     echo "     bin/mcp-proxy                      (logging proxy)"
@@ -74,29 +76,31 @@ build_windows() {
 
     # Main server (standard)
     echo "[1/4] Building bin/filesystem-ultra-v4.exe ..."
-    rm -f bin/filesystem-ultra-v4.exe
-    go build $GO_LDFLAGS $GO_FLAGS -o bin/filesystem-ultra-v4.exe ./cmd/filesystem-ultra
+    rm -f bin/filesystem-ultra-v4.exe bin/filesystem-ultra.exe
+    go build "$GO_LDFLAGS" $GO_FLAGS -o bin/filesystem-ultra-v4.exe ./cmd/filesystem-ultra
+    cp -f bin/filesystem-ultra-v4.exe bin/filesystem-ultra.exe
 
     # Main server + embedded ripgrep
     echo "[2/4] Building bin/filesystem-ultra-v4-embed_rg.exe ..."
     rm -f bin/filesystem-ultra-v4-embed_rg.exe
-    go build $GO_LDFLAGS $GO_FLAGS -tags embed_rg -o bin/filesystem-ultra-v4-embed_rg.exe ./cmd/filesystem-ultra
+    go build "$GO_LDFLAGS" $GO_FLAGS -tags embed_rg -o bin/filesystem-ultra-v4-embed_rg.exe ./cmd/filesystem-ultra
 
     # Proxy (correct build)
     echo "[3/4] Building bin/mcp-proxy.exe ..."
     rm -f bin/filesystem-ultra-v4-proxy.exe 2>/dev/null || true
     rm -f bin/mcp-proxy.exe
-    go build $GO_LDFLAGS $GO_FLAGS -o bin/mcp-proxy.exe ./cmd/proxy
+    go build "$GO_LDFLAGS" $GO_FLAGS -o bin/mcp-proxy.exe ./cmd/proxy
 
     # Dashboard
     echo "[4/4] Building bin/filesystem-ultra-v4-dashboard.exe ..."
     rm -f bin/filesystem-ultra-v4-dashboard.exe
-    go build $GO_LDFLAGS $GO_FLAGS -o bin/filesystem-ultra-v4-dashboard.exe ./cmd/dashboard/
+    go build "$GO_LDFLAGS" $GO_FLAGS -o bin/filesystem-ultra-v4-dashboard.exe ./cmd/dashboard/
 
     echo ""
     echo "✅ Windows cross-compile successful!"
     echo ""
     echo "   Binaries (in bin/):"
+    echo "     bin/filesystem-ultra.exe            (same server, .mcpb entry name)"
     echo "     bin/filesystem-ultra-v4.exe"
     echo "     bin/filesystem-ultra-v4-embed_rg.exe"
     echo "     bin/mcp-proxy.exe                   ← Use this one in Claude Desktop"

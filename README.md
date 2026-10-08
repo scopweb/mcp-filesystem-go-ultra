@@ -521,6 +521,9 @@ tests/                      Black-box suite over the exported core API
 ## Security
 
 - `IsPathAllowed()` resolves symlinks via `filepath.EvalSymlinks()` before the containment check — prevents symlink escape from allowed paths
+- **Secret files denied by default** — `.env`, `*.pem`, `*.pfx`, `id_rsa*`, `credentials.json`. Opt in with `--allow-secrets` (audited)
+- **Search regex is Go RE2** — `search_files` compiles with `regexp`. Nested quantifiers stay linear; backreferences are rejected
+- **Writes are temp + rename** — crash-safe replace on every platform. NTFS file id, birthtime, and hardlinks are not preserved (same tradeoff the reference server kept on Windows)
 - **Allowed-path root protection** (v4.2.1) — `delete_file`, `soft_delete`, and `move_file` reject the `--allowed-paths` root itself, preventing `os.RemoveAll()` from wiping an entire tree
 - Strict parameter validation — unknown params rejected, types enforced (`core/param_validator.go`)
 - Temp files and backup IDs use `crypto/rand` (not timestamps)

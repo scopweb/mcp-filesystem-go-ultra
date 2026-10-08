@@ -1,3 +1,7 @@
+param(
+    [string]$Exe
+)
+
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $root
@@ -21,8 +25,13 @@ if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -F
 New-Item -ItemType Directory -Path $serverDir | Out-Null
 
 $exe = Join-Path $serverDir "filesystem-ultra.exe"
-& go build -ldflags="$ldflags" -trimpath -o $exe .\cmd\filesystem-ultra
-if ($LASTEXITCODE -ne 0) { throw "go build failed: $LASTEXITCODE" }
+if ($Exe) {
+    if (-not (Test-Path -LiteralPath $Exe)) { throw "missing built server: $Exe" }
+    Copy-Item -LiteralPath $Exe -Destination $exe
+} else {
+    & go build -ldflags="$ldflags" -trimpath -o $exe .\cmd\filesystem-ultra
+    if ($LASTEXITCODE -ne 0) { throw "go build failed: $LASTEXITCODE" }
+}
 
 Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $stage "manifest.json")
 

@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### security: RE2 search contract and temp+rename identity
+
+`search_files` already compiles with Go's RE2. Backreferences are rejected; a nested quantifier stays linear (`TestCompileRegex_ReDoSStaysBounded`). Writes and edits stay temp + rename, so NTFS file id, birthtime, and hardlinks do not survive (`TestWriteAndEdit_TempRenameDropsNTFSIdentity`). `openWorldHint` stays true on `github_issues` and `gitlab_issues`, and on `git` only when `--git-network` is set.
+
 ### docs: comparison table, protocol line, and Windows `.mcpb`
 
 README table against `@modelcontextprotocol/server-filesystem` (Windows roots, name vs content search, undo, dry-run/diff). Protocol stated as MCP 2025-11-25 over stdio; 2026-07-28 stays out of scope. `bundle/manifest.json` plus `scripts/pack-mcpb.ps1` build a win32 `.mcpb` into `dist/` (not committed).
