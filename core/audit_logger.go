@@ -162,7 +162,8 @@ type AuditEntry struct {
 	SessionID      string `json:"session_id,omitempty"`       // groups ops belonging to the same conversation (reset after 5min gap)
 	FileLinesTotal int    `json:"file_lines_total,omitempty"` // total lines in the target file (for range-read efficiency)
 	LinesRead      int    `json:"lines_read,omitempty"`       // lines actually read/affected (range ops)
-	TokensConsumed int64  `json:"tokens_consumed,omitempty"`  // estimated tokens used by this op (bytes/4)
+	TokenUnit      string `json:"token_unit,omitempty"`       // "bytes/4": estimate, not provider usage
+	TokensConsumed int64  `json:"tokens_consumed,omitempty"`  // bytes/4 estimate of the text fallback, not the model bill
 	TokensBaseline int64  `json:"tokens_baseline,omitempty"`  // estimated tokens without filesystem (naive approach)
 	TokensSaved    int64  `json:"tokens_saved,omitempty"`     // max(0, tokens_baseline - tokens_consumed)
 

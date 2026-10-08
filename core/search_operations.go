@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -270,11 +271,12 @@ func (e *UltraFastEngine) formatAdvancedSearchOutput(matches []SearchMatch, patt
 		} else {
 			result.WriteString(fmt.Sprintf("%d matches\n", n))
 		}
-		for i := 0; i < n; i++ {
-			match := matches[i]
-			result.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd, match.Line))
-			if includeContext {
-				result.WriteString(formatNumberedContext(match, contextLines, true))
+		if includeContext {
+			result.WriteString(formatMergedContext(matches, true))
+		} else {
+			for i := 0; i < n; i++ {
+				match := matches[i]
+				result.WriteString(fmt.Sprintf("%s:%d[%d:%d] %s\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd, match.Line))
 			}
 		}
 	} else {
@@ -283,14 +285,15 @@ func (e *UltraFastEngine) formatAdvancedSearchOutput(matches []SearchMatch, patt
 		} else {
 			result.WriteString(fmt.Sprintf("🔍 Found %d matches for pattern '%s':\n\n", n, pattern))
 		}
-		for i := 0; i < n; i++ {
-			match := matches[i]
-			result.WriteString(fmt.Sprintf("📁 %s:%d [%d:%d]\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd))
-			result.WriteString(fmt.Sprintf("   %s\n", match.Line))
-			if includeContext && (len(match.Context) > 0 || contextLines > 0) {
-				result.WriteString(formatNumberedContext(match, contextLines, false))
+		if includeContext {
+			result.WriteString(formatMergedContext(matches, false))
+		} else {
+			for i := 0; i < n; i++ {
+				match := matches[i]
+				result.WriteString(fmt.Sprintf("📁 %s:%d [%d:%d]\n", match.File, match.LineNumber, match.MatchStart, match.MatchEnd))
+				result.WriteString(fmt.Sprintf("   %s\n", match.Line))
+				result.WriteString("\n")
 			}
-			result.WriteString("\n")
 		}
 	}
 	if truncated {
@@ -304,6 +307,9 @@ func (e *UltraFastEngine) formatAdvancedSearchOutput(matches []SearchMatch, patt
 func formatNumberedContext(match SearchMatch, contextLines int, compact bool) string {
 	if len(match.Context) == 0 {
 		return ""
+	}
+	if len(match.ContextLineNumbers) == len(match.Context) {
+		return formatKnownContext(match, compact)
 	}
 	var nBefore int
 	if match.ContextSplit {
@@ -373,13 +379,112 @@ func formatSearchMatchesRipgrep(matches []SearchMatch, maxToShow int) string {
 	return b.String()
 }
 
-// formatSearchGrouped prints one path header, then line:text rows. Context,
-// when present, is numbered from ContextBefore so before/after stay in order.
-func formatSearchGrouped(matches []SearchMatch, includeContext bool, contextLines int) string {
+func formatKnownContext(match SearchMatch, compact bool) string {
+	return formatLineWindow(contextRows(match), compact)
+}
+
+type shownLine struct {
+	n    int
+	text string
+	hit  bool
+}
+
+func contextRows(match SearchMatch) []shownLine {
+	rows := []shownLine{{n: match.LineNumber, text: strings.TrimRight(match.Line, "\r\n"), hit: true}}
+	if len(match.ContextLineNumbers) == len(match.Context) {
+		for i, n := range match.ContextLineNumbers {
+			rows = append(rows, shownLine{n: n, text: match.Context[i]})
+		}
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].n < rows[j].n })
+	return rows
+}
+
+func formatLineWindow(rows []shownLine, compact bool) string {
 	var b strings.Builder
+	indent := "  "
+	if !compact {
+		indent = "   "
+		b.WriteString(indent + "Context:\n")
+	}
+	for _, row := range rows {
+		mark := " "
+		if row.hit {
+			mark = ">"
+		}
+		fmt.Fprintf(&b, "%s%s%d | %s\n", indent, mark, row.n, row.text)
+	}
+	return b.String()
+}
+
+func formatMergedContext(matches []SearchMatch, compact bool) string {
+	var b strings.Builder
+	last := ""
+	var group []SearchMatch
+	flush := func() {
+		if len(group) == 0 {
+			return
+		}
+		lines := map[int]shownLine{}
+		var order []int
+		add := func(row shownLine) {
+			prev, ok := lines[row.n]
+			if !ok {
+				order = append(order, row.n)
+			}
+			if !ok || (row.hit && !prev.hit) {
+				lines[row.n] = row
+			}
+		}
+		for _, m := range group {
+			if len(m.ContextLineNumbers) == len(m.Context) && (len(m.Context) > 0 || m.LineNumber > 0) {
+				for _, row := range contextRows(m) {
+					add(row)
+				}
+				continue
+			}
+			add(shownLine{n: m.LineNumber, text: strings.TrimRight(m.Line, "\r\n"), hit: true})
+		}
+		sort.Ints(order)
+		start := 0
+		for i := 1; i <= len(order); i++ {
+			if i == len(order) || order[i] != order[i-1]+1 {
+				window := make([]shownLine, 0, i-start)
+				for _, n := range order[start:i] {
+					window = append(window, lines[n])
+				}
+				b.WriteString(formatLineWindow(window, compact))
+				start = i
+			}
+		}
+	}
+	for _, m := range matches {
+		if m.File != last {
+			flush()
+			group = nil
+			if last != "" {
+				b.WriteByte('\n')
+			}
+			b.WriteString(m.File)
+			b.WriteByte('\n')
+			last = m.File
+		}
+		group = append(group, m)
+	}
+	flush()
+	return b.String()
+}
+
+// formatSearchGrouped prints one path header, then line:text rows. Context
+// windows are merged so an overlapping line is shown once, with its real number.
+func formatSearchGrouped(matches []SearchMatch, includeContext bool, contextLines int) string {
 	if len(matches) == 0 {
 		return ""
 	}
+	if includeContext {
+		return fmt.Sprintf("%d matches\n%s", len(matches), formatMergedContext(matches, true))
+	}
+	var b strings.Builder
 	b.WriteString(fmt.Sprintf("%d matches\n", len(matches)))
 	last := ""
 	for _, m := range matches {
@@ -388,12 +493,9 @@ func formatSearchGrouped(matches []SearchMatch, includeContext bool, contextLine
 			b.WriteByte('\n')
 			last = m.File
 		}
-		if includeContext && len(m.Context) > 0 {
-			b.WriteString(formatNumberedContext(m, contextLines, true))
-			continue
-		}
 		fmt.Fprintf(&b, "  %d:%s\n", m.LineNumber, strings.TrimRight(m.Line, "\r\n"))
 	}
+	_ = contextLines
 	return b.String()
 }
 
@@ -838,16 +940,18 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 
 						// Add context (truncated to avoid huge context lines)
 						var context []string
-						// Use built-in min/max (Go 1.21+) - no need for helper functions
+						var nums []int
 						start := max(0, lineNum-contextLines)
 						end := min(len(lines), lineNum+contextLines+1)
 
 						for i := start; i < end; i++ {
 							if i != lineNum {
 								context = append(context, truncateSearchLine(strings.TrimRight(lines[i], "\r"), 0))
+								nums = append(nums, i+1)
 							}
 						}
 						match.Context = context
+						match.ContextLineNumbers = nums
 						match.ContextBefore = lineNum - start
 						match.ContextSplit = true
 

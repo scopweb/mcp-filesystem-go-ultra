@@ -142,13 +142,39 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 		return nil, fmt.Errorf("ripgrep failed: %w", err)
 	}
 
+	return parseRipgrepOutput(output, includeContext, contextLines)
+}
+
+// Keep absolute line numbers: rg emits disjoint context groups and suppresses
+// duplicate context records between nearby matches.
+func parseRipgrepOutput(output []byte, includeContext bool, contextLines int) ([]SearchMatch, error) {
 	var matches []SearchMatch
-	// pendingContext holds the trailing context lines rg emitted since the
-	// last match record; they become the leading context of the next match.
-	// Context records are also appended to the previous match (trailing
-	// context), mirroring the native path's per-match window.
-	var pendingContext []string
+	lines := map[int]string{}
+	first := 0
+	flush := func() {
+		if includeContext && contextLines > 0 {
+			for i := first; i < len(matches); i++ {
+				m := &matches[i]
+				m.ContextSplit = true
+				for n := max(1, m.LineNumber-contextLines); n <= m.LineNumber+contextLines; n++ {
+					if n == m.LineNumber {
+						continue
+					}
+					if text, ok := lines[n]; ok {
+						m.Context = append(m.Context, text)
+						m.ContextLineNumbers = append(m.ContextLineNumbers, n)
+						if n < m.LineNumber {
+							m.ContextBefore++
+						}
+					}
+				}
+			}
+		}
+		first = len(matches)
+		clear(lines)
+	}
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -163,22 +189,12 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 		}
 
 		switch rgMatch.Type {
-		case "begin":
-			// New file: context lines from the previous file must not leak
-			// into this one's matches.
-			pendingContext = pendingContext[:0]
+		case "begin", "end":
+			flush()
 			continue
 		case "context":
-			ctxLine := truncateSearchLine(strings.TrimRight(rgMatch.Data.Lines.Text, "\r\n"), 0)
 			if includeContext && contextLines > 0 {
-				// Trailing context of the previous match (cap at contextLines
-				// after the match line: leading + match + trailing ≈ 2N).
-				if len(matches) > 0 && len(matches[len(matches)-1].Context) < 2*contextLines {
-					matches[len(matches)-1].Context = append(matches[len(matches)-1].Context, ctxLine)
-				}
-				if len(pendingContext) < contextLines {
-					pendingContext = append(pendingContext, ctxLine)
-				}
+				lines[rgMatch.Data.LineNumber] = truncateSearchLine(strings.TrimRight(rgMatch.Data.Lines.Text, "\r\n"), 0)
 			}
 			continue
 		case "match":
@@ -201,17 +217,12 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 			match.MatchStart = rgMatch.Data.Submatches[0].Start
 			match.MatchEnd = rgMatch.Data.Submatches[0].End
 		}
-		if includeContext && contextLines > 0 && len(pendingContext) > 0 {
-			match.ContextBefore = len(pendingContext)
-			match.Context = append(match.Context, pendingContext...)
-			pendingContext = pendingContext[:0]
-		} else {
-			pendingContext = pendingContext[:0]
+		if includeContext {
+			lines[match.LineNumber] = match.Line
 		}
-		match.ContextSplit = includeContext && contextLines > 0
-
 		matches = append(matches, match)
 	}
+	flush()
 
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("ripgrep output parsing error: %w", err)

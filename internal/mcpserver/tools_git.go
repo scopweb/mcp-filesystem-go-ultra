@@ -17,13 +17,13 @@ func registerGitTools(reg *toolRegistry) {
 	engine := reg.engine
 	gitNetwork := reg.gitNetwork
 
-	gitActions := []string{"status", "diff", "log", "show", "add", "commit", "restore", "branch", "init", "remote"}
-	gitDesc := "git — Git operations: status, diff, log, show, add, commit, restore, branch, init, remote. " +
+	gitActions := []string{"status", "diff", "log", "show", "add", "commit", "restore", "branch", "init", "remote", "review"}
+	gitDesc := "git — Git operations: status, diff, review, log, show, add, commit, restore, branch, init, remote. " +
 		"Must be run from within a git repository. Related: analyze_operation, edit_file, help."
 	actionHelp := `git(action:"status")  // or: diff, log, show, add, commit, restore, branch, init, remote`
 	if gitNetwork {
-		gitActions = []string{"status", "diff", "log", "show", "add", "commit", "push", "fetch", "restore", "branch", "init", "remote"}
-		gitDesc = "git — Git operations: status, diff, log, show, add, commit, push, fetch, restore, branch, init, remote. " +
+		gitActions = []string{"status", "diff", "log", "show", "add", "commit", "push", "fetch", "restore", "branch", "init", "remote", "review"}
+		gitDesc = "git — Git operations: status, diff, review, log, show, add, commit, push, fetch, restore, branch, init, remote. " +
 			"Must be run from within a git repository. Related: analyze_operation, edit_file, help."
 		actionHelp = `git(action:"status")  // or: diff, log, show, add, commit, push, fetch, restore, branch, init, remote`
 	}
@@ -52,6 +52,8 @@ func registerGitTools(reg *toolRegistry) {
 		mcp.WithBoolean("force", mcp.Description("branch: with delete:true, true → -D (else -d). push: true → --force-with-lease (never plain --force). Other actions: ignored.")),
 		mcp.WithBoolean("prune", mcp.Description("fetch: true → --prune (drop stale remote-tracking refs). Default: false.")),
 		mcp.WithBoolean("update", mcp.Description("add: true → git add -u (tracked modifications only; does not stage untracked paths such as .agent/). paths optional.")),
+		mcp.WithNumber("offset", mcp.Description("review/diff page start (0-based file index). Omit on diff to keep the unpaged stat/full output. review always pages.")),
+		mcp.WithString("expected_status_hash", mcp.Description("review/diff: status_hash from the previous page. Mismatch returns STALE_GIT and no diff body.")),
 	}
 	gitTool := mcp.NewTool("git", gitOpts...)
 
@@ -151,6 +153,8 @@ func registerGitTools(reg *toolRegistry) {
 			return gitBranch(ctx, engine, repoRoot, args)
 		case "remote":
 			return gitRemote(ctx, engine, repoRoot, args)
+		case "review":
+			return gitReview(ctx, engine, repoRoot, args)
 		default:
 			return usageError(
 				fmt.Sprintf("unknown action %q", action),
@@ -178,6 +182,7 @@ func gitHelpExamples(gitNetwork bool) []string {
 	return append(ex,
 		`git(action:"remote")`,
 		`git(action:"restore", paths:["file.txt"], staged:true)`,
+		`git(action:"review")`,
 		`git(action:"branch", name:"feature/new", checkout:true)`,
 		`git(action:"branch", name:"old", delete:true)`,
 	)
@@ -207,7 +212,7 @@ func gitInit(ctx context.Context, engine *core.UltraFastEngine, path string, arg
 		return mcp.NewToolResultError(fmt.Sprintf("git init denied by hook: %v", err)), nil
 	}
 
-	output, err := execGitCommand(targetPath, "git", "init")
+	output, err := execGitCommandCtx(ctx, targetPath, "git", "init")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git init failed: %v\n%s", err, output)), nil
 	}
@@ -261,7 +266,7 @@ func gitStatus(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 		}
 	}
 
-	gitOutput, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	gitOutput, werr := execGitCommandCtx(ctx, repoRoot, "git", cmdArgs...)
 	if werr != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git status failed: %v\n%s", werr, gitOutput)), nil
 	}
@@ -396,11 +401,14 @@ func gitDiff(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 	if errRes != nil {
 		return errRes, nil
 	}
+	if _, page := args["offset"]; page || strings.TrimSpace(stringArg(args, "expected_status_hash")) != "" {
+		return gitDiffPage(ctx, engine, repoRoot, args, staged, rev, out, maxLines, paths)
+	}
 
 	// ---- Layer 2 guardrail: count first, downgrade if too many files ----
 	banner := ""
 	if out == "full" && len(paths) == 0 {
-		count, cerr := countChangedFiles(repoRoot, rev, staged)
+		count, cerr := countChangedFiles(ctx, repoRoot, rev, staged)
 		if cerr == nil && count > diffGuardrailThreshold {
 			out = "stat"
 			banner = fmt.Sprintf(
@@ -431,7 +439,7 @@ func gitDiff(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 		}
 	}
 
-	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	output, werr := execGitCommandCtx(ctx, repoRoot, "git", cmdArgs...)
 	if werr != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git diff failed: %v\n%s", werr, output)), nil
 	}
@@ -503,7 +511,7 @@ func gitLog(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 		}
 	}
 
-	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	output, werr := execGitCommandCtx(ctx, repoRoot, "git", cmdArgs...)
 	if werr != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git log failed: %v\n%s", werr, output)), nil
 	}
@@ -546,7 +554,7 @@ func gitShow(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 	}
 
 	// ---- Header: commit metadata + message, never counted against max_lines ----
-	header, herr := execGitCommand(repoRoot, "git", "show", "--no-patch", rev)
+	header, herr := execGitCommandCtx(ctx, repoRoot, "git", "show", "--no-patch", rev)
 	if herr != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git show failed: %v\n%s", herr, header)), nil
 	}
@@ -569,7 +577,7 @@ func gitShow(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 		}
 	}
 
-	body, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	body, werr := execGitCommandCtx(ctx, repoRoot, "git", cmdArgs...)
 	if werr != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git show failed: %v\n%s", werr, body)), nil
 	}
@@ -640,7 +648,7 @@ func gitAdd(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 		cmdArgs = append(cmdArgs, "--")
 		cmdArgs = append(cmdArgs, normalized...)
 	}
-	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	output, werr := execGitCommandCtx(ctx, repoRoot, "git", cmdArgs...)
 	if werr != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git add failed: %v\n%s", werr, output)), nil
 	}
@@ -649,7 +657,7 @@ func gitAdd(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostWrite, hookCtx)
 
 	if engine.IsCompactMode() {
-		statusOut, _ := execGitCommand(repoRoot, "git", "status", "--porcelain")
+		statusOut, _ := execGitCommandCtx(ctx, repoRoot, "git", "status", "--porcelain")
 		lines := strings.Split(statusOut, "\n")
 		staged := 0
 		for _, line := range lines {
@@ -694,7 +702,7 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 	}
 
 	// Get staged diff --stat for risk assessment
-	stagedStat, werr := execGitCommand(repoRoot, "git", "diff", "--cached", "--shortstat")
+	stagedStat, werr := execGitCommandCtx(ctx, repoRoot, "git", "diff", "--cached", "--shortstat")
 	if werr != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git commit failed: %v", werr)), nil
 	}
@@ -728,7 +736,7 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 		}
 	}
 
-	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	output, werr := execGitCommandCtx(ctx, repoRoot, "git", cmdArgs...)
 	if werr != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git commit failed: %v\n%s", werr, output)), nil
 	}
@@ -737,7 +745,7 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 	hookCtx.Metadata["commit_hash"] = extractCommitHash(output)
 	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostWrite, hookCtx)
 
-	commitHash, _ := execGitCommand(repoRoot, "git", "rev-parse", "--short", "HEAD")
+	commitHash, _ := execGitCommandCtx(ctx, repoRoot, "git", "rev-parse", "--short", "HEAD")
 
 	if engine.IsCompactMode() {
 		lines := strings.Split(strings.TrimSpace(output), "\n")
@@ -851,7 +859,7 @@ func gitRestore(ctx context.Context, engine *core.UltraFastEngine, repoRoot stri
 	cmdArgs = append(cmdArgs, "--")
 	cmdArgs = append(cmdArgs, paths...)
 
-	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	output, werr := execGitCommandCtx(ctx, repoRoot, "git", cmdArgs...)
 	if werr != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git restore failed: %v\n%s", werr, output)), nil
 	}
@@ -911,7 +919,7 @@ func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 				"branch delete requires name",
 				`git(action:"branch", name:"feature/old", delete:true)`), nil
 		}
-		output, werr := execGitCommand(repoRoot, "git", "branch", "-a")
+		output, werr := execGitCommandCtx(ctx, repoRoot, "git", "branch", "-a")
 		if werr != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("git branch failed: %v\n%s", werr, output)), nil
 		}
@@ -935,7 +943,7 @@ func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 			`git(action:"branch", name:"feature/old", delete:true)`), nil
 	}
 
-	_, existsErr := execGitCommand(repoRoot, "git", "show-ref", "--verify", "--quiet", "refs/heads/"+name)
+	_, existsErr := execGitCommandCtx(ctx, repoRoot, "git", "show-ref", "--verify", "--quiet", "refs/heads/"+name)
 	branchExists := existsErr == nil
 
 	if del {
@@ -976,7 +984,7 @@ func gitBranch(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 		cmdArgs = []string{"branch", name}
 		label = "created branch"
 	}
-	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	output, werr := execGitCommandCtx(ctx, repoRoot, "git", cmdArgs...)
 	if werr != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git branch create failed: %v\n%s", werr, output)), nil
 	}
@@ -1006,7 +1014,7 @@ func gitBranchDelete(ctx context.Context, engine *core.UltraFastEngine, repoRoot
 	if force {
 		deleteCmd = "-D"
 	}
-	output, werr := execGitCommand(repoRoot, "git", "branch", deleteCmd, name)
+	output, werr := execGitCommandCtx(ctx, repoRoot, "git", "branch", deleteCmd, name)
 	if werr != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git branch delete failed: %v\n%s", werr, output)), nil
 	}
@@ -1031,7 +1039,7 @@ func gitBranchSwitch(ctx context.Context, engine *core.UltraFastEngine, repoRoot
 	if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreWrite, hookCtx); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git switch denied: %v", err)), nil
 	}
-	output, werr := execGitCommand(repoRoot, "git", "switch", name)
+	output, werr := execGitCommandCtx(ctx, repoRoot, "git", "switch", name)
 	if werr != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git switch failed: %v\n%s", werr, output)), nil
 	}
@@ -1085,7 +1093,7 @@ func gitFetch(ctx context.Context, engine *core.UltraFastEngine, repoRoot string
 	}
 	cmdArgs = append(cmdArgs, remote)
 
-	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	output, werr := execGitCommandCtx(ctx, repoRoot, "git", cmdArgs...)
 	if werr != nil {
 		return mcp.NewToolResultError(redactGitText(fmt.Sprintf("git fetch failed: %v\n%s", werr, output))), nil
 	}
@@ -1156,7 +1164,7 @@ func gitPush(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 		cmdArgs = append(cmdArgs, remote)
 	}
 
-	output, werr := execGitCommand(repoRoot, "git", cmdArgs...)
+	output, werr := execGitCommandCtx(ctx, repoRoot, "git", cmdArgs...)
 	if werr != nil {
 		return mcp.NewToolResultError(redactGitText(fmt.Sprintf("git push failed: %v\n%s", werr, output))), nil
 	}
@@ -1191,19 +1199,58 @@ func gitPush(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 // cmd.Stdout and cmd.Stderr to its own buffers and requires those fields
 // to be unset when called; keeping caller-owned buffers lets us build a
 // structured error message that distinguishes stdout from stderr.
+const gitCaptureCap = 1 << 20
+
 func execGitCommand(dir, command string, args ...string) (string, error) {
-	cmd := exec.Command(command, args...)
-	cmd.Dir = dir
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	if err != nil {
-		return string(append(stdout.Bytes(), stderr.Bytes()...)),
-			fmt.Errorf("%v: %s", err, stderr.String())
-	}
-	return stdout.String(), nil
+	return execGitCommandCtx(context.Background(), dir, command, args...)
 }
+
+func execGitCommandCtx(ctx context.Context, dir, command string, args ...string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Dir = dir
+	stdout := &cappedBuffer{max: gitCaptureCap}
+	stderr := &cappedBuffer{max: 64 << 10}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	err := cmd.Run()
+	out := stdout.String()
+	if stdout.cut {
+		out += "\n[TRUNCADO: salida git cortada a 1MB]\n"
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return out, ctx.Err()
+		}
+		return out + stderr.String(), fmt.Errorf("%v: %s", err, stderr.String())
+	}
+	return out, nil
+}
+
+type cappedBuffer struct {
+	buf bytes.Buffer
+	max int
+	cut bool
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if c.max <= 0 || c.buf.Len() >= c.max {
+		c.cut = true
+		return len(p), nil
+	}
+	remain := c.max - c.buf.Len()
+	if len(p) > remain {
+		_, _ = c.buf.Write(p[:remain])
+		c.cut = true
+		return len(p), nil
+	}
+	_, _ = c.buf.Write(p)
+	return len(p), nil
+}
+
+func (c *cappedBuffer) String() string { return c.buf.String() }
 
 // isDestructiveGitAction returns true for git operations that can cause data loss
 // or are generally considered dangerous in an AI-driven environment.

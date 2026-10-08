@@ -68,14 +68,15 @@ type EditResult struct {
 
 // SearchMatch represents a text search match
 type SearchMatch struct {
-	File          string   `json:"file"`
-	LineNumber    int      `json:"line_number"`
-	Line          string   `json:"line"`
-	Context       []string `json:"context,omitempty"`
-	ContextBefore int      `json:"context_before,omitempty"` // leading context entries; valid when ContextSplit
-	ContextSplit  bool     `json:"-"`                        // Context is [before..., after...], not a guess
-	MatchStart    int      `json:"match_start"`
-	MatchEnd      int      `json:"match_end"`
+	File               string   `json:"file"`
+	LineNumber         int      `json:"line_number"`
+	Line               string   `json:"line"`
+	Context            []string `json:"context,omitempty"`
+	ContextLineNumbers []int    `json:"context_line_numbers,omitempty"` // absolute numbers, paired with Context
+	ContextBefore      int      `json:"context_before,omitempty"`       // leading context entries; valid when ContextSplit
+	ContextSplit       bool     `json:"-"`                              // Context is [before..., after...], not a guess
+	MatchStart         int      `json:"match_start"`
+	MatchEnd           int      `json:"match_end"`
 }
 
 // EditFile performs intelligent file editing with backup and rollback

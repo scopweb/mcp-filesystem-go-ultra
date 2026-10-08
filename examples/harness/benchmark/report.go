@@ -125,7 +125,7 @@ func summarize(entries []proxyEntry, slices map[string][2]int, names []string, d
 	}
 	return report{
 		Generated: time.Now().UTC().Format(time.RFC3339),
-		Note:      "paths redacted; tokens = proxy bytes/4 estimates; retries always 0 (harness does not replay); scripted MCP is not a real-model eval",
+		Note:      "paths redacted; tokens are proxy bytes/4 estimates (token_unit), not provider usage; retries always 0 (harness does not replay); scripted MCP is not a real-model eval",
 		Scenarios: rows,
 		ByTool:    byTool,
 		Expensive: expensive,

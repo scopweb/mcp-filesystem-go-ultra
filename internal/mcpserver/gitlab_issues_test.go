@@ -229,7 +229,7 @@ func TestGitLabIssues_Help(t *testing.T) {
 		}
 	}
 	st := reg.server.ListTools()["gitlab_issues"]
-	if st.Tool.RawOutputSchema != nil || st.Tool.OutputSchema.Type != "" {
-		t.Fatal("experimental tool declared an outputSchema")
+	if st.Tool.RawOutputSchema == nil && st.Tool.OutputSchema.Type == "" {
+		t.Fatal("graduated tool must declare an outputSchema")
 	}
 }

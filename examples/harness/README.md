@@ -12,7 +12,7 @@ One MCP instance per workspace:
 
 | Flag | Why |
 |------|-----|
-| `--profile=strict` | 17-tool agent core (`backup` and `security_policy` included). Default `ultra` is 28 tools. |
+| `--profile=strict` | 17-tool agent core (`backup` and `security_policy` included). `--profile=agent` adds `git` (18). Default `ultra` is 29 tools. |
 | `--roots-mode=union` | Client Roots **add** to the CLI allowlist. Default `replace` wipes CLI paths (OpenCode does this). |
 | `--compact-mode` | Short responses (hashes, UNDO ids). |
 

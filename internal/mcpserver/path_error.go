@@ -23,6 +23,7 @@ const (
 	errCodeHashRequired     = "HASH_REQUIRED"
 	errCodeUnavailable      = "TOOL_UNAVAILABLE"
 	errCodeBudgetExceeded   = "BUDGET_EXCEEDED"
+	errCodeStaleGit         = "STALE_GIT"
 	errCodeRollbackPartial  = "ROLLBACK_PARTIAL"
 	errCodeRollbackFailed   = "ROLLBACK_FAILED"
 	errCodeRollbackComplete = "ROLLBACK_COMPLETE"
@@ -152,7 +153,7 @@ func pathErrorJSONWithOCC(message, path, expectedHash, currentHash string, confl
 
 func recoveryForCode(code string) string {
 	switch code {
-	case errCodeOCCMismatch, errCodeHashRequired, errCodePatchFailed:
+	case errCodeOCCMismatch, errCodeHashRequired, errCodePatchFailed, errCodeStaleGit:
 		return recoveryReadAndRebase
 	case errCodeRollbackPartial, errCodeRollbackFailed, errCodeRollbackComplete:
 		return recoveryCheckAlreadyApplied

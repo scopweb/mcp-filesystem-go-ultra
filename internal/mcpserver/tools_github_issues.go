@@ -22,6 +22,7 @@ func registerGitHubIssuesTools(reg *toolRegistry) {
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithOpenWorldHintAnnotation(true),
+		mcp.WithRawOutputSchema(githubIssuesOutputSchema),
 		mcp.WithString("action", mcp.Required(), mcp.Description("Action: "+strings.Join(actions, ", ")), mcp.Enum(actions...)),
 		mcp.WithString("path", mcp.Description("Local repository directory, inside allowed roots. Used to resolve the GitHub remote when repo is omitted.")),
 		mcp.WithString("repo", mcp.Description("Explicit owner/repo. Does not require a local remote. Not a URL.")),

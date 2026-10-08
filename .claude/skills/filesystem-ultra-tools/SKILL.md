@@ -1,13 +1,13 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.7.1. 28 tools ultra / 17 strict. First call list_allowed_directories, then directory_tree or help(tool:X). Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=strict --compact-mode --roots-mode=union.
+description: Tool catalog for filesystem-ultra MCP server v4.8.0. 29 tools ultra / 18 agent / 17 strict. First call list_allowed_directories, then directory_tree or help(tool:X). Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=agent --compact-mode --roots-mode=union.
 ---
 
-# Filesystem Ultra v4.7.1 — Tool Discovery
+# Filesystem Ultra v4.8.0 — Tool Discovery
 
 ## Recommended server flags
 
-`--profile=strict --compact-mode --roots-mode=union` (`--readonly` off). `--git-network` only if the agent must `git push`/`fetch`. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 28 tools including `analyze_code` and experimental `github_issues` / `gitlab_issues`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
+`--profile=agent --compact-mode --roots-mode=union` (`--readonly` off) when the agent needs git without the full catalog. `--profile=strict` remains the 17-tool core without git. `--git-network` only if the agent must `git push`/`fetch` (honored by ultra and agent, ignored by strict). `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 29 tools including `analyze_code`, graduated `github_issues` / `gitlab_issues`, and experimental `context_pack`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
 
 ## Bind each project to one filesystem tool family
 

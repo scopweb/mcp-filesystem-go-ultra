@@ -70,7 +70,7 @@ help(tool:X) on demand. Do not load the full catalog at startup.`
 // serverVersion is the single source of truth for the version reported by
 // --version, the MCP handshake, the help header and the startup logs.
 // Keep in sync with the top CHANGELOG entry.
-const serverVersion = "4.7.1"
+const serverVersion = "4.8.0"
 
 // BuildCommit and BuildDate are stamped at build time via
 //
@@ -117,8 +117,8 @@ func Run() {
 		readOnly         = flag.Bool("readonly", false, "Reject mutating tools (READONLY)")
 		mutationBudget   = flag.Int("mutation-budget", 0, "Max applied mutations per process (0=off). Shared by all stdio clients.")
 		allowSecrets     = flag.Bool("allow-secrets", false, "Allow reading secret files (.env, *.pem, keys). Audited.")
-		profileFlag      = flag.String("profile", "ultra", "Tool catalog: ultra (default, all tools) or strict (agent core only)")
-		gitNetwork       = flag.Bool("git-network", false, "Enable git push/fetch (network). Off by default; ignored in profile=strict.")
+		profileFlag      = flag.String("profile", "ultra", "Tool catalog: ultra (default, all tools), strict (agent core), or agent (strict plus git)")
+		gitNetwork       = flag.Bool("git-network", false, "Enable git push/fetch (network). Off by default; ignored in profile=strict. Honored by ultra and agent.")
 		gitRemoteAllow   = flag.String("git-remote-allow", "", "Optional. Comma-separated allowed push/fetch destinations (host, host/org, or repo URL). Empty = no extra lock (any configured remote). Example: github.com,gitlab.com. force:true does not bypass. git(action:\"remote\") works without --git-network.")
 		compactMode      = flag.Bool("compact-mode", false, "Enable compact responses (minimal tokens for Claude Desktop)")
 		maxResponseSize  = flag.String("max-response-size", "10MB", "Maximum response size")

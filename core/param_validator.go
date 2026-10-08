@@ -281,22 +281,32 @@ var toolSchemas = map[string]ToolParamSchema{
 		"cursor":    {ParamString, false},
 	},
 	"git": {
-		"action":    {ParamString, true},
-		"path":      {ParamString, false},
-		"paths":     {ParamArray, false},
-		"output":    {ParamString, false}, // "stat" | "name-only" | "full" (diff); "name-only" | "full" (status); "oneline" | "full" (log); "stat" | "name-only" | "full" (show)
-		"max_lines": {ParamNumber, false}, // default 200
-		"limit":     {ParamNumber, false}, // log: default 10
-		"rev":       {ParamString, false}, // single rev or range; replaces commit_range + source
-		"staged":    {ParamBoolean, false},
-		"message":   {ParamString, false},
-		"name":      {ParamString, false},  // branch: list when empty
-		"checkout":  {ParamBoolean, false}, // branch: true → git switch
-		"delete":    {ParamBoolean, false}, // branch: true → git branch -d (required to delete)
-		"force":     {ParamBoolean, false}, // branch: with delete, true → -D; push: --force-with-lease
-		"remote":    {ParamString, false},  // push/fetch: remote name (default origin)
-		"prune":     {ParamBoolean, false}, // fetch: true → --prune
-		"update":    {ParamBoolean, false}, // add: true → git add -u (tracked only)
+		"action":               {ParamString, true},
+		"path":                 {ParamString, false},
+		"paths":                {ParamArray, false},
+		"output":               {ParamString, false}, // "stat" | "name-only" | "full" (diff); "name-only" | "full" (status); "oneline" | "full" (log); "stat" | "name-only" | "full" (show)
+		"max_lines":            {ParamNumber, false}, // default 200
+		"limit":                {ParamNumber, false}, // log: default 10
+		"rev":                  {ParamString, false}, // single rev or range; replaces commit_range + source
+		"staged":               {ParamBoolean, false},
+		"message":              {ParamString, false},
+		"name":                 {ParamString, false},  // branch: list when empty
+		"checkout":             {ParamBoolean, false}, // branch: true → git switch
+		"delete":               {ParamBoolean, false}, // branch: true → git branch -d (required to delete)
+		"force":                {ParamBoolean, false}, // branch: with delete, true → -D; push: --force-with-lease
+		"remote":               {ParamString, false},  // push/fetch: remote name (default origin)
+		"prune":                {ParamBoolean, false}, // fetch: true → --prune
+		"update":               {ParamBoolean, false}, // add: true → git add -u (tracked only)
+		"offset":               {ParamNumber, false},
+		"expected_status_hash": {ParamString, false},
+	},
+	"context_pack": {
+		"path":         {ParamString, true},
+		"query":        {ParamString, false},
+		"focus_paths":  {ParamArray, false},
+		"budget_chars": {ParamNumber, false},
+		"max_files":    {ParamNumber, false},
+		"include_git":  {ParamBoolean, false},
 	},
 
 	// ---- ALIASES ----

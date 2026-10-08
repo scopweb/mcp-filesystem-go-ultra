@@ -50,6 +50,7 @@ type ProxyLogEntry struct {
 	BytesOut   int64     `json:"bytes_out"`
 	TokensIn   int64     `json:"tokens_in"`
 	TokensOut  int64     `json:"tokens_out"`
+	TokenUnit  string    `json:"token_unit,omitempty"`
 	DurationMs int64     `json:"duration_ms"`
 	DurationNs int64     `json:"duration_ns"`
 	Status     string    `json:"status"`
@@ -262,6 +263,7 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 						Tool:      params.Name,
 						BytesIn:   int64(len(argsBytes)),
 						TokensIn:  int64(len(argsBytes)) / 4,
+						TokenUnit: "bytes/4",
 						RequestID: extractID(msg.ID),
 					}
 					if p, ok := params.Arguments["path"].(string); ok {

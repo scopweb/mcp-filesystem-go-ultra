@@ -185,15 +185,16 @@ apply_patch
 ## Version Control, JavaScript, Analysis, and Discovery (5)
 
 git
-- Purpose: Safe Git status, diff, log, show, add, commit, push, fetch, restore, branch, init, and remote actions
-- Key params: action, path, paths, output, rev, max_lines, delete, prune, remote
+- Purpose: Safe Git status, diff, log, show, review, add, commit, push, fetch, restore, branch, init, and remote actions
+- Key params: action, path, paths, output, rev, max_lines, offset, expected_status_hash, delete, prune, remote
+- review returns a paged file list plus status_hash. Continue with the same hash; a mismatch is STALE_GIT.
 - remote lists effective fetch/push URLs (credentials redacted) without --git-network
 - commit risk is informational (staged file/insertion counts); it does not block the commit
 - push/fetch show the effective destination, not only the remote name
 - --git-remote-allow is optional; omit it to allow any configured remote. Example: github.com,gitlab.com. force:true does not bypass
 
 github_issues
-- Purpose: List, view, create, comment, edit, close, and reopen GitHub issues via gh. Does not delete issues or run gh auth login. Ultra only. Experimental.
+- Purpose: List, view, create, comment, edit, close, and reopen GitHub issues via gh. Does not delete issues or run gh auth login. Ultra only. Graduated.
 - Key params: action, path, repo, hostname, number, state, labels, assignee, title, body, reason, limit, cursor
 - path resolves owner/repo from HTTPS or SSH remotes. A non-github.com remote is not assumed to be GitHub; pass repo and hostname.
 - While a file security policy is active, path resolution is refused (git stays unavailable). Explicit repo does not run git.
@@ -202,7 +203,7 @@ github_issues
 - Examples: github_issues(action:"list", path:"C:/repo"); github_issues(action:"view", path:"C:/repo", number:12); github_issues(action:"comment", repo:"owner/repo", number:12, body:"note"); github_issues(action:"close", repo:"owner/repo", number:12, reason:"completed")
 
 gitlab_issues
-- Purpose: List, view, comment, close, and reopen GitLab issues. Auth is cached per process (GITLAB_TOKEN or one git-credential sign-in). Does not delete issues. Ultra only. Experimental.
+- Purpose: List, view, comment, close, and reopen GitLab issues. Auth is cached per process (GITLAB_TOKEN or one git-credential sign-in). Does not delete issues. Ultra only. Graduated.
 - Key params: action, path, repo, base_url, number, body, page
 - Do not assume gitlab.com or https. SSH remotes are not treated as GitLab; pass base_url.
 - Path resolution is refused while a file security policy is active. Explicit repo+base_url does not run git.
@@ -215,6 +216,10 @@ minify_js
 analyze_code
 - Purpose: Read-only symbols/lint/sec/impact. For editing use apply_patch/edit_file. Do not use git grep or bash. Ultra only. Impact is text search, not a callgraph.
 - Key params: action (symbols|lint|sec|impact), path, query, max_findings
+
+context_pack
+- Purpose: Deterministic ranked context (files, signatures, short snippets, optional git review). Experimental. Not an embedding index. Ultra only.
+- Key params: path, query, focus_paths, budget_chars, max_files, include_git
 
 help
 - Purpose: Dynamic registered-tool catalog; help(tool:"X") returns schema + examples
@@ -293,7 +298,7 @@ Use edit_file for changes, NOT write_file!
 | Single replacement      | edit_file(path, old_text, new_text)          |
 | Multiple replacements   | multi_edit(path, edits_json)                 |
 | Replace specific match  | edit_file(path, old_text, new_text, occurrence=N) |
-| Regex transformation    | edit_file(path, mode:"regex", patterns_json) |
+| Regex transformation    | edit_file(path, mode:"regex", patterns) or pipeline regex_transform with {{file.stem}} / {{file.name}} |
 | Search & replace all    | edit_file(path, mode:"search_replace", pattern, replacement) |
 
 ## Examples
@@ -622,7 +627,7 @@ Repeated edits on a broken file make recovery harder.
 Available topics:
 - overview  - Quick start guide
 - workflow  - The 4-step efficient workflow
-- tools     - Complete list of tools (28 ultra / 17 strict)
+- tools     - Complete list of tools (29 ultra / 18 agent / 17 strict)
 - read      - Reading files efficiently
 - write     - Writing and creating files
 - edit      - Editing files (most important!)

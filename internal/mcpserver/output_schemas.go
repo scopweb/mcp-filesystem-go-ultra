@@ -201,6 +201,73 @@ var backupOutputSchema = json.RawMessage(`{
   "required": ["status", "action", "message"]
 }`)
 
+var securityPolicyOutputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "enabled": {"type": "boolean", "description": "True when a file security policy is loaded"},
+    "levels": {"type": "array", "items": {"type": "string"}, "description": "Level names only. Patterns and paths are not listed."},
+    "precedence": {"type": "string"},
+    "agent_can_modify": {"type": "boolean", "description": "Always false. Restart the server to change the policy."}
+  },
+  "required": ["enabled", "levels", "precedence", "agent_can_modify"]
+}`)
+
+var githubIssuesOutputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "status": {"type": "string", "description": "ok | empty | truncated | applied"},
+    "action": {"type": "string"},
+    "repo": {"type": "string"},
+    "hostname": {"type": "string"},
+    "state": {"type": "string"},
+    "issues": {"type": "array", "items": {"type": "object"}},
+    "count": {"type": "integer"},
+    "truncated": {"type": "boolean"},
+    "pull_requests_omitted": {"type": "integer"},
+    "untrusted_content": {"type": "boolean"},
+    "continuation": {"type": "object"},
+    "number": {"type": "integer"},
+    "title": {"type": "string"},
+    "body": {"type": "string"},
+    "body_truncated": {"type": "boolean"},
+    "labels": {"type": "array"},
+    "assignees": {"type": "array"},
+    "updated_at": {"type": "string"},
+    "url": {"type": "string"},
+    "comments": {"type": "array", "items": {"type": "object"}},
+    "message": {"type": "string"},
+    "comment_url": {"type": "string"}
+  },
+  "required": ["status", "action"]
+}`)
+
+var gitlabIssuesOutputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "status": {"type": "string", "description": "ok | empty | truncated | applied"},
+    "action": {"type": "string"},
+    "repo": {"type": "string"},
+    "base_url": {"type": "string"},
+    "state": {"type": "string"},
+    "issues": {"type": "array", "items": {"type": "object"}},
+    "count": {"type": "integer"},
+    "truncated": {"type": "boolean"},
+    "untrusted_content": {"type": "boolean"},
+    "continuation": {"type": "object"},
+    "number": {"type": "integer"},
+    "title": {"type": "string"},
+    "body": {"type": "string"},
+    "body_truncated": {"type": "boolean"},
+    "labels": {"type": "array"},
+    "updated_at": {"type": "string"},
+    "url": {"type": "string"},
+    "comments": {"type": "array", "items": {"type": "object"}},
+    "message": {"type": "string"},
+    "note_id": {"type": "integer"}
+  },
+  "required": ["status", "action"]
+}`)
+
 var analyzeCodeOutputSchema = json.RawMessage(`{
   "type": "object",
   "properties": {

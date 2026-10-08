@@ -156,10 +156,9 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 			}
 		}
 
-		// ROI: compute token estimates for savings analysis.
-		// tokens_consumed = actual tokens used by this tool call (request + response).
-		// tokens_baseline = what would be spent without the filesystem server (naive approach).
-		// tokens_saved    = max(0, baseline - consumed).
+		// ROI estimates. token_unit=bytes/4 is not provider usage and does not
+		// include structuredContent. Do not compare it with a model's bill.
+		entry.TokenUnit = "bytes/4"
 		entry.TokensConsumed = (entry.BytesIn + entry.BytesOut) / 4
 		switch tool {
 		case "read_file", "read_text_file":

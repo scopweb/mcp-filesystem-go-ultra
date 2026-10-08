@@ -24,6 +24,30 @@ func TestParseToolProfile(t *testing.T) {
 	if _, err := parseToolProfile("full"); err == nil {
 		t.Fatal("want error for unknown profile")
 	}
+	p, err = parseToolProfile("agent")
+	if err != nil || p != profileAgent {
+		t.Fatalf("agent: %q %v", p, err)
+	}
+}
+
+func TestProfile_AgentIsStrictPlusGit(t *testing.T) {
+	dir := t.TempDir()
+	reg := newProfileRegistry(t, dir, registerOpts{Profile: profileAgent})
+	got := map[string]bool{}
+	for name := range reg.server.ListTools() {
+		got[name] = true
+	}
+	if len(got) != len(strictToolSet)+1 {
+		t.Fatalf("agent registered %d tools, want %d", len(got), len(strictToolSet)+1)
+	}
+	if !got["git"] {
+		t.Fatal("agent profile must register git")
+	}
+	for _, banned := range []string{"context_pack", "github_issues", "analyze_code", "wsl"} {
+		if got[banned] {
+			t.Errorf("agent must not register %q", banned)
+		}
+	}
 }
 
 func TestProfile_StrictToolSetExact(t *testing.T) {
@@ -60,8 +84,8 @@ func TestProfile_UltraHasFullCatalog(t *testing.T) {
 	dir := t.TempDir()
 	reg := newProfileRegistry(t, dir, registerOpts{Profile: profileUltra})
 	n := len(reg.server.ListTools())
-	if n != 28 {
-		t.Fatalf("ultra registered %d tools, want 28", n)
+	if n != 29 {
+		t.Fatalf("ultra registered %d tools, want 29", n)
 	}
 	for _, name := range []string{"git", "github_issues", "gitlab_issues", "minify_js", "backup", "help", "apply_patch"} {
 		if _, ok := reg.server.ListTools()[name]; !ok {

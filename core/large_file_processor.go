@@ -195,15 +195,10 @@ func (p *LargeFileProcessor) processInMemory(ctx context.Context, config Process
 		return fmt.Errorf("processing function failed: %w", err)
 	}
 
-	// Check if content actually changed
 	if processed != content {
-		result.TransformedLines = 1 // Mark as transformed
+		result.TransformedLines = changedLineCount(content, processed)
 	}
-
-	// Store transformed content for dry run diff
-	if config.DryRun {
-		result.TransformedContent = processed
-	}
+	result.TransformedContent = processed
 
 	// Write result if not dry run
 	if !config.DryRun {
@@ -292,7 +287,12 @@ func (p *LargeFileProcessor) processLineByLine(ctx context.Context, config Proce
 
 		// Track if line was transformed
 		if processedLine != line {
-			result.TransformedLines++
+			n := changedLineCount(line, processedLine)
+			if n < 0 || result.TransformedLines < 0 {
+				result.TransformedLines = -1
+			} else {
+				result.TransformedLines += n
+			}
 		}
 
 		// Write processed line
@@ -423,7 +423,8 @@ func (p *LargeFileProcessor) processChunkByChunk(ctx context.Context, config Pro
 
 			// Track if chunk was transformed
 			if processedChunk != chunk {
-				result.TransformedLines++
+				// Chunks may split a source line. Do not report chunks as lines.
+				result.TransformedLines = -1
 			}
 
 			// Write processed chunk
@@ -444,8 +445,8 @@ func (p *LargeFileProcessor) processChunkByChunk(ctx context.Context, config Pro
 
 	// For chunk mode, we can't easily reconstruct line-based diff
 	// but we can note if changes occurred
-	if config.DryRun && result.TransformedLines > 0 {
-		result.TransformedContent = "[file would be modified - " + fmt.Sprintf("%d chunks changed", result.TransformedLines) + "]"
+	if config.DryRun && result.TransformedLines != 0 {
+		result.TransformedContent = "[file would be modified - affected line count unavailable in chunk mode]"
 	}
 
 	result.ChunksProcessed = chunkIndex
