@@ -2,6 +2,26 @@
 
 > **Note for humans**: This file grew to ~4700 lines. For changes before v4.6 see `git log --oneline`. Only recent releases are summarized here.
 
+## [4.8.0] - 2026-10-08
+
+### fix(search,regex): affected lines, merged context, and per-file tokens
+
+`Lines Affected` is the number of changed source lines, not a boolean. Chunk mode reports it unavailable instead of counting chunks. Search context keeps ripgrep's absolute line numbers and prints each overlapping line once. `batch_operations` regex pipelines expand `{{file.name}}` and `{{file.stem}}` per file; `$1` remains a capture. A pipeline no longer rewrites a transformed file with an empty body.
+
+**Verification:** `TestChangedLineCount_RepeatedEditsCountOnce` · `TestSearchContext_MergesOverlapAndKeepsNumbers` · `TestPipelineRegex_FileStemOnce`
+
+### feat(agent): profile, git review, and context_pack
+
+`--profile=agent` is the strict catalog plus `git`. `strict` still omits git. `git(action:"review")` returns a paged file list and `status_hash`; continuing a diff or review with a stale hash is `STALE_GIT` and does not return a body. Git subprocesses honor cancellation and cap captured output at 1MB.
+
+`context_pack` is experimental (no outputSchema). It ranks `focus_paths` and a content query, returns signatures and short snippets, and can attach a compact git review. It is deterministic, not an embedding index. Incremental `since_hash` reads stay deferred: `expected_hash` already covers edit safety, and a delta requires the client to still hold the previous body.
+
+`github_issues`, `gitlab_issues`, and `security_policy` graduate with outputSchemas and handler sweeps. `git:remote` is no longer marked experimental. Token fields in the audit log and proxy are labeled `token_unit=bytes/4`. That is not provider usage.
+
+Ultra catalog is 29 tools. Agent is 18. Strict stays 17.
+
+**Verification:** `TestProfile_AgentIsStrictPlusGit` · `TestGitReview_HashAndStale` · `TestGitDiff_OffsetPagesFiles` · `TestContextPack_FocusRanksAndOmitsSecrets` · `TestGraduatedSchema_GitHubIssues` · `TestGraduatedSchema_GitLabIssues` · `TestExecGitCommand_CancelledContext`
+
 ## [Unreleased]
 
 ### feat(gitlab_issues): comment and close GitLab issues

@@ -19,6 +19,7 @@ func registerSecurityTools(reg *toolRegistry) {
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
+		mcp.WithRawOutputSchema(securityPolicyOutputSchema),
 	)
 	reg.addTool(tool, auditWrap(engine, "security_policy", func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		body := map[string]any{
@@ -31,7 +32,7 @@ func registerSecurityTools(reg *toolRegistry) {
 		if err != nil {
 			return mcp.NewToolResultError("security_policy unavailable"), nil
 		}
-		return mcp.NewToolResultText(string(raw)), nil
+		return mcp.NewToolResultStructured(body, string(raw)), nil
 	}),
 		`security_policy()`,
 	)

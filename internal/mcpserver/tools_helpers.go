@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -202,7 +203,7 @@ func parseOutputArg(args map[string]interface{}, key, def string, valid []string
 // countChangedFiles runs `git diff --name-only` and returns the count of changed files.
 // Used by the Layer-2 guardrail in gitDiff: when output=="full" is requested without paths,
 // we count first to decide whether to downgrade to stat.
-func countChangedFiles(repoRoot, rev string, staged bool) (int, error) {
+func countChangedFiles(ctx context.Context, repoRoot, rev string, staged bool) (int, error) {
 	cmdArgs := []string{"diff", "--no-ext-diff", "--name-only"}
 	if staged {
 		cmdArgs = append(cmdArgs, "--cached")
@@ -210,7 +211,7 @@ func countChangedFiles(repoRoot, rev string, staged bool) (int, error) {
 	if rev != "" {
 		cmdArgs = append(cmdArgs, rev)
 	}
-	output, err := execGitCommand(repoRoot, "git", cmdArgs...)
+	output, err := execGitCommandCtx(ctx, repoRoot, "git", cmdArgs...)
 	if err != nil {
 		return 0, err
 	}

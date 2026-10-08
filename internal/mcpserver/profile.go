@@ -10,6 +10,7 @@ type toolProfile string
 const (
 	profileUltra  toolProfile = "ultra"
 	profileStrict toolProfile = "strict"
+	profileAgent  toolProfile = "agent"
 )
 
 // strictToolSet is the agent-core catalog. Order matches the discovery
@@ -41,13 +42,18 @@ func parseToolProfile(s string) (toolProfile, error) {
 		return profileUltra, nil
 	case "strict":
 		return profileStrict, nil
+	case "agent":
+		return profileAgent, nil
 	default:
-		return "", fmt.Errorf("invalid --profile %q (want strict|ultra)", s)
+		return "", fmt.Errorf("invalid --profile %q (want strict|agent|ultra)", s)
 	}
 }
 
 func (p toolProfile) allows(name string) bool {
 	if p == "" || p == profileUltra {
+		return true
+	}
+	if p == profileAgent && name == "git" {
 		return true
 	}
 	_, ok := strictToolSet[name]

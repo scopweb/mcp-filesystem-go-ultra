@@ -22,6 +22,7 @@ func registerGitLabIssuesTools(reg *toolRegistry) {
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithOpenWorldHintAnnotation(true),
+		mcp.WithRawOutputSchema(gitlabIssuesOutputSchema),
 		mcp.WithString("action", mcp.Required(), mcp.Description("Action: "+strings.Join(actions, ", ")), mcp.Enum(actions...)),
 		mcp.WithString("path", mcp.Description("Local repository directory, inside allowed roots. Used to resolve the GitLab remote when repo is omitted.")),
 		mcp.WithString("repo", mcp.Description("Explicit group/project. Not a URL. Requires base_url.")),

@@ -2,9 +2,23 @@ package core
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
+
+// expandFileVars replaces per-file tokens. It does not use $n: those remain
+// regex capture expansions. Unknown {{file.*}} tokens are left unchanged.
+func expandFileVars(s, path string) string {
+	if !strings.Contains(s, "{{file.") {
+		return s
+	}
+	base := filepath.Base(path)
+	return strings.NewReplacer(
+		"{{file.name}}", base,
+		"{{file.stem}}", strings.TrimSuffix(base, filepath.Ext(base)),
+	).Replace(s)
+}
 
 // templatePattern matches {{step_id.field}} references
 var templatePattern = regexp.MustCompile(`\{\{([a-zA-Z0-9_-]+)\.([a-zA-Z_]+)\}\}`)

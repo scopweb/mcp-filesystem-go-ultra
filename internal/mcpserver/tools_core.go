@@ -132,6 +132,7 @@ func registerToolsOpts(s *server.MCPServer, engine *core.UltraFastEngine, opts r
 	registerGitLabIssuesTools(reg)
 	registerMinifyTools(reg)
 	registerAnalyzeTools(reg)
+	registerContextTools(reg)
 	registerDiscoveryTools(reg)
 	registerPatchTools(reg)
 	// Aliases disabled: duplicates add noise to discovery, hurt token budget.
@@ -1074,7 +1075,11 @@ func registerCoreTools(reg *toolRegistry) {
 			output.WriteString(fmt.Sprintf("File: %s\n", result.FilePath))
 			output.WriteString(fmt.Sprintf("Patterns Applied: %d/%d\n", result.PatternsApplied, len(patterns)))
 			output.WriteString(fmt.Sprintf("Total Replacements: %d\n", result.TotalReplacements))
-			output.WriteString(fmt.Sprintf("Lines Affected: %d\n", result.LinesAffected))
+			if result.LinesAffected < 0 {
+				output.WriteString("Lines Affected: unavailable (bounded diff or chunk mode)\n")
+			} else {
+				output.WriteString(fmt.Sprintf("Lines Affected: %d\n", result.LinesAffected))
+			}
 			output.WriteString(fmt.Sprintf("Duration: %v\n", result.Duration))
 
 			if result.BackupID != "" {

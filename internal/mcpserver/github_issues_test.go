@@ -631,11 +631,11 @@ func TestGitHubIssues_HelpAndExperimental(t *testing.T) {
 		}
 	}
 	st := reg.server.ListTools()["github_issues"]
-	if st.Tool.RawOutputSchema != nil || st.Tool.OutputSchema.Type != "" {
-		t.Fatal("experimental tool declared an outputSchema")
+	if st.Tool.RawOutputSchema == nil && st.Tool.OutputSchema.Type == "" {
+		t.Fatal("graduated tool must declare an outputSchema")
 	}
-	if !strings.HasPrefix(st.Tool.Description, "[EXPERIMENTAL since v") {
-		t.Fatalf("description=%s", st.Tool.Description)
+	if strings.HasPrefix(st.Tool.Description, "[EXPERIMENTAL since v") {
+		t.Fatalf("graduated description=%s", st.Tool.Description)
 	}
 	if !isBatchShim(`C:\tools\gh.cmd`) || !isBatchShim("/usr/bin/gh.bat") || isBatchShim(`C:\tools\gh.exe`) {
 		t.Fatal("batch shim detection")

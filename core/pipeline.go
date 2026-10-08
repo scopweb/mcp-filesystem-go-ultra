@@ -808,9 +808,14 @@ func (pe *PipelineExecutor) executeRegexTransform(ctx context.Context, step Pipe
 			}
 		}
 
+		expanded := make([]TransformPattern, len(patterns))
+		for i, pattern := range patterns {
+			expanded[i] = pattern
+			expanded[i].Replacement = expandFileVars(pattern.Replacement, normalizedPath)
+		}
 		config := RegexTransformConfig{
 			FilePath: normalizedPath,
-			Patterns: patterns,
+			Patterns: expanded,
 			Mode:     ModeSequential,
 			DryRun:   dryRun,
 		}
@@ -828,7 +833,7 @@ func (pe *PipelineExecutor) executeRegexTransform(ctx context.Context, step Pipe
 			}
 		}
 
-		if !dryRun {
+		if !dryRun && transformResult.TransformedContent != "" {
 			if err := pe.engine.WriteFileContent(ctx, normalizedPath, transformResult.TransformedContent); err != nil {
 				return &PipelineStepError{
 					StepID:  step.ID,
