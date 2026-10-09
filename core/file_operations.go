@@ -926,8 +926,8 @@ func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string,
 		return "", err
 	}
 
-	// Get file info
-	info, err := os.Stat(path)
+	// Stat through os.Root when an allowlist is active. Insecure-open keeps os.Stat.
+	info, err := e.statWithinRoot(path)
 	if os.IsNotExist(err) {
 		return "", fmt.Errorf("file or directory does not exist: %s", path)
 	}
