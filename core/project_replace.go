@@ -253,7 +253,11 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 	filesWithMatches := make([]string, 0, len(matchedFiles))
 	perFile := make([]ProjectReplaceFileResult, 0, len(matchedFiles))
 	var totalOccurrences int
-	for _, f := range matchedFiles {
+	for i, f := range matchedFiles {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		ReportProgress(ctx, i+1, len(matchedFiles), "scan")
 		content, err := os.ReadFile(f)
 		if err != nil {
 			continue
@@ -341,7 +345,18 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 	var mu sync.Mutex
 	var firstProcessErr error
 
+	var replacedN int
 	processFile := func(f string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		defer func() {
+			mu.Lock()
+			replacedN++
+			n := replacedN
+			mu.Unlock()
+			ReportProgress(ctx, n, len(filesWithMatches), "replace")
+		}()
 		content, err := os.ReadFile(f)
 		if err != nil {
 			return nil

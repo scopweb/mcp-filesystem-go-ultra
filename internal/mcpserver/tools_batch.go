@@ -688,6 +688,7 @@ func registerBatchTools(reg *toolRegistry) {
 			includePaths = append(includePaths, decoded...)
 		}
 
+		ctx = bindProgress(ctx, reg.server, request)
 		result, err := engine.ProjectReplace(ctx, path, find, replace, literal, caseSensitive, fileTypes, includePaths, excludePaths, preview, createBackup, parallel, maxFiles, force)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("project_replace error: %v", err)), nil

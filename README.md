@@ -103,6 +103,14 @@ build-windows.sh         # Linux/macOS
 
 Requires Go 1.27.2+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
 
+From a checkout, install the executable package, not the module root (the root has no `main`):
+
+```bash
+go install ./cmd/filesystem-ultra
+```
+
+The module path is `github.com/mcp/filesystem-ultra`. It does not match the GitHub import path, so `go install github.com/scopweb/mcp-filesystem-go-ultra@latest` does not work. Renaming the module, including a `/v4` path, is a separate release decision and is not done here.
+
 ```bash
 # Run tests
 go test ./tests/... ./core/... ./internal/mcpserver/
