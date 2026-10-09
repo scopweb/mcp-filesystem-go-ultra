@@ -181,7 +181,7 @@ func (t *FileTxn) Commit(ctx context.Context, newBytes []byte, dryRun bool, back
 	if mode == 0 {
 		mode = 0644
 	}
-	if err := atomicWriteFile(path, newBytes, mode); err != nil {
+	if err := t.engine.atomicWriteWithinRoot(path, newBytes, mode); err != nil {
 		return backupID, fmt.Errorf("error writing file: %w", err)
 	}
 	after := FileSnapshot{Path: path, Canon: t.snap.Canon, Exists: true, Hash: contentHashFNV(string(newBytes)), Mode: mode}

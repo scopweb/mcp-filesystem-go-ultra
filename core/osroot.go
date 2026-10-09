@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // os.Root covers file I/O inside an allowed base. It does not sandbox Git,
@@ -72,6 +73,45 @@ func (e *UltraFastEngine) locateRoot(path string) (*os.Root, string, bool, error
 		return nil, "", false, err
 	}
 	return root, rel, false, nil
+}
+
+func (e *UltraFastEngine) atomicWriteWithinRoot(path string, data []byte, mode os.FileMode) error {
+	root, rel, open, err := e.locateRoot(path)
+	if err != nil {
+		return err
+	}
+	if open {
+		return atomicWriteFile(path, data, mode)
+	}
+	parent := filepath.Dir(rel)
+	if parent != "." && parent != "" {
+		if err := root.MkdirAll(parent, 0755); err != nil {
+			return fmt.Errorf("failed to create directory: %w", err)
+		}
+	}
+	tmpRel := rel + ".tmp." + secureRandomSuffix()
+	if err := root.WriteFile(tmpRel, data, mode); err != nil {
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+	if err := renameRootWithRetry(root, tmpRel, rel); err != nil {
+		_ = root.Remove(tmpRel)
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+	return nil
+}
+
+func renameRootWithRetry(root *os.Root, oldRel, newRel string) error {
+	var err error
+	for _, delay := range []time.Duration{0, 50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond} {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		err = root.Rename(oldRel, newRel)
+		if err == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 func relWithinBases(path string, bases []string) (base, rel string, err error) {
