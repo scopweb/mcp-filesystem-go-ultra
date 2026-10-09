@@ -391,6 +391,7 @@ func (e *UltraFastEngine) resolveAllowedPaths() {
 
 	e.resolvedAllowedPaths = make([]string, 0, len(e.config.AllowedPaths))
 	for _, allowed := range e.config.AllowedPaths {
+		allowed = NormalizePath(allowed)
 		baseAbs, err := filepath.Abs(allowed)
 		if err != nil {
 			slog.Warn("Failed to resolve allowed path", "path", allowed, "error", err)
@@ -1440,12 +1441,15 @@ func NormalizePath(path string) string {
 	if len(path) >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/') {
 		driveLetter := strings.ToLower(string(path[0]))
 
-		// If running on Linux/WSL, convert to WSL path
+		// Convert to /mnt/<drive> only inside WSL. Native Linux has no such
+		// mount; rewriting C:\temp to /mnt/c/temp makes the allowlist and the
+		// tool path disagree.
 		if os.PathSeparator == '/' {
-			remainder := path[3:]
-			// Convert backslashes to forward slashes
-			remainder = filepath.ToSlash(remainder)
-			return "/mnt/" + driveLetter + "/" + remainder
+			if wsl, _ := DetectEnvironment(); wsl {
+				remainder := strings.ReplaceAll(path[3:], `\`, `/`)
+				return "/mnt/" + driveLetter + "/" + remainder
+			}
+			return path
 		}
 		// If running on Windows, normalize separators
 		return filepath.Clean(path)

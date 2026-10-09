@@ -5,10 +5,14 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 func TestE2E_E5_CTemp(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("C:\\temp is a Windows root")
+	}
 	root := `C:\temp`
 	if st, err := os.Stat(root); err != nil || !st.IsDir() {
 		t.Skip("C:\\temp not present")
