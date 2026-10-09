@@ -128,6 +128,10 @@ type UltraFastEngine struct {
 	resolvedAllowedPaths []string
 	allowedMu            sync.RWMutex
 	allowedSource        string
+	// os.Root handles for allowed bases. Not a process sandbox. Git and hooks
+	// do not use these. Closed when the allowlist changes.
+	rootHandles map[string]*os.Root
+	rootMu      sync.Mutex
 
 	// Audit logger for operation tracking (nil if --log-dir not set)
 	auditLogger *AuditLogger
@@ -406,6 +410,7 @@ func (e *UltraFastEngine) resolveAllowedPaths() {
 
 // Close gracefully shuts down the engine
 func (e *UltraFastEngine) Close() error {
+	e.closeRoots()
 	if e.cache != nil {
 		_ = e.cache.Close()
 	}
@@ -1571,6 +1576,7 @@ func (e *UltraFastEngine) AllowedSource() string {
 func (e *UltraFastEngine) SetAllowedPaths(paths []string, source string) {
 	e.allowedMu.Lock()
 	defer e.allowedMu.Unlock()
+	e.closeRoots()
 	e.config.AllowedPaths = append([]string(nil), paths...)
 	e.resolveAllowedPaths()
 	if source == "" {

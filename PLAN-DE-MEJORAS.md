@@ -273,5 +273,9 @@ Evidencia: `go test ./internal/mcpserver/ ./core/` y `TestRecovery_ToolPanicBeco
 `get_file_info`, `create_directory`, `delete_file`, `move_file` y `copy_file` publican `outputSchema` y `structuredContent`. El texto no cambia. `context_pack` sigue experimental y sin esquema. La validación global del SDK no se activa.
 Evidencia: `TestOutputSchema_HandlerSweep`.
 
-### Fases 9–10 — no aplicadas
-`os.Root` y las decisiones de producto (MRTR, multimedia, `/v4`) quedan pendientes.
+### Fase 9 — primer grupo
+`GetFileInfo` hace `Stat` con `os.Root` cuando hay allowlist. Los handles se cierran al cambiar raíces o al cerrar el motor. Git y hooks no pasan por ahí. No sustituye la política de archivos. UNC no migrado.
+Evidencia: `TestStatWithinRoot_ReadsInsideAndRejectsEscape`, `TestStatWithinRoot_SymlinkOutsideRejected`, `TestCloseRoots_DropsHandlesOnAllowlistChange`.
+
+### Fase 10 — no aplicada
+MRTR, multimedia y `/v4` siguen pendientes.
