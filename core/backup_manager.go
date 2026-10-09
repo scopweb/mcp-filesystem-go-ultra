@@ -865,7 +865,7 @@ func copyFile(src, dst string) error {
 	}
 	defer sourceFile.Close()
 
-	destFile, err := os.Create(dst)
+	destFile, err := openCopyDestination(dst, 0666, true)
 	if err != nil {
 		return err
 	}
@@ -882,7 +882,7 @@ func copyFileWithHash(src, dst string) (string, error) {
 	}
 	defer sourceFile.Close()
 
-	destFile, err := os.Create(dst)
+	destFile, err := openCopyDestination(dst, 0666, true)
 	if err != nil {
 		return "", err
 	}
@@ -907,7 +907,7 @@ func copyFileAndVerifyHash(src, dst, expectedHash string) error {
 	}
 	defer sourceFile.Close()
 
-	destFile, err := os.Create(dst)
+	destFile, err := openCopyDestination(dst, 0666, true)
 	if err != nil {
 		return err
 	}

@@ -199,7 +199,7 @@ func main() {
 	fileSecurityConfig := flag.String("file-security-config", "", "Same JSON policy as the MCP server. Required to avoid serving protected backup bytes. Does not inherit the server flag.")
 	allowedPaths := flag.String("allowed-paths", "", "Comma-separated sandbox roots used to evaluate relative policy patterns. Required when the policy has separator patterns.")
 	port := flag.Int("port", 9100, "HTTP port to listen on")
-	host := flag.String("host", "127.0.0.1", "Host/interface to bind to (default: localhost only). Use 0.0.0.0 to expose on the network — NOT recommended: the dashboard has no authentication and serves audit logs and backup file contents.")
+	host := flag.String("host", "127.0.0.1", "Listen address (default: 127.0.0.1). This is not the Host-header allowlist. 0.0.0.0 binds all interfaces but still accepts only loopback Host values. NOT recommended: the dashboard has no authentication and serves audit logs and backup file contents.")
 	flag.Parse()
 
 	if *logDir == "" {
@@ -253,7 +253,7 @@ func main() {
 	if *proxyLogDir != "" {
 		log.Printf("  Proxy logs: %s", *proxyLogDir)
 	}
-	log.Fatal(http.ListenAndServe(addr, mux))
+	log.Fatal(http.ListenAndServe(addr, guardHost(allowedHTTPHosts(*host), *port, mux)))
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {

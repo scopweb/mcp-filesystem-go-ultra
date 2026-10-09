@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra
 
-**v4.8.0** · Go 1.27.1 · MCP 2025-11-25 · stdio · 29 tools ultra / 18 agent / 17 strict
+**v4.8.0** · Go 1.27.2 · MCP 2025-11-25 · stdio · 29 tools ultra / 18 agent / 17 strict
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -101,7 +101,7 @@ build-windows.bat        # default
 build-windows.sh         # Linux/macOS
 ```
 
-Requires Go 1.27.1+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
+Requires Go 1.27.2+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
 
 ```bash
 # Run tests
@@ -254,7 +254,7 @@ Allowed paths: positional args after the flags, **or** one `--allowed-paths` wit
 |------|---------|-------------|
 | `--allowed-paths` | (required) | Comma-separated allowed roots; or pass paths as positional args |
 | `--insecure-open` | off | Labs only: disable the sandbox (entire disk). Fail-closed by default since v4.6.0. |
-| `--roots-mode` | replace | How MCP client Roots combine with CLI paths: `replace`, `union`, `ignore` |
+| `--roots-mode` | replace | How MCP client Roots combine with CLI paths: `replace` (client list replaces CLI), `union` (CLI plus client), `ignore` (keep CLI). An empty Roots result does not open the disk. There is no `intersect` mode. |
 | `--profile` | ultra | `ultra` = all 29 tools; `agent` = 18 (strict + `git`); `strict` = 17-tool core (includes `backup` and `security_policy`) |
 | `--file-security-config` | empty | JSON policy layered on allowed-paths. Invalid file exits 2. Immutable until restart. See below. |
 | `--git-network` | off | Enable `git` push/fetch. Off the critical path; ignored in `strict` |

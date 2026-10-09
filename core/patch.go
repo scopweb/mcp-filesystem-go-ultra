@@ -321,8 +321,8 @@ func PatchHeaderMatches(header, destPath string) bool {
 	if h == "/dev/null" || h == "dev/null" {
 		return true
 	}
-	dest := filepath.ToSlash(destPath)
-	h = filepath.ToSlash(h)
+	dest := toSlashAny(destPath)
+	h = toSlashAny(h)
 	if strings.EqualFold(filepath.Base(dest), filepath.Base(h)) {
 		return true
 	}

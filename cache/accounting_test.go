@@ -23,7 +23,7 @@ func TestAccounting_FreshHitAndStaleMiss(t *testing.T) {
 	}
 	st := c.GetStats()
 	if st.FileHits != 1 || st.FileMisses != 0 || st.StaleMisses != 0 {
-		t.Fatalf("after hit: %+v", st)
+		t.Fatalf("after hit: hits=%d misses=%d stale=%d", st.FileHits, st.FileMisses, st.StaleMisses)
 	}
 
 	future := time.Now().Add(2 * time.Second)
@@ -35,7 +35,7 @@ func TestAccounting_FreshHitAndStaleMiss(t *testing.T) {
 	}
 	st = c.GetStats()
 	if st.FileHits != 1 || st.FileMisses != 1 || st.StaleMisses != 1 {
-		t.Fatalf("after stale: %+v", st)
+		t.Fatalf("after stale: hits=%d misses=%d stale=%d", st.FileHits, st.FileMisses, st.StaleMisses)
 	}
 }
 
@@ -58,10 +58,10 @@ func TestAccounting_PeekAndPrefetchExcludedFromDemand(t *testing.T) {
 	}
 	st := c.GetStats()
 	if st.FileHits != 0 || st.FileMisses != 0 {
-		t.Fatalf("demand polluted: %+v", st)
+		t.Fatalf("demand polluted: hits=%d misses=%d", st.FileHits, st.FileMisses)
 	}
 	if st.InternalLookups != 1 || st.PrefetchHits != 1 {
-		t.Fatalf("class counts: %+v", st)
+		t.Fatalf("class counts: internal=%d prefetchHits=%d", st.InternalLookups, st.PrefetchHits)
 	}
 }
 

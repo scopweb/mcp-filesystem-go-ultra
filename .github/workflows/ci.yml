@@ -14,8 +14,8 @@ on:
     branches: [ main ]
 
 env:
-  # Go 1.27.1: required by go.mod.
-  GO_VERSION: '1.27.1'
+  # Go 1.27.2: required by go.mod.
+  GO_VERSION: '1.27.2'
 
 jobs:
   # ============================================================
@@ -37,16 +37,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+          cache: true
 
       - name: Download dependencies
         run: go mod download
@@ -75,27 +66,14 @@ jobs:
       # Verified: the suite runs cleanly on Linux (15 s, no leak) and
       # on local Windows machines with more RAM, so the code is fine
       # — this is purely a Windows-runner memory budget issue.
-      # Linux runs the full suite (with race). Windows runs only
-      # ./core/ and ./tests/security/, which is enough coverage for
-      # the go/no-go signal on a PR. The 202 integration tests in
-      # ./tests/ still run in CI — just on Linux.
+      # Linux runs the full suite (with race). Windows skips ./tests/
+      # for the runner memory budget and runs cache, cmd, core,
+      # mcpserver and tests/security. The integration tests in
+      # ./tests/ still run in CI — on Linux.
       - name: Run tests (Windows, no race, no ./tests/ integration suite)
         if: runner.os != 'Linux'
         run: |
-          go test -p 1 ./core/... -count=1
-          go test -p 1 ./internal/mcpserver/ -count=1
-          go test -p 1 ./tests/security/... -count=1
-
-      - name: Run focused core + security tests (Linux, with race)
-        if: runner.os == 'Linux'
-        run: |
-          go test -race -p 1 ./core/... -count=1
-          go test -race -p 1 ./tests/security/... -count=1
-
-      - name: Run focused core + security tests (Windows, no race)
-        if: runner.os != 'Linux'
-        run: |
-          go test -p 1 ./core/... -count=1
+          go test -p 1 ./cache/... ./cmd/... ./core/... -count=1
           go test -p 1 ./internal/mcpserver/ -count=1
           go test -p 1 ./tests/security/... -count=1
 
@@ -126,16 +104,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+          cache: true
 
       # The `embed_rg` build embeds ripgrep binaries via //go:embed. Those
       # binaries are git-ignored (the project ignores *.exe) and are NOT
@@ -189,11 +158,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: true
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -212,9 +184,33 @@ jobs:
         # this PR actually touches so a fix for, say, normalizer.go can't
         # be blocked by an unrelated formatting drift in engine.go.
         run: |
-          unformatted=$(git diff --name-only --diff-filter=ACM origin/main...HEAD -- '*.go' | xargs -r gofmt -l 2>/dev/null)
+          set -eu
+          range=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            range="origin/${{ github.base_ref }}...HEAD"
+          else
+            before="${{ github.event.before }}"
+            if [ -n "$before" ] && [ "$before" != "0000000000000000000000000000000000000000" ] && git cat-file -e "${before}^{commit}" 2>/dev/null; then
+              range="${before}..HEAD"
+            elif git rev-parse --verify origin/main >/dev/null 2>&1; then
+              range="origin/main...HEAD"
+            elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+              range="HEAD^..HEAD"
+            fi
+          fi
+          if [ -n "$range" ]; then
+            files=$(git diff --name-only --diff-filter=ACM $range -- '*.go')
+          else
+            files=$(git ls-tree -r --name-only HEAD -- '*.go')
+          fi
+          if [ -z "$files" ]; then
+            echo "no Go files to check"
+            exit 0
+          fi
+          unformatted=$(printf '%s\n' "$files" | xargs -r gofmt -l)
           if [ -n "$unformatted" ]; then
-            echo "These files in this PR are not gofmt'ed:"
+            echo "These changed Go files are not gofmt'd:"
             echo "$unformatted"
             exit 1
           fi

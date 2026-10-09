@@ -271,6 +271,110 @@ func ResolveSymlinks(path string) (string, bool, error) {
 	return resolved, hasSymlink, nil
 }
 
+const maxContainmentHops = 40
+
+// resolveContainmentPath returns the path a create or open would affect.
+// A missing non-link suffix is joined onto the deepest existing ancestor.
+// A symlink component is replaced by its Readlink target, including when that
+// target does not exist. It must not be treated as a plain name under the parent:
+// that fallback is what lets a dangling link escape the allowlist.
+func resolveContainmentPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return resolveContainment(filepath.Clean(abs), 0)
+}
+
+func resolveContainment(abs string, hops int) (string, error) {
+	if hops > maxContainmentHops {
+		return "", fmt.Errorf("too many symlink hops in %s", abs)
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved, nil
+	}
+	current := abs
+	var suffix []string
+	for {
+		info, err := os.Lstat(current)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				target, rerr := os.Readlink(current)
+				if rerr != nil {
+					return "", rerr
+				}
+				if !filepath.IsAbs(target) {
+					target = filepath.Join(filepath.Dir(current), target)
+				}
+				target = filepath.Clean(target)
+				for _, part := range suffix {
+					target = filepath.Join(target, part)
+				}
+				return resolveContainment(target, hops+1)
+			}
+			resolved, rerr := filepath.EvalSymlinks(current)
+			if rerr != nil {
+				return "", rerr
+			}
+			for _, part := range suffix {
+				resolved = filepath.Join(resolved, part)
+			}
+			return resolved, nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", fmt.Errorf("no existing ancestor of %s", abs)
+		}
+		suffix = append([]string{filepath.Base(current)}, suffix...)
+		current = parent
+	}
+}
+
+// refuseSymlinkPath reports an error when path or an existing ancestor is a
+// symlink. Lstat sees a dangling link; Stat does not, and must not be used to
+// decide that a copy destination is absent.
+func refuseSymlinkPath(path string) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("failed to resolve path: %w", err)
+	}
+	has, err := pathContainsSymlink(abs)
+	if err != nil {
+		return fmt.Errorf("failed to inspect path: %w", err)
+	}
+	if has {
+		return fmt.Errorf("security: refusing to follow symlink in %s", path)
+	}
+	return nil
+}
+
+// openCopyDestination creates or replaces dst without following a symlink.
+// overwrite preserves restore/batch replacement of a regular file. A missing
+// name is created with O_EXCL so a dangling symlink is not followed on POSIX.
+// O_EXCL does not close a race in an intermediate directory.
+func openCopyDestination(dst string, perm os.FileMode, overwrite bool) (*os.File, error) {
+	if err := refuseSymlinkPath(dst); err != nil {
+		return nil, err
+	}
+	info, err := os.Lstat(dst)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("security: refusing to follow symlink %s", dst)
+		}
+		if !overwrite {
+			return nil, fmt.Errorf("destination already exists: %s", dst)
+		}
+		return os.OpenFile(dst, os.O_WRONLY|os.O_TRUNC, perm)
+	}
+	return os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+}
+
 // pathContainsSymlink returns true if any component of p (or any of its
 // existing ancestors) is a symbolic link. It is the actual TOCTOU defense:
 // an attacker who plants a symlink anywhere along the path will be caught,

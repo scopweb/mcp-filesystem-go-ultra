@@ -1283,33 +1283,13 @@ func (e *UltraFastEngine) IsPathAllowed(path string) bool {
 		return false
 	}
 
-	// Resolve symlinks to prevent symlink-based sandbox escape.
-	// If the path doesn't exist yet (e.g., write to new file or mkdir -p),
-	// walk up the tree to find the first existing ancestor and resolve from there.
-	resolved, err := filepath.EvalSymlinks(targetAbs)
+	// Resolve the path that a later create/open would affect. A missing file
+	// keeps its name under the existing parent. A symlink, including a dangling
+	// one, is replaced by its target — never by the link's own name.
+	resolved, err := resolveContainmentPath(targetAbs)
 	if err != nil {
-		// Walk up the directory tree to find the deepest existing ancestor
-		current := targetAbs
-		var suffix []string
-		for {
-			parent := filepath.Dir(current)
-			suffix = append([]string{filepath.Base(current)}, suffix...)
-			if parent == current {
-				// Reached filesystem root without finding existing path
-				break
-			}
-			if parentResolved, parentErr := filepath.EvalSymlinks(parent); parentErr == nil {
-				resolved = parentResolved
-				for _, s := range suffix {
-					resolved = filepath.Join(resolved, s)
-				}
-				break
-			}
-			current = parent
-		}
-		if resolved == "" {
-			return false
-		}
+		slog.Debug("Path rejected: containment resolve failed", "path", path, "reason", err.Error())
+		return false
 	}
 	targetAbs = resolved
 
@@ -1596,6 +1576,9 @@ func (e *UltraFastEngine) SetAllowedPaths(paths []string, source string) {
 			source = AllowedSourceCLI
 		}
 	}
+	if len(paths) == 0 && source != AllowedSourceInsecure {
+		source = "denied"
+	}
 	e.allowedSource = source
 	if e.autoSyncManager != nil {
 		e.autoSyncManager.SetAllowedPaths(e.config.AllowedPaths)
@@ -1609,11 +1592,14 @@ func (e *UltraFastEngine) SetAllowedPaths(paths []string, source string) {
 	}
 }
 
-func (e *UltraFastEngine) allowedBases() (empty bool, bases []string) {
+func (e *UltraFastEngine) allowedBases() (open bool, bases []string) {
 	e.allowedMu.RLock()
 	if len(e.config.AllowedPaths) == 0 {
+		// Only an explicit insecure sandbox is open. An empty list from Roots
+		// or a future intersection is "no path authorized", not the whole disk.
+		open = e.allowedSource == AllowedSourceInsecure
 		e.allowedMu.RUnlock()
-		return true, nil
+		return open, nil
 	}
 	if len(e.resolvedAllowedPaths) == len(e.config.AllowedPaths) {
 		bases = append([]string(nil), e.resolvedAllowedPaths...)
@@ -1625,7 +1611,7 @@ func (e *UltraFastEngine) allowedBases() (empty bool, bases []string) {
 	e.allowedMu.Lock()
 	defer e.allowedMu.Unlock()
 	if len(e.config.AllowedPaths) == 0 {
-		return true, nil
+		return e.allowedSource == AllowedSourceInsecure, nil
 	}
 	if len(e.resolvedAllowedPaths) != len(e.config.AllowedPaths) {
 		e.resolveAllowedPaths()
@@ -1711,7 +1697,7 @@ func (e *UltraFastEngine) CopyFileWithBuffer(src, dst string) error {
 	}
 	defer sourceFile.Close()
 
-	destFile, err := os.Create(dst)
+	destFile, err := openCopyDestination(dst, 0666, true)
 	if err != nil {
 		return &PathError{Op: "copy", Path: dst, Err: err}
 	}
