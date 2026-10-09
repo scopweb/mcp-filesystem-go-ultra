@@ -129,11 +129,11 @@ type policyPin struct {
 // FilePolicy is an immutable rule set loaded at startup. Concurrent reads
 // are safe. There is no reload API.
 type FilePolicy struct {
-	enabled  bool
-	rules    []compiledRule
-	pins     []policyPin
-	hash string
-	mu   sync.RWMutex // pins are appended once at startup, before serve
+	enabled bool
+	rules   []compiledRule
+	pins    []policyPin
+	hash    string
+	mu      sync.RWMutex // pins are appended once at startup, before serve
 }
 
 type policyDocument struct {
@@ -491,6 +491,27 @@ func splitSegments(slashPath string) []string {
 }
 
 func relUnderRoot(root, path string) (string, bool) {
+	if rel, ok := relUnderClean(root, path); ok {
+		return rel, true
+	}
+	if runtime.GOOS != "windows" {
+		return "", false
+	}
+	return relUnderClean(evalOrSame(root), evalOrSame(path))
+}
+
+func evalOrSame(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		abs = p
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	return filepath.Clean(abs)
+}
+
+func relUnderClean(root, path string) (string, bool) {
 	root = filepath.Clean(root)
 	path = filepath.Clean(path)
 	rel, err := filepath.Rel(root, path)
