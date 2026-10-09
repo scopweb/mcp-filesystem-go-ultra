@@ -4,7 +4,7 @@ go 1.27.2
 
 require (
 	github.com/allegro/bigcache/v3 v3.2.0
-	github.com/mark3labs/mcp-go v1.0.0
+	github.com/mark3labs/mcp-go v1.2.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
 )
