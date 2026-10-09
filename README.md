@@ -267,8 +267,8 @@ Allowed paths: positional args after the flags, **or** one `--allowed-paths` wit
 | `--cache-ttl` | 3m | File content cache life (Go duration). Retention only; freshness is size/mtime. Does not change directory-listing TTL. Get does not refresh BigCache life. |
 | `--parallel-ops` | 2×CPU (max 16) | Max concurrent operations |
 | `--backup-dir` | system temp | Directory for automatic backups |
-| `--backup-max-age` | 72h | Maximum backup retention |
-| `--backup-max-count` | 50 | Maximum backup count per file |
+| `--backup-max-age` | 7 | Maximum backup retention, in days |
+| `--backup-max-count` | 100 | Maximum number of backups to keep |
 | `--risk-threshold-medium` | 20 | % change flagged as medium risk |
 | `--risk-threshold-high` | 75 | % change flagged as high risk |
 | `--hooks-enabled` | off | Enable pre/post operation hooks |
@@ -360,7 +360,7 @@ Copy [examples/harness/](examples/harness/) — do not guess flags. One MCP inst
 
 ## Available Tools
 
-25 in `--profile=ultra` (default). `--profile=strict` keeps the 16 marked **strict**.
+29 in `--profile=ultra` (default). `--profile=agent` is the 17-tool core plus `git`. `--profile=strict` is those 17, marked **strict**. `server_info` is not read-only: `artifact/write` can overwrite a file.
 
 | Tool | Purpose | When to use |
 |------|---------|-------------|
@@ -388,7 +388,11 @@ Copy [examples/harness/](examples/harness/) — do not guess flags. One MCP inst
 | `git` | Local git. `add` + `update:true` is `git add -u`. `remote` is read-only (no `--git-network`). `push`/`fetch` need `--git-network` | ultra |
 | `minify_js` | Pure-Go JS minify (no Node) | ultra |
 | `analyze_code` | Read-only symbols / lint / sec / impact. Symbols: Go AST; JS/TS/C#/SQL regex. Not a writer. | ultra — understand code; edit with `apply_patch`/`edit_file`. Do not use git grep or bash |
-| `server_info` | Stats / static help / artifacts | ultra |
+| `server_info` | Stats / static help / artifacts. Not read-only: `artifact/write` can overwrite a file | ultra |
+| `security_policy` | Read-only description of the file protection policy. Does not list rules | **strict** |
+| `github_issues` | GitHub issues via `gh`. No delete, no `gh auth login` | ultra |
+| `gitlab_issues` | GitLab issues via its HTTP API. No delete | ultra |
+| `context_pack` | Ranked files and short snippets for a task. Experimental | ultra |
 
 ---
 
