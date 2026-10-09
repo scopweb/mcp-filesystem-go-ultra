@@ -277,5 +277,6 @@ Evidencia: `TestOutputSchema_HandlerSweep`.
 `GetFileInfo` hace `Stat` con `os.Root` cuando hay allowlist. Los handles se cierran al cambiar raíces o al cerrar el motor. Git y hooks no pasan por ahí. No sustituye la política de archivos. UNC no migrado.
 Evidencia: `TestStatWithinRoot_ReadsInsideAndRejectsEscape`, `TestStatWithinRoot_SymlinkOutsideRejected`, `TestCloseRoots_DropsHandlesOnAllowlistChange`.
 
-### Fase 10 — no aplicada
-MRTR, multimedia y `/v4` siguen pendientes.
+### Fase 10 — parcial, sin cambio de política
+`project_replace` emite `notifications/progress` solo si la petición trae `progressToken`, en las etapas scan/replace, y no si el contexto está cancelado. No amplía timeouts. `go install` documentado como `./cmd/filesystem-ultra`. El módulo no se renombra.
+No se adopta MRTR: cambiaría la política de ejecución; `force:true` no es aprobación humana. No se añade modo imagen/audio a `read_file` (núcleo congelado). No hay Docker ni GoReleaser.
