@@ -861,30 +861,12 @@ func (e *UltraFastEngine) WriteFileBytes(ctx context.Context, path string, data 
 		return &ContextError{Op: "write_bytes", Details: "operation cancelled before write"}
 	}
 
-	// Ensure directory exists
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	// Atomic write using temp file with secure random name
-	tmpPath := path + ".tmp." + secureRandomSuffix()
-
-	// Preserve original file permissions if file exists, otherwise use 0644
 	fileMode := os.FileMode(0644)
-	if info, err := os.Stat(path); err == nil {
+	if info, err := e.statWithinRoot(path); err == nil {
 		fileMode = info.Mode()
 	}
-
-	// Write to temporary file
-	if err := os.WriteFile(tmpPath, data, fileMode); err != nil {
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	// Atomic rename (retry past transient Windows locks)
-	if err := renameWithRetry(tmpPath, path); err != nil {
-		os.Remove(tmpPath) // Clean up temp file
-		return fmt.Errorf("failed to rename temp file: %w", err)
+	if err := e.atomicWriteWithinRoot(path, data, fileMode); err != nil {
+		return err
 	}
 
 	// Invalidate cache
