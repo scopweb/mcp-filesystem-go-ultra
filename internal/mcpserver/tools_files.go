@@ -25,6 +25,7 @@ func registerFileTools(reg *toolRegistry) {
 			"Use create_directory for ALL project directory creation — never use the runtime's built-in mkdir tools for host paths. "+
 			"Recursive creation supported. Related: list_directory, write_file, delete_file, batch_operations."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to the directory to create")),
+		mcp.WithRawOutputSchema(fileMutationOutputSchema),
 	)
 	reg.addTool(createDirTool, auditWrap(engine, "create_directory", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -37,10 +38,11 @@ func registerFileTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
 
+		text := fmt.Sprintf("Successfully created directory: %s", path)
 		if engine.IsCompactMode() {
-			return mcp.NewToolResultText(fmt.Sprintf("OK: %s created", path)), nil
+			text = fmt.Sprintf("OK: %s created", path)
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("Successfully created directory: %s", path)), nil
+		return appliedFile(text, map[string]any{"path": path}), nil
 	}))
 
 	// ============================================================================
@@ -58,6 +60,7 @@ func registerFileTools(reg *toolRegistry) {
 		mcp.WithString("path", mcp.Description("Path to the file or directory to delete. Required unless paths is provided.")),
 		mcp.WithArray("paths", mcp.WithStringItems(), mcp.Description("Native array of paths, or a JSON array string (legacy adapter). e.g. [\"a.txt\",\"b.txt\"]")),
 		mcp.WithBoolean("permanent", mcp.Description("Permanently delete instead of soft-delete (default: false)")),
+		mcp.WithRawOutputSchema(fileMutationOutputSchema),
 	)
 	reg.addTool(deleteFileTool, auditWrap(engine, "delete_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		permanent := false
@@ -107,7 +110,16 @@ func registerFileTools(reg *toolRegistry) {
 					}
 				}
 				results.WriteString(fmt.Sprintf("\n%d/%d succeeded", successCount, len(paths)))
-				return mcp.NewToolResultText(results.String()), nil
+				text := results.String()
+				status := "applied"
+				if successCount != len(paths) {
+					status = "partial"
+				}
+				return withMessage(map[string]any{
+					"status":    status,
+					"permanent": permanent,
+					"message":   text,
+				}, text), nil
 			}
 		}
 
@@ -122,10 +134,11 @@ func registerFileTools(reg *toolRegistry) {
 				return mcp.NewToolResultError(formatToolError(err)), nil
 			}
 			core.InvalidateKnownHash(core.NormalizePath(path))
+			text := fmt.Sprintf("Successfully deleted: %s", path)
 			if engine.IsCompactMode() {
-				return mcp.NewToolResultText(fmt.Sprintf("OK: %s deleted", path)), nil
+				text = fmt.Sprintf("OK: %s deleted", path)
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("Successfully deleted: %s", path)), nil
+			return appliedFile(text, map[string]any{"path": path, "permanent": true}), nil
 		}
 
 		// Default: soft delete
@@ -136,10 +149,11 @@ func registerFileTools(reg *toolRegistry) {
 		core.SetSoftDeleteID(ctx, info.SDID)
 		core.InvalidateKnownHash(core.NormalizePath(path))
 
+		text := formatSoftDeleteVerbose(path, info)
 		if engine.IsCompactMode() {
-			return mcp.NewToolResultText(formatSoftDeleteCompact(path, info)), nil
+			text = formatSoftDeleteCompact(path, info)
 		}
-		return mcp.NewToolResultText(formatSoftDeleteVerbose(path, info)), nil
+		return appliedFile(text, map[string]any{"path": path, "permanent": false, "sd_id": info.SDID}), nil
 	}))
 
 	// ============================================================================
@@ -155,6 +169,7 @@ func registerFileTools(reg *toolRegistry) {
 			"Related: copy_file, delete_file, edit_file, batch_operations."),
 		mcp.WithString("source_path", mcp.Required(), mcp.Description("Current path of the file/directory")),
 		mcp.WithString("dest_path", mcp.Required(), mcp.Description("New path for the file/directory")),
+		mcp.WithRawOutputSchema(fileMutationOutputSchema),
 	)
 	reg.addTool(moveFileTool, auditWrap(engine, "move_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		sourcePath, err := request.RequireString("source_path")
@@ -174,10 +189,11 @@ func registerFileTools(reg *toolRegistry) {
 		core.InvalidateKnownHash(core.NormalizePath(sourcePath))
 		core.RefreshKnownHashes([]string{core.NormalizePath(destPath)})
 
+		text := fmt.Sprintf("Successfully moved '%s' to '%s'", sourcePath, destPath)
 		if engine.IsCompactMode() {
-			return mcp.NewToolResultText(fmt.Sprintf("OK: moved to %s", destPath)), nil
+			text = fmt.Sprintf("OK: moved to %s", destPath)
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("Successfully moved '%s' to '%s'", sourcePath, destPath)), nil
+		return appliedFile(text, map[string]any{"source_path": sourcePath, "dest_path": destPath}), nil
 	}))
 
 	// ============================================================================
@@ -193,6 +209,7 @@ func registerFileTools(reg *toolRegistry) {
 			"Also copies directories recursively. Related: move_file, delete_file, edit_file, batch_operations, backup."),
 		mcp.WithString("source_path", mcp.Required(), mcp.Description("Path of the file/directory to copy")),
 		mcp.WithString("dest_path", mcp.Required(), mcp.Description("Destination path for the copy")),
+		mcp.WithRawOutputSchema(fileMutationOutputSchema),
 	)
 	reg.addTool(copyFileTool, auditWrap(engine, "copy_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		sourcePath, err := request.RequireString("source_path")
@@ -211,10 +228,11 @@ func registerFileTools(reg *toolRegistry) {
 		}
 		core.RefreshKnownHashes([]string{core.NormalizePath(destPath)})
 
+		text := fmt.Sprintf("Successfully copied '%s' to '%s'", sourcePath, destPath)
 		if engine.IsCompactMode() {
-			return mcp.NewToolResultText(fmt.Sprintf("OK: copied to %s", destPath)), nil
+			text = fmt.Sprintf("OK: copied to %s", destPath)
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("Successfully copied '%s' to '%s'", sourcePath, destPath)), nil
+		return appliedFile(text, map[string]any{"source_path": sourcePath, "dest_path": destPath}), nil
 	}))
 
 	// ============================================================================
@@ -231,6 +249,7 @@ func registerFileTools(reg *toolRegistry) {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("path", mcp.Description("Path to the file or directory. Required unless paths is provided.")),
 		mcp.WithArray("paths", mcp.WithStringItems(), mcp.Description("Native array of paths, or a JSON array string (legacy adapter). e.g. [\"file1.txt\",\"dir/\"]")),
+		mcp.WithRawOutputSchema(getFileInfoOutputSchema),
 	)
 	reg.addTool(fileInfoTool, auditWrap(engine, "get_file_info", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Batch mode: get info for multiple files in one call
@@ -244,12 +263,16 @@ func registerFileTools(reg *toolRegistry) {
 					return mcp.NewToolResultError("paths array is empty"), nil
 				}
 				var results strings.Builder
+				errs := make([]error, len(paths))
+				norm := make([]string, len(paths))
 				for i, p := range paths {
 					p = core.NormalizePath(p)
+					norm[i] = p
 					if i > 0 {
 						results.WriteString("\n")
 					}
 					info, err := engine.GetFileInfo(ctx, p)
+					errs[i] = err
 					if err != nil {
 						results.WriteString(fmt.Sprintf("=== %s ===\nERROR: %v\n", p, err))
 					} else {
@@ -259,7 +282,7 @@ func registerFileTools(reg *toolRegistry) {
 						}
 					}
 				}
-				return mcp.NewToolResultText(results.String()), nil
+				return fileInfoBatch(engine, norm, errs, results.String()), nil
 			}
 		}
 
@@ -272,7 +295,7 @@ func registerFileTools(reg *toolRegistry) {
 		if err != nil {
 			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
-		return mcp.NewToolResultText(info), nil
+		return fileInfoSingle(engine, core.NormalizePath(path), info), nil
 	}))
 }
 
