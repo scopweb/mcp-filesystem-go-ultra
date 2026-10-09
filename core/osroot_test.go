@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -48,6 +49,26 @@ func TestStatWithinRoot_SymlinkOutsideRejected(t *testing.T) {
 	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
 	if _, err := engine.statWithinRoot(link); err == nil {
 		t.Fatal("os.Root must not stat a symlink that leaves the root")
+	}
+}
+
+func TestReadFileBytes_SymlinkOutsideRejected(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(target, []byte("secret"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	data, err := engine.ReadFileBytes(context.Background(), link)
+	if err == nil || string(data) == "secret" {
+		t.Fatalf("read escaped: %q %v", data, err)
 	}
 }
 

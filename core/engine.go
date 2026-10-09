@@ -970,8 +970,7 @@ func (e *UltraFastEngine) ReadFileBytes(ctx context.Context, path string) ([]byt
 		return nil, err
 	}
 
-	// Check file info
-	info, err := os.Stat(path)
+	info, err := e.statWithinRoot(path)
 	if err != nil {
 		return nil, &PathError{Op: "read_bytes", Path: path, Err: err}
 	}
@@ -980,8 +979,7 @@ func (e *UltraFastEngine) ReadFileBytes(ctx context.Context, path string) ([]byt
 		return nil, &ValidationError{Field: "path", Value: path, Message: "path is a directory, not a file"}
 	}
 
-	// Read file bytes
-	data, err := os.ReadFile(path)
+	data, err := e.readWithinRoot(path)
 	if err != nil {
 		return nil, &PathError{Op: "read_bytes", Path: path, Err: err}
 	}
