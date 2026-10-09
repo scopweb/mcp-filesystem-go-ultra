@@ -6,7 +6,7 @@ import (
 )
 
 func IsSecretPath(path string) bool {
-	base := strings.ToLower(filepath.Base(path))
+	base := strings.ToLower(anyBase(path))
 	if base == ".env" || strings.HasPrefix(base, ".env.") {
 		return true
 	}

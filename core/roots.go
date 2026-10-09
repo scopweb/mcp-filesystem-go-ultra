@@ -30,6 +30,8 @@ func ParseRootsMode(s string) RootsMode {
 
 // MergeAllowedPaths combines CLI roots with client MCP Roots.
 // Empty client roots never wipe an existing CLI sandbox (fail-closed).
+// There is no intersect mode: an empty intersection must not become open access.
+// --roots-mode=ignore keeps the CLI list. replace and union are the other modes.
 func MergeAllowedPaths(cli, client []string, mode RootsMode) (paths []string, source string) {
 	cli = sanitizeNonEmpty(cli)
 	client = sanitizeNonEmpty(client)

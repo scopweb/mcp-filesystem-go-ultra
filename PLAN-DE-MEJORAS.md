@@ -238,3 +238,29 @@ Los esfuerzos son orientativos. Cada fase puede dividirse en cambios independien
 Una fase está completada cuando su cambio está aplicado, el diff ha sido revisado y sus verificaciones han producido evidencia registrada. Los tests omitidos, los entornos no disponibles y las decisiones pendientes deben quedar explícitos.
 
 El primer hito es: **Go 1.27.2 efectivo, fallo de copia corregido mediante regresión y suites de CI nuevamente ejecutables**. Las nuevas funcionalidades no deben retrasar ese hito.
+
+## Registro de ejecución (2026-10-09)
+
+Sin commit ni push.
+
+### Fase 1 — hecha
+Archivos: `go.mod`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `build-windows.bat`, `README.md`, `CLAUDE.md`. Changelog histórico intacto. `go.sum` sin cambios de dependencias.
+Evidencia: `go version` → go1.27.2 (toolchain auto desde 1.27.1). Binario temporal `filesystem-ultra-v4-1272.exe` compilado con go1.27.2. `govulncheck` v1.7.0, DB 2026-10-08, sin vulnerabilidades. `go vet ./...` seguía fallando en los 4 avisos de mutex de `cache/accounting_test.go` (fase 3).
+
+### Fase 2 — hecha
+El test reproducía el escape en Linux (`CopyFile` devolvía nil y creaba el archivo fuera). Arreglo: `resolveContainmentPath` no trata un symlink colgante como nombre bajo el padre; la copia rechaza destinos que atraviesan symlinks y crea con `O_EXCL`. Cubre API core, directorio, batch, pipeline y `copy_file`.
+Evidencia Linux (WSL, Go 1.27.2): PASS de los tests de symlink. Windows: `os.Symlink` falla con privilegio insuficiente; casos omitidos, no ejecutados aquí. `O_EXCL` no cierra carreras en directorios intermedios. `go test ./core/` en Windows: ok.
+
+### Fase 3 — hecha en local, CI remoto no ejecutado
+`go vet ./...` pasa. Tests de ruta/`logicalServerName` pasan en Linux. `pack-mcpb.ps1` probado con ejecutable dado y con compilación propia. `embed_rg` compilado en Windows y en WSL. `release.yml` descarga ripgrep y usa `release/README.txt`. gofmt del workflow contempla PR, push y primer push. Caché duplicada de `actions/cache` retirada; la de `setup-go` queda. Suites Windows duplicadas retiradas.
+Pendiente: subir el cambio para declarar el CI remoto verde. Bump de acciones (checkout/setup-go/cache/artifacts/gh-release) no aplicado: el plan lo pide en un cambio separado y no se verificaron las etiquetas oficiales en esta sesión.
+
+### Fase 4 — hecha
+`file://` lee con tope durante la lectura (50 MB), distingue texto y binario, autoriza la ruta resuelta y audita. Dashboard valida `Host` en GET y POST; `--host 0.0.0.0` no abre hosts ajenos. `rejectCrossSite` se mantiene.
+Evidencia: `TestReadFileResource_*`, `TestHostHeader_*`, `TestGuardHost_BlocksBeforeHandler`. No es una prueba de DNS rebinding en navegador.
+
+### Fase 5 — parcial
+Una lista vacía que no es `--insecure-open` ya no abre el disco (`TestSetAllowedPaths_EmptyNonInsecureDenies`). `replace`/`union`/`ignore` documentados. `intersect` no se añade: una intersección vacía no debe significar acceso total. Defaults de perfil y bundle no cambiados.
+
+### Fases 6–10 — no aplicadas
+El SDK MCP, anotaciones, esquemas, `os.Root` y las decisiones de producto (MRTR, multimedia, `/v4`) quedan pendientes. La fase 6 debe ir en un cambio aislado.

@@ -114,7 +114,7 @@ func (e *UltraFastEngine) copyDirectoryRecursive(srcDir, dstDir string, createDi
 		}
 		defer srcFile.Close()
 
-		dstFile, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		dstFile, err := openCopyDestination(dstPath, 0644, true)
 		if err != nil {
 			srcFile.Close()
 			return fmt.Errorf("failed to create %s: %w", dstPath, err)
@@ -268,7 +268,7 @@ func (e *UltraFastEngine) SyncWorkspace(ctx context.Context, direction string, f
 			}
 			defer srcFile.Close()
 
-			dstFile, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+			dstFile, err := openCopyDestination(dstPath, 0644, true)
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("failed to create %s: %v", dstPath, err))
 				return nil

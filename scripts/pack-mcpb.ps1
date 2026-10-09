@@ -24,12 +24,12 @@ $serverDir = Join-Path $stage "server"
 if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 New-Item -ItemType Directory -Path $serverDir | Out-Null
 
-$exe = Join-Path $serverDir "filesystem-ultra.exe"
+$stagedExe = Join-Path $serverDir "filesystem-ultra.exe"
 if ($Exe) {
     if (-not (Test-Path -LiteralPath $Exe)) { throw "missing built server: $Exe" }
-    Copy-Item -LiteralPath $Exe -Destination $exe
+    Copy-Item -LiteralPath $Exe -Destination $stagedExe
 } else {
-    & go build -ldflags="$ldflags" -trimpath -o $exe .\cmd\filesystem-ultra
+    & go build -ldflags="$ldflags" -trimpath -o $stagedExe .\cmd\filesystem-ultra
     if ($LASTEXITCODE -ne 0) { throw "go build failed: $LASTEXITCODE" }
 }
 
@@ -46,15 +46,15 @@ $zip = [System.IO.Compression.ZipFile]::Open($out, [System.IO.Compression.ZipArc
 try {
     $entries = @(
         @{ Name = "manifest.json"; Path = (Join-Path $stage "manifest.json") },
-        @{ Name = "server/filesystem-ultra.exe"; Path = $exe }
+        @{ Name = "server/filesystem-ultra.exe"; Path = $stagedExe }
     )
     foreach ($item in $entries) {
         $entry = $zip.CreateEntry($item.Name, [System.IO.Compression.CompressionLevel]::Optimal)
-        $input = [System.IO.File]::OpenRead($item.Path)
+        $src = [System.IO.File]::OpenRead($item.Path)
         try {
             $target = $entry.Open()
-            try { $input.CopyTo($target) } finally { $target.Dispose() }
-        } finally { $input.Dispose() }
+            try { $src.CopyTo($target) } finally { $target.Dispose() }
+        } finally { $src.Dispose() }
     }
 } finally {
     $zip.Dispose()

@@ -20,7 +20,7 @@ on:
       - 'v*'
 
 env:
-  GO_VERSION: '1.27.1'
+  GO_VERSION: '1.27.2'
 
 jobs:
   # ============================================================
@@ -36,14 +36,19 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download ripgrep binaries for embed_rg
+        shell: bash
+        run: bash embed/ripgrep/download.sh
 
       - name: Build all Windows binaries
         run: .\build-windows.bat
 
       - name: Package Windows release
         run: |
-          # Include release instructions
-          Copy-Item ..\release\README.txt bin\README.txt -Force
+          # Include release instructions. The checkout root is the workspace, not its parent.
+          Copy-Item release\README.txt bin\README.txt -Force
           cd bin
           Compress-Archive -Path * -DestinationPath ..\filesystem-ultra-${{ github.ref_name }}-windows-amd64.zip -Force
         shell: pwsh
@@ -70,6 +75,10 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download ripgrep binaries for embed_rg
+        run: bash embed/ripgrep/download.sh
 
       - name: Build all Linux binaries
         run: |
@@ -78,8 +87,8 @@ jobs:
 
       - name: Package Linux release
         run: |
-          # Include release instructions
-          cp ../release/README.txt bin/README.txt
+          # Include release instructions. The checkout root is the workspace, not its parent.
+          cp release/README.txt bin/README.txt
           cd bin
           tar -czvf ../filesystem-ultra-${{ github.ref_name }}-linux-amd64.tar.gz .
 

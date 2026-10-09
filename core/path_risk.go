@@ -18,8 +18,16 @@ func riskRank(level string) int {
 	}
 }
 
+func toSlashAny(path string) string {
+	return strings.ReplaceAll(path, `\`, `/`)
+}
+
+func anyBase(path string) string {
+	return filepath.Base(toSlashAny(path))
+}
+
 func slashLower(path string) string {
-	return strings.ToLower(filepath.ToSlash(path))
+	return strings.ToLower(toSlashAny(path))
 }
 
 func pathHasDir(slashPath, dir string) bool {
@@ -31,7 +39,7 @@ func PathFloorFor(path string, changePercent, mediumPercent float64) (floor, rea
 		return "", ""
 	}
 	n := slashLower(path)
-	base := strings.ToLower(filepath.Base(path))
+	base := strings.ToLower(anyBase(path))
 	if strings.HasSuffix(base, "_test.go") {
 		return "", "test file"
 	}

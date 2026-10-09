@@ -465,7 +465,8 @@ func (e *UltraFastEngine) MoveFile(ctx context.Context, sourcePath, destPath str
 		return fmt.Errorf("failed to stat source: %w", err)
 	}
 
-	// Check if destination already exists
+	// Check if destination already exists. Rename replaces a dangling symlink
+	// instead of following it, so Stat (not Lstat) preserves that contract.
 	if _, err := os.Stat(destPath); err == nil {
 		return fmt.Errorf("destination already exists: %s", destPath)
 	}
@@ -567,9 +568,21 @@ func (e *UltraFastEngine) CopyFile(ctx context.Context, sourcePath, destPath str
 		return fmt.Errorf("failed to stat source: %w", err)
 	}
 
-	// Check if destination already exists
-	if _, err := os.Stat(destPath); err == nil {
+	// Lstat, not Stat: a dangling symlink is a destination, not a missing file.
+	// Stat would follow it and report "not exist", then the later open creates
+	// the file outside the root.
+	if err := refuseSymlinkPath(destPath); err != nil {
+		return err
+	}
+	destInfo, err := os.Lstat(destPath)
+	if err == nil {
+		if destInfo.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("security: destination is a symlink: %s", destPath)
+		}
 		return fmt.Errorf("destination already exists: %s", destPath)
+	}
+	if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to stat destination: %w", err)
 	}
 
 	// TOCTOU defense: re-resolve symlinks immediately before copy.
@@ -618,6 +631,31 @@ func (e *UltraFastEngine) CopyFile(ctx context.Context, sourcePath, destPath str
 	return nil
 }
 
+// prepareCopyParent creates the destination parent only when it does not
+// traverse a symlink, then re-checks the created directory is still inside
+// the allowlist. O_EXCL on the final component does not cover this race.
+func (e *UltraFastEngine) prepareCopyParent(dst string) error {
+	if err := refuseSymlinkPath(dst); err != nil {
+		return err
+	}
+	destDir := filepath.Dir(dst)
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
+	return e.assertResolvedInside(destDir)
+}
+
+func (e *UltraFastEngine) assertResolvedInside(path string) error {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return fmt.Errorf("failed to resolve destination: %w", err)
+	}
+	if !e.IsPathAllowed(resolved) {
+		return fmt.Errorf("security: destination resolved outside allowed paths: %s", resolved)
+	}
+	return nil
+}
+
 // copyFile copies a single file using io.Copy for memory efficiency
 func (e *UltraFastEngine) copyFile(src, dst string) error {
 	// TOCTOU defense: re-resolve symlinks immediately before copy.
@@ -644,14 +682,14 @@ func (e *UltraFastEngine) copyFile(src, dst string) error {
 	}
 	defer srcFile.Close()
 
-	// Ensure destination directory exists
-	destDir := filepath.Dir(dst)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("failed to create destination directory: %w", err)
+	if err := e.prepareCopyParent(dst); err != nil {
+		return err
 	}
 
-	// Create destination file with same permissions
-	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, sourceInfo.Mode())
+	// O_EXCL: if the final name is a symlink, including a dangling one, open
+	// fails instead of following it. Not sufficient for a symlink planted in
+	// an intermediate directory; prepareCopyParent re-checks that after mkdir.
+	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, sourceInfo.Mode())
 	if err != nil {
 		return fmt.Errorf("failed to create destination file: %w", err)
 	}
@@ -686,9 +724,14 @@ func (e *UltraFastEngine) copyDirectory(src, dst string) error {
 		return fmt.Errorf("failed to stat source directory: %w", err)
 	}
 
-	// Create destination directory
+	if err := refuseSymlinkPath(dst); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dst, sourceInfo.Mode()); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
+	if err := e.assertResolvedInside(dst); err != nil {
+		return err
 	}
 
 	// Read directory contents

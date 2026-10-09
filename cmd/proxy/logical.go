@@ -12,7 +12,7 @@ var (
 )
 
 func exeBasename(pathOrBase string) string {
-	base := filepath.Base(pathOrBase)
+	base := filepath.Base(strings.ReplaceAll(pathOrBase, `\`, `/`))
 	return strings.TrimSuffix(base, ".exe")
 }
 
