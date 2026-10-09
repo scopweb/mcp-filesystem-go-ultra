@@ -262,5 +262,9 @@ Evidencia: `TestReadFileResource_*`, `TestHostHeader_*`, `TestGuardHost_BlocksBe
 ### Fase 5 — parcial
 Una lista vacía que no es `--insecure-open` ya no abre el disco (`TestSetAllowedPaths_EmptyNonInsecureDenies`). `replace`/`union`/`ignore` documentados. `intersect` no se añade: una intersección vacía no debe significar acceso total. Defaults de perfil y bundle no cambiados.
 
-### Fases 6–10 — no aplicadas
-El SDK MCP, anotaciones, esquemas, `os.Root` y las decisiones de producto (MRTR, multimedia, `/v4`) quedan pendientes. La fase 6 debe ir en un cambio aislado.
+### Fase 6 — hecha, aislada
+`mcp-go` v1.0.0 → v1.2.0. Notas oficiales v1.2.0 revisadas (2026-10-08). No se subieron `x/sys` ni `x/sync`. `WithRecovery` y `WithResourceRecovery` activos. El timeout de Roots no se tocó. El anuncio de protocolo sigue en 2025-11-25; no se añade una restricción que el SDK no aplica.
+Evidencia: `go test ./internal/mcpserver/ ./core/` y `TestRecovery_ToolPanicBecomesJSONRPCError`.
+
+### Fases 7–10 — no aplicadas
+Anotaciones, esquemas, `os.Root` y las decisiones de producto (MRTR, multimedia, `/v4`) quedan pendientes.

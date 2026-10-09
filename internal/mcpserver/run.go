@@ -95,6 +95,8 @@ func newFilesystemMCPServer() *server.MCPServer {
 		server.WithResourceCapabilities(false, true),
 		server.WithLogging(),
 		server.WithInstructions(serverInstructions),
+		server.WithRecovery(),
+		server.WithResourceRecovery(),
 	)
 }
 
