@@ -269,5 +269,9 @@ Evidencia: `go test ./internal/mcpserver/ ./core/` y `TestRecovery_ToolPanicBeco
 ### Fase 7 — hecha
 `openWorldHint` deja de heredar el true del SDK. Solo `github_issues`, `gitlab_issues` y `git` con `--git-network` son open-world. `server_info` sigue sin ser read-only; `destructiveHint` pasa a true porque `artifact/write` puede sobrescribir. README: backups 7 días / 100, catálogo 29/17. SECURITY.md ya coincidía en Roots, `force` y Git; no se inventan plazos.
 
-### Fases 8–10 — no aplicadas
-Esquemas, `os.Root` y las decisiones de producto (MRTR, multimedia, `/v4`) quedan pendientes.
+### Fase 8 — primer corte
+`get_file_info`, `create_directory`, `delete_file`, `move_file` y `copy_file` publican `outputSchema` y `structuredContent`. El texto no cambia. `context_pack` sigue experimental y sin esquema. La validación global del SDK no se activa.
+Evidencia: `TestOutputSchema_HandlerSweep`.
+
+### Fases 9–10 — no aplicadas
+`os.Root` y las decisiones de producto (MRTR, multimedia, `/v4`) quedan pendientes.

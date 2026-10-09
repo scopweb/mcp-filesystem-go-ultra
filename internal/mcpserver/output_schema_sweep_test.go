@@ -80,6 +80,7 @@ func TestOutputSchema_HandlerSweep(t *testing.T) {
 	dir := t.TempDir()
 	reg := buildEditRegistry(t, dir, false)
 	registerBatchTools(reg)
+	registerFileTools(reg)
 	registerSearchTools(reg)
 	registerDiscoveryTools(reg)
 	registerPatchTools(reg)
@@ -97,6 +98,8 @@ func TestOutputSchema_HandlerSweep(t *testing.T) {
 	diffSchema := parseSchema(t, diffFilesOutputSchema)
 	patchSchema := parseSchema(t, applyPatchOutputSchema)
 	analyzeSchema := parseSchema(t, analyzeCodeOutputSchema)
+	infoSchema := parseSchema(t, getFileInfoOutputSchema)
+	fileOpSchema := parseSchema(t, fileMutationOutputSchema)
 
 	// freshFile creates a per-case file so edit cases cannot interfere.
 	freshFile := func(name, content string) string {
@@ -187,6 +190,18 @@ func TestOutputSchema_HandlerSweep(t *testing.T) {
 			args: map[string]any{"path": freshFile("p1.txt", "old\n"), "patch": "--- a/p1.txt\n+++ b/p1.txt\n@@ -1 +1 @@\n-old\n+new\n", "dry_run": true}},
 		{name: "analyze symbols", tool: "analyze_code", schema: analyzeSchema, textMessage: true,
 			args: map[string]any{"action": "symbols", "path": freshFile("an.go", "package an\nfunc Exported() {}\n")}},
+		{name: "file info", tool: "get_file_info", schema: infoSchema, textMessage: true,
+			args: map[string]any{"path": freshFile("info.txt", sample)}},
+		{name: "file info batch", tool: "get_file_info", schema: infoSchema, textMessage: true,
+			args: map[string]any{"paths": []any{freshFile("info2.txt", sample), dir}}},
+		{name: "create directory", tool: "create_directory", schema: fileOpSchema, textMessage: true,
+			args: map[string]any{"path": filepath.Join(dir, "newdir")}},
+		{name: "copy file", tool: "copy_file", schema: fileOpSchema, textMessage: true,
+			args: map[string]any{"source_path": freshFile("copy-src.txt", sample), "dest_path": filepath.Join(dir, "copy-dst.txt")}},
+		{name: "move file", tool: "move_file", schema: fileOpSchema, textMessage: true,
+			args: map[string]any{"source_path": freshFile("move-src.txt", sample), "dest_path": filepath.Join(dir, "move-dst.txt")}},
+		{name: "delete permanent", tool: "delete_file", schema: fileOpSchema, textMessage: true,
+			args: map[string]any{"path": freshFile("del.txt", sample), "permanent": true}},
 	}
 
 	for _, tc := range cases {

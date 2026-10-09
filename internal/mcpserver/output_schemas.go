@@ -281,3 +281,35 @@ var analyzeCodeOutputSchema = json.RawMessage(`{
   },
   "required": ["status", "action", "findings", "truncated", "tool", "retryable", "message"]
 }`)
+
+var getFileInfoOutputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "status": {"type": "string", "description": "ok | partial"},
+    "path": {"type": "string"},
+    "name": {"type": "string"},
+    "type": {"type": "string", "description": "file | dir"},
+    "size": {"type": "integer", "description": "Omitted when the path is protected or hidden"},
+    "mode": {"type": "string"},
+    "modified": {"type": "string"},
+    "mime": {"type": "string"},
+    "files": {"type": "array", "items": {"type": "object"}, "description": "Batch results. Each item has path and status ok|error."},
+    "message": {"type": "string", "description": "Text fallback, identical to the text content block"}
+  },
+  "required": ["status", "message"]
+}`)
+
+var fileMutationOutputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "status": {"type": "string", "description": "applied | partial"},
+    "path": {"type": "string"},
+    "source_path": {"type": "string"},
+    "dest_path": {"type": "string"},
+    "permanent": {"type": "boolean"},
+    "sd_id": {"type": "string"},
+    "files": {"type": "array", "items": {"type": "object"}},
+    "message": {"type": "string", "description": "Text fallback, identical to the text content block"}
+  },
+  "required": ["status", "message"]
+}`)
