@@ -89,6 +89,7 @@ func (r *toolRegistry) addTool(tool mcp.Tool, handler toolHandler, examples ...s
 	if !r.profile.allows(tool.Name) {
 		return
 	}
+	tool = sealOpenWorld(tool)
 	tool = applyExperimentalPolicy(tool)
 	r.server.AddTool(tool, handler)
 	r.handlers[tool.Name] = handler
@@ -100,6 +101,21 @@ func (r *toolRegistry) addTool(tool mcp.Tool, handler toolHandler, examples ...s
 			r.toolExamples = make(map[string][]string)
 		}
 		r.toolExamples[tool.Name] = examples
+	}
+}
+
+// sealOpenWorld sets openWorldHint from behavior, not the SDK default (true).
+// github_issues and gitlab_issues always reach a remote. git is open only when
+// --git-network is on, which tools_git.go already records. Every other tool
+// stays on the local filesystem.
+func sealOpenWorld(tool mcp.Tool) mcp.Tool {
+	switch tool.Name {
+	case "github_issues", "gitlab_issues", "git":
+		return tool
+	default:
+		closed := false
+		tool.Annotations.OpenWorldHint = &closed
+		return tool
 	}
 }
 

@@ -480,6 +480,7 @@ func registerHelpTool(reg *toolRegistry) {
 		mcp.WithString("tool", mcp.Description("Tool name (e.g. \"git\"). When set, returns that tool's schema + examples.")),
 		mcp.WithString("detail", mcp.Description("summary|normal|full. Catalog only (no tool:). summary: names. full: catalog + examples. detail shapes structuredContent; compact-mode trims text."), mcp.Enum("summary", "normal", "full")),
 	)
+	helpTool = sealOpenWorld(helpTool)
 	reg.server.AddTool(helpTool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args, _ := request.Params.Arguments.(map[string]any)
 		name, _ := args["tool"].(string)

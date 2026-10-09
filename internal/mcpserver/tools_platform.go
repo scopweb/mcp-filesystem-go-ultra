@@ -349,7 +349,7 @@ func registerPlatformTools(reg *toolRegistry) {
 	serverInfoTool := mcp.NewTool("server_info",
 		mcp.WithTitleAnnotation("Server Info"),
 		mcp.WithReadOnlyHintAnnotation(false),
-		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithDescription("server_info — Server help, performance stats, and artifact capture. Actions: help, stats, artifact. "+
 			"Related: edit_file, search_files, batch_operations, backup, analyze_operation."),

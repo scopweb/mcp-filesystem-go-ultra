@@ -266,5 +266,8 @@ Una lista vacía que no es `--insecure-open` ya no abre el disco (`TestSetAllowe
 `mcp-go` v1.0.0 → v1.2.0. Notas oficiales v1.2.0 revisadas (2026-10-08). No se subieron `x/sys` ni `x/sync`. `WithRecovery` y `WithResourceRecovery` activos. El timeout de Roots no se tocó. El anuncio de protocolo sigue en 2025-11-25; no se añade una restricción que el SDK no aplica.
 Evidencia: `go test ./internal/mcpserver/ ./core/` y `TestRecovery_ToolPanicBecomesJSONRPCError`.
 
-### Fases 7–10 — no aplicadas
-Anotaciones, esquemas, `os.Root` y las decisiones de producto (MRTR, multimedia, `/v4`) quedan pendientes.
+### Fase 7 — hecha
+`openWorldHint` deja de heredar el true del SDK. Solo `github_issues`, `gitlab_issues` y `git` con `--git-network` son open-world. `server_info` sigue sin ser read-only; `destructiveHint` pasa a true porque `artifact/write` puede sobrescribir. README: backups 7 días / 100, catálogo 29/17. SECURITY.md ya coincidía en Roots, `force` y Git; no se inventan plazos.
+
+### Fases 8–10 — no aplicadas
+Esquemas, `os.Root` y las decisiones de producto (MRTR, multimedia, `/v4`) quedan pendientes.
