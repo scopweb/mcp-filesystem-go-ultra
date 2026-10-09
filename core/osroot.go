@@ -37,6 +37,17 @@ func (e *UltraFastEngine) rootFor(base string) (*os.Root, error) {
 	return root, nil
 }
 
+func (e *UltraFastEngine) lstatWithinRoot(path string) (os.FileInfo, error) {
+	root, rel, open, err := e.locateRoot(path)
+	if err != nil {
+		return nil, err
+	}
+	if open {
+		return os.Lstat(path)
+	}
+	return root.Lstat(rel)
+}
+
 func (e *UltraFastEngine) statWithinRoot(path string) (os.FileInfo, error) {
 	root, rel, open, err := e.locateRoot(path)
 	if err != nil {
@@ -98,6 +109,23 @@ func (e *UltraFastEngine) atomicWriteWithinRoot(path string, data []byte, mode o
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 	return nil
+}
+
+func (e *UltraFastEngine) removeWithinRoot(path string, dir bool) error {
+	root, rel, open, err := e.locateRoot(path)
+	if err != nil {
+		return err
+	}
+	if open {
+		if dir {
+			return os.RemoveAll(path)
+		}
+		return os.Remove(path)
+	}
+	if dir {
+		return root.RemoveAll(rel)
+	}
+	return root.Remove(rel)
 }
 
 func renameRootWithRetry(root *os.Root, oldRel, newRel string) error {

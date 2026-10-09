@@ -378,8 +378,9 @@ func (e *UltraFastEngine) DeleteFile(ctx context.Context, path string) error {
 		return fmt.Errorf("access denied: cannot delete allowed-path root '%s'%s", path, e.AllowedDirsSuffix())
 	}
 
-	// Check if file/directory exists
-	info, err := os.Stat(path)
+	// Check if file/directory exists. Stat follows links so a dangling
+	// symlink still reports missing, matching the previous os.Stat path.
+	info, err := e.statWithinRoot(path)
 	if os.IsNotExist(err) {
 		return fmt.Errorf("file or directory does not exist: %s", path)
 	}
@@ -402,12 +403,13 @@ func (e *UltraFastEngine) DeleteFile(ctx context.Context, path string) error {
 		return fmt.Errorf("pre-delete hook denied operation: %w", err)
 	}
 
-	// Delete file or directory recursively
-	if info.IsDir() {
-		err = os.RemoveAll(path)
-	} else {
-		err = os.Remove(path)
+	// A symlink is unlinked, not followed. Stat above reports the target,
+	// so a link to a directory must not become RemoveAll.
+	dir := info.IsDir()
+	if link, lerr := e.lstatWithinRoot(path); lerr == nil && link.Mode()&os.ModeSymlink != 0 {
+		dir = false
 	}
+	err = e.removeWithinRoot(path, dir)
 
 	if err != nil {
 		return fmt.Errorf("failed to delete: %w", err)
