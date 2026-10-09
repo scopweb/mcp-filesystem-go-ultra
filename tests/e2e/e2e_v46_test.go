@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,9 @@ func TestE2E_V46_LiveUsage(t *testing.T) {
 }
 
 func TestE2E_CTemp(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("C:\\temp is a Windows root")
+	}
 	root := `C:\temp`
 	if st, err := os.Stat(root); err != nil || !st.IsDir() {
 		t.Skip("C:\\temp not present")
@@ -192,6 +196,9 @@ func contentHashOf(t *testing.T, res *mcp.CallToolResult) string {
 }
 
 func TestE2E_MultiAgent_CTemp(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("C:\\temp is a Windows root")
+	}
 	root := `C:\temp`
 	if err := os.MkdirAll(root, 0755); err != nil {
 		t.Fatal(err)

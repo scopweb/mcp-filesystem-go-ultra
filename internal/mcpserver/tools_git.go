@@ -728,7 +728,7 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 	hookCtx.Metadata["staged_files"] = stagedFiles
 	hookCtx.Metadata["staged_insertions"] = stagedInsertions
 
-	cmdArgs := []string{"commit", "-m", message}
+	cmdArgs := append(gitIdentityArgs(ctx, repoRoot), "commit", "-m", message)
 	if len(paths) > 0 {
 		cmdArgs = append(cmdArgs, "--")
 		for _, p := range paths {
@@ -1200,6 +1200,19 @@ func gitPush(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 // to be unset when called; keeping caller-owned buffers lets us build a
 // structured error message that distinguishes stdout from stderr.
 const gitCaptureCap = 1 << 20
+
+// gitIdentityArgs supplies a process-local author only when the repo has none.
+// It does not write git config.
+func gitIdentityArgs(ctx context.Context, repoRoot string) []string {
+	email, err := execGitCommandCtx(ctx, repoRoot, "git", "config", "--get", "user.email")
+	if err == nil && strings.TrimSpace(email) != "" {
+		return nil
+	}
+	return []string{
+		"-c", "user.name=filesystem-ultra",
+		"-c", "user.email=filesystem-ultra@localhost",
+	}
+}
 
 func execGitCommand(dir, command string, args ...string) (string, error) {
 	return execGitCommandCtx(context.Background(), dir, command, args...)

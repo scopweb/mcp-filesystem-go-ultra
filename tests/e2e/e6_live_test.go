@@ -5,11 +5,15 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestE2E_E6_CTemp(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("C:\\temp is a Windows root")
+	}
 	root := `C:\temp`
 	if st, err := os.Stat(root); err != nil || !st.IsDir() {
 		t.Skip("C:\\temp not present")
@@ -32,7 +36,7 @@ func runLiveE6(t *testing.T, workDir string) {
 	listed := c.rpc(t, "tools/list", map[string]any{})
 	result, _ := listed["result"].(map[string]any)
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 25 {
+	if len(tools) != 29 {
 		t.Fatalf("tools/list count=%d", len(tools))
 	}
 
