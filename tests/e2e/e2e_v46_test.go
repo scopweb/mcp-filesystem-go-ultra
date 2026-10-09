@@ -33,6 +33,16 @@ func startClient(t *testing.T, exe string, args ...string) *client.Client {
 	return c
 }
 
+func containsPath(got, path string) bool {
+	if strings.Contains(got, path) {
+		return true
+	}
+	if runtime.GOOS == "windows" {
+		return strings.Contains(strings.ToLower(got), strings.ToLower(path))
+	}
+	return false
+}
+
 func callErr(t *testing.T, c *client.Client, name string, args map[string]any) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -106,7 +116,7 @@ func runLiveV46(t *testing.T, workDir string) {
 	c := startClient(t, exe, workDir)
 
 	res := call(t, c, "list_allowed_directories", map[string]any{})
-	if !strings.Contains(textOf(t, res), workDir) {
+	if !containsPath(textOf(t, res), workDir) {
 		t.Fatalf("list_allowed missing workDir: %s", textOf(t, res))
 	}
 
@@ -219,7 +229,7 @@ func TestE2E_MultiAgent_CTemp(t *testing.T) {
 
 	for name, c := range map[string]*client.Client{"writer": writer, "reviewer": reviewer, "peer": peer} {
 		got := textOf(t, call(t, c, "list_allowed_directories", map[string]any{}))
-		if !strings.Contains(got, workDir) {
+		if !containsPath(got, workDir) {
 			t.Fatalf("%s list_allowed missing workDir: %s", name, got)
 		}
 	}
