@@ -111,6 +111,57 @@ func TestWriteFileBytes_InsideRoot(t *testing.T) {
 	}
 }
 
+func TestDeleteFile_InsideRoot(t *testing.T) {
+	root := t.TempDir()
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	file := filepath.Join(root, "gone.txt")
+	dir := filepath.Join(root, "sub")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "n.txt"), []byte("n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.DeleteFile(context.Background(), file); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.DeleteFile(context.Background(), dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(file); !os.IsNotExist(err) {
+		t.Fatalf("file still present: %v", err)
+	}
+	if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+		t.Fatalf("dir still present: %v", err)
+	}
+}
+
+func TestRemoveWithinRoot_SymlinkOutsideLeavesTarget(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "kept.txt")
+	if err := os.WriteFile(target, []byte("kept"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	_ = engine.removeWithinRoot(link, false)
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != "kept" {
+		t.Fatalf("outside file changed: %q %v", got, err)
+	}
+}
+
 func TestCloseRoots_DropsHandlesOnAllowlistChange(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()
