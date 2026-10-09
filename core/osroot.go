@@ -37,19 +37,41 @@ func (e *UltraFastEngine) rootFor(base string) (*os.Root, error) {
 }
 
 func (e *UltraFastEngine) statWithinRoot(path string) (os.FileInfo, error) {
-	open, bases := e.allowedBases()
+	root, rel, open, err := e.locateRoot(path)
+	if err != nil {
+		return nil, err
+	}
 	if open {
 		return os.Stat(path)
 	}
-	base, rel, err := relWithinBases(path, bases)
+	return root.Stat(rel)
+}
+
+func (e *UltraFastEngine) readWithinRoot(path string) ([]byte, error) {
+	root, rel, open, err := e.locateRoot(path)
 	if err != nil {
 		return nil, err
+	}
+	if open {
+		return os.ReadFile(path)
+	}
+	return root.ReadFile(rel)
+}
+
+func (e *UltraFastEngine) locateRoot(path string) (*os.Root, string, bool, error) {
+	open, bases := e.allowedBases()
+	if open {
+		return nil, "", true, nil
+	}
+	base, rel, err := relWithinBases(path, bases)
+	if err != nil {
+		return nil, "", false, err
 	}
 	root, err := e.rootFor(base)
 	if err != nil {
-		return nil, err
+		return nil, "", false, err
 	}
-	return root.Stat(rel)
+	return root, rel, false, nil
 }
 
 func relWithinBases(path string, bases []string) (base, rel string, err error) {
