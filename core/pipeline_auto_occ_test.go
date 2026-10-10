@@ -24,6 +24,7 @@ func TestPipelineRefreshesAutoOCCBaseline(t *testing.T) {
 	RecordReadHash(NormalizePath(path), contentHashFNV("foo bar\n"))
 
 	engine := newTestEngine(dir)
+	t.Cleanup(func() { engine.Close() })
 	executor := NewPipelineExecutor(engine)
 	res, err := executor.Execute(context.Background(), PipelineRequest{
 		Name: "refresh-test",

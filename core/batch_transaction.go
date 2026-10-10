@@ -52,7 +52,7 @@ func (m *BatchOperationManager) executeBatchContext(ctx context.Context, request
 	journal := &mutationJournal{}
 	if request.Atomic {
 		for _, path := range uniqueSorted(paths) {
-			if _, err := recoverySnapshot(path); err != nil {
+			if _, err := recoverySnapshot(m.engine, path); err != nil {
 				result.Errors = []string{err.Error()}
 				return
 			}
@@ -76,7 +76,7 @@ func (m *BatchOperationManager) executeBatchContext(ctx context.Context, request
 		before := []FileSnapshot{}
 		if request.Atomic {
 			for _, path := range uniqueSorted(m.collectPaths(op)) {
-				snap, snapErr := recoverySnapshot(path)
+				snap, snapErr := recoverySnapshot(m.engine, path)
 				if snapErr != nil {
 					err = snapErr
 					break
@@ -92,7 +92,7 @@ func (m *BatchOperationManager) executeBatchContext(ctx context.Context, request
 		}
 		// Include partial changes of the failing operation (not only successful ops).
 		for _, snap := range before {
-			after, readErr := recoverySnapshot(snap.Path)
+			after, readErr := recoverySnapshot(m.engine, snap.Path)
 			if readErr != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("cannot inspect partial write %s: %v", snap.Path, readErr))
 				if err == nil {

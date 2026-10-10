@@ -59,19 +59,20 @@ func (e *UltraFastEngine) AnalyzeWriteChange(ctx context.Context, path, content 
 
 	// Check if file exists
 	existingContent := ""
-	info, err := os.Stat(path)
+	info, err := e.statWithinRoot(path)
 	if err == nil {
 		analysis.FileExists = true
 		analysis.FileSize = info.Size()
 
-		// Read existing content
-		contentBytes, err := os.ReadFile(path)
+		contentBytes, err := e.readWithinRoot(path)
 		if err == nil {
 			existingContent = string(contentBytes)
 		}
-	} else {
+	} else if os.IsNotExist(err) {
 		analysis.FileExists = false
 		analysis.Suggestions = append(analysis.Suggestions, "This will create a new file")
+	} else {
+		return nil, err
 	}
 
 	// Analyze changes
@@ -139,15 +140,17 @@ func (e *UltraFastEngine) AnalyzeEditChange(ctx context.Context, path, oldText, 
 	}
 
 	// Check if file exists
-	info, err := os.Stat(path)
-	if err != nil {
+	info, err := e.statWithinRoot(path)
+	if os.IsNotExist(err) {
 		return nil, fmt.Errorf("file does not exist: %s", path)
+	}
+	if err != nil {
+		return nil, err
 	}
 	analysis.FileExists = true
 	analysis.FileSize = info.Size()
 
-	// Read current content
-	contentBytes, err := os.ReadFile(path)
+	contentBytes, err := e.readWithinRoot(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
@@ -235,9 +238,12 @@ func (e *UltraFastEngine) AnalyzeDeleteChange(ctx context.Context, path string) 
 	}
 
 	// Check if file/directory exists
-	info, err := os.Stat(path)
-	if err != nil {
+	info, err := e.statWithinRoot(path)
+	if os.IsNotExist(err) {
 		return nil, fmt.Errorf("file or directory does not exist: %s", path)
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	analysis.FileExists = true
@@ -260,7 +266,7 @@ func (e *UltraFastEngine) AnalyzeDeleteChange(ctx context.Context, path string) 
 	} else {
 		// Single file
 		lines := 0
-		contentBytes, err := os.ReadFile(path)
+		contentBytes, err := e.readWithinRoot(path)
 		if err == nil {
 			lines = strings.Count(string(contentBytes), "\n") + 1
 		}
@@ -524,11 +530,11 @@ func (e *UltraFastEngine) CompareFiles(ctx context.Context, pathA, pathB string)
 	}
 
 	// Read both files
-	contentA, err := os.ReadFile(pathA)
+	contentA, err := e.readWithinRoot(pathA)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file A (%s): %w", pathA, err)
 	}
-	contentB, err := os.ReadFile(pathB)
+	contentB, err := e.readWithinRoot(pathB)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file B (%s): %w", pathB, err)
 	}

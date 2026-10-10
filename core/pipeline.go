@@ -40,6 +40,13 @@ func NewPipelineExecutor(engine *UltraFastEngine) *PipelineExecutor {
 	}
 }
 
+func (pe *PipelineExecutor) readStepFile(path string) ([]byte, error) {
+	if pe == nil || pe.engine == nil {
+		return os.ReadFile(path)
+	}
+	return pe.engine.readWithinRoot(path)
+}
+
 // Execute executes a complete pipeline
 func (pe *PipelineExecutor) execute(ctx context.Context, request PipelineRequest) (out *PipelineResult, execErr error) {
 	startTime := time.Now()
@@ -431,7 +438,7 @@ func (pe *PipelineExecutor) executeReadRanges(ctx context.Context, step Pipeline
 			result.Content[filePath] = combined.String()
 		} else {
 			// No range specified — read full file (backward compatible)
-			content, err := os.ReadFile(normalizedPath)
+			content, err := pe.readStepFile(normalizedPath)
 			if err != nil {
 				return &PipelineStepError{
 					StepID:  step.ID,
@@ -481,7 +488,7 @@ func (pe *PipelineExecutor) executeEdit(ctx context.Context, step PipelineStep, 
 	operations := make([]BatchImpactInfo, 0, len(files))
 	for _, filePath := range files {
 		normalizedPath := NormalizePath(filePath)
-		content, err := os.ReadFile(normalizedPath)
+		content, err := pe.readStepFile(normalizedPath)
 		if err != nil {
 			continue // Skip unreadable files for risk assessment
 		}
@@ -521,7 +528,7 @@ func (pe *PipelineExecutor) executeEdit(ctx context.Context, step PipelineStep, 
 
 		if dryRun {
 			// Just count occurrences
-			content, err := os.ReadFile(normalizedPath)
+			content, err := pe.readStepFile(normalizedPath)
 			if err != nil {
 				continue // Skip unreadable files in dry-run
 			}
@@ -632,7 +639,7 @@ func (pe *PipelineExecutor) executeMultiEdit(ctx context.Context, step PipelineS
 
 		if dryRun {
 			// Count potential changes
-			content, err := os.ReadFile(normalizedPath)
+			content, err := pe.readStepFile(normalizedPath)
 			if err != nil {
 				continue
 			}
@@ -677,7 +684,7 @@ func (pe *PipelineExecutor) executeCountOccurrences(ctx context.Context, step Pi
 	for _, filePath := range files {
 		normalizedPath := NormalizePath(filePath)
 
-		content, err := os.ReadFile(normalizedPath)
+		content, err := pe.readStepFile(normalizedPath)
 		if err != nil {
 			continue // Skip unreadable files
 		}
@@ -772,7 +779,7 @@ func (pe *PipelineExecutor) executeRegexTransform(ctx context.Context, step Pipe
 		normalizedPath := NormalizePath(filePath)
 
 		// Read original content so pre/post edit hooks can see full content for regex_transform
-		originalContentBytes, _ := os.ReadFile(normalizedPath)
+		originalContentBytes, _ := pe.readStepFile(normalizedPath)
 		originalContent := string(originalContentBytes)
 
 		// Pre-edit hook (full content support for regex_transform)
@@ -1146,7 +1153,7 @@ func (pe *PipelineExecutor) performSmartSearchInternal(ctx context.Context, path
 		}
 
 		// Read file for content search
-		content, readErr := os.ReadFile(filePath)
+		content, readErr := pe.readStepFile(filePath)
 		if readErr != nil {
 			return nil // Skip unreadable files
 		}
@@ -1409,7 +1416,7 @@ func (pe *PipelineExecutor) executeDiff(ctx context.Context, step PipelineStep, 
 	fileB = NormalizePath(fileB)
 
 	// Read both files
-	contentA, err := os.ReadFile(fileA)
+	contentA, err := pe.readStepFile(fileA)
 	if err != nil {
 		return &PipelineStepError{
 			StepID:  step.ID,
@@ -1420,7 +1427,7 @@ func (pe *PipelineExecutor) executeDiff(ctx context.Context, step PipelineStep, 
 		}
 	}
 
-	contentB, err := os.ReadFile(fileB)
+	contentB, err := pe.readStepFile(fileB)
 	if err != nil {
 		return &PipelineStepError{
 			StepID:  step.ID,

@@ -485,6 +485,255 @@ func TestAnalyzeSymbols_SymlinkOutsideNotRead(t *testing.T) {
 	}
 }
 
+func TestReadSnapshot_SymlinkOutsideNotRead(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("secret-snapshot"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "inside.txt"), []byte("inside-snapshot"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	snap, err := readSnapshot(engine, link, link)
+	if err == nil && strings.Contains(string(snap.Bytes), "secret-snapshot") {
+		t.Fatal("snapshot read outside symlink")
+	}
+	if err == nil {
+		t.Fatal("snapshot of an outside symlink must fail")
+	}
+	ok, err := readSnapshot(engine, filepath.Join(root, "inside.txt"), filepath.Join(root, "inside.txt"))
+	if err != nil || string(ok.Bytes) != "inside-snapshot" {
+		t.Fatalf("inside snapshot %q %v", ok.Bytes, err)
+	}
+}
+
+func TestReadFileContent_SymlinkOutsideNotRead(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret-read"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "inside.txt"), []byte("inside-read"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), link); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	if raw, rerr := engine.readFileBytesDeduped(context.Background(), link); rerr == nil && strings.Contains(string(raw), "secret-read") {
+		t.Fatal("deduped read followed an outside symlink")
+	}
+	got, err := engine.ReadFileContent(context.Background(), link)
+	if err == nil && strings.Contains(got, "secret-read") {
+		t.Fatal("read_file followed an outside symlink")
+	}
+	if err == nil {
+		t.Fatal("read of an outside symlink must fail")
+	}
+	got, err = engine.ReadFileContent(context.Background(), filepath.Join(root, "inside.txt"))
+	if err != nil || got != "inside-read" {
+		t.Fatalf("inside read %q %v", got, err)
+	}
+}
+
+func TestProjectReplace_SymlinkOutsideNotRead(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "hit.txt"), []byte("inside-token\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("secret-token\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(root, "link.txt")); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	res, err := engine.ProjectReplace(context.Background(), root, "token", "DONE", true, true, ".txt", nil, nil, true, false, false, 20, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.TotalReplaced != 1 {
+		t.Fatalf("replaced %d, want 1", res.TotalReplaced)
+	}
+	got, err := os.ReadFile(secret)
+	if err != nil || string(got) != "secret-token\n" {
+		t.Fatalf("outside file changed: %q %v", got, err)
+	}
+}
+
+func TestPipelineCount_SymlinkOutsideNotRead(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	inside := filepath.Join(root, "hit.txt")
+	if err := os.WriteFile(inside, []byte("inside-token\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("secret-token\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	result, err := NewPipelineExecutor(engine).Execute(context.Background(), PipelineRequest{
+		Name: "count-symlink",
+		Steps: []PipelineStep{{
+			ID:     "count",
+			Action: "count_occurrences",
+			Params: map[string]interface{}{
+				"files":   []string{inside, link},
+				"pattern": "token",
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || len(result.Results) == 0 {
+		t.Fatal("missing pipeline result")
+	}
+	if got := result.Results[0].Counts[inside]; got != 1 {
+		t.Fatalf("inside count %d", got)
+	}
+	if got := result.Results[0].Counts[link]; got != 0 {
+		t.Fatalf("outside symlink counted %d", got)
+	}
+	body, err := os.ReadFile(secret)
+	if err != nil || string(body) != "secret-token\n" {
+		t.Fatalf("outside file changed: %q %v", body, err)
+	}
+}
+
+func TestAnalyzeEdit_SymlinkOutsideNotRead(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("secret-plan"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "hit.txt"), []byte("inside-plan"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	analysis, err := engine.AnalyzeEditChange(context.Background(), link, "secret", "x")
+	if err == nil {
+		t.Fatalf("analyze followed an outside symlink: %+v", analysis)
+	}
+	got, err := engine.AnalyzeEditChange(context.Background(), filepath.Join(root, "hit.txt"), "inside", "ok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.FileSize == 0 {
+		t.Fatalf("inside analyze failed: %+v", got)
+	}
+}
+
+func TestBatchEdit_SymlinkOutsideNotRead(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("secret-batch"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	inside := filepath.Join(root, "hit.txt")
+	if err := os.WriteFile(inside, []byte("inside-batch"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	m := &BatchOperationManager{}
+	m.SetEngine(engine)
+	if err := m.executeEdit(context.Background(), FileOperation{Path: link, OldText: "secret", NewText: "x"}, &OperationResult{}); err == nil {
+		t.Fatal("batch edit followed an outside symlink")
+	}
+	got, err := os.ReadFile(secret)
+	if err != nil || string(got) != "secret-batch" {
+		t.Fatalf("outside file changed: %q %v", got, err)
+	}
+	if err := m.executeEdit(context.Background(), FileOperation{Path: inside, OldText: "inside-batch", NewText: "ok-batch"}, &OperationResult{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = os.ReadFile(inside)
+	if err != nil || string(got) != "ok-batch" {
+		t.Fatalf("inside edit %q %v", got, err)
+	}
+}
+
+func TestBatchMoveCopyDelete_SymlinkOutsideLeavesTarget(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("secret-batch"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	inside := filepath.Join(root, "hit.txt")
+	if err := os.WriteFile(inside, []byte("inside"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	m := &BatchOperationManager{}
+	m.SetEngine(engine)
+	ctx := context.Background()
+	if err := m.executeMove(ctx, FileOperation{Source: link, Destination: filepath.Join(root, "moved.txt")}, &OperationResult{}); err == nil {
+		t.Fatal("batch move followed an outside symlink")
+	}
+	if err := m.executeCopy(ctx, FileOperation{Source: link, Destination: filepath.Join(root, "copied.txt")}, &OperationResult{}); err == nil {
+		t.Fatal("batch copy followed an outside symlink")
+	}
+	if err := m.executeDelete(ctx, FileOperation{Path: link}, &OperationResult{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(secret)
+	if err != nil || string(got) != "secret-batch" {
+		t.Fatalf("outside file changed: %q %v", got, err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "copied.txt")); !os.IsNotExist(err) {
+		t.Fatalf("copy destination was created: %v", err)
+	}
+	if err := m.executeMove(ctx, FileOperation{Source: inside, Destination: filepath.Join(root, "moved-ok.txt")}, &OperationResult{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "moved-ok.txt")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCloseRoots_DropsHandlesOnAllowlistChange(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()

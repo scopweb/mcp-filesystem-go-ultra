@@ -348,6 +348,27 @@ type rollbackData struct {
 }
 
 // prepareRollback prepara la información necesaria para revertir una operación
+func (m *BatchOperationManager) statUser(path string) (os.FileInfo, error) {
+	if m != nil && m.engine != nil {
+		return m.engine.statWithinRoot(path)
+	}
+	return os.Stat(path)
+}
+
+func (m *BatchOperationManager) lstatUser(path string) (os.FileInfo, error) {
+	if m != nil && m.engine != nil {
+		return m.engine.lstatWithinRoot(path)
+	}
+	return os.Lstat(path)
+}
+
+func (m *BatchOperationManager) readUserFile(path string) ([]byte, error) {
+	if m == nil || m.engine == nil {
+		return os.ReadFile(path)
+	}
+	return m.engine.readWithinRoot(path)
+}
+
 func (m *BatchOperationManager) prepareRollback(op FileOperation) rollbackData {
 	rb := rollbackData{
 		operationType: op.Type,
@@ -357,7 +378,7 @@ func (m *BatchOperationManager) prepareRollback(op FileOperation) rollbackData {
 	case "write":
 		rb.originalPath = op.Path
 		// Guardar contenido original si el archivo existe
-		if content, err := os.ReadFile(op.Path); err == nil {
+		if content, err := m.readUserFile(op.Path); err == nil {
 			rb.content = content
 		} else {
 			rb.wasCreated = true
@@ -366,7 +387,7 @@ func (m *BatchOperationManager) prepareRollback(op FileOperation) rollbackData {
 	case "edit", "search_and_replace":
 		rb.originalPath = op.Path
 		// Guardar contenido original
-		if content, err := os.ReadFile(op.Path); err == nil {
+		if content, err := m.readUserFile(op.Path); err == nil {
 			rb.content = content
 		}
 
@@ -381,7 +402,7 @@ func (m *BatchOperationManager) prepareRollback(op FileOperation) rollbackData {
 	case "delete":
 		rb.originalPath = op.Path
 		// Guardar contenido antes de eliminar
-		if content, err := os.ReadFile(op.Path); err == nil {
+		if content, err := m.readUserFile(op.Path); err == nil {
 			rb.content = content
 		}
 
@@ -392,11 +413,11 @@ func (m *BatchOperationManager) prepareRollback(op FileOperation) rollbackData {
 	case "extract":
 		// Capture both files so an extract can be fully reverted (point 4).
 		rb.originalPath = op.Source
-		if content, err := os.ReadFile(op.Source); err == nil {
+		if content, err := m.readUserFile(op.Source); err == nil {
 			rb.content = content
 		}
 		rb.secondPath = op.Destination
-		if content, err := os.ReadFile(op.Destination); err == nil {
+		if content, err := m.readUserFile(op.Destination); err == nil {
 			rb.secondContent = content
 		} else {
 			rb.secondWasCreated = true
@@ -606,7 +627,7 @@ func (m *BatchOperationManager) executeExtract(ctx context.Context, op FileOpera
 		return fmt.Errorf("pre-extract hook denied batch extract: %w", err)
 	}
 
-	srcBytes, err := os.ReadFile(op.Source)
+	srcBytes, err := m.readUserFile(op.Source)
 	if err != nil {
 		return err
 	}
@@ -619,7 +640,7 @@ func (m *BatchOperationManager) executeExtract(ctx context.Context, op FileOpera
 	// Destination content: the SAME removed bytes, optionally appended.
 	var destContent []byte
 	if op.Append {
-		if existing, rerr := os.ReadFile(op.Destination); rerr == nil {
+		if existing, rerr := m.readUserFile(op.Destination); rerr == nil {
 			destContent = append(existing, []byte(removed)...)
 		} else if os.IsNotExist(rerr) {
 			destContent = []byte(removed)
@@ -657,7 +678,7 @@ func (m *BatchOperationManager) executeEdit(ctx context.Context, op FileOperatio
 		return fmt.Errorf("pre-edit hook denied batch edit: %w", err)
 	}
 
-	content, err := os.ReadFile(op.Path)
+	content, err := m.readUserFile(op.Path)
 	if err != nil {
 		return err
 	}
@@ -713,10 +734,10 @@ func (m *BatchOperationManager) executeSearchAndReplace(ctx context.Context, op 
 		return fmt.Errorf("search_and_replace requires engine (not available in standalone batch mode)")
 	}
 	var sizeBefore int64
-	if info, statErr := os.Stat(op.Path); statErr == nil {
+	if info, statErr := m.engine.statWithinRoot(op.Path); statErr == nil {
 		sizeBefore = info.Size()
 	}
-	content, err := os.ReadFile(op.Path)
+	content, err := m.readUserFile(op.Path)
 	if err != nil {
 		return err
 	}
@@ -731,7 +752,7 @@ func (m *BatchOperationManager) executeSearchAndReplace(ctx context.Context, op 
 	}
 	// Report the byte delta (parity with edit), not the replacement count.
 	result.BytesAffected = int64(replacements) * int64(len(op.NewText)-len(op.OldText))
-	if info, statErr := os.Stat(op.Path); statErr == nil {
+	if info, statErr := m.engine.statWithinRoot(op.Path); statErr == nil {
 		result.BytesAffected = info.Size() - sizeBefore
 	}
 
@@ -747,12 +768,15 @@ func (m *BatchOperationManager) executeMove(ctx context.Context, op FileOperatio
 		return fmt.Errorf("pre-move hook denied batch move: %w", err)
 	}
 
-	info, err := os.Stat(op.Source)
+	info, err := m.statUser(op.Source)
 	if err != nil {
 		return err
 	}
-
-	err = os.Rename(op.Source, op.Destination)
+	if m.engine != nil {
+		err = m.engine.moveWithinRoot(op.Source, op.Destination, !info.IsDir())
+	} else {
+		err = os.Rename(op.Source, op.Destination)
+	}
 	if err != nil {
 		return err
 	}
@@ -769,12 +793,15 @@ func (m *BatchOperationManager) executeCopy(ctx context.Context, op FileOperatio
 		return fmt.Errorf("pre-copy hook denied batch copy: %w", err)
 	}
 
-	info, err := os.Stat(op.Source)
+	info, err := m.statUser(op.Source)
 	if err != nil {
 		return err
 	}
-
-	err = copyFile(op.Source, op.Destination)
+	if m.engine != nil {
+		err = m.engine.copyFile(op.Source, op.Destination)
+	} else {
+		err = copyFile(op.Source, op.Destination)
+	}
 	if err != nil {
 		return err
 	}
@@ -792,12 +819,15 @@ func (m *BatchOperationManager) executeDelete(ctx context.Context, op FileOperat
 		return fmt.Errorf("pre-delete hook denied batch delete: %w", err)
 	}
 
-	info, err := os.Stat(op.Path)
+	info, err := m.lstatUser(op.Path)
 	if err != nil {
 		return err
 	}
-
-	err = os.Remove(op.Path)
+	if m.engine != nil {
+		err = m.engine.removeWithinRoot(op.Path, false)
+	} else {
+		err = os.Remove(op.Path)
+	}
 	if err != nil {
 		return err
 	}

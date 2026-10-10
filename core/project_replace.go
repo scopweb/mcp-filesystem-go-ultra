@@ -258,7 +258,7 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 			return nil, err
 		}
 		ReportProgress(ctx, i+1, len(matchedFiles), "scan")
-		content, err := os.ReadFile(f)
+		content, err := e.readWithinRoot(f)
 		if err != nil {
 			continue
 		}
@@ -357,7 +357,7 @@ func (e *UltraFastEngine) ProjectReplace(ctx context.Context, path, find, replac
 			mu.Unlock()
 			ReportProgress(ctx, n, len(filesWithMatches), "replace")
 		}()
-		content, err := os.ReadFile(f)
+		content, err := e.readWithinRoot(f)
 		if err != nil {
 			return nil
 		}
