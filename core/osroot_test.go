@@ -734,6 +734,41 @@ func TestBatchMoveCopyDelete_SymlinkOutsideLeavesTarget(t *testing.T) {
 	}
 }
 
+func TestSearchReplace_SymlinkOutsideNotWritten(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("secret-edit"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	inside := filepath.Join(root, "hit.txt")
+	if err := os.WriteFile(inside, []byte("inside-edit"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	if _, err := engine.searchAndReplaceInFile(link, "secret", "x", true, false); err == nil {
+		t.Fatal("search replace followed an outside symlink")
+	}
+	got, err := os.ReadFile(secret)
+	if err != nil || string(got) != "secret-edit" {
+		t.Fatalf("outside file changed: %q %v", got, err)
+	}
+	n, err := engine.searchAndReplaceInFile(inside, "inside", "ok", true, false)
+	if err != nil || n != 1 {
+		t.Fatalf("inside replace %d %v", n, err)
+	}
+	got, err = os.ReadFile(inside)
+	if err != nil || string(got) != "ok-edit" {
+		t.Fatalf("inside edit %q %v", got, err)
+	}
+}
+
 func TestCloseRoots_DropsHandlesOnAllowlistChange(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()

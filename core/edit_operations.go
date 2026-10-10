@@ -411,7 +411,7 @@ func (e *UltraFastEngine) validateEditableFile(path string) error {
 // createBackup creates a backup of a file, preserving original permissions
 func (e *UltraFastEngine) createBackup(path string) (string, error) {
 	backupPath := path + ".backup"
-	content, err := os.ReadFile(path)
+	content, err := e.readWithinRoot(path)
 	if err != nil {
 		return "", err
 	}
@@ -743,7 +743,7 @@ func (e *UltraFastEngine) searchAndReplaceInDirectory(dirPath, pattern, replacem
 // is not modified.
 func (e *UltraFastEngine) searchAndReplaceInFile(filePath, pattern, replacement string, caseSensitive bool, dryRun bool) (int, error) {
 	// Check if file is text and not too large
-	info, err := os.Stat(filePath)
+	info, err := e.statWithinRoot(filePath)
 	if err != nil {
 		return 0, err
 	}
@@ -752,8 +752,7 @@ func (e *UltraFastEngine) searchAndReplaceInFile(filePath, pattern, replacement 
 		return 0, nil // Skip large files
 	}
 
-	// Read file content
-	content, err := os.ReadFile(filePath)
+	content, err := e.readWithinRoot(filePath)
 	if err != nil {
 		return 0, err
 	}
@@ -799,13 +798,7 @@ func (e *UltraFastEngine) searchAndReplaceInFile(filePath, pattern, replacement 
 	newContent := re.ReplaceAllString(contentStr, strings.ReplaceAll(replacement, "$", "$$"))
 
 	// Write back to file atomically with secure random temp name
-	tmpPath := filePath + ".tmp." + secureRandomSuffix()
-	if err := os.WriteFile(tmpPath, []byte(newContent), info.Mode()); err != nil {
-		return 0, err
-	}
-
-	if err := renameWithRetry(tmpPath, filePath); err != nil {
-		os.Remove(tmpPath)
+	if err := e.atomicWriteWithinRoot(filePath, []byte(newContent), info.Mode()&0o777); err != nil {
 		return 0, err
 	}
 
@@ -1663,7 +1656,7 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 	}
 
 	// Check if file exists
-	info, err := os.Stat(validPath)
+	info, err := e.statWithinRoot(validPath)
 	if os.IsNotExist(err) {
 		return nil, fmt.Errorf("file does not exist: %s", validPath)
 	}
@@ -1693,7 +1686,7 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 		}()
 	}
 
-	content, err := os.ReadFile(validPath)
+	content, err := e.readWithinRoot(validPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
@@ -1778,12 +1771,7 @@ func (e *UltraFastEngine) ReplaceNthOccurrence(ctx context.Context, path, patter
 	newContent = restoreEOL(newContent, originalEOL)
 
 	if !dryRun {
-		tmpPath := validPath + ".tmp." + fmt.Sprintf("%d", time.Now().UnixNano())
-		if err := os.WriteFile(tmpPath, []byte(newContent), info.Mode()); err != nil {
-			return nil, fmt.Errorf("error writing temp file: %w", err)
-		}
-		if err := renameWithRetry(tmpPath, validPath); err != nil {
-			os.Remove(tmpPath)
+		if err := e.atomicWriteWithinRoot(validPath, []byte(newContent), info.Mode()&0o777); err != nil {
 			return nil, fmt.Errorf("error finalizing edit: %w", err)
 		}
 		e.invalidateMutatedPath(validPath)
