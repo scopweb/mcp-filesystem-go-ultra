@@ -295,6 +295,96 @@ func namesOf(entries []os.DirEntry) []string {
 	return out
 }
 
+func TestCopyDirectory_SameRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	src := filepath.Join(root, "Src")
+	if err := os.MkdirAll(filepath.Join(src, "Nested"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "NavThMenu.razor"), []byte("menu"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "Nested", "ITruckerService.cs"), []byte("svc"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	kept := filepath.Join(outside, "kept.txt")
+	if err := os.WriteFile(kept, []byte("kept"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(kept, filepath.Join(src, "link.txt")); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	dst := filepath.Join(root, "Dst")
+	if err := engine.CopyFile(context.Background(), src, dst); err != nil {
+		t.Fatal(err)
+	}
+	menu, err := os.ReadFile(filepath.Join(dst, "NavThMenu.razor"))
+	if err != nil || string(menu) != "menu" {
+		t.Fatalf("menu %q %v", menu, err)
+	}
+	svc, err := os.ReadFile(filepath.Join(dst, "Nested", "ITruckerService.cs"))
+	if err != nil || string(svc) != "svc" {
+		t.Fatalf("svc %q %v", svc, err)
+	}
+	if _, err := os.Lstat(filepath.Join(dst, "link.txt")); !os.IsNotExist(err) {
+		t.Fatalf("symlink was copied: %v", err)
+	}
+	got, err := os.ReadFile(kept)
+	if err != nil || string(got) != "kept" {
+		t.Fatalf("outside file changed: %q %v", got, err)
+	}
+	entries, err := os.ReadDir(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() == "navthmenu.razor" {
+			t.Fatal("copied name was lowercased")
+		}
+	}
+}
+
+func TestCreateDirectory_SameRootPreservesCase(t *testing.T) {
+	root := t.TempDir()
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	path := filepath.Join(root, "SubDir", "NavThMenu")
+	if err := engine.CreateDirectory(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "SubDir"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "NavThMenu" || !entries[0].IsDir() {
+		t.Fatalf("case changed: %v", namesOf(entries))
+	}
+}
+
+func TestCreateDirectory_SymlinkParentLeavesOutside(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	err := engine.CreateDirectory(context.Background(), filepath.Join(link, "NewDir"))
+	if err == nil {
+		t.Fatal("create through an outside symlink must fail")
+	}
+	if _, statErr := os.Lstat(filepath.Join(outside, "NewDir")); !os.IsNotExist(statErr) {
+		t.Fatalf("outside directory was created: %v", statErr)
+	}
+}
+
 func TestCloseRoots_DropsHandlesOnAllowlistChange(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()
