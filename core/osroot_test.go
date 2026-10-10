@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -206,6 +207,92 @@ func TestMoveFile_SymlinkSourceLeavesTarget(t *testing.T) {
 	if rerr != nil || string(got) != "kept" {
 		t.Fatalf("outside file changed: %q %v", got, rerr)
 	}
+}
+
+func TestCopyFile_SameRoot(t *testing.T) {
+	root := t.TempDir()
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	src := filepath.Join(root, "a.txt")
+	if err := os.WriteFile(src, []byte("copied"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(root, "nested", "b.txt")
+	if err := engine.CopyFile(context.Background(), src, dst); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil || string(got) != "copied" {
+		t.Fatalf("copied %q %v", got, err)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("source missing: %v", err)
+	}
+}
+
+func TestCopyFile_SymlinkSourceLeavesTarget(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "kept.txt")
+	if err := os.WriteFile(target, []byte("kept"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	err := engine.CopyFile(context.Background(), link, filepath.Join(root, "gone.txt"))
+	if err == nil {
+		t.Fatal("copy of an outside symlink must fail")
+	}
+	got, rerr := os.ReadFile(target)
+	if rerr != nil || string(got) != "kept" {
+		t.Fatalf("outside file changed: %q %v", got, rerr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "gone.txt")); !os.IsNotExist(err) {
+		t.Fatalf("destination was created: %v", err)
+	}
+}
+
+func TestWriteFileBytes_PreservesFileNameCase(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows rename changes filename case")
+	}
+	root := t.TempDir()
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	path := filepath.Join(root, "SubDir", "NavThMenu.razor")
+	if err := engine.WriteFileBytes(context.Background(), path, []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.WriteFileBytes(context.Background(), path, []byte("y")); err != nil {
+		t.Fatal(err)
+	}
+	got := filepath.Join(root, "SubDir", "NavThMenu.razor")
+	entries, err := os.ReadDir(filepath.Join(root, "SubDir"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "NavThMenu.razor" {
+		t.Fatalf("case changed: %v", namesOf(entries))
+	}
+	body, err := os.ReadFile(got)
+	if err != nil || string(body) != "y" {
+		t.Fatalf("body %q %v", body, err)
+	}
+}
+
+func namesOf(entries []os.DirEntry) []string {
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		out[i] = e.Name()
+	}
+	return out
 }
 
 func TestCloseRoots_DropsHandlesOnAllowlistChange(t *testing.T) {
