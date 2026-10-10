@@ -555,8 +555,9 @@ func (e *UltraFastEngine) CopyFile(ctx context.Context, sourcePath, destPath str
 		return err
 	}
 
-	// Check if source exists
-	sourceInfo, err := os.Stat(sourcePath)
+	// Check if source exists. Stat follows links so a dangling symlink still
+	// reports missing, matching the previous os.Stat path.
+	sourceInfo, err := e.statWithinRoot(sourcePath)
 	if os.IsNotExist(err) {
 		return fmt.Errorf("source does not exist: %s", sourcePath)
 	}
@@ -570,7 +571,7 @@ func (e *UltraFastEngine) CopyFile(ctx context.Context, sourcePath, destPath str
 	if err := refuseSymlinkPath(destPath); err != nil {
 		return err
 	}
-	destInfo, err := os.Lstat(destPath)
+	destInfo, err := e.lstatWithinRoot(destPath)
 	if err == nil {
 		if destInfo.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("security: destination is a symlink: %s", destPath)
@@ -664,6 +665,9 @@ func (e *UltraFastEngine) copyFile(src, dst string) error {
 	if wasSymlink {
 		return fmt.Errorf("security: source path resolved to symlink %q", srcResolved)
 	}
+	if done, err := e.copyFileSameRoot(src, dst); done {
+		return err
+	}
 
 	// Get source file permissions
 	sourceInfo, err := os.Stat(src)
@@ -710,6 +714,55 @@ func (e *UltraFastEngine) copyFile(src, dst string) error {
 	e.cache.InvalidateDirectory(filepath.Dir(dst))
 
 	return nil
+}
+
+func (e *UltraFastEngine) copyFileSameRoot(src, dst string) (bool, error) {
+	sRoot, sRel, sOpen, err := e.locateRoot(src)
+	if err != nil {
+		return true, err
+	}
+	dRoot, dRel, dOpen, err := e.locateRoot(dst)
+	if err != nil {
+		return true, err
+	}
+	if sOpen || dOpen || sRoot != dRoot {
+		return false, nil
+	}
+	info, err := sRoot.Stat(sRel)
+	if err != nil {
+		return true, fmt.Errorf("failed to stat source file: %w", err)
+	}
+	srcFile, err := sRoot.Open(sRel)
+	if err != nil {
+		return true, fmt.Errorf("failed to open source file: %w", err)
+	}
+	defer srcFile.Close()
+	parent := filepath.Dir(dRel)
+	if parent != "." && parent != "" {
+		if err := dRoot.MkdirAll(parent, 0755); err != nil {
+			return true, fmt.Errorf("failed to create destination directory: %w", err)
+		}
+	}
+	perm := info.Mode() & 0o777
+	if perm == 0 {
+		perm = 0o644
+	}
+	dstFile, err := dRoot.OpenFile(dRel, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+	if err != nil {
+		return true, fmt.Errorf("failed to create destination file: %w", err)
+	}
+	defer dstFile.Close()
+	bufPtr := e.bufferPool.Get().(*[]byte)
+	defer e.bufferPool.Put(bufPtr)
+	if _, err := io.CopyBuffer(dstFile, srcFile, *bufPtr); err != nil {
+		return true, fmt.Errorf("failed to copy file content: %w", err)
+	}
+	if err := dstFile.Sync(); err != nil {
+		return true, fmt.Errorf("failed to sync destination file: %w", err)
+	}
+	e.invalidateFileReadCache(dst)
+	e.cache.InvalidateDirectory(filepath.Dir(dst))
+	return true, nil
 }
 
 // copyDirectory recursively copies a directory

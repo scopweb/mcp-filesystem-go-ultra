@@ -181,7 +181,8 @@ func relWithinBases(path string, bases []string) (base, rel string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	target := foldRootPath(abs)
+	cleaned := filepath.Clean(abs)
+	target := foldRootPath(cleaned)
 	var best string
 	for _, b := range bases {
 		nb := foldRootPath(b)
@@ -194,12 +195,41 @@ func relWithinBases(path string, bases []string) (base, rel string, err error) {
 	if best == "" {
 		return "", "", fmt.Errorf("path is outside os.Root bases")
 	}
-	trimmed := target[len(foldRootPath(best)):]
-	trimmed = strings.TrimPrefix(trimmed, string(os.PathSeparator))
-	if trimmed == "" {
-		return best, ".", nil
+	rel, err = relPreserveCase(cleaned, best)
+	if err != nil {
+		return "", "", err
 	}
-	return best, trimmed, nil
+	return best, rel, nil
+}
+
+func relPreserveCase(cleaned, best string) (string, error) {
+	absVol, absParts := splitVolume(cleaned)
+	bestVol, bestParts := splitVolume(best)
+	if !strings.EqualFold(absVol, bestVol) || len(absParts) < len(bestParts) {
+		return "", fmt.Errorf("path is outside os.Root bases")
+	}
+	for i := range bestParts {
+		if !strings.EqualFold(absParts[i], bestParts[i]) {
+			return "", fmt.Errorf("path is outside os.Root bases")
+		}
+	}
+	rest := absParts[len(bestParts):]
+	if len(rest) == 0 {
+		return ".", nil
+	}
+	return filepath.Join(rest...), nil
+}
+
+func splitVolume(p string) (string, []string) {
+	p = filepath.Clean(p)
+	vol := filepath.VolumeName(p)
+	rest := strings.Trim(p[len(vol):], `\/`)
+	if rest == "" {
+		return vol, nil
+	}
+	return vol, strings.FieldsFunc(rest, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
 }
 
 func foldRootPath(p string) string {
