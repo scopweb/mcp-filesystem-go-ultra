@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -382,6 +383,45 @@ func TestCreateDirectory_SymlinkParentLeavesOutside(t *testing.T) {
 	}
 	if _, statErr := os.Lstat(filepath.Join(outside, "NewDir")); !os.IsNotExist(statErr) {
 		t.Fatalf("outside directory was created: %v", statErr)
+	}
+}
+
+func TestListDirectory_SameRootPreservesCase(t *testing.T) {
+	root := t.TempDir()
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	if err := os.WriteFile(filepath.Join(root, "NavThMenu.razor"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := engine.ListDirectoryContent(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "NavThMenu.razor") {
+		t.Fatalf("listing lost case: %s", got)
+	}
+}
+
+func TestListDirectory_SymlinkOutsideRejected(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("no"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "out")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	got, err := engine.ListDirectoryContent(context.Background(), link)
+	if err == nil && strings.Contains(got, "secret.txt") {
+		t.Fatalf("listed outside names: %s", got)
+	}
+	if err == nil {
+		t.Fatal("listing an outside symlink must fail")
 	}
 }
 

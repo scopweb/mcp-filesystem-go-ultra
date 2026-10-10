@@ -1084,7 +1084,7 @@ func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string,
 			result.WriteString(fmt.Sprintf("📂 Type: Directory\n"))
 
 			// Count items in directory if it's a directory
-			entries, err := os.ReadDir(path)
+			entries, err := e.readDirWithinRoot(path)
 			if err == nil {
 				fileCount := 0
 				dirCount := 0
