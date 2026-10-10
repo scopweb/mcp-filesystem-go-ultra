@@ -317,12 +317,15 @@ func (e *UltraFastEngine) CreateDirectory(ctx context.Context, path string) erro
 		return err
 	}
 
-	// Check if directory already exists
-	if info, err := os.Stat(path); err == nil {
+	// Check if directory already exists. A stat error other than missing
+	// stops the create, so a symlink parent cannot be followed by MkdirAll.
+	if info, err := e.statWithinRoot(path); err == nil {
 		if info.IsDir() {
 			return fmt.Errorf("directory already exists: %s", path)
 		}
 		return fmt.Errorf("a file with that name already exists: %s", path)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to stat directory: %w", err)
 	}
 
 	// Execute pre-create hook
@@ -339,8 +342,7 @@ func (e *UltraFastEngine) CreateDirectory(ctx context.Context, path string) erro
 		return fmt.Errorf("pre-create hook denied operation: %w", err)
 	}
 
-	// Create directory with all parent directories
-	if err := os.MkdirAll(path, 0755); err != nil {
+	if err := e.mkdirWithinRoot(path, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -765,8 +767,72 @@ func (e *UltraFastEngine) copyFileSameRoot(src, dst string) (bool, error) {
 	return true, nil
 }
 
+func (e *UltraFastEngine) copyDirectorySameRoot(src, dst string) (bool, error) {
+	sRoot, sRel, sOpen, err := e.locateRoot(src)
+	if err != nil {
+		return true, err
+	}
+	dRoot, dRel, dOpen, err := e.locateRoot(dst)
+	if err != nil {
+		return true, err
+	}
+	if sOpen || dOpen || sRoot != dRoot {
+		return false, nil
+	}
+	info, err := sRoot.Lstat(sRel)
+	if err != nil {
+		return true, fmt.Errorf("failed to stat source directory: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return true, fmt.Errorf("security: source path resolved to symlink %q", src)
+	}
+	if !info.IsDir() {
+		return true, fmt.Errorf("path is not a directory: %s", src)
+	}
+	if _, err := dRoot.Lstat(dRel); err == nil {
+		return true, fmt.Errorf("destination already exists: %s", dst)
+	} else if !os.IsNotExist(err) {
+		return true, fmt.Errorf("failed to stat destination: %w", err)
+	}
+	perm := info.Mode() & 0o777
+	if perm == 0 {
+		perm = 0o755
+	}
+	if err := dRoot.MkdirAll(dRel, perm); err != nil {
+		return true, fmt.Errorf("failed to create destination directory: %w", err)
+	}
+	dir, err := sRoot.Open(sRel)
+	if err != nil {
+		return true, fmt.Errorf("failed to read directory: %w", err)
+	}
+	entries, err := dir.ReadDir(-1)
+	dir.Close()
+	if err != nil {
+		return true, fmt.Errorf("failed to read directory: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		sourcePath := filepath.Join(src, entry.Name())
+		destPath := filepath.Join(dst, entry.Name())
+		if entry.IsDir() {
+			if err := e.copyDirectory(sourcePath, destPath); err != nil {
+				return true, err
+			}
+		} else if err := e.copyFile(sourcePath, destPath); err != nil {
+			return true, err
+		}
+	}
+	e.cache.InvalidateDirectory(dst)
+	return true, nil
+}
+
 // copyDirectory recursively copies a directory
 func (e *UltraFastEngine) copyDirectory(src, dst string) error {
+	if done, err := e.copyDirectorySameRoot(src, dst); done {
+		return err
+	}
 	// Get source directory info
 	sourceInfo, err := os.Stat(src)
 	if err != nil {

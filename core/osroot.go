@@ -145,6 +145,21 @@ func (e *UltraFastEngine) moveWithinRoot(src, dst string, createParent bool) err
 	return nil
 }
 
+func (e *UltraFastEngine) mkdirWithinRoot(path string, perm os.FileMode) error {
+	root, rel, open, err := e.locateRoot(path)
+	if err != nil {
+		return err
+	}
+	if open {
+		return os.MkdirAll(path, perm)
+	}
+	perm &= 0o777
+	if perm == 0 {
+		perm = 0o755
+	}
+	return root.MkdirAll(rel, perm)
+}
+
 func (e *UltraFastEngine) removeWithinRoot(path string, dir bool) error {
 	root, rel, open, err := e.locateRoot(path)
 	if err != nil {
