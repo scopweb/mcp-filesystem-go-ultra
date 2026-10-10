@@ -12,7 +12,7 @@ func TestAnalyzeSymbols_CSharpAndJS(t *testing.T) {
 	if err := os.WriteFile(cs, []byte("namespace N;\npublic class PdaController {\n    public void CargaRestore() {}\n}\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	res := AnalyzeSymbols(cs, "", 50)
+	res := AnalyzeSymbols(nil, cs, "", 50)
 	if res.Status != "ok" {
 		t.Fatalf("status %s msg %s", res.Status, res.Message)
 	}
@@ -33,7 +33,7 @@ func TestAnalyzeSymbols_CSharpAndJS(t *testing.T) {
 	if err := os.WriteFile(js, []byte("export function loadPda() {}\nclass View {}\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	jsRes := AnalyzeSymbols(js, "loadPda", 20)
+	jsRes := AnalyzeSymbols(nil, js, "loadPda", 20)
 	if len(jsRes.Findings) != 1 || jsRes.Findings[0].Line != 1 {
 		t.Fatalf("js: %+v", jsRes.Findings)
 	}
@@ -46,7 +46,7 @@ func TestAnalyzeSymbols_SQLProcedure(t *testing.T) {
 	if err := os.WriteFile(p, []byte(body), 0644); err != nil {
 		t.Fatal(err)
 	}
-	res := AnalyzeSymbols(p, "", 10)
+	res := AnalyzeSymbols(nil, p, "", 10)
 	if len(res.Findings) != 1 || res.Findings[0].Symbol != "CargaRestore" {
 		t.Fatalf("%+v", res.Findings)
 	}

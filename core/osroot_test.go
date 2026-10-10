@@ -425,6 +425,66 @@ func TestListDirectory_SymlinkOutsideRejected(t *testing.T) {
 	}
 }
 
+func TestSearchFiles_SymlinkOutsideNotRead(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "hit.txt"), []byte("inside-token\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("secret-token\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	out, err := engine.SearchFiles(context.Background(), SearchOptions{
+		Path: root, Pattern: "token", IncludeContent: true, NoIgnore: true, MaxResults: 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.Text, "inside-token") {
+		t.Fatalf("missed inside match: %s", out.Text)
+	}
+	if strings.Contains(out.Text, "secret-token") {
+		t.Fatalf("read outside symlink: %s", out.Text)
+	}
+}
+
+func TestAnalyzeSymbols_SymlinkOutsideNotRead(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "inside.go"), []byte("package p\nfunc InsideFunc() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(outside, "secret.go")
+	if err := os.WriteFile(secret, []byte("package p\nfunc SecretFunc() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(root, "leak.go")); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	got := AnalyzeSymbols(engine, root, "", 50)
+	text := got.Message
+	for _, f := range got.Findings {
+		text += f.Symbol
+	}
+	if !strings.Contains(text, "InsideFunc") {
+		t.Fatalf("missed inside symbol: %+v", got)
+	}
+	if strings.Contains(text, "SecretFunc") {
+		t.Fatalf("read outside symlink: %+v", got)
+	}
+}
+
 func TestCloseRoots_DropsHandlesOnAllowlistChange(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()

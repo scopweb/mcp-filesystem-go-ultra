@@ -162,7 +162,7 @@ func contextPack(ctx context.Context, engine *core.UltraFastEngine, args map[str
 	}
 	entries := make([]map[string]any, 0, len(files))
 	for _, f := range files {
-		f.Symbols = signatureLines(f.Path, 6)
+		f.Symbols = signatureLines(engine, f.Path, 6)
 		if f.Snippet == "" && f.Line == 0 && len(f.Symbols) > 0 {
 			if line, ok := f.Symbols[0]["line"].(int); ok {
 				f.Line = line
@@ -262,8 +262,8 @@ func packGit(ctx context.Context, engine *core.UltraFastEngine, path string, inc
 	return text, payload, ""
 }
 
-func signatureLines(path string, max int) []map[string]any {
-	res := core.AnalyzeSymbols(path, "", max)
+func signatureLines(engine *core.UltraFastEngine, path string, max int) []map[string]any {
+	res := core.AnalyzeSymbols(engine, path, "", max)
 	out := make([]map[string]any, 0, len(res.Findings))
 	for _, f := range res.Findings {
 		if len(out) >= max {

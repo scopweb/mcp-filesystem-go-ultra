@@ -1,7 +1,6 @@
 package core
 
 import (
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -23,8 +22,8 @@ var (
 	sqlObjRe  = regexp.MustCompile(`(?im)^[ \t]*CREATE[ \t]+(?:OR[ \t]+ALTER[ \t]+)?(?:PROC(?:EDURE)?|FUNCTION|VIEW|TRIGGER)[ \t]+(?:\[?[A-Za-z_][\w]*\]?\.)?\[?([A-Za-z_][\w]*)\]?`)
 )
 
-func analyzeTextSymbols(path, query string, maxFindings int) (AnalyzeResult, bool) {
-	files, err := textSymbolFiles(path)
+func analyzeTextSymbols(e *UltraFastEngine, path, query string, maxFindings int) (AnalyzeResult, bool) {
+	files, err := textSymbolFiles(e, path)
 	res := AnalyzeResult{Action: "symbols", Tool: "regex", Findings: []AnalyzeFinding{}, Retryable: false}
 	if err != nil {
 		res.Status = "error"
@@ -38,7 +37,7 @@ func analyzeTextSymbols(path, query string, maxFindings int) (AnalyzeResult, boo
 		if analyzeBlocked(fpath) {
 			continue
 		}
-		b, err := os.ReadFile(fpath)
+		b, err := analyzeRead(e, fpath)
 		if err != nil {
 			continue
 		}
@@ -55,8 +54,8 @@ func analyzeTextSymbols(path, query string, maxFindings int) (AnalyzeResult, boo
 	return res, true
 }
 
-func textSymbolFiles(path string) ([]string, error) {
-	st, err := os.Stat(path)
+func textSymbolFiles(e *UltraFastEngine, path string) ([]string, error) {
+	st, err := analyzeStat(e, path)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +65,7 @@ func textSymbolFiles(path string) ([]string, error) {
 		}
 		return nil, nil
 	}
-	entries, err := os.ReadDir(path)
+	entries, err := analyzeReadDir(e, path)
 	if err != nil {
 		return nil, err
 	}

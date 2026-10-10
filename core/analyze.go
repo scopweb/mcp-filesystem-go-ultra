@@ -102,8 +102,29 @@ func resolveAnalyzeBin(name string) (string, error) {
 	return p, nil
 }
 
-func goFilesIn(path string) ([]string, error) {
-	st, err := os.Stat(path)
+func analyzeStat(e *UltraFastEngine, path string) (os.FileInfo, error) {
+	if e == nil {
+		return os.Stat(path)
+	}
+	return e.statWithinRoot(path)
+}
+
+func analyzeReadDir(e *UltraFastEngine, path string) ([]os.DirEntry, error) {
+	if e == nil {
+		return os.ReadDir(path)
+	}
+	return e.readDirWithinRoot(path)
+}
+
+func analyzeRead(e *UltraFastEngine, path string) ([]byte, error) {
+	if e == nil {
+		return os.ReadFile(path)
+	}
+	return e.readWithinRoot(path)
+}
+
+func goFilesIn(e *UltraFastEngine, path string) ([]string, error) {
+	st, err := analyzeStat(e, path)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +134,7 @@ func goFilesIn(path string) ([]string, error) {
 		}
 		return nil, nil
 	}
-	entries, err := os.ReadDir(path)
+	entries, err := analyzeReadDir(e, path)
 	if err != nil {
 		return nil, err
 	}
@@ -141,8 +162,8 @@ func packageDir(path string) string {
 	return filepath.Dir(path)
 }
 
-func AnalyzeSymbols(path, query string, maxFindings int) AnalyzeResult {
-	files, err := goFilesIn(path)
+func AnalyzeSymbols(e *UltraFastEngine, path, query string, maxFindings int) AnalyzeResult {
+	files, err := goFilesIn(e, path)
 	res := AnalyzeResult{Action: "symbols", Tool: "go-ast", Findings: []AnalyzeFinding{}, Retryable: false}
 	if err != nil {
 		res.Status = "error"
@@ -150,7 +171,7 @@ func AnalyzeSymbols(path, query string, maxFindings int) AnalyzeResult {
 		return res
 	}
 	if len(files) == 0 {
-		if alt, ok := analyzeTextSymbols(path, query, maxFindings); ok {
+		if alt, ok := analyzeTextSymbols(e, path, query, maxFindings); ok {
 			return alt
 		}
 		res.Status = "empty"
@@ -164,7 +185,11 @@ func AnalyzeSymbols(path, query string, maxFindings int) AnalyzeResult {
 		if analyzeBlocked(fpath) {
 			continue
 		}
-		f, err := parser.ParseFile(fset, fpath, nil, parser.ParseComments)
+		src, err := analyzeRead(e, fpath)
+		if err != nil {
+			continue
+		}
+		f, err := parser.ParseFile(fset, fpath, src, parser.ParseComments)
 		if err != nil {
 			continue
 		}
@@ -255,16 +280,16 @@ func addSymbol(res *AnalyzeResult, fset *token.FileSet, fpath string, ident *ast
 	})
 }
 
-func AnalyzeSec(path string, maxFindings int) AnalyzeResult {
+func AnalyzeSec(e *UltraFastEngine, path string, maxFindings int) AnalyzeResult {
 	res := AnalyzeResult{Action: "sec", Tool: "go-ast", Findings: []AnalyzeFinding{}, Retryable: false}
-	files, err := goFilesIn(path)
+	files, err := goFilesIn(e, path)
 	if err != nil {
 		res.Status = "error"
 		res.Message = err.Error()
 		return res
 	}
 	if len(files) == 0 {
-		st, _ := os.Stat(path)
+		st, _ := analyzeStat(e, path)
 		if st != nil && !st.IsDir() {
 			files = []string{path}
 		}
@@ -273,7 +298,7 @@ func AnalyzeSec(path string, maxFindings int) AnalyzeResult {
 		if analyzeBlocked(fpath) {
 			continue
 		}
-		raw, err := os.ReadFile(fpath)
+		raw, err := analyzeRead(e, fpath)
 		if err != nil {
 			continue
 		}
@@ -380,7 +405,7 @@ func parseVetOutput(res *AnalyzeResult, text, dir string) {
 func AnalyzeImpact(ctx context.Context, engine *UltraFastEngine, path, query string, maxFindings int) AnalyzeResult {
 	res := AnalyzeResult{Action: "impact", Tool: "search", Findings: []AnalyzeFinding{}, Retryable: false}
 	root := path
-	if st, err := os.Stat(path); err == nil && !st.IsDir() {
+	if st, err := analyzeStat(engine, path); err == nil && !st.IsDir() {
 		root = filepath.Dir(path)
 		if query == "" {
 			base := filepath.Base(path)
