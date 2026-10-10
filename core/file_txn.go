@@ -35,15 +35,27 @@ func (t *FileTxn) SkipBackup() {
 
 func (t *FileTxn) Snapshot() FileSnapshot { return t.snap }
 
-func readSnapshot(path, canon string) (FileSnapshot, error) {
-	info, statErr := os.Stat(path)
+func readSnapshot(e *UltraFastEngine, path, canon string) (FileSnapshot, error) {
+	var info os.FileInfo
+	var statErr error
+	if e != nil {
+		info, statErr = e.statWithinRoot(path)
+	} else {
+		info, statErr = os.Stat(path)
+	}
 	if statErr != nil {
 		return FileSnapshot{}, ClassifyReadError("snapshot", path, statErr)
 	}
 	if info.IsDir() {
 		return FileSnapshot{}, fmt.Errorf("cannot mutate directory: %s", path)
 	}
-	raw, err := os.ReadFile(path)
+	var raw []byte
+	var err error
+	if e != nil {
+		raw, err = e.readWithinRoot(path)
+	} else {
+		raw, err = os.ReadFile(path)
+	}
 	if err != nil {
 		return FileSnapshot{}, ClassifyReadError("snapshot", path, err)
 	}
@@ -89,7 +101,7 @@ func (e *UltraFastEngine) BeginFileTxn(ctx context.Context, path string, allowMi
 	ctx = withHeldPath(ctx, canon)
 
 	txn := &FileTxn{engine: e, unlock: unlock}
-	snap, err := readSnapshot(path, canon)
+	snap, err := readSnapshot(e, path, canon)
 	if err != nil {
 		if allowMissing && isNotExistPathError(err) {
 			txn.snap = FileSnapshot{Path: path, Canon: canon, Mode: 0644, Exists: false, Hash: contentHashFNV("")}
@@ -158,7 +170,7 @@ func (t *FileTxn) Commit(ctx context.Context, newBytes []byte, dryRun bool, back
 		return "", err
 	}
 	path := t.snap.Path
-	current, readErr := recoverySnapshot(path)
+	current, readErr := recoverySnapshot(t.engine, path)
 	if readErr != nil {
 		return "", readErr
 	}
@@ -218,7 +230,7 @@ func (e *UltraFastEngine) ReadSnapshot(ctx context.Context, path string) (FileSn
 	if cached, hit := e.cache.GetFileFresh(path); hit {
 		raw := cached
 		mode := os.FileMode(0644)
-		if info, statErr := os.Stat(path); statErr == nil {
+		if info, statErr := e.statWithinRoot(path); statErr == nil {
 			mode = info.Mode()
 		}
 		return FileSnapshot{
@@ -235,7 +247,7 @@ func (e *UltraFastEngine) ReadSnapshot(ctx context.Context, path string) (FileSn
 		return FileSnapshot{}, err
 	}
 	mode := os.FileMode(0644)
-	if info, statErr := os.Stat(path); statErr == nil {
+	if info, statErr := e.statWithinRoot(path); statErr == nil {
 		mode = info.Mode()
 	}
 	return FileSnapshot{

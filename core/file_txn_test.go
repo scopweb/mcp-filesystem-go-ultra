@@ -76,6 +76,7 @@ func TestConcurrentEdit_OCCConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := newTestEngine(dir)
+	t.Cleanup(func() { engine.Close() })
 	hash := contentHashFNV(original)
 
 	start := make(chan struct{})
@@ -122,6 +123,7 @@ func TestReadSnapshot_HashMatchesBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := newTestEngine(dir)
+	t.Cleanup(func() { engine.Close() })
 	snap, err := engine.ReadSnapshot(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -137,6 +139,7 @@ func TestReadSnapshot_HashMatchesBytes(t *testing.T) {
 func TestBeginFileTxn_MissingVsPermission(t *testing.T) {
 	dir := t.TempDir()
 	engine := newTestEngine(dir)
+	t.Cleanup(func() { engine.Close() })
 	missing := filepath.Join(dir, "nope.txt")
 	_, txn, err := engine.BeginFileTxn(context.Background(), missing, false)
 	if err == nil {
@@ -175,6 +178,7 @@ func TestFileTxn_ErrorPathsReleaseLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := newTestEngine(dir)
+	t.Cleanup(func() { engine.Close() })
 	defer engine.Close()
 
 	t.Run("occ", func(t *testing.T) {
@@ -234,6 +238,7 @@ func TestNestedTxn_NoDeadlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := newTestEngine(dir)
+	t.Cleanup(func() { engine.Close() })
 	ctx, txn, err := engine.BeginFileTxn(context.Background(), path, false)
 	if err != nil {
 		t.Fatal(err)

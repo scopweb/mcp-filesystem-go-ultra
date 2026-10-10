@@ -33,9 +33,15 @@ func (j *mutationJournal) record(before, after FileSnapshot) {
 	j.entries = append(j.entries, mutationEntry{before, after})
 }
 
-func recoverySnapshot(path string) (FileSnapshot, error) {
+func recoverySnapshot(e *UltraFastEngine, path string) (FileSnapshot, error) {
 	canon := CanonicalPath(path)
-	info, err := os.Lstat(path)
+	var info os.FileInfo
+	var err error
+	if e != nil {
+		info, err = e.lstatWithinRoot(path)
+	} else {
+		info, err = os.Lstat(path)
+	}
 	if os.IsNotExist(err) {
 		return FileSnapshot{Path: path, Canon: canon}, nil
 	}
@@ -45,7 +51,7 @@ func recoverySnapshot(path string) (FileSnapshot, error) {
 	if !info.Mode().IsRegular() {
 		return FileSnapshot{}, fmt.Errorf("transactional recovery requires a regular file: %s", path)
 	}
-	return readSnapshot(path, canon)
+	return readSnapshot(e, path, canon)
 }
 
 // rollback never runs mutating hooks: recovery must restore the captured bytes.
@@ -84,7 +90,7 @@ func (j *mutationJournal) rollback(ctx context.Context, e *UltraFastEngine) (str
 		if blocked[path] {
 			continue
 		}
-		current, err := recoverySnapshot(path)
+		current, err := recoverySnapshot(e, path)
 		if err == nil && (current.Exists != entry.after.Exists || current.Hash != entry.after.Hash) {
 			err = fmt.Errorf("rollback conflict: %s changed after this operation", path)
 		}
@@ -138,7 +144,7 @@ func (e *UltraFastEngine) beginRecoverableAction(ctx context.Context, paths []st
 	}
 	before := []FileSnapshot{}
 	for _, path := range uniqueSorted(paths) {
-		snap, err := recoverySnapshot(path)
+		snap, err := recoverySnapshot(e, path)
 		if err != nil {
 			unlock()
 			return ctx, nil, err
@@ -148,7 +154,7 @@ func (e *UltraFastEngine) beginRecoverableAction(ctx context.Context, paths []st
 	return ctx, func() {
 		defer unlock()
 		for _, snap := range before {
-			after, err := recoverySnapshot(snap.Path)
+			after, err := recoverySnapshot(e, snap.Path)
 			if err != nil {
 				// An unreadable result cannot be restored safely; retain a conflict entry.
 				after = FileSnapshot{Path: snap.Path, Exists: true, Hash: "unknown"}

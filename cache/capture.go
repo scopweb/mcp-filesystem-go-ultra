@@ -101,10 +101,17 @@ func (a FileStatMeta) sameVersion(b FileStatMeta) bool {
 }
 
 func ReadFileStable(path string) (content []byte, meta FileStatMeta, stable bool, err error) {
+	return ReadFileStableOpen(path, os.Open)
+}
+
+func ReadFileStableOpen(path string, open func(string) (*os.File, error)) (content []byte, meta FileStatMeta, stable bool, err error) {
+	if open == nil {
+		open = os.Open
+	}
 	var last []byte
 	var lastMeta FileStatMeta
 	for attempt := 0; attempt < maxCaptureAttempts; attempt++ {
-		content, meta, stable, err = readFileCaptureOnce(path)
+		content, meta, stable, err = readFileCaptureOnce(path, open)
 		if err != nil {
 			return nil, FileStatMeta{}, false, err
 		}
@@ -116,8 +123,8 @@ func ReadFileStable(path string) (content []byte, meta FileStatMeta, stable bool
 	return last, lastMeta, false, nil
 }
 
-func readFileCaptureOnce(path string) ([]byte, FileStatMeta, bool, error) {
-	f, err := os.Open(path)
+func readFileCaptureOnce(path string, open func(string) (*os.File, error)) ([]byte, FileStatMeta, bool, error) {
+	f, err := open(path)
 	if err != nil {
 		return nil, FileStatMeta{}, false, err
 	}

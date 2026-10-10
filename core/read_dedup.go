@@ -41,7 +41,7 @@ func (e *UltraFastEngine) readFileBytesDeduped(ctx context.Context, path string)
 		gen := e.cache.CaptureGeneration(path)
 		diskReadCount.Add(1)
 		e.cache.RecordDiskLoad()
-		data, meta, stable, readErr := cache.ReadFileStable(path)
+		data, meta, stable, readErr := cache.ReadFileStableOpen(path, e.openWithinRoot)
 		if readErr != nil {
 			return nil, &PathError{Op: "read", Path: path, Err: readErr}
 		}
