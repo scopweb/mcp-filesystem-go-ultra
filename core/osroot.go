@@ -111,6 +111,40 @@ func (e *UltraFastEngine) atomicWriteWithinRoot(path string, data []byte, mode o
 	return nil
 }
 
+func (e *UltraFastEngine) moveWithinRoot(src, dst string, createParent bool) error {
+	sRoot, sRel, sOpen, err := e.locateRoot(src)
+	if err != nil {
+		return err
+	}
+	dRoot, dRel, dOpen, err := e.locateRoot(dst)
+	if err != nil {
+		return err
+	}
+	if sOpen || dOpen || sRoot != dRoot {
+		if createParent {
+			if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+				return fmt.Errorf("failed to create destination directory: %w", err)
+			}
+		}
+		if err := os.Rename(src, dst); err != nil {
+			return fmt.Errorf("failed to move: %w", err)
+		}
+		return nil
+	}
+	if createParent {
+		parent := filepath.Dir(dRel)
+		if parent != "." && parent != "" {
+			if err := dRoot.MkdirAll(parent, 0755); err != nil {
+				return fmt.Errorf("failed to create destination directory: %w", err)
+			}
+		}
+	}
+	if err := renameRootWithRetry(sRoot, sRel, dRel); err != nil {
+		return fmt.Errorf("failed to move: %w", err)
+	}
+	return nil
+}
+
 func (e *UltraFastEngine) removeWithinRoot(path string, dir bool) error {
 	root, rel, open, err := e.locateRoot(path)
 	if err != nil {

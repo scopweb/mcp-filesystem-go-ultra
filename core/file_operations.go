@@ -458,8 +458,9 @@ func (e *UltraFastEngine) MoveFile(ctx context.Context, sourcePath, destPath str
 		return fmt.Errorf("access denied: cannot move allowed-path root '%s'%s", sourcePath, e.AllowedDirsSuffix())
 	}
 
-	// Check if source exists
-	sourceInfo, err := os.Stat(sourcePath)
+	// Check if source exists. Stat follows links so a dangling symlink still
+	// reports missing, matching the previous os.Stat path.
+	sourceInfo, err := e.statWithinRoot(sourcePath)
 	if os.IsNotExist(err) {
 		return fmt.Errorf("source does not exist: %s", sourcePath)
 	}
@@ -469,17 +470,10 @@ func (e *UltraFastEngine) MoveFile(ctx context.Context, sourcePath, destPath str
 
 	// Check if destination already exists. Rename replaces a dangling symlink
 	// instead of following it, so Stat (not Lstat) preserves that contract.
-	if _, err := os.Stat(destPath); err == nil {
+	if _, err := e.statWithinRoot(destPath); err == nil {
 		return fmt.Errorf("destination already exists: %s", destPath)
-	}
-
-	// Ensure destination directory exists
-	destDir := filepath.Dir(destPath)
-	if !sourceInfo.IsDir() {
-		// For files, create parent directory
-		if err := os.MkdirAll(destDir, 0755); err != nil {
-			return fmt.Errorf("failed to create destination directory: %w", err)
-		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to stat destination: %w", err)
 	}
 
 	// Execute pre-move hook
@@ -509,9 +503,9 @@ func (e *UltraFastEngine) MoveFile(ctx context.Context, sourcePath, destPath str
 		return fmt.Errorf("security: source path resolved to symlink %q", sourceResolved)
 	}
 
-	// Perform the move
-	if err := os.Rename(sourcePath, destPath); err != nil {
-		return fmt.Errorf("failed to move: %w", err)
+	// Same allowlist root uses os.Root. Different roots keep os.Rename.
+	if err := e.moveWithinRoot(sourcePath, destPath, !sourceInfo.IsDir()); err != nil {
+		return err
 	}
 
 	// Invalidate cache entries
