@@ -59,6 +59,22 @@ func (e *UltraFastEngine) statWithinRoot(path string) (os.FileInfo, error) {
 	return root.Stat(rel)
 }
 
+func (e *UltraFastEngine) readDirWithinRoot(path string) ([]os.DirEntry, error) {
+	root, rel, open, err := e.locateRoot(path)
+	if err != nil {
+		return nil, err
+	}
+	if open {
+		return os.ReadDir(path)
+	}
+	dir, err := root.Open(rel)
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
+	return dir.ReadDir(-1)
+}
+
 func (e *UltraFastEngine) readWithinRoot(path string) ([]byte, error) {
 	root, rel, open, err := e.locateRoot(path)
 	if err != nil {

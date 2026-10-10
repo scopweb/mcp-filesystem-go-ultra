@@ -95,7 +95,7 @@ func (e *UltraFastEngine) ListDirectoryTreeResult(ctx context.Context, path stri
 			return nil, nil
 		}
 
-		info, err := os.Lstat(dirPath)
+		info, err := e.lstatWithinRoot(dirPath)
 		if err != nil {
 			return nil, err
 		}
@@ -116,7 +116,7 @@ func (e *UltraFastEngine) ListDirectoryTreeResult(ctx context.Context, path stri
 		node.Type = "directory"
 		node.Size = 0
 
-		entries, err := os.ReadDir(dirPath)
+		entries, err := e.readDirWithinRoot(dirPath)
 		if err != nil {
 			return node, nil
 		}

@@ -1020,7 +1020,7 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 	}
 
 	// Stat the directory once; used both for existence check and mtime validation.
-	dirInfo, statErr := os.Stat(path)
+	dirInfo, statErr := e.statWithinRoot(path)
 
 	// Try cache first, but validate against directory mtime to detect external writes
 	// Policy listings are not cached: a cached body could outlive a startup pin.
@@ -1044,7 +1044,7 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 	if statErr != nil {
 		return "", fmt.Errorf("failed to read directory: %w", statErr)
 	}
-	rawEntries, err := os.ReadDir(path)
+	rawEntries, err := e.readDirWithinRoot(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to read directory: %w", err)
 	}
@@ -1137,7 +1137,7 @@ func (e *UltraFastEngine) ListDirectoryJSON(ctx context.Context, path string) (s
 		return "", err
 	}
 
-	dirInfo, statErr := os.Stat(path)
+	dirInfo, statErr := e.statWithinRoot(path)
 
 	cacheKey := path + "::json"
 	if !e.PolicyEnabled() {
@@ -1152,7 +1152,7 @@ func (e *UltraFastEngine) ListDirectoryJSON(ctx context.Context, path string) (s
 	if statErr != nil {
 		return "", fmt.Errorf("failed to read directory: %w", statErr)
 	}
-	rawEntries, err := os.ReadDir(path)
+	rawEntries, err := e.readDirWithinRoot(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to read directory: %w", err)
 	}
