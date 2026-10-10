@@ -162,6 +162,52 @@ func TestRemoveWithinRoot_SymlinkOutsideLeavesTarget(t *testing.T) {
 	}
 }
 
+func TestMoveFile_SameRoot(t *testing.T) {
+	root := t.TempDir()
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	src := filepath.Join(root, "a.txt")
+	if err := os.WriteFile(src, []byte("moved"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(root, "nested", "b.txt")
+	if err := engine.MoveFile(context.Background(), src, dst); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil || string(got) != "moved" {
+		t.Fatalf("moved %q %v", got, err)
+	}
+	if _, err := os.Lstat(src); !os.IsNotExist(err) {
+		t.Fatalf("source still present: %v", err)
+	}
+}
+
+func TestMoveFile_SymlinkSourceLeavesTarget(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "kept.txt")
+	if err := os.WriteFile(target, []byte("kept"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	err := engine.MoveFile(context.Background(), link, filepath.Join(root, "gone.txt"))
+	if err == nil {
+		t.Fatal("move of an outside symlink must fail")
+	}
+	got, rerr := os.ReadFile(target)
+	if rerr != nil || string(got) != "kept" {
+		t.Fatalf("outside file changed: %q %v", got, rerr)
+	}
+}
+
 func TestCloseRoots_DropsHandlesOnAllowlistChange(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()
