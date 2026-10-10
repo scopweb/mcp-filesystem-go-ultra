@@ -12,7 +12,7 @@ func TestAnalyzeSymbols_ExportedFunc(t *testing.T) {
 	if err := os.WriteFile(p, []byte("package p\nfunc Exported() {}\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	got := AnalyzeSymbols(p, "Exported", 50)
+	got := AnalyzeSymbols(nil, p, "Exported", 50)
 	if len(got.Findings) == 0 {
 		t.Fatalf("status=%s msg=%s", got.Status, got.Message)
 	}
@@ -28,7 +28,7 @@ func TestAnalyzeSec_HardcodedCredential(t *testing.T) {
 	if err := os.WriteFile(p, []byte(src), 0644); err != nil {
 		t.Fatal(err)
 	}
-	got := AnalyzeSec(p, 50)
+	got := AnalyzeSec(nil, p, 50)
 	if len(got.Findings) == 0 {
 		t.Fatalf("expected secret finding, status=%s", got.Status)
 	}

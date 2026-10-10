@@ -68,11 +68,11 @@ func registerAnalyzeTools(reg *toolRegistry) {
 		}, func() {
 			switch action {
 			case "symbols":
-				result = core.AnalyzeSymbols(path, query, maxFindings)
+				result = core.AnalyzeSymbols(engine, path, query, maxFindings)
 			case "lint":
 				result = core.AnalyzeLint(ctx, path, maxFindings)
 			case "sec":
-				result = core.AnalyzeSec(path, maxFindings)
+				result = core.AnalyzeSec(engine, path, maxFindings)
 			case "impact":
 				result = core.AnalyzeImpact(ctx, engine, path, query, maxFindings)
 			}

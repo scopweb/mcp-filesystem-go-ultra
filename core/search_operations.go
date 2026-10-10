@@ -653,7 +653,7 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 				}
 
 				// Read file
-				content, err := os.ReadFile(currentFile)
+				content, err := e.readWithinRoot(currentFile)
 				if err != nil {
 					return
 				}
@@ -882,7 +882,7 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 		e.workerPool.Submit(func() {
 			defer wg.Done()
 
-			content, err := os.ReadFile(currentFile)
+			content, err := e.readWithinRoot(currentFile)
 			if err != nil {
 				return
 			}
@@ -1136,7 +1136,7 @@ func (e *UltraFastEngine) CountOccurrencesOpts(ctx context.Context, opts SearchO
 	}
 
 	// Check if file exists
-	info, err := os.Stat(validPath)
+	info, err := e.statWithinRoot(validPath)
 	if os.IsNotExist(err) {
 		return "", fmt.Errorf("file does not exist: %s", validPath)
 	}
@@ -1180,7 +1180,7 @@ func (e *UltraFastEngine) CountOccurrencesOpts(ctx context.Context, opts SearchO
 
 // countOccurrencesInFile counts occurrences in a single file
 func (e *UltraFastEngine) countOccurrencesInFile(filePath, pattern string, regexPattern *regexp.Regexp, returnLines bool) (string, error) {
-	content, err := os.ReadFile(filePath)
+	content, err := e.readWithinRoot(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
@@ -1293,7 +1293,7 @@ func (e *UltraFastEngine) countOccurrencesInDir(ctx context.Context, dirPath, pa
 			return nil
 		}
 
-		content, err := os.ReadFile(path)
+		content, err := e.readWithinRoot(path)
 		if err != nil {
 			return nil // skip unreadable files
 		}
