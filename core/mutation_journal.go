@@ -96,9 +96,17 @@ func (j *mutationJournal) rollback(ctx context.Context, e *UltraFastEngine) (str
 		}
 		if err == nil {
 			if entry.before.Exists {
-				err = atomicWriteFile(path, entry.before.Bytes, entry.before.Mode)
+				if e != nil {
+					err = e.atomicWriteWithinRoot(path, entry.before.Bytes, entry.before.Mode&0o777)
+				} else {
+					err = atomicWriteFile(path, entry.before.Bytes, entry.before.Mode)
+				}
 			} else if current.Exists {
-				err = os.Remove(path)
+				if e != nil {
+					err = e.removeWithinRoot(path, false)
+				} else {
+					err = os.Remove(path)
+				}
 			}
 		}
 		if err != nil {

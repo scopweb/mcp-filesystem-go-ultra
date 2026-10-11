@@ -40,6 +40,16 @@ func NewPipelineExecutor(engine *UltraFastEngine) *PipelineExecutor {
 	}
 }
 
+func (pe *PipelineExecutor) refreshKnownHashes(paths []string) {
+	for _, p := range paths {
+		if pe != nil {
+			refreshKnownHashPath(pe.engine, p)
+			continue
+		}
+		refreshKnownHashPath(nil, p)
+	}
+}
+
 func (pe *PipelineExecutor) readStepFile(path string) ([]byte, error) {
 	if pe == nil || pe.engine == nil {
 		return os.ReadFile(path)
@@ -202,7 +212,7 @@ func (pe *PipelineExecutor) execute(ctx context.Context, request PipelineRequest
 	// (skip dry-run — nothing changed), so the session's own pipeline edits
 	// aren't later flagged as external changes by edit_file.
 	if !request.DryRun && finalSuccess {
-		RefreshKnownHashes(affectedFiles)
+		pe.refreshKnownHashes(affectedFiles)
 	}
 
 	return &PipelineResult{
@@ -1216,7 +1226,7 @@ func (pe *PipelineExecutor) executeParallelPath(ctx context.Context, request Pip
 	// (skip dry-run), so the session's own pipeline edits aren't later flagged
 	// as external changes.
 	if !request.DryRun && finalSuccess {
-		RefreshKnownHashes(affectedFiles)
+		pe.refreshKnownHashes(affectedFiles)
 	}
 
 	pResult := &PipelineResult{

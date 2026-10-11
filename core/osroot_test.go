@@ -769,6 +769,28 @@ func TestSearchReplace_SymlinkOutsideNotWritten(t *testing.T) {
 	}
 }
 
+func TestChunkedRead_SymlinkOutsideNotRead(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret-chunk"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), link); err != nil {
+		t.Skipf("symlink not permitted: %v", err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	got, err := engine.ChunkedReadFile(context.Background(), link, 32)
+	if err == nil && strings.Contains(got, "secret-chunk") {
+		t.Fatal("chunked read followed an outside symlink")
+	}
+	if err == nil {
+		t.Fatal("chunked read of an outside symlink must fail")
+	}
+}
+
 func TestCloseRoots_DropsHandlesOnAllowlistChange(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()

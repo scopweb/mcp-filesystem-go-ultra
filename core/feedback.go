@@ -199,11 +199,18 @@ func InvalidateKnownHash(path string) {
 // the session baseline, or clears the baseline if the file is gone. Shared by
 // batch and pipeline so a session's own multi-file writes don't later trip
 // auto-OCC as external changes (new point 4).
-func refreshKnownHashPath(path string) {
+func refreshKnownHashPath(e *UltraFastEngine, path string) {
 	if path == "" {
 		return
 	}
-	if data, err := os.ReadFile(path); err == nil {
+	var data []byte
+	var err error
+	if e != nil {
+		data, err = e.readWithinRoot(path)
+	} else {
+		data, err = os.ReadFile(path)
+	}
+	if err == nil {
 		RecordWriteHash(NormalizePath(path), contentHashFNV(string(data)))
 	} else {
 		InvalidateKnownHash(NormalizePath(path))
@@ -215,7 +222,7 @@ func refreshKnownHashPath(path string) {
 // longer exist have their baseline cleared.
 func RefreshKnownHashes(paths []string) {
 	for _, p := range paths {
-		refreshKnownHashPath(p)
+		refreshKnownHashPath(nil, p)
 	}
 }
 

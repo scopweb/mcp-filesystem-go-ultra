@@ -805,9 +805,8 @@ func (e *UltraFastEngine) WriteFileContent(ctx context.Context, path, content st
 		}
 	}
 
-	// Ensure directory exists
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := e.mkdirWithinRoot(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -1681,13 +1680,13 @@ func (e *UltraFastEngine) CopyFileWithBuffer(src, dst string) error {
 	if err := e.Authorize(OpCopyWrite, dst); err != nil {
 		return err
 	}
-	sourceFile, err := os.Open(src)
+	sourceFile, err := e.openWithinRoot(src)
 	if err != nil {
 		return &PathError{Op: "copy", Path: src, Err: err}
 	}
 	defer sourceFile.Close()
 
-	destFile, err := openCopyDestination(dst, 0666, true)
+	destFile, err := e.openDestWithinRoot(dst, 0666, true)
 	if err != nil {
 		return &PathError{Op: "copy", Path: dst, Err: err}
 	}
@@ -1881,7 +1880,7 @@ func (e *UltraFastEngine) VerifyFileIntegrity(path string, expectedChangePct flo
 	}
 
 	// Get file info
-	info, err := os.Stat(path)
+	info, err := e.statWithinRoot(path)
 	if err != nil {
 		result.OK = false
 		result.Verification = "ERROR"
@@ -1893,7 +1892,7 @@ func (e *UltraFastEngine) VerifyFileIntegrity(path string, expectedChangePct flo
 	result.Readable = true
 
 	// Read file content to verify it's intact and get line count
-	content, err := os.ReadFile(path)
+	content, err := e.readWithinRoot(path)
 	if err != nil {
 		result.OK = false
 		result.Verification = "ERROR"
