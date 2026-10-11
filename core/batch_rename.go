@@ -461,14 +461,14 @@ func (e *UltraFastEngine) executeRenameOperations(ctx context.Context, operation
 			ctx, finish, err = e.beginRecoverableAction(ctx, []string{op.OldPath, op.NewPath})
 		}
 		if err == nil {
-			if _, statErr := os.Lstat(op.NewPath); statErr == nil {
+			if _, statErr := e.lstatWithinRoot(op.NewPath); statErr == nil {
 				err = fmt.Errorf("destination already exists: %s", op.NewPath)
 			} else if !os.IsNotExist(statErr) {
 				err = statErr
 			}
 		}
 		if err == nil {
-			err = os.Rename(op.OldPath, op.NewPath)
+			err = e.moveWithinRoot(op.OldPath, op.NewPath, true)
 		}
 		if finish != nil {
 			finish()
@@ -484,7 +484,7 @@ func (e *UltraFastEngine) executeRenameOperations(ctx context.Context, operation
 		e.invalidateMutatedPath(op.OldPath)
 		e.invalidateMutatedPath(op.NewPath)
 		InvalidateKnownHash(op.OldPath)
-		refreshKnownHashPath(op.NewPath)
+		refreshKnownHashPath(e, op.NewPath)
 	}
 	result.Success = result.ErrorCount == 0
 }

@@ -94,7 +94,7 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 
 	// Ensure directory exists
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := e.mkdirWithinRoot(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -115,24 +115,19 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 		}
 	}
 
-	// Create temp file for atomic operation with secure random suffix
-	tmpPath := path + ".streaming." + secureRandomSuffix()
-
-	// Preserve original file permissions if file exists, otherwise use 0644
 	fileMode := os.FileMode(0644)
-	if existingInfo, statErr := os.Stat(path); statErr == nil {
+	if existingInfo, statErr := e.statWithinRoot(path); statErr == nil {
 		fileMode = existingInfo.Mode()
 	}
 
-	// Open file for writing with O_SYNC for data integrity
-	file, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fileMode)
+	file, commit, abort, err := e.createTempInRoot(path, fileMode)
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
 	defer func() {
 		file.Close()
-		if _, err := os.Stat(tmpPath); err == nil {
-			os.Remove(tmpPath) // Clean up on error
+		if abort != nil {
+			abort()
 		}
 	}()
 
@@ -177,13 +172,11 @@ func (e *UltraFastEngine) StreamingWriteFile(ctx context.Context, path, content 
 		return fmt.Errorf("failed to sync file: %w", err)
 	}
 	file.Close()
-
-	// Atomic rename (retry past transient Windows locks)
-	if err := renameWithRetry(tmpPath, path); err != nil {
+	if err := commit(); err != nil {
 		return fmt.Errorf("failed to finalize file: %w", err)
 	}
+	abort = nil
 
-	// Invalidate cache
 	e.invalidateMutatedPath(path)
 
 	operation.Status = "completed"
@@ -244,7 +237,7 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 	}
 
 	// Get file info
-	info, err := os.Stat(path)
+	info, err := e.statWithinRoot(path)
 	if err != nil {
 		return "", fmt.Errorf("file stat error: %w", err)
 	}
@@ -262,7 +255,7 @@ func (e *UltraFastEngine) ChunkedReadFile(ctx context.Context, path string, maxC
 	}
 
 	// Open file
-	file, err := os.Open(path)
+	file, err := e.openWithinRoot(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
@@ -322,7 +315,7 @@ func (e *UltraFastEngine) SmartEditFile(ctx context.Context, path, oldText, newT
 	}
 
 	// Get file info first
-	info, err := os.Stat(path)
+	info, err := e.statWithinRoot(path)
 	if err != nil {
 		return nil, fmt.Errorf("file stat error: %w", err)
 	}
@@ -456,7 +449,7 @@ func (e *UltraFastEngine) streamingEditLargeFile(ctx context.Context, path, oldT
 // A trailing '\r' at a read boundary is held back raw so a "\r\n" pair
 // split across reads is normalized to a single '\n' (not "\n\n").
 func (e *UltraFastEngine) forEachNormalizedWindow(ctx context.Context, path string, hold int, fn func(window string, limit int, last bool) (consumed int, err error)) error {
-	f, err := os.Open(path)
+	f, err := e.openWithinRoot(path)
 	if err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
 	}
@@ -541,7 +534,7 @@ func (e *UltraFastEngine) forEachNormalizedWindow(ctx context.Context, path stri
 // preservation, buffered writer, sync, rename, cache invalidation, autosync).
 func (e *UltraFastEngine) executeStreamingReplace(ctx context.Context, path, needle, replacement string, hold int) error {
 	totalSize := int64(0)
-	if info, err := os.Stat(path); err == nil {
+	if info, err := e.statWithinRoot(path); err == nil {
 		totalSize = info.Size()
 	}
 
@@ -562,22 +555,19 @@ func (e *UltraFastEngine) executeStreamingReplace(ctx context.Context, path, nee
 		}
 	}
 
-	tmpPath := path + ".streaming." + secureRandomSuffix()
-
 	fileMode := os.FileMode(0644)
-	if existingInfo, statErr := os.Stat(path); statErr == nil {
+	if existingInfo, statErr := e.statWithinRoot(path); statErr == nil {
 		fileMode = existingInfo.Mode()
 	}
 
-	file, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fileMode)
+	file, commit, abort, err := e.createTempInRoot(path, fileMode)
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
-	success := false
 	defer func() {
 		file.Close()
-		if !success {
-			os.Remove(tmpPath)
+		if abort != nil {
+			abort()
 		}
 	}()
 
@@ -627,10 +617,10 @@ func (e *UltraFastEngine) executeStreamingReplace(ctx context.Context, path, nee
 		return fmt.Errorf("failed to close temp file: %w", err)
 	}
 
-	if err := renameWithRetry(tmpPath, path); err != nil {
+	if err := commit(); err != nil {
 		return fmt.Errorf("failed to finalize file: %w", err)
 	}
-	success = true
+	abort = nil
 
 	// Invalidate cache
 	e.invalidateMutatedPath(path)
@@ -664,7 +654,7 @@ func (e *UltraFastEngine) GetFileAnalysis(ctx context.Context, path string) (str
 	if err := e.Authorize(OpRead, path); err != nil {
 		return "", err
 	}
-	info, err := os.Stat(path)
+	info, err := e.statWithinRoot(path)
 	if err != nil {
 		return "", err
 	}

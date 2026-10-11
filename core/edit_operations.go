@@ -417,10 +417,10 @@ func (e *UltraFastEngine) createBackup(path string) (string, error) {
 	}
 	// Preserve original file permissions for backup
 	fileMode := os.FileMode(0600) // restrictive default for backups
-	if info, statErr := os.Stat(path); statErr == nil {
-		fileMode = info.Mode()
+	if info, statErr := e.statWithinRoot(path); statErr == nil {
+		fileMode = info.Mode() & 0o777
 	}
-	err = os.WriteFile(backupPath, content, fileMode)
+	err = e.atomicWriteWithinRoot(backupPath, content, fileMode)
 	return backupPath, err
 }
 
@@ -711,7 +711,7 @@ func (e *UltraFastEngine) performIntelligentEdit(content, oldText, newText strin
 // searchAndReplaceInDirectory performs search and replace in all files in a directory.
 // When dryRun is true, replacement counts are computed but no files are modified.
 func (e *UltraFastEngine) searchAndReplaceInDirectory(dirPath, pattern, replacement string, caseSensitive bool, dryRun bool, results *[]string, totalReplacements *int) error {
-	entries, err := os.ReadDir(dirPath)
+	entries, err := e.readDirWithinRoot(dirPath)
 	if err != nil {
 		return err
 	}
@@ -832,8 +832,8 @@ func detectEOL(content string) string {
 // detectFileEOL returns the dominant line-ending style of an on-disk file by
 // sampling only its first eolSampleSize bytes. This avoids reading multi-MB
 // files into memory just to decide CRLF vs LF on the write path.
-func detectFileEOL(path string) (string, error) {
-	f, err := os.Open(path)
+func (e *UltraFastEngine) detectFileEOL(path string) (string, error) {
+	f, err := e.openWithinRoot(path)
 	if err != nil {
 		return "", err
 	}

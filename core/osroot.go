@@ -75,6 +75,61 @@ func (e *UltraFastEngine) readDirWithinRoot(path string) ([]os.DirEntry, error) 
 	return dir.ReadDir(-1)
 }
 
+func (e *UltraFastEngine) createTempInRoot(path string, perm os.FileMode) (*os.File, func() error, func(), error) {
+	perm &= 0o777
+	if perm == 0 {
+		perm = 0o644
+	}
+	root, rel, open, err := e.locateRoot(path)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	suffix := ".tmp." + secureRandomSuffix()
+	if open {
+		tmp := path + suffix
+		f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return f, func() error { return renameWithRetry(tmp, path) }, func() { _ = os.Remove(tmp) }, nil
+	}
+	tmpRel := rel + suffix
+	f, err := root.OpenFile(tmpRel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return f, func() error { return renameRootWithRetry(root, tmpRel, rel) }, func() { _ = root.Remove(tmpRel) }, nil
+}
+
+func (e *UltraFastEngine) openDestWithinRoot(path string, perm os.FileMode, overwrite bool) (*os.File, error) {
+	perm &= 0o777
+	if perm == 0 {
+		perm = 0o644
+	}
+	root, rel, open, err := e.locateRoot(path)
+	if err != nil {
+		return nil, err
+	}
+	if open {
+		return openCopyDestination(path, perm, overwrite)
+	}
+	if _, err := root.Lstat(rel); err == nil {
+		if !overwrite {
+			return nil, fmt.Errorf("destination already exists: %s", path)
+		}
+		return root.OpenFile(rel, os.O_WRONLY|os.O_TRUNC, perm)
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	parent := filepath.Dir(rel)
+	if parent != "." && parent != "" {
+		if err := root.MkdirAll(parent, 0o755); err != nil {
+			return nil, err
+		}
+	}
+	return root.OpenFile(rel, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+}
+
 func (e *UltraFastEngine) openWithinRoot(path string) (*os.File, error) {
 	root, rel, open, err := e.locateRoot(path)
 	if err != nil {

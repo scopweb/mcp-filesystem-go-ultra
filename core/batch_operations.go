@@ -186,15 +186,15 @@ func (m *BatchOperationManager) refreshKnownHashes(ops []FileOperation) {
 	for _, op := range ops {
 		switch op.Type {
 		case "write", "edit", "search_and_replace":
-			refreshKnownHashPath(op.Path)
+			refreshKnownHashPath(m.engine, op.Path)
 		case "extract":
-			refreshKnownHashPath(op.Source)
-			refreshKnownHashPath(op.Destination)
+			refreshKnownHashPath(m.engine, op.Source)
+			refreshKnownHashPath(m.engine, op.Destination)
 		case "copy":
-			refreshKnownHashPath(op.Destination)
+			refreshKnownHashPath(m.engine, op.Destination)
 		case "move":
 			InvalidateKnownHash(NormalizePath(op.Source))
-			refreshKnownHashPath(op.Destination)
+			refreshKnownHashPath(m.engine, op.Destination)
 		case "delete":
 			InvalidateKnownHash(NormalizePath(op.Path))
 		}
@@ -348,6 +348,27 @@ type rollbackData struct {
 }
 
 // prepareRollback prepara la información necesaria para revertir una operación
+func (m *BatchOperationManager) restoreBytes(path string, data []byte) error {
+	if m != nil && m.engine != nil {
+		return m.engine.atomicWriteWithinRoot(path, data, 0o644)
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func (m *BatchOperationManager) removeUser(path string) error {
+	if m != nil && m.engine != nil {
+		return m.engine.removeWithinRoot(path, false)
+	}
+	return os.Remove(path)
+}
+
+func (m *BatchOperationManager) renameUser(src, dst string) error {
+	if m != nil && m.engine != nil {
+		return m.engine.moveWithinRoot(src, dst, true)
+	}
+	return os.Rename(src, dst)
+}
+
 func (m *BatchOperationManager) statUser(path string) (os.FileInfo, error) {
 	if m != nil && m.engine != nil {
 		return m.engine.statWithinRoot(path)
@@ -436,36 +457,29 @@ func (m *BatchOperationManager) rollback(rollbackInfo []rollbackData) {
 		switch rb.operationType {
 		case "write", "edit", "search_and_replace":
 			if rb.wasCreated {
-				// El archivo fue creado, eliminarlo
-				os.Remove(rb.originalPath)
+				_ = m.removeUser(rb.originalPath)
 			} else {
-				// Restaurar contenido original
-				os.WriteFile(rb.originalPath, rb.content, 0644)
+				_ = m.restoreBytes(rb.originalPath, rb.content)
 			}
 
 		case "move":
-			// Mover de vuelta
-			os.Rename(rb.backupPath, rb.originalPath)
+			_ = m.renameUser(rb.backupPath, rb.originalPath)
 
 		case "copy":
-			// Eliminar la copia
-			os.Remove(rb.originalPath)
+			_ = m.removeUser(rb.originalPath)
 
 		case "delete":
-			// Restaurar archivo eliminado
-			os.WriteFile(rb.originalPath, rb.content, 0644)
+			_ = m.restoreBytes(rb.originalPath, rb.content)
 
 		case "create_dir":
-			// Eliminar directorio creado
-			os.Remove(rb.originalPath)
+			_ = m.removeUser(rb.originalPath)
 
 		case "extract":
-			// Restaurar origen y revertir el destino (point 4).
-			os.WriteFile(rb.originalPath, rb.content, 0644)
+			_ = m.restoreBytes(rb.originalPath, rb.content)
 			if rb.secondWasCreated {
-				os.Remove(rb.secondPath)
+				_ = m.removeUser(rb.secondPath)
 			} else {
-				os.WriteFile(rb.secondPath, rb.secondContent, 0644)
+				_ = m.restoreBytes(rb.secondPath, rb.secondContent)
 			}
 		}
 	}
@@ -846,7 +860,12 @@ func (m *BatchOperationManager) executeCreateDir(ctx context.Context, op FileOpe
 		return fmt.Errorf("pre-create hook denied batch create_dir: %w", err)
 	}
 
-	err := os.MkdirAll(op.Path, 0755)
+	var err error
+	if m.engine != nil {
+		err = m.engine.mkdirWithinRoot(op.Path, 0755)
+	} else {
+		err = os.MkdirAll(op.Path, 0755)
+	}
 	if err != nil {
 		return err
 	}
