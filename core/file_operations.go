@@ -889,6 +889,7 @@ func (e *UltraFastEngine) copyDirectory(src, dst string) error {
 func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startLine, endLine int) (string, error) {
 	// Normalize path (handles WSL ↔ Windows conversion)
 	path = NormalizePath(path)
+	displayPath := path
 	// Acquire semaphore
 	if err := e.acquireOperation(ctx, "read_range"); err != nil {
 		return "", err
@@ -901,6 +902,17 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 	if !e.IsPathAllowed(path) {
 		return "", e.AccessDeniedError("stat", path)
 	}
+	if err := e.Authorize(OpRead, path); err != nil {
+		return "", err
+	}
+	resolved, err := e.ResolveAndAuthorize("read", path)
+	if err != nil {
+		return "", err
+	}
+	if err := e.Authorize(OpRead, resolved); err != nil {
+		return "", err
+	}
+	path = resolved
 
 	// Check if file exists
 	info, err := os.Stat(path)
@@ -923,13 +935,13 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 	// Fast path: serve range from cache or deduped full read (files ≤ LargeFileThreshold).
 	if info.Size() <= LargeFileThreshold {
 		if cached, hit := e.cache.GetFileFresh(path); hit {
-			return extractLineRangeFromBytes(cached, path, startLine, endLine)
+			return extractLineRangeFromBytes(cached, displayPath, startLine, endLine)
 		}
 		content, readErr := e.readFileBytesDeduped(ctx, path)
 		if readErr != nil {
 			return "", readErr
 		}
-		return extractLineRangeFromBytes(content, path, startLine, endLine)
+		return extractLineRangeFromBytes(content, displayPath, startLine, endLine)
 	}
 
 	// Open file for efficient line-by-line reading
@@ -1000,7 +1012,7 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 	// matching the format used by autoTruncateLargeFile so consumers see
 	// a single consistent shape across read paths.
 	footer := fmt.Sprintf("\n\n[Lines %d-%d of %d total lines in %s",
-		startLine, actualEndLine, totalLines, filepath.Base(path))
+		startLine, actualEndLine, totalLines, filepath.Base(displayPath))
 	if actualEndLine < totalLines {
 		rangeSize := endLine - startLine
 		if rangeSize < 0 {

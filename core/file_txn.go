@@ -134,14 +134,14 @@ func (e *UltraFastEngine) FindOCCBaseline(path, expectedHash string) []byte {
 	if err := e.Authorize(OpRead, path); err != nil {
 		return nil
 	}
-	backups, err := e.backupManager.ListBackups(0, "all", path, 0)
+	backups, err := e.backupManager.ListBackups(0, "all", "", 0)
 	if err != nil {
 		return nil
 	}
-	cleanPath := filepath.Clean(path)
+	wantedKey := CanonicalOCCKey(path)
 	for _, backup := range backups {
 		for _, file := range backup.Files {
-			if filepath.Clean(file.OriginalPath) != cleanPath {
+			if CanonicalOCCKey(file.OriginalPath) != wantedKey {
 				continue
 			}
 			raw, err := os.ReadFile(filepath.Join(e.backupManager.GetBackupPath(backup.BackupID), file.BackupPath))
@@ -225,6 +225,17 @@ func (e *UltraFastEngine) ReadSnapshot(ctx context.Context, path string) (FileSn
 	}
 	if !e.IsPathAllowed(path) {
 		return FileSnapshot{}, e.AccessDeniedError("read", path)
+	}
+	if err := e.Authorize(OpRead, path); err != nil {
+		return FileSnapshot{}, err
+	}
+	if resolved, err := e.ResolveAndAuthorize("read", path); err != nil {
+		return FileSnapshot{}, err
+	} else {
+		path = resolved
+	}
+	if err := e.Authorize(OpRead, path); err != nil {
+		return FileSnapshot{}, err
 	}
 	canon := CanonicalPath(path)
 	if cached, hit := e.cache.GetFileFresh(path); hit {

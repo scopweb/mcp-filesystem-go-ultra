@@ -75,12 +75,24 @@ func forgetReadFlight(path string) {
 // It is intentionally file-only for move/delete call sites that manage several
 // source/destination directory caches explicitly.
 func (e *UltraFastEngine) invalidateFileReadCache(path string) {
-	if e == nil || e.cache == nil || path == "" {
+	if path == "" {
 		forgetReadFlight(path)
 		return
 	}
-	e.cache.InvalidateFile(path)
-	forgetReadFlight(path)
+	keys := []string{path}
+	if e != nil {
+		if resolved, err := e.ResolveAndAuthorize("read", path); err == nil && resolved != "" && resolved != path {
+			keys = append(keys, resolved)
+		}
+	}
+	for _, key := range keys {
+		if e == nil || e.cache == nil {
+			forgetReadFlight(key)
+			continue
+		}
+		e.cache.InvalidateFile(key)
+		forgetReadFlight(key)
+	}
 }
 
 // invalidateMutatedPath removes every cache entry whose value can be stale
@@ -98,6 +110,10 @@ func (e *UltraFastEngine) invalidateMutatedPath(path string) {
 	}
 	e.cache.InvalidateMetadata(path)
 	e.cache.InvalidateDirectory(filepath.Dir(path))
+	if resolved, err := e.ResolveAndAuthorize("read", path); err == nil && resolved != "" && resolved != path {
+		e.cache.InvalidateMetadata(resolved)
+		e.cache.InvalidateDirectory(filepath.Dir(resolved))
+	}
 }
 
 // extractLineRangeFromBytes builds the same response shape as ReadFileRange's
