@@ -1053,8 +1053,19 @@ func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string,
 		return "", err
 	}
 
+	// Resolve before entering os.Root: absolute symlinks are rejected by Root.Stat
+	// even when their targets are allowed. Keep the logical path for policy and display.
+	resolved, err := e.ResolveAndAuthorize("stat", path)
+	if err != nil {
+		return "", err
+	}
+	if err := e.Authorize(OpMetadata, resolved); err != nil {
+		return "", err
+	}
+	level = maxLevel(level, e.ProtectionLevel(resolved))
+
 	// Stat through os.Root when an allowlist is active. Insecure-open keeps os.Stat.
-	info, err := e.statWithinRoot(path)
+	info, err := e.statWithinRoot(resolved)
 	if os.IsNotExist(err) {
 		return "", fmt.Errorf("file or directory does not exist: %s", path)
 	}
@@ -1096,12 +1107,12 @@ func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string,
 			result.WriteString(fmt.Sprintf("📂 Type: Directory\n"))
 
 			// Count items in directory if it's a directory
-			entries, err := e.readDirWithinRoot(path)
+			entries, err := e.readDirWithinRoot(resolved)
 			if err == nil {
 				fileCount := 0
 				dirCount := 0
 				for _, entry := range entries {
-					if e.OmitFromDiscovery(filepath.Join(path, entry.Name())) {
+					if e.OmitFromDiscovery(filepath.Join(path, entry.Name())) || e.OmitFromDiscovery(filepath.Join(resolved, entry.Name())) {
 						continue
 					}
 					if entry.IsDir() {
@@ -1122,7 +1133,7 @@ func (e *UltraFastEngine) GetFileInfo(ctx context.Context, path string) (string,
 		if !info.IsDir() {
 			result.WriteString(fmt.Sprintf("📎 MIME: %s\n", mimeByPath(path)))
 			if info.Size() <= 5*1024*1024 {
-				if sum, err := sha256File(path); err == nil {
+				if sum, err := sha256File(resolved); err == nil {
 					result.WriteString(fmt.Sprintf("🔒 SHA256: %s\n", sum))
 				}
 			}

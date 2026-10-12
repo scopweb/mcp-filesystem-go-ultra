@@ -9,6 +9,62 @@ import (
 	"testing"
 )
 
+func TestGetFileInfo_Symlinks(t *testing.T) {
+	root := t.TempDir()
+	targetDir := filepath.Join(root, "real")
+	if err := os.Mkdir(targetDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(targetDir, "file.txt")
+	if err := os.WriteFile(target, []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	engine, cleanup := setupTestEngine(t)
+	defer cleanup()
+	engine.SetAllowedPaths([]string{root}, AllowedSourceCLI)
+	engine.config.CompactMode = false
+
+	for _, tc := range []struct {
+		name   string
+		target string
+		suffix string
+		want   string
+	}{
+		{"absolute-file", target, "", "Size: 5 B (5 bytes)"},
+		{"relative-file", filepath.Join("real", "file.txt"), "", "Size: 5 B (5 bytes)"},
+		{"absolute-parent", targetDir, "file.txt", "Size: 5 B (5 bytes)"},
+		{"absolute-directory", targetDir, "", "Contents: 1 files, 0 directories"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			link := filepath.Join(root, tc.name)
+			if err := os.Symlink(tc.target, link); err != nil {
+				t.Skipf("symlink not permitted: %v", err)
+			}
+			got, err := engine.GetFileInfo(context.Background(), filepath.Join(link, tc.suffix))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("missing %q in metadata: %s", tc.want, got)
+			}
+		})
+	}
+
+	t.Run("outside-rejected", func(t *testing.T) {
+		outside := filepath.Join(t.TempDir(), "secret.txt")
+		if err := os.WriteFile(outside, []byte("secret"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(root, "outside")
+		if err := os.Symlink(outside, link); err != nil {
+			t.Skipf("symlink not permitted: %v", err)
+		}
+		if got, err := engine.GetFileInfo(context.Background(), link); err == nil || got != "" {
+			t.Fatalf("outside metadata exposed: %q, %v", got, err)
+		}
+	})
+}
+
 func TestStatWithinRoot_ReadsInsideAndRejectsEscape(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()

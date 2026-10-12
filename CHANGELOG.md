@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### fix(get_file_info): resolve allowed symlinks before os.Root stat
+
+`get_file_info` resolves and re-authorizes the canonical target before calling `os.Root.Stat`, fixing `path escapes from parent` for absolute symlinks whose targets are inside allowed paths. Metadata policy checks retain both the logical alias and the resolved target. Directory entry counts and file hashes also use the resolved path; directory counts honor discovery restrictions on both paths. Targets outside allowed paths remain rejected.
+
+**Verification:** `TestGetFileInfo_Symlinks` covers absolute and relative file links, an absolute directory link used as a parent, directory metadata counts, and outside-target rejection. Passed on Windows and Ubuntu/WSL with test files under `/tmp` (Linux test binary; not a stdio deployment check).
+
 ### security: RE2 search contract and temp+rename identity
 
 `search_files` already compiles with Go's RE2. Backreferences are rejected; a nested quantifier stays linear (`TestCompileRegex_ReDoSStaysBounded`). Writes and edits stay temp + rename, so NTFS file id, birthtime, and hardlinks do not survive (`TestWriteAndEdit_TempRenameDropsNTFSIdentity`). `openWorldHint` stays true on `github_issues` and `gitlab_issues`, and on `git` only when `--git-network` is set.
