@@ -32,6 +32,18 @@ func TestEdit_ReplacementWithoutNewText_Trial3PriceGo(t *testing.T) {
 		t.Fatalf("got %s", text)
 	}
 	mustFile(t, path, original)
+	if !strings.Contains(text, "Rename replacement to new_text") || strings.Contains(text, "or mode:") {
+		t.Fatalf("recovery must correct the key without changing edit semantics: %s", text)
+	}
+	// Follow the recovery instruction with the same old text and replacement value.
+	corrected := "package price\n\nfunc Total() {}\n"
+	res = callNamed(t, reg, context.Background(), "edit_file", map[string]interface{}{
+		"path": path, "old_text": original, "new_text": corrected,
+	})
+	if res.IsError {
+		t.Fatalf("corrected request failed: %s", resultText(t, res))
+	}
+	mustFile(t, path, corrected)
 }
 
 func TestEdit_ExplicitEmptyNewTextStillDeletes(t *testing.T) {

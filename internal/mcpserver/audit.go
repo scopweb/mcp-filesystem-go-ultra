@@ -56,7 +56,10 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 			if validationErrs := core.ValidateToolParams(tool, args); len(validationErrs) > 0 {
 				entry.DurationMs = time.Since(start).Milliseconds()
 				entry.Status = "error"
-				entry.Error = "parameter validation failed"
+				entry.Error = "parameter validation failed: " + strings.Join(validationErrs, "; ")
+				entry.Path, _ = args["path"].(string)
+				entry.Args = summarizeArgs(args)
+				engine.RecordMCPCall(time.Since(start), entry.Status, toolIsMutating(tool, args), isDryRunArgs(args))
 				engine.Audit(*entry)
 				field, expected := "", ""
 				if len(validationErrs) > 0 {

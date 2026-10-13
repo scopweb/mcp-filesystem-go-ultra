@@ -982,10 +982,10 @@ func registerCoreTools(reg *toolRegistry) {
 					_, hasStr := args["new_str"]
 					if !hasNew && !hasStr {
 						return pathErrorResult(errCodeInvalidParams,
-							`mode replace got replacement without new_text; pass new_text, or mode:"search_replace" to use replacement. The file was not modified.`,
+							`mode replace got replacement without new_text. Rename the argument key replacement to new_text, keeping its value and old_text unchanged. Keep mode:"replace" (or omit mode). Do not switch modes to fix this argument name. The file was not modified.`,
 							path,
-							map[string]string{"field": "new_text", "expected": "new_text or mode search_replace"},
-							suggestionValidation), nil
+							map[string]string{"field": "new_text", "expected": "new_text (or new_str)"},
+							`Rename replacement to new_text and retry once with the corrected arguments; do not repeat the rejected call.`), nil
 					}
 				}
 			}
