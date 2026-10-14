@@ -724,9 +724,9 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 	}
 
 	if len(page) == 0 && offset == 0 {
-		text := fmt.Sprintf("🔍 No matches found for pattern '%s' in %s", pattern, path)
+		text := fmt.Sprintf("🔍 No matches found for pattern '%s' in %s\n0 coincidencias en contenido", pattern, path)
 		if !includeContent {
-			text = fmt.Sprintf("🔍 No filename matches for pattern '%s' in %s (filename-only search — file contents were NOT searched; pass include_content:true to search inside files)", pattern, path)
+			text = fmt.Sprintf("🔍 No filename matches for pattern '%s' in %s (filename-only search — file contents were NOT searched; pass include_content:true to search inside files)\n0 coincidencias en nombres de fichero", pattern, path)
 		}
 		return SearchOutcome{Text: text, Matches: []SearchMatch{}, FilenameOnly: !includeContent, Truncated: walkCapped, HiddenCount: hiddenCount, ExactTotal: exact}, nil
 	}

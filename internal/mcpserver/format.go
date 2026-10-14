@@ -362,6 +362,16 @@ func formatPipelineResult(result *core.PipelineResult, compact bool) string {
 // tells the model how to read the rest with start_line/end_line.
 const autoTruncateLargeFileLines = 300
 
+// defaultHeadTailMaxLines is the server cap when mode is head or tail and
+// max_lines is omitted. An explicit max_lines is a selection, not this cap.
+const defaultHeadTailMaxLines = 100
+
+const (
+	cutAutoCap        = "auto_cap"
+	cutServerMaxLines = "server_max_lines"
+	cutLineWidth      = "line_width"
+)
+
 type readProjection struct {
 	Text       string
 	Truncated  bool
@@ -369,6 +379,7 @@ type readProjection struct {
 	EndLine    int
 	TotalLines int
 	ContinueAt int
+	Cut        string
 }
 
 func splitContentLines(content string) []string {
@@ -388,37 +399,51 @@ func truncatedPrefixFooter(shown, total, chunk int) string {
 		shown, total, shown+1, chunk)
 }
 
-func projectMaxLinesPrefix(p readProjection, lines []string, maxLines int) readProjection {
+func selectionFooter(path string, startLine, endLine, total int) string {
+	return fmt.Sprintf("\n\n[Lines %d-%d of %d total lines in %s]",
+		startLine, endLine, total, filepath.Base(path))
+}
+
+func rangeFooter(path string, startLine, endLine, total int) string {
+	return selectionFooter(path, startLine, endLine, total)
+}
+
+func projectPrefix(p readProjection, path string, lines []string, maxLines int, explicit bool) readProjection {
 	total := len(lines)
 	if total <= maxLines {
 		return p
 	}
 	p.StartLine = 1
 	p.EndLine = maxLines
+	body := strings.Join(lines[:maxLines], "\n")
+	if explicit {
+		p.Text = body + selectionFooter(path, 1, maxLines, total)
+		return p
+	}
 	p.Truncated = true
 	p.ContinueAt = maxLines + 1
-	p.Text = strings.Join(lines[:maxLines], "\n") + truncatedPrefixFooter(maxLines, total, maxLines)
+	p.Cut = cutServerMaxLines
+	p.Text = body + truncatedPrefixFooter(maxLines, total, maxLines)
 	return p
 }
 
-func rangeFooter(path string, startLine, endLine, total int) string {
-	footer := fmt.Sprintf("\n\n[Lines %d-%d of %d total lines in %s",
-		startLine, endLine, total, filepath.Base(path))
-	if endLine < total {
-		rangeSize := endLine - startLine
-		if rangeSize < 0 {
-			rangeSize = 0
-		}
-		nextStart := endLine + 1
-		nextEnd := nextStart + rangeSize
-		if nextEnd > total {
-			nextEnd = total
-		}
-		footer += fmt.Sprintf(" \u2014 use start_line/end_line to read more, e.g. start_line=%d end_line=%d",
-			nextStart, nextEnd)
+func projectTail(p readProjection, path string, lines []string, maxLines int, explicit bool) readProjection {
+	total := len(lines)
+	if total <= maxLines {
+		return p
 	}
-	footer += "]"
-	return footer
+	p.StartLine = total - maxLines + 1
+	p.EndLine = total
+	body := strings.Join(lines[total-maxLines:], "\n")
+	if explicit {
+		p.Text = body + selectionFooter(path, p.StartLine, total, total)
+		return p
+	}
+	p.Truncated = true
+	p.Cut = cutServerMaxLines
+	p.Text = body + fmt.Sprintf(
+		"\n[Truncated: showing last %d of %d lines. Increase max_lines or use start_line to read earlier lines]", maxLines, total)
+	return p
 }
 
 func readRangeArgs(args map[string]interface{}) (startLine, endLine, maxLines int, mode string, lineLimit int, lineLimitSet bool) {
@@ -449,6 +474,7 @@ func projectRead(content, path string, startLine, endLine, maxLines int, mode st
 	lines := splitContentLines(content)
 	total := len(lines)
 	p := readProjection{Text: content, StartLine: 1, EndLine: total, TotalLines: total}
+	explicitCap := maxLines > 0
 
 	if startLine > 0 || endLine > 0 {
 		if startLine <= 0 {
@@ -459,13 +485,11 @@ func projectRead(content, path string, startLine, endLine, maxLines int, mode st
 		}
 		if total == 0 {
 			p.StartLine, p.EndLine = startLine, 0
-			p.Truncated = true
 			p.Text = rangeFooter(path, startLine, 0, 0)
 			return applyLineLimit(p, lineLimit)
 		}
 		if startLine > total {
 			p.StartLine, p.EndLine = startLine, total
-			p.Truncated = true
 			p.Text = rangeFooter(path, startLine, total, total)
 			return applyLineLimit(p, lineLimit)
 		}
@@ -477,31 +501,19 @@ func projectRead(content, path string, startLine, endLine, maxLines int, mode st
 		}
 		body := strings.Join(lines[startLine-1:endLine], "\n")
 		p.StartLine, p.EndLine = startLine, endLine
-		p.Truncated = startLine > 1 || endLine < total
-		if endLine < total {
-			p.ContinueAt = endLine + 1
-		}
 		p.Text = body + rangeFooter(path, startLine, endLine, total)
 		return applyLineLimit(p, lineLimit)
 	}
 
 	if mode == "head" || mode == "tail" || maxLines > 0 {
 		if maxLines <= 0 {
-			maxLines = 100
+			maxLines = defaultHeadTailMaxLines
 		}
 		switch mode {
-		case "head":
-			p = projectMaxLinesPrefix(p, lines, maxLines)
 		case "tail":
-			if total <= maxLines {
-				return applyLineLimit(p, lineLimit)
-			}
-			p.StartLine = total - maxLines + 1
-			p.Truncated = true
-			p.Text = strings.Join(lines[total-maxLines:], "\n") + fmt.Sprintf(
-				"\n[Truncated: showing last %d of %d lines. Increase max_lines or use start_line to read more]", maxLines, total)
+			p = projectTail(p, path, lines, maxLines, explicitCap)
 		default:
-			p = projectMaxLinesPrefix(p, lines, maxLines)
+			p = projectPrefix(p, path, lines, maxLines, explicitCap)
 		}
 		return applyLineLimit(p, lineLimit)
 	}
@@ -510,6 +522,7 @@ func projectRead(content, path string, startLine, endLine, maxLines int, mode st
 		p.EndLine = autoTruncateLargeFileLines
 		p.Truncated = true
 		p.ContinueAt = autoTruncateLargeFileLines + 1
+		p.Cut = cutAutoCap
 		p.Text = autoTruncateLargeFile(content, path)
 	}
 	return applyLineLimit(p, lineLimit)
@@ -523,6 +536,11 @@ func applyLineLimit(p readProjection, lineLimit int) readProjection {
 	p.Text = truncateLineWidths(p.Text, lineLimit)
 	if p.Text != before {
 		p.Truncated = true
+		if p.Cut == "" {
+			p.Cut = cutLineWidth
+		} else if !strings.Contains(p.Cut, cutLineWidth) {
+			p.Cut += "+" + cutLineWidth
+		}
 	}
 	return p
 }

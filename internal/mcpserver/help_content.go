@@ -99,8 +99,11 @@ directory_tree
 read_file
 - Purpose: Read a full file, line range, head/tail, or base64 content. Replaces bash cat/head/tail/cut.
 - Key params: path, paths, start_line, end_line, max_lines, max_line_length, mode, encoding
-- max_lines without range (mode omitted or all): first N consecutive lines; continue with start_line+max_lines
-- Logs: mode="tail" max_lines=40 (lines auto-cut to 300 chars)
+- A completed explicit range, head, tail, or max_lines selection is status=ok and truncated=false. start_line/end_line/total_lines still describe the slice. Do not continue just because the file is longer.
+- truncated=true only for a server cut: full-file auto-cap, head/tail with max_lines omitted, or max_line_length. continuation is valid for that cut (next chunk, or kind=line_width — not a fake next range).
+- max_lines without range (mode omitted or all): first N consecutive lines. That selection is complete; use start_line only if you still need more.
+- Logs: mode="tail" max_lines=40 (lines auto-cut to 300 chars). The text block is the body; content_hash is the full-file snapshot. Do not edit from a width-cut line.
+- Clients that JSON-encode structuredContent will escape quotes and newlines. The text content block is the readable body. Do not add line-number prefixes to content; they are not part of the file.
 
 write_file
 - Purpose: Create or overwrite a file atomically; mode=append concatenates
@@ -121,6 +124,8 @@ list_directory
 search_files
 - Purpose: Search by filename or content. Honors .gitignore by default (no_ignore=false). truncated + hidden_count in structured output.
 - Key params: path, pattern, file_types, include_content, include_context, case_sensitive, count_only, max_results, no_ignore
+- Empty results name the scope: "0 coincidencias en nombres de fichero" or "0 coincidencias en contenido". A path that is a file forces content search. There is no mode parameter; do not infer content search from a regex alone.
+- structured message is a short summary. Hits live in matches. The text content block keeps the listing for text-only clients.
 
 ## File Operations (5)
 
@@ -597,6 +602,7 @@ server_info(action:"stats")
 
 ## Known Issues
 - read_file with only start_line (no end_line) now reads to end of file (fixed in v4.1.2)
+- truncated=false on a range means the requested lines were delivered, not that the file ends there. Check total_lines.
 - If file seems truncated, verify with mode:"tail" before editing
 - If >15% of file changes in one edit, STOP and verify
 

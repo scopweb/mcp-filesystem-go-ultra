@@ -77,9 +77,12 @@ func TestReadFileHandler_StartEndLine_FooterAndContent(t *testing.T) {
 	if !strings.Contains(text, wantTotal) {
 		t.Fatalf("footer must report real total %q\n--- tail ---\n%s", wantTotal, text[len(text)-200:])
 	}
-	wantHint := "start_line=51 end_line=86"
-	if !strings.Contains(text, wantHint) {
-		t.Fatalf("footer must include continuation hint %q\n%s", wantHint, text[len(text)-200:])
+	if strings.Contains(text, "read more") || strings.Contains(text, "start_line=51") {
+		t.Fatalf("completed range must not suggest continuation\n%s", text[len(text)-200:])
+	}
+	m, _ := result.StructuredContent.(map[string]any)
+	if m["truncated"] != false || m["status"] != statusOK || m["continuation"] != nil {
+		t.Fatalf("completed range structured: %#v", m)
 	}
 
 	// Range mode must not append content_hash (only full reads do).

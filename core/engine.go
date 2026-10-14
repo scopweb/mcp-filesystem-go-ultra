@@ -1627,7 +1627,35 @@ func (e *UltraFastEngine) ListedAllowedPaths() []string {
 		}
 		out = append(out, filepath.Clean(baseAbs))
 	}
+	return dedupeDisplayRoots(out)
+}
+
+// dedupeDisplayRoots drops paths that name the same root after clean and
+// symlink resolution. Comparison is case-insensitive on Windows. A child
+// root is kept. This list is for display only; it is not the allowlist.
+func dedupeDisplayRoots(paths []string) []string {
+	if len(paths) < 2 {
+		return paths
+	}
+	seen := make(map[string]struct{}, len(paths))
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		key := displayRootKey(p)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, p)
+	}
 	return out
+}
+
+func displayRootKey(p string) string {
+	p = filepath.Clean(p)
+	if os.PathSeparator == '\\' {
+		return strings.ToLower(p)
+	}
+	return p
 }
 
 // ListDirectoryTree returns a recursive JSON tree. Respects gitignore by default.

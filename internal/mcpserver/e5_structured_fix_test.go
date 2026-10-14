@@ -143,12 +143,11 @@ func TestE5_ReadHeadContinuationNextLine(t *testing.T) {
 		t.Fatal(resultText(t, res))
 	}
 	m, _ := res.StructuredContent.(map[string]any)
-	if m["truncated"] != true {
-		t.Fatalf("head must be truncated: %#v", m)
+	if m["truncated"] != false || m["status"] != statusOK || m["continuation"] != nil {
+		t.Fatalf("explicit head is a selection, not a cut: %#v", m)
 	}
-	cont, _ := m["continuation"].(map[string]any)
-	if asIntMeta(cont["start_line"]) != 2 {
-		t.Fatalf("continuation start_line want 2: %#v", m)
+	if asIntMeta(m["end_line"]) != 1 || asIntMeta(m["total_lines"]) != 4 {
+		t.Fatalf("head meta: %#v", m)
 	}
 }
 

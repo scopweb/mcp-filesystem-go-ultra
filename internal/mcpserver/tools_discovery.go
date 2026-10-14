@@ -100,6 +100,16 @@ func allowedDirectoriesStructured(reg *toolRegistry, text string) map[string]any
 		"version":       serverVersion,
 		"commit":        BuildCommit,
 		"build_date":    BuildDate,
-		"message":       text,
+		"message":       allowedDirectoriesSummary(paths, source),
 	}
+}
+
+func allowedDirectoriesSummary(paths []string, source string) string {
+	if len(paths) == 0 {
+		return "0 raíces mostradas. " + insecureOpenWarning
+	}
+	if source == "" {
+		source = "unspecified"
+	}
+	return fmt.Sprintf("%d raíces permitidas (source: %s). El listado está en paths.", len(paths), source)
 }
