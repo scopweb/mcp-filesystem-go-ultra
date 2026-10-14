@@ -295,7 +295,13 @@ func registerSearchTools(reg *toolRegistry) {
 			}
 		}
 
-		scope := map[string]any{"path": path, "pattern": pattern, "include_content": includeContent, "count_only": countOnly, "offset": offset, "max_results": maxResults}
+		searched := "filename"
+		if countOnly {
+			searched = "count"
+		} else if includeContent {
+			searched = "content"
+		}
+		scope := map[string]any{"path": path, "pattern": pattern, "include_content": includeContent, "count_only": countOnly, "offset": offset, "max_results": maxResults, "searched": searched}
 		out, err := engine.SearchFiles(ctx, core.SearchOptions{
 			Path: path, Pattern: pattern, FileTypes: core.FileTypeFiltersFromArg(fileTypes),
 			CaseSensitive: caseSensitive, WholeWord: wholeWord, IncludeContent: includeContent,

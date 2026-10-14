@@ -1,9 +1,9 @@
 ---
 name: ripgrep-reference
-description: Ripgrep backend reference for filesystem-ultra v4.7.0: detection, parameters, and fallback behavior.
+description: Ripgrep backend reference for filesystem-ultra v4.8.0: detection, parameters, and fallback behavior.
 ---
 
-# Ripgrep Backend Reference (v4.7.0)
+# Ripgrep Backend Reference (v4.8.0)
 
 ## Overview
 
@@ -110,7 +110,7 @@ Rename downloaded binary to: `rg-{os}-{arch}` (e.g., `rg-linux-arm64`)
 
 ### At Startup (logs)
 ```
-INFO Ripgrep detected for accelerated search version=14.x.x  # found
+INFO Ripgrep detected for accelerated search version=15.1.0  # found (version is whatever rg --version reports)
 INFO Ripgrep not found - using Go-native search              # not found
 ```
 
@@ -118,6 +118,8 @@ INFO Ripgrep not found - using Go-native search              # not found
 `server_info(action:"stats")` is ultra-only (absent in `--profile=strict`). Otherwise look for `ripgrepAvailable: true` in engine state, or the startup log line.
 
 ## Error Handling
+
+A file security policy disables ripgrep (`PolicyEnabled`). Search then uses the Go-native walk. `search_files` structured `message` is a short summary; hits stay in `matches`. Do not scrape ripgrep JSON from the text block.
 
 If ripgrep fails during search, the system falls back to Go-native regex:
 

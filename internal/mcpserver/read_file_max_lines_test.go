@@ -82,11 +82,11 @@ func TestProjectRead_MaxLinesPrefixModes(t *testing.T) {
 	content := numberedContent(10, true)
 	for _, mode := range []string{"", "all"} {
 		p := projectRead(content, "f.go", 0, 0, 4, mode, 0)
-		if !p.Truncated {
-			t.Fatalf("mode=%q: expected truncated", mode)
+		if p.Truncated || p.ContinueAt != 0 {
+			t.Fatalf("mode=%q: explicit max_lines is a selection, not a cut: %+v", mode, p)
 		}
-		if p.StartLine != 1 || p.EndLine != 4 || p.TotalLines != 10 || p.ContinueAt != 5 {
-			t.Fatalf("mode=%q meta start=%d end=%d total=%d continue=%d", mode, p.StartLine, p.EndLine, p.TotalLines, p.ContinueAt)
+		if p.StartLine != 1 || p.EndLine != 4 || p.TotalLines != 10 {
+			t.Fatalf("mode=%q meta start=%d end=%d total=%d", mode, p.StartLine, p.EndLine, p.TotalLines)
 		}
 		body := bodyBeforeTruncationFooter(p.Text)
 		assertConsecutive(t, collectNumberedLines(body), 1, 4)
@@ -96,8 +96,11 @@ func TestProjectRead_MaxLinesPrefixModes(t *testing.T) {
 		if strings.Contains(p.Text, "lines omitted") || strings.Contains(p.Text, "head +") || strings.Contains(p.Text, "mode=all") {
 			t.Fatalf("mode=%q contradictory/old footer: %q", mode, p.Text)
 		}
-		if !strings.Contains(p.Text, "To continue: start_line=5, max_lines=4") {
-			t.Fatalf("mode=%q missing continuation footer: %q", mode, p.Text)
+		if strings.Contains(p.Text, "To continue:") || strings.Contains(p.Text, "[Truncated:") {
+			t.Fatalf("mode=%q must not frame a completed selection as truncated: %q", mode, p.Text)
+		}
+		if !strings.Contains(p.Text, "Lines 1-4 of 10 total lines") {
+			t.Fatalf("mode=%q missing range footer: %q", mode, p.Text)
 		}
 	}
 }
@@ -117,8 +120,8 @@ func TestProjectRead_MaxLinesEvenOddAndOne(t *testing.T) {
 		body := bodyBeforeTruncationFooter(p.Text)
 		got := collectNumberedLines(body)
 		assertConsecutive(t, got, 1, tc.end)
-		if p.EndLine != tc.end || p.ContinueAt != tc.end+1 {
-			t.Fatalf("max_lines=%d end=%d continue=%d", tc.maxLines, p.EndLine, p.ContinueAt)
+		if p.EndLine != tc.end || p.Truncated || p.ContinueAt != 0 {
+			t.Fatalf("max_lines=%d end=%d truncated=%v continue=%d", tc.maxLines, p.EndLine, p.Truncated, p.ContinueAt)
 		}
 		if hasNumberedLine(body, 11) {
 			t.Fatalf("max_lines=%d must not include the last line", tc.maxLines)
@@ -161,8 +164,8 @@ func TestProjectRead_HeadTailAndOmittedMaxLinesPreserved(t *testing.T) {
 	content := numberedContent(10, true)
 	head := projectRead(content, "f.go", 0, 0, 3, "head", 0)
 	assertConsecutive(t, collectNumberedLines(bodyBeforeTruncationFooter(head.Text)), 1, 3)
-	if head.ContinueAt != 4 {
-		t.Fatalf("head continue=%d", head.ContinueAt)
+	if head.Truncated || head.ContinueAt != 0 {
+		t.Fatalf("explicit head must not continue: %+v", head)
 	}
 
 	tail := projectRead(content, "f.go", 0, 0, 3, "tail", 0)
@@ -213,21 +216,14 @@ func TestReadFileHandler_MaxLinesPrefixOmittedAndAll(t *testing.T) {
 			t.Fatalf("must be a consecutive prefix, got:\n%s", body)
 		}
 		m, _ := res.StructuredContent.(map[string]any)
-		if m["truncated"] != true {
-			t.Fatalf("truncated=%v", m["truncated"])
+		if m["truncated"] != false || m["status"] != statusOK || m["continuation"] != nil {
+			t.Fatalf("explicit max_lines must be a complete selection: %#v", m)
 		}
 		if asIntMeta(m["start_line"]) != 1 || asIntMeta(m["end_line"]) != 5 || asIntMeta(m["total_lines"]) != 12 {
 			t.Fatalf("structured range: %#v", m)
 		}
-		cont, _ := m["continuation"].(map[string]any)
-		if asIntMeta(cont["start_line"]) != 6 || asIntMeta(cont["max_lines"]) != 5 {
-			t.Fatalf("continuation: %#v", cont)
-		}
-		if strings.Contains(fmt.Sprint(cont["hint"]), "mode=all") {
-			t.Fatalf("hint must not recommend mode=all: %#v", cont)
-		}
-		if !strings.Contains(text, "To continue: start_line=6, max_lines=5") {
-			t.Fatalf("text footer mismatch:\n%s", text)
+		if strings.Contains(text, "To continue:") || strings.Contains(text, "[Truncated:") {
+			t.Fatalf("text must not request continuation:\n%s", text)
 		}
 		if !strings.Contains(asString(m["content"]), body) {
 			t.Fatal("structured content must include the same prefix")
@@ -244,11 +240,13 @@ func TestReadFileHandler_MaxLinesContinuationNoGaps(t *testing.T) {
 		"path": path, "max_lines": float64(4),
 	})
 	m, _ := first.StructuredContent.(map[string]any)
-	cont, _ := m["continuation"].(map[string]any)
-	nextStart := asIntMeta(cont["start_line"])
-	chunk := asIntMeta(cont["max_lines"])
-	if nextStart != 5 || chunk != 4 {
-		t.Fatalf("continuation want start=5 max_lines=4 got %#v", cont)
+	if m["continuation"] != nil || m["truncated"] != false {
+		t.Fatalf("first selection must not be truncated: %#v", m)
+	}
+	nextStart := asIntMeta(m["end_line"]) + 1
+	chunk := 4
+	if nextStart != 5 {
+		t.Fatalf("next start want 5 got %d (%#v)", nextStart, m)
 	}
 
 	second := callReadFile(t, reg, map[string]interface{}{
@@ -269,10 +267,12 @@ func TestReadFileHandler_MaxLinesContinuationNoGaps(t *testing.T) {
 	}
 
 	sm, _ := second.StructuredContent.(map[string]any)
-	scont, _ := sm["continuation"].(map[string]any)
+	if sm["truncated"] != false || sm["continuation"] != nil {
+		t.Fatalf("middle range must be complete: %#v", sm)
+	}
 	third := callReadFile(t, reg, map[string]interface{}{
 		"path":       path,
-		"start_line": float64(asIntMeta(scont["start_line"])),
+		"start_line": float64(asIntMeta(sm["end_line"]) + 1),
 		"max_lines":  float64(4),
 	})
 	thirdBody := bodyBeforeTruncationFooter(resultText(t, third))

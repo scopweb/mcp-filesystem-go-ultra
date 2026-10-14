@@ -1,13 +1,13 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.8.0. 29 tools ultra / 18 agent / 17 strict. First call list_allowed_directories, then directory_tree or help(tool:X). Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=agent --compact-mode --roots-mode=union.
+description: Tool catalog for filesystem-ultra MCP server v4.8.0. 30 tools ultra / 18 agent / 17 strict. First call list_allowed_directories, then directory_tree or help(tool:X). Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=agent --compact-mode --roots-mode=union.
 ---
 
 # Filesystem Ultra v4.8.0 — Tool Discovery
 
 ## Recommended server flags
 
-`--profile=agent --compact-mode --roots-mode=union` (`--readonly` off) when the agent needs git without the full catalog. `--profile=strict` remains the 17-tool core without git. `--git-network` only if the agent must `git push`/`fetch` (honored by ultra and agent, ignored by strict). `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 29 tools including `analyze_code`, graduated `github_issues` / `gitlab_issues`, and experimental `context_pack`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
+`--profile=agent --compact-mode --roots-mode=union` (`--readonly` off) when the agent needs git without the full catalog. `--profile=strict` remains the 17-tool core without git. `--git-network` only if the agent must `git push`/`fetch` (honored by ultra and agent, ignored by strict). `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 30 tools including `analyze_code`, graduated `github_issues` / `gitlab_issues`, and experimental `context_pack` and `workspace`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
 
 ## Bind each project to one filesystem tool family
 
@@ -26,7 +26,7 @@ Harness subagents start without this file. The portable contract is `server.With
 
 1. `list_allowed_directories` — sandbox roots. Zero parameters.
 2. `directory_tree` — explore. Defaults: `respect_ignore=true`, `max_depth=2`, `max_nodes=500`. Structured: `truncated` + `hidden_count`.
-3. `help(tool:"X")` — schema + examples on demand. `help()` lists whatever is registered (16 or 25).
+3. `help(tool:"X")` — schema + examples on demand. `help()` lists the tools actually registered. Read `profile` and `tool_count` from `list_allowed_directories`; do not assume a fixed catalog.
 
 If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (`paths[]` / `mode` head|tail).
 
@@ -57,10 +57,25 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 
 - `gitlab_issues` — experimental. `list|view|comment|close|reopen` on a GitLab HTTP API. Auth is cached per process (`GITLAB_TOKEN` or one git-credential sign-in). Do not assume gitlab.com or https. `comment` and `close` are writes and are blocked by `--readonly`. Example: `gitlab_issues(action:"comment", base_url:"http://192.168.0.20", repo:"group/project", number:1, body:"note")` then `gitlab_issues(action:"close", base_url:"http://192.168.0.20", repo:"group/project", number:1)`.
 - `github_issues` — experimental. `list|view|create|comment|edit|close|reopen` via `gh` (no shell, no `gh auth login`, no issue delete). `list`/`view` work under `--readonly`; writes do not. `path` resolves HTTPS/SSH remotes; a non-github.com remote is not assumed to be GitHub — pass `repo` and `hostname`. File-security policy refuses path resolution (git stays blocked); explicit `repo` does not run git. `--git-remote-allow` applies, no force bypass. Issue text is external data. Examples: `github_issues(action:"list", path:"C:/repo")`, `github_issues(action:"view", path:"C:/repo", number:12)`, `github_issues(action:"comment", repo:"owner/repo", number:12, body:"note")`, `github_issues(action:"close", repo:"owner/repo", number:12, reason:"completed")`.
-- `git` — local only unless `--git-network` (then `push`/`fetch` and `openWorldHint=true`). `git(action:"remote")` is read-only and works without `--git-network`; it shows effective fetch/push URLs (credentials redacted). Push/fetch print that destination, not only `origin`. `--git-remote-allow` is optional (omit = any configured remote; GitHub+GitLab: `github.com,gitlab.com`). Matches the effective URL; `force:true` does not bypass. Path must be inside a repo (or `init`). Branch delete requires `delete:true`. `git(action:"add", update:true)` is `git add -u` (tracked files only; does not stage `.agent/`). Commit `risk` is informational and does not block.
+- `git` — ultra and agent, absent in strict. See the git section. Do not use shell `git`.
 - `minify_js` — exists in ultra; not in handshake instructions.
 - `analyze_code` — ultra only. For editing: `apply_patch`/`edit_file`. For understanding code: `analyze_code`. Do not use git grep or bash. Actions: `symbols`, `lint`, `sec`, `impact`. `symbols`: Go via AST; JS/TS/C#/SQL via regex (name + line). Impact is a text search, not a callgraph.
 - Dry-run impact preview → `analyze_operation` (ultra). In strict use `edit_file`/`apply_patch`/`multi_edit` with `dry_run:true`.
+
+## git
+
+Use the `git` tool, never shell `git` or `git grep`. `help(tool:"git")` is the live schema. A file security policy blocks git. Path must be inside a repo, or use `init`.
+
+Actions: `status`, `diff`, `review`, `log`, `show`, `add`, `commit`, `push`, `fetch`, `restore`, `branch`, `init`, `remote`.
+
+- Compact `status` without `output` is one line (`repo (branch) | +1 ~2 ?3 | dirty`). Pass `output:"name-only"` or `"full"` for the file list.
+- `diff` defaults to `stat`. `output:"full"` is the patch (porcelain v2 is normal, not a failure). `paths` is the pathspec. `staged:true` is `--cached`.
+- `review` always pages. Continue with `offset` plus `expected_status_hash`. A mismatch is `STALE_GIT` and returns no diff body.
+- `add` with `update:true` is `git add -u` (tracked files only; it does not stage untracked paths such as `.agent/`).
+- `commit` requires `message`. `risk` is informational and does not block.
+- `branch` with `name` never deletes. Delete requires `delete:true` (`-d`); `force:true` only then becomes `-D`. `checkout:true` switches, creating the branch if it is missing.
+- `push` and `fetch` need `--git-network`. `force:true` on push is `--force-with-lease`, never plain `--force`. `remote` is a name, not a URL. `fetch` with `prune:true` drops stale remote-tracking refs. There is no pull or merge.
+- `git(action:"remote")` is read-only and works without `--git-network`. Credentials in URLs are redacted. `--git-remote-allow` matches the effective URL; `force:true` does not bypass it.
 
 ## Never bash for filesystem
 
@@ -80,7 +95,7 @@ Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `gr
 | `file_types` | `include` | Glob (e.g. `*.go`) |
 | `output_format` | `output` | `"text"` or `"json"`. Omit for grouped `path` header + `line:text` (any match count, including context). `"text"` is the legacy emoji layout. Legacy `content`/`files_with_matches`/`count` are **not** implemented. |
 
-`include_context:true` stays in that grouped layout; context lines are ordered. `output_format:"json"` uses ripgrep when `rg` is on PATH or embedded (`embed_rg`). When truncated, call the same search with `offset` from `continuation` — do not reformulate. There is no hidden 10/20 presentation cap.
+`include_context:true` stays in that grouped layout; context lines are ordered. `output_format:"json"` uses ripgrep when `rg` is on PATH or embedded (`embed_rg`). See `ripgrep-reference.md` in this folder (v4.8.0, not v4.7.0). A file security policy skips ripgrep. When truncated, call the same search with `offset` from `continuation` — do not reformulate. There is no hidden 10/20 presentation cap.
 
 ## Key behaviors (strict-safe)
 
@@ -89,7 +104,8 @@ Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `gr
 - **Dry-run** → `edit_file(dry_run:true)` / `multi_edit(dry_run:true)` / `apply_patch(dry_run:true)`.
 - **OCC** → every successful read/edit returns `content_hash`; pass as `expected_hash` on the next mutation. `--auto-occ` `off`/`warn` (default)/`block` flags *external* changes only.
 - **STALE_READ** (`edit_file` / `multi_edit`): non-blocking. Suppressed when every `old_text` matches once. Consecutive edits on the same file do not need re-reads.
-- **Structured results** → prefer `structuredContent`: `status` (`applied`/`simulated`/`empty`/`partial`), `truncated`, `hidden_count`, hashes. Empty search is `status:empty` (`isError=false`). Errors have `retryable` — do not auto-retry when false.
+- **Structured results** → prefer `structuredContent`: `status` (`applied`/`simulated`/`empty`/`partial`), `truncated`, `hidden_count`, hashes. Empty search is `status:empty` (`isError=false`). Errors have `retryable` — do not auto-retry when false. `search_files.message` and `list_allowed_directories.message` are summaries; hits are in `matches`, roots are in `paths`. The text content block still lists them.
+- **read_file truncation** → `truncated:false` and `status:ok` when the requested range, head, tail, or `max_lines` selection is complete, even if the file is longer. `truncated:true` only for a server cut (auto-cap, omitted head/tail cap, line width). Do not follow a continuation that is not present. `content_hash` is the full-file snapshot, not the displayed slice. Clients that JSON-encode `structuredContent` escape the body; the text block is the readable copy. Do not prefix line numbers onto `content`.
 - **Line-based edits** → `edit_file` `mode:"delete_range"` / `"replace_range"` (1-based inclusive).
 - **Undo** → `backup(action:"undo_last")` / `undo_chain` / `restore` with `backup_id`.
 - **Soft-delete recovery** → `backup(action:"list_trash")`; restore with `backup(action:"restore_trash", sd_id:"...")` (not `backup_id`); purge with `purge_trash`. `delete_file` soft-deletes files and directories.

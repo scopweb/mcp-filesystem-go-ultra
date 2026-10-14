@@ -151,7 +151,7 @@ func (e *UltraFastEngine) advancedSearchOutcomeFromOpts(ctx context.Context, opt
 
 	if len(page) == 0 && offset == 0 {
 		return SearchOutcome{
-			Text:        fmt.Sprintf("🔍 No matches found for pattern '%s' in %s", pattern, path),
+			Text:        fmt.Sprintf("🔍 No matches found for pattern '%s' in %s\n0 coincidencias en contenido", pattern, path),
 			Matches:     []SearchMatch{},
 			MatchCount:  0,
 			HiddenCount: hidden,

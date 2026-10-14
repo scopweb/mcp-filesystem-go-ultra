@@ -77,8 +77,13 @@ func applySearchDetail(sc map[string]any, text string, detail string) (map[strin
 	}
 	sc["matches"] = paths
 	text = fmt.Sprintf("%d\n%s", count, strings.Join(lines, "\n"))
-	sc["message"] = text
+	sc["message"] = searchSummaryMessage(scopeOf(sc), count, len(paths), sc["truncated"] == true)
 	return sc, text
+}
+
+func scopeOf(sc map[string]any) map[string]any {
+	scope, _ := sc["scope"].(map[string]any)
+	return scope
 }
 
 func applyBatchReadDetail(files []map[string]any, combined string, detail string) ([]map[string]any, string) {

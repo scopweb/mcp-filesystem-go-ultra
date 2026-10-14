@@ -17,12 +17,12 @@ var readFileOutputSchema = json.RawMessage(`{
     "content_hash": {"type": "string", "description": "FNV-1a 8-hex hash of the FULL file bytes from the same snapshot as content. Pass as expected_hash on a subsequent edit. On batch reads this field is omitted at the top level; each files[] entry has its own content_hash."},
     "path": {"type": "string", "description": "Canonical path actually read (single-file reads)"},
     "status": {"type": "string", "description": "ok | partial | truncated | failed"},
-    "truncated": {"type": "boolean", "description": "True when the returned body is not the full file (range/head/tail/auto-cap/line-width)"},
+    "truncated": {"type": "boolean", "description": "True only when a server limit cut the requested body (auto-cap, omitted head/tail cap, or line-width). A completed explicit range, head, tail, or max_lines selection is false even if the file is longer."},
     "start_line": {"type": "integer", "description": "First line of a range/head/tail read (1-based, actual)"},
     "end_line": {"type": "integer", "description": "Last line returned (1-based, inclusive, clamped to file length)"},
     "total_lines": {"type": "integer", "description": "Total lines in the full file"},
     "files": {"type": "array", "description": "Per-file results for batch reads (paths). Item errors are listed here; status=partial when mixed.", "items": {"type": "object"}},
-    "continuation": {"type": "object", "description": "How to read the rest when truncated (start_line, max_lines, hint)"}
+    "continuation": {"type": "object", "description": "Present only when truncated. auto-cap includes start_line and max_lines for the next chunk. line-width uses kind=line_width and does not invent a next line range. Not a suggestion to continue a completed explicit range."}
   },
   "required": ["content"]
 }`)
@@ -99,7 +99,7 @@ var searchFilesOutputSchema = json.RawMessage(`{
     "matches": {"type": "array", "description": "Structured hits {path, line, text}. Empty on filename-only/count_only when not parseable as line hits.", "items": {"type": "object"}},
     "scope": {"type": "object", "description": "Path/pattern/filters actually used"},
     "continuation": {"type": "object", "description": "When truncated: next page of the same path/pattern. next_offset and max_results are integers. hint is the readable instruction. Never means retry the same mutation.", "properties": {"next_offset": {"type": "integer"}, "max_results": {"type": "integer"}, "hint": {"type": "string"}}},
-    "message": {"type": "string", "description": "Human-readable text fallback, identical to the text content block"}
+    "message": {"type": "string", "description": "Brief summary of match_count and scope. Not a copy of matches or of the text content block."}
   },
   "required": ["status", "match_count", "truncated", "hidden_count", "message"]
 }`)
@@ -152,7 +152,7 @@ var listAllowedDirectoriesOutputSchema = json.RawMessage(`{
     "version": {"type": "string", "description": "Server version. initialize already sends it; this is the copy the model sees."},
     "commit": {"type": "string", "description": "Build commit, or dev when go build did not stamp -ldflags."},
     "build_date": {"type": "string", "description": "Build date stamped at link time, or unknown."},
-    "message": {"type": "string", "description": "Human-readable listing, identical to the text content block"}
+    "message": {"type": "string", "description": "Brief summary. Roots are in paths; the text content block lists them for text-only clients."}
   },
   "required": ["status", "paths", "version", "commit", "build_date", "message"]
 }`)

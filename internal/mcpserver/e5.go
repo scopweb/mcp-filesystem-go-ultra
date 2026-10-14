@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -120,18 +121,59 @@ func readStructuredMeta(path, content, hash string, proj readProjection, files [
 	if len(files) > 0 {
 		m["files"] = files
 	}
-	if truncated && proj.ContinueAt > 0 {
+	if cont := readContinuation(proj); cont != nil {
+		m["continuation"] = cont
+	}
+	return m
+}
+
+func readContinuation(proj readProjection) map[string]any {
+	if !proj.Truncated {
+		return nil
+	}
+	lineWidth := strings.Contains(proj.Cut, cutLineWidth)
+	widthHint := " Lines were cut to max_line_length; pass max_line_length:0 for exact text. Do not use the cut body as edit_file old_text."
+	switch proj.Cut {
+	case cutLineWidth:
+		return map[string]any{
+			"kind": cutLineWidth,
+			"hint": "lines were cut to max_line_length; pass max_line_length:0 for exact text. Do not use the cut body as edit_file old_text.",
+		}
+	case cutServerMaxLines:
+		if proj.ContinueAt == 0 {
+			return map[string]any{
+				"kind": cutServerMaxLines,
+				"hint": "tail omitted max_lines and the server cap cut earlier lines. Pass an explicit max_lines or a start_line/end_line range.",
+			}
+		}
+	}
+	if proj.ContinueAt > 0 {
 		chunk := proj.EndLine - proj.StartLine + 1
 		if chunk < 1 {
 			chunk = 1
 		}
-		m["continuation"] = map[string]any{
+		hint := "use start_line=" + strconv.Itoa(proj.ContinueAt) + ", max_lines=" + strconv.Itoa(chunk) + " to read the next chunk; do not re-read the whole file"
+		if lineWidth {
+			hint += widthHint
+		}
+		kind := proj.Cut
+		if kind == "" {
+			kind = cutAutoCap
+		}
+		return map[string]any{
+			"kind":       kind,
 			"start_line": proj.ContinueAt,
 			"max_lines":  chunk,
-			"hint":       "use start_line=" + strconv.Itoa(proj.ContinueAt) + ", max_lines=" + strconv.Itoa(chunk) + " to read the next chunk; do not re-read the whole file",
+			"hint":       hint,
 		}
 	}
-	return m
+	if lineWidth {
+		return map[string]any{
+			"kind": cutLineWidth,
+			"hint": "lines were cut to max_line_length; pass max_line_length:0 for exact text. Do not use the cut body as edit_file old_text.",
+		}
+	}
+	return nil
 }
 
 func listStructured(path, format, text string, entries []map[string]any, truncated bool, hiddenCount int, includeHidden bool) map[string]any {
@@ -219,6 +261,41 @@ func searchContinuationObject(next, page int, reason string) map[string]any {
 	}
 }
 
+func searchScopeKind(scope map[string]any) string {
+	if scope != nil {
+		if s, _ := scope["searched"].(string); s == "filename" || s == "content" || s == "count" {
+			if s == "filename" {
+				return "nombres de fichero"
+			}
+			return "contenido"
+		}
+		if c, _ := scope["count_only"].(bool); c {
+			return "contenido"
+		}
+		if c, _ := scope["include_content"].(bool); c {
+			return "contenido"
+		}
+	}
+	return "nombres de fichero"
+}
+
+func searchSummaryMessage(scope map[string]any, matchCount, shown int, truncated bool) string {
+	kind := searchScopeKind(scope)
+	if matchCount == 0 && !truncated {
+		return "0 coincidencias en " + kind
+	}
+	if truncated && shown != matchCount {
+		return fmt.Sprintf("%d coincidencias en %s (mostrando %d, truncado)", matchCount, kind, shown)
+	}
+	if truncated {
+		return fmt.Sprintf("%d coincidencias en %s (truncado)", matchCount, kind)
+	}
+	if shown != matchCount {
+		return fmt.Sprintf("%d coincidencias en %s (mostrando %d)", matchCount, kind, shown)
+	}
+	return fmt.Sprintf("%d coincidencias en %s", matchCount, kind)
+}
+
 func searchStructured(text string, scope map[string]any, matches []map[string]any, matchCount int, truncated bool, hiddenCount int) map[string]any {
 	status := statusOK
 	if truncated {
@@ -235,7 +312,7 @@ func searchStructured(text string, scope map[string]any, matches []map[string]an
 		"truncated":    truncated,
 		"hidden_count": hiddenCount,
 		"matches":      matches,
-		"message":      text,
+		"message":      searchSummaryMessage(scope, matchCount, len(matches), truncated),
 	}
 	if scope != nil {
 		m["scope"] = scope
