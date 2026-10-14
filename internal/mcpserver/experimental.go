@@ -38,6 +38,7 @@ import (
 // diff_files, apply_patch, native edits/batch, strict match, and e3-v1 retries.
 var experimentalFeatures = map[string]string{
 	"context_pack": "4.8.0",
+	"workspace":    "4.8.0",
 }
 
 // isExperimental reports whether featureKey is currently experimental and

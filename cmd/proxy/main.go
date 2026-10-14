@@ -41,21 +41,22 @@ type initializeParams struct {
 }
 
 type ProxyLogEntry struct {
-	Timestamp  time.Time `json:"ts"`
-	Model      string    `json:"model,omitempty"`
-	Client     string    `json:"client,omitempty"`
-	Tool       string    `json:"tool"`
-	Path       string    `json:"path,omitempty"`
-	BytesIn    int64     `json:"bytes_in"`
-	BytesOut   int64     `json:"bytes_out"`
-	TokensIn   int64     `json:"tokens_in"`
-	TokensOut  int64     `json:"tokens_out"`
-	TokenUnit  string    `json:"token_unit,omitempty"`
-	DurationMs int64     `json:"duration_ms"`
-	DurationNs int64     `json:"duration_ns"`
-	Status     string    `json:"status"`
-	Error      string    `json:"error,omitempty"`
-	RequestID  string    `json:"request_id,omitempty"`
+	Timestamp   time.Time `json:"ts"`
+	Model       string    `json:"model,omitempty"`
+	ModelSource string    `json:"model_source,omitempty"`
+	Client      string    `json:"client,omitempty"`
+	Tool        string    `json:"tool"`
+	Path        string    `json:"path,omitempty"`
+	BytesIn     int64     `json:"bytes_in"`
+	BytesOut    int64     `json:"bytes_out"`
+	TokensIn    int64     `json:"tokens_in"`
+	TokensOut   int64     `json:"tokens_out"`
+	TokenUnit   string    `json:"token_unit,omitempty"`
+	DurationMs  int64     `json:"duration_ms"`
+	DurationNs  int64     `json:"duration_ns"`
+	Status      string    `json:"status"`
+	Error       string    `json:"error,omitempty"`
+	RequestID   string    `json:"request_id,omitempty"`
 }
 
 type pendingCall struct {
@@ -66,17 +67,21 @@ type pendingCall struct {
 }
 
 type config struct {
-	model       string
-	logDir      string
-	callTimeout time.Duration
-	idleTimeout time.Duration
-	reapStale   bool
-	target      []string
-	childEnv    []string
+	model              string
+	opencodeDB         string
+	opencodeToolPrefix string
+	logDir             string
+	callTimeout        time.Duration
+	idleTimeout        time.Duration
+	reapStale          bool
+	target             []string
+	childEnv           []string
 }
 
 func main() {
-	model := flag.String("model", "", "Model name to tag in logs (e.g. opus-4, sonnet-4)")
+	model := flag.String("model", "", "Fallback model label when the client does not identify one (e.g. opus-4)")
+	opencodeDB := flag.String("opencode-db", "", "OpenCode sqlite database. Empty uses the default user database when it exists.")
+	opencodePrefix := flag.String("opencode-tool-prefix", "", "OpenCode MCP server name used to match tool ids, e.g. filesystem-ultra")
 	logDir := flag.String("log-dir", "", "Directory for proxy logs (required)")
 	timeout := flag.Duration("timeout", 0, "Kill child after this duration of inactivity with pending requests (0 = no idle kill)")
 	callTimeout := flag.Duration("call-timeout", 60*time.Second, "Per tools/call timeout; return an MCP error if the child does not respond (0 = wait forever)")
@@ -85,7 +90,7 @@ func main() {
 
 	args := flag.Args()
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: mcp-proxy [--model NAME] [--log-dir DIR] [--timeout DURATION] [--call-timeout DURATION] [--reap-stale=false] -- <command> [args...]")
+		fmt.Fprintln(os.Stderr, "Usage: mcp-proxy [--model NAME] [--opencode-db PATH] [--opencode-tool-prefix NAME] [--log-dir DIR] [--timeout DURATION] [--call-timeout DURATION] [--reap-stale=false] -- <command> [args...]")
 		fmt.Fprintln(os.Stderr, "  The target MCP server command follows after --")
 		os.Exit(1)
 	}
@@ -103,20 +108,28 @@ func main() {
 		os.Exit(1)
 	}
 
+	dbPath := *opencodeDB
+	if dbPath == "" {
+		dbPath = defaultOpenCodeDB()
+	}
 	os.Exit(runProxy(config{
-		model:       *model,
-		logDir:      *logDir,
-		callTimeout: *callTimeout,
-		idleTimeout: *timeout,
-		reapStale:   *reapStale,
-		target:      args,
+		model:              *model,
+		opencodeDB:         dbPath,
+		opencodeToolPrefix: *opencodePrefix,
+		logDir:             *logDir,
+		callTimeout:        *callTimeout,
+		idleTimeout:        *timeout,
+		reapStale:          *reapStale,
+		target:             args,
 	}, os.Stdin, os.Stdout, os.Stderr))
 }
 
 func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Writer) int {
 	log.SetOutput(errOut)
-	log.Printf("mcp-proxy: model=%q log-dir=%q call-timeout=%v idle-timeout=%v reap-stale=%v target=%v",
-		cfg.model, cfg.logDir, cfg.callTimeout, cfg.idleTimeout, cfg.reapStale, cfg.target)
+	log.Printf("mcp-proxy: model=%q opencode-db=%q opencode-tool-prefix=%q log-dir=%q call-timeout=%v idle-timeout=%v reap-stale=%v target=%v",
+		cfg.model, cfg.opencodeDB, cfg.opencodeToolPrefix, cfg.logDir, cfg.callTimeout, cfg.idleTimeout, cfg.reapStale, cfg.target)
+	models := newOpenCodeModels(cfg.opencodeDB, cfg.opencodeToolPrefix, cfg.model)
+	defer models.Close()
 
 	if cfg.reapStale && len(cfg.target) > 0 {
 		reapStaleChildren(cfg.target[0])
@@ -175,6 +188,7 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 			pc.entry.setDuration(benchclock.Since(pc.start))
 			pc.entry.Status = status
 			pc.entry.Error = msg
+			models.tag(&pc.entry)
 			logger.Log(pc.entry)
 			writeClient(toolErrorReply(pc.rawID, msg))
 		}
@@ -196,6 +210,7 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 		pc.entry.setDuration(benchclock.Since(pc.start))
 		pc.entry.Status = "timeout"
 		pc.entry.Error = msg
+		models.tag(&pc.entry)
 		logger.Log(pc.entry)
 		writeClient(toolErrorReply(pc.rawID, msg))
 	}
@@ -384,6 +399,7 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 					}
 				}
 
+				models.tag(&pc.entry)
 				logger.Log(pc.entry)
 			}
 			writeClient(line)

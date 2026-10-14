@@ -226,6 +226,12 @@ context_pack
 - Purpose: Deterministic ranked context (files, signatures, short snippets, optional git review). Experimental. Not an embedding index. Ultra only.
 - Key params: path, query, focus_paths, budget_chars, max_files, include_git
 
+workspace
+- Purpose: Experimental real git worktree. begin/status/diff/export/discard. Ultra only. Not a sandbox and not crash-durable. promote and query are not registered.
+- begin requires a clean tracked HEAD, a new dest outside the repo, and a parent that is already allowed. It does not widen allowed-paths and does not copy untracked or ignored files.
+- discard refuses pending changes and never falls back to a recursive delete.
+- export is complete or an error. A truncated diff page is review-only.
+
 help
 - Purpose: Dynamic registered-tool catalog; help(tool:"X") returns schema + examples
 - Key params: tool

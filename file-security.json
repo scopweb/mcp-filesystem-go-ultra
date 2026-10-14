@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "rules": [
+    { "pattern": ".env", "level": "hidden" },
+    { "pattern": ".env.*", "level": "hidden" },
+    { "pattern": "*.ini", "level": "protected" },
+    { "pattern": "settings.json", "level": "read_only" },
+    { "pattern": "**/secrets/**", "level": "hidden" }
+  ]
+}

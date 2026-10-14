@@ -569,7 +569,7 @@ func backupItems(backups []core.BackupInfo) []map[string]any {
 // identical mutation blindly.
 func retryableForCode(code string) bool {
 	switch code {
-	case errCodeOCCMismatch, errCodeHashRequired, errCodeStaleGit:
+	case errCodeOCCMismatch, errCodeHashRequired, errCodeStaleGit, errCodeStaleWorkspace:
 		return true
 	default:
 		return false

@@ -5,6 +5,8 @@ El P1 abierto (evaluación real de agentes) se mantiene. Esto no lo sustituye.
 
 No entra: overlay / begin-promote, ProjFS, WinFsp, TxF, "Shadow Workspace" (término de Cursor, sep 2024, y es otra cosa).
 
+Excepción explícita (2026-10-12): `workspace` experimental es un worktree Git real (`begin/status/diff/export/discard`), no un overlay. `promote` sigue fuera.
+
 ## Fase A — adopción (1 semana)
 
 Lo que decide si alguien cambia el server oficial por este.
@@ -31,11 +33,11 @@ Hoy el bloqueo de secretos depende de un hook que el usuario tiene que montar. L
 
 Issues abiertos del reference server en 2026. Cada uno, un test, no una feature.
 
-1. Root `file:///c%3A/temp` aceptado (issue 3174).
-2. UNC dentro del allowlist.
-3. `search_files` no parte paths por el separador (issue 3965).
-4. `realpath` ENOENT no tumba el server (issue 3948).
-5. Roots del cliente se unen a los del CLI con `--roots-mode=union` ya existente: un test de regresión con el caso OpenCode y otro con VS Code.
+1. Root `file:///c%3A/temp` aceptado (issue 3174). Hecho: `TestFileURIToPath_EncodedDriveRoot`, `TestEncodedDriveRoot_AllowsChild`.
+2. UNC dentro del allowlist. Hecho: `TestUNCInsideAllowlist` (salta si no hay `\\localhost\C$`).
+3. `search_files` no parte paths por el separador (issue 3965). Hecho: `TestSearchFiles_DoesNotSplitOnSeparator`.
+4. `realpath` ENOENT no tumba el server (issue 3948). Hecho: `TestRealpathENOENT_DoesNotDenyOrPanic`.
+5. Roots del cliente se unen a los del CLI con `--roots-mode=union` ya existente: un test de regresión con el caso OpenCode y otro con VS Code. Hecho: `TestMergeAllowedPaths_OpenCodeUnionKeepsCLI`, `TestMergeAllowedPaths_VSCodeUnionAddsEncodedRoot`.
 
 ## Fase D — la prueba que el roadmap ya pide
 
