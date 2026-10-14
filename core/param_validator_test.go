@@ -190,6 +190,7 @@ func TestValidateToolParams_AllToolsRegistered(t *testing.T) {
 		"get_file_info", "git", "search", "edit", "write", "help",
 		"list_allowed_directories", "directory_tree", "diff_files", "apply_patch",
 		"minify_js", "project_replace", "security_policy", "github_issues", "gitlab_issues",
+		"workspace",
 	}
 	for _, tool := range expected {
 		if _, ok := toolSchemas[tool]; !ok {

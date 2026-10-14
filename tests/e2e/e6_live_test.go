@@ -36,7 +36,7 @@ func runLiveE6(t *testing.T, workDir string) {
 	listed := c.rpc(t, "tools/list", map[string]any{})
 	result, _ := listed["result"].(map[string]any)
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 29 {
+	if len(tools) != 30 {
 		t.Fatalf("tools/list count=%d", len(tools))
 	}
 

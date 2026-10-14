@@ -55,6 +55,21 @@ func TestFileURIToPath_Unix(t *testing.T) {
 	}
 }
 
+func TestFileURIToPath_EncodedDriveRoot(t *testing.T) {
+	got, err := FileURIToPath("file:///c%3A/temp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		want := filepath.Clean(`c:\temp`)
+		if got != want {
+			t.Fatalf("got %q want %q", got, want)
+		}
+	} else if !strings.Contains(strings.ToLower(got), "c:") {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestFileURIToPath_PercentEncoding(t *testing.T) {
 	got, err := FileURIToPath("file:///C:/My%20Proj")
 	if err != nil {

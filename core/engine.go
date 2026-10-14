@@ -435,6 +435,14 @@ func (e *UltraFastEngine) AuditEnabled() bool {
 	return e.auditLogger != nil
 }
 
+// ReceiptDir returns the configured e3-v1 receipt directory. Empty means memory only.
+func (e *UltraFastEngine) ReceiptDir() string {
+	if e == nil || e.config == nil {
+		return ""
+	}
+	return strings.TrimSpace(e.config.ReceiptDir)
+}
+
 // CurrentSessionID returns the active session identifier, starting a new session
 // if more than sessionInactivityTimeout has elapsed since the last operation.
 // Sessions group operations belonging to the same Claude conversation.

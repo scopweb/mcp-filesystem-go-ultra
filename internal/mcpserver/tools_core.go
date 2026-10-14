@@ -149,6 +149,7 @@ func registerToolsOpts(s *server.MCPServer, engine *core.UltraFastEngine, opts r
 	registerMinifyTools(reg)
 	registerAnalyzeTools(reg)
 	registerContextTools(reg)
+	registerWorkspaceTools(reg)
 	registerDiscoveryTools(reg)
 	registerPatchTools(reg)
 	// Aliases disabled: duplicates add noise to discovery, hurt token budget.

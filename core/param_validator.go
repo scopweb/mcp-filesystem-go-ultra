@@ -372,6 +372,16 @@ var toolSchemas = map[string]ToolParamSchema{
 		"query":        {ParamString, false},
 		"max_findings": {ParamNumber, false},
 	},
+	"workspace": {
+		"action":               {ParamString, true},
+		"source_path":          {ParamString, false},
+		"dest_path":            {ParamString, false},
+		"workspace_id":         {ParamString, false},
+		"offset":               {ParamNumber, false},
+		"max_files":            {ParamNumber, false},
+		"expected_status_hash": {ParamString, false},
+		"generation":           {ParamNumber, false},
+	},
 	"project_replace": {
 		"path":           {ParamString, true},
 		"find":           {ParamString, true},

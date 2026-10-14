@@ -43,7 +43,7 @@ func TestProfile_AgentIsStrictPlusGit(t *testing.T) {
 	if !got["git"] {
 		t.Fatal("agent profile must register git")
 	}
-	for _, banned := range []string{"context_pack", "github_issues", "analyze_code", "wsl"} {
+	for _, banned := range []string{"context_pack", "github_issues", "analyze_code", "wsl", "workspace"} {
 		if got[banned] {
 			t.Errorf("agent must not register %q", banned)
 		}
@@ -84,10 +84,10 @@ func TestProfile_UltraHasFullCatalog(t *testing.T) {
 	dir := t.TempDir()
 	reg := newProfileRegistry(t, dir, registerOpts{Profile: profileUltra})
 	n := len(reg.server.ListTools())
-	if n != 29 {
-		t.Fatalf("ultra registered %d tools, want 29", n)
+	if n != 30 {
+		t.Fatalf("ultra registered %d tools, want 30", n)
 	}
-	for _, name := range []string{"git", "github_issues", "gitlab_issues", "minify_js", "backup", "help", "apply_patch"} {
+	for _, name := range []string{"git", "github_issues", "gitlab_issues", "minify_js", "backup", "help", "apply_patch", "workspace"} {
 		if _, ok := reg.server.ListTools()[name]; !ok {
 			t.Errorf("ultra missing %q", name)
 		}

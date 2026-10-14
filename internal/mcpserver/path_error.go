@@ -24,6 +24,7 @@ const (
 	errCodeUnavailable      = "TOOL_UNAVAILABLE"
 	errCodeBudgetExceeded   = "BUDGET_EXCEEDED"
 	errCodeStaleGit         = "STALE_GIT"
+	errCodeStaleWorkspace   = "STALE_WORKSPACE"
 	errCodeRollbackPartial  = "ROLLBACK_PARTIAL"
 	errCodeRollbackFailed   = "ROLLBACK_FAILED"
 	errCodeRollbackComplete = "ROLLBACK_COMPLETE"

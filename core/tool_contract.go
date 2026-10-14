@@ -87,7 +87,7 @@ func classFor(name string) ActionClass {
 		"copy_file", "create_directory", "batch_operations", "project_replace",
 		"minify_js", "apply_patch":
 		return ClassWrite
-	case "wsl", "git", "backup", "server_info", "github_issues", "gitlab_issues":
+	case "wsl", "git", "backup", "server_info", "github_issues", "gitlab_issues", "workspace":
 		return ClassMixed
 	default:
 		return ClassRead
@@ -126,6 +126,7 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 	setEnum("analyze_code", "action", "symbols", "lint", "sec", "impact")
 	setEnum("wsl", "action", "sync", "status", "autosync_config", "autosync_status")
 	setEnum("server_info", "action", "help", "stats", "artifact")
+	setEnum("workspace", "action", "begin", "status", "diff", "export", "discard")
 	setEnum("github_issues", "action", "list", "view", "create", "comment", "edit", "close", "reopen")
 	setEnum("gitlab_issues", "action", "list", "view", "comment", "close", "reopen")
 	setEnum("gitlab_issues", "state", "opened", "closed", "all")
@@ -285,6 +286,24 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 				return false
 			default:
 				return true
+			}
+		}
+	}
+	if c := cs["workspace"]; c != nil {
+		c.Examples = []string{
+			`workspace(action:"begin", source_path:"C:/repo", dest_path:"C:/ws/job")`,
+			`workspace(action:"status", workspace_id:"...")`,
+			`workspace(action:"diff", workspace_id:"...", offset:0, max_files:20)`,
+			`workspace(action:"export", workspace_id:"...")`,
+			`workspace(action:"discard", workspace_id:"...")`,
+		}
+		c.Mutating = func(args map[string]interface{}) bool {
+			a, _ := args["action"].(string)
+			switch a {
+			case "begin", "discard":
+				return true
+			default:
+				return false
 			}
 		}
 	}

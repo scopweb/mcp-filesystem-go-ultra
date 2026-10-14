@@ -10,6 +10,16 @@
 
 **Verification:** `TestGetFileInfo_Symlinks` covers absolute and relative file links, an absolute directory link used as a parent, directory metadata counts, and outside-target rejection. Passed on Windows and Ubuntu/WSL with test files under `/tmp` (Linux test binary; not a stdio deployment check).
 
+### feat(workspace): experimental real git worktree
+
+Ultra-only `workspace` (`begin`, `status`, `diff`, `export`, `discard`). `begin` creates a detached worktree at an already-allowed local destination and does not copy tracked-dirty, untracked, or ignored files. It does not widen allowed-paths. `discard` removes only a clean workspace this process registered; there is no `--force` and no recursive fallback. `export` fails closed above 1MB instead of returning a truncated success. `promote` and `query` are not actions. This is not a sandbox and not a crash-durable transaction. Registry persists under `--receipt-dir/workspaces` when that flag is set; otherwise it is process memory. Introduced as experimental in v4.8.0, no outputSchema.
+
+Ultra catalog is 30 tools. Agent stays 18. Strict stays 17.
+
+### test: Windows parity with the reference server
+
+`file:///c%3A/temp` is accepted. A UNC child of an allowlisted share is allowed. `search_files` returns the full path, not pieces split on the separator. A missing file under an allowed directory does not panic. `--roots-mode=union` keeps the CLI list for the OpenCode case and adds a VS Code encoded root.
+
 ### security: RE2 search contract and temp+rename identity
 
 `search_files` already compiles with Go's RE2. Backreferences are rejected; a nested quantifier stays linear (`TestCompileRegex_ReDoSStaysBounded`). Writes and edits stay temp + rename, so NTFS file id, birthtime, and hardlinks do not survive (`TestWriteAndEdit_TempRenameDropsNTFSIdentity`). `openWorldHint` stays true on `github_issues` and `gitlab_issues`, and on `git` only when `--git-network` is set.
