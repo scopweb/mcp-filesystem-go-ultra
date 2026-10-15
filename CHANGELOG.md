@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### fix(issues): error payloads conform to outputSchema
+
+`github_issues` and `gitlab_issues` error results now include `status: failed` and `action` in `structuredContent`. Strict clients validate that object even when `isError` is true; the previous `{error: ...}` shape was rejected as `-32602` and hid the real cause. The text envelope is unchanged.
+
 ### fix(get_file_info): resolve allowed symlinks before os.Root stat
 
 `get_file_info` resolves and re-authorizes the canonical target before calling `os.Root.Stat`, fixing `path escapes from parent` for absolute symlinks whose targets are inside allowed paths. Metadata policy checks retain both the logical alias and the resolved target. Directory entry counts and file hashes also use the resolved path; directory counts honor discovery restrictions on both paths. Targets outside allowed paths remain rejected.

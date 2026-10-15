@@ -1207,11 +1207,27 @@ func ghFail(code, message, suggestion string, retryable bool, details map[string
 		text = string(b)
 	}
 	r := mcp.NewToolResultError(text)
-	r.StructuredContent = map[string]any{"error": map[string]any{
-		"code": code, "message": message, "suggestion": suggestion,
-		"retryable": retryable, "recovery": recoveryFixArguments, "details": details,
-	}}
+	r.StructuredContent = map[string]any{
+		"status": statusFailed,
+		"action": issueFailAction(details),
+		"error": map[string]any{
+			"code": code, "message": message, "suggestion": suggestion,
+			"retryable": retryable, "recovery": recoveryFixArguments, "details": details,
+		},
+	}
 	return r
+}
+
+func issueFailAction(details map[string]any) string {
+	if details == nil {
+		return "unknown"
+	}
+	action, _ := details["action"].(string)
+	action = strings.TrimSpace(action)
+	if action == "" {
+		return "unknown"
+	}
+	return action
 }
 
 func stringField(args map[string]interface{}, key string) (string, bool, *mcp.CallToolResult) {

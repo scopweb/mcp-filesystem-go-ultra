@@ -1,12 +1,15 @@
 package mcpserver
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 func TestGraduatedSchema_SecurityPolicy(t *testing.T) {
@@ -92,6 +95,65 @@ func TestGraduatedSchema_GitLabIssues(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			res := callToolSweep(t, reg, "gitlab_issues", tc.args)
 			assertPayloadConforms(t, schema, structuredPayload(t, res))
+		})
+	}
+}
+
+func TestGraduatedSchema_IssueErrorsConform(t *testing.T) {
+	dir := t.TempDir()
+	reg := newHelpTestRegistry(t, dir)
+	cases := []struct {
+		tool   string
+		schema json.RawMessage
+		args   map[string]any
+		action string
+	}{
+		{
+			tool:   "gitlab_issues",
+			schema: gitlabIssuesOutputSchema,
+			args: map[string]any{
+				"action": "close", "repo": "group/project", "base_url": "http://gitlab.example",
+				"number": float64(7), "state": "closed",
+			},
+			action: "close",
+		},
+		{
+			tool:   "github_issues",
+			schema: githubIssuesOutputSchema,
+			args: map[string]any{
+				"action": "close", "repo": "acme/widgets", "number": float64(12), "state": "closed",
+			},
+			action: "close",
+		},
+		{
+			tool:   "gitlab_issues",
+			schema: gitlabIssuesOutputSchema,
+			args:   map[string]any{"action": "close", "repo": "group/project", "base_url": "http://gitlab.example"},
+			action: "unknown",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.tool+"/"+tc.action, func(t *testing.T) {
+			h := reg.handlers[tc.tool]
+			res, err := h(context.Background(), mcp.CallToolRequest{Params: mcp.CallToolParams{Name: tc.tool, Arguments: tc.args}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res == nil || !res.IsError {
+				t.Fatal("expected tool error")
+			}
+			payload := structuredPayload(t, res)
+			assertPayloadConforms(t, parseSchema(t, tc.schema), payload)
+			if payload["status"] != statusFailed || payload["action"] != tc.action {
+				t.Fatalf("status=%v action=%v", payload["status"], payload["action"])
+			}
+			errObj, ok := payload["error"].(map[string]any)
+			if !ok || errObj["code"] == "" || errObj["message"] == "" {
+				t.Fatalf("error=%#v", payload["error"])
+			}
+			if !strings.Contains(issueText(t, res), `"code"`) {
+				t.Fatalf("text envelope lost: %s", issueText(t, res))
+			}
 		})
 	}
 }
