@@ -215,8 +215,8 @@ var securityPolicyOutputSchema = json.RawMessage(`{
 var githubIssuesOutputSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "status": {"type": "string", "description": "ok | empty | truncated | applied"},
-    "action": {"type": "string"},
+    "status": {"type": "string", "description": "ok | empty | truncated | applied | failed"},
+    "action": {"type": "string", "description": "Requested action. failed results use unknown when the action was not recorded."},
     "repo": {"type": "string"},
     "hostname": {"type": "string"},
     "state": {"type": "string"},
@@ -236,7 +236,8 @@ var githubIssuesOutputSchema = json.RawMessage(`{
     "url": {"type": "string"},
     "comments": {"type": "array", "items": {"type": "object"}},
     "message": {"type": "string"},
-    "comment_url": {"type": "string"}
+    "comment_url": {"type": "string"},
+    "error": {"type": "object", "description": "Tool execution error. Present only when status is failed. code, message, suggestion, retryable, recovery, details."}
   },
   "required": ["status", "action"]
 }`)
@@ -244,8 +245,8 @@ var githubIssuesOutputSchema = json.RawMessage(`{
 var gitlabIssuesOutputSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "status": {"type": "string", "description": "ok | empty | truncated | applied"},
-    "action": {"type": "string"},
+    "status": {"type": "string", "description": "ok | empty | truncated | applied | failed"},
+    "action": {"type": "string", "description": "Requested action. failed results use unknown when the action was not recorded."},
     "repo": {"type": "string"},
     "base_url": {"type": "string"},
     "state": {"type": "string"},
@@ -263,7 +264,8 @@ var gitlabIssuesOutputSchema = json.RawMessage(`{
     "url": {"type": "string"},
     "comments": {"type": "array", "items": {"type": "object"}},
     "message": {"type": "string"},
-    "note_id": {"type": "integer"}
+    "note_id": {"type": "integer"},
+    "error": {"type": "object", "description": "Tool execution error. Present only when status is failed. code, message, suggestion, retryable, recovery, details."}
   },
   "required": ["status", "action"]
 }`)
