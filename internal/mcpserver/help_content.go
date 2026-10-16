@@ -123,8 +123,9 @@ list_directory
 
 search_files
 - Purpose: Search by filename or content. Honors .gitignore by default (no_ignore=false). truncated + hidden_count in structured output.
-- Key params: path, pattern, file_types, include_content, include_context, case_sensitive, count_only, max_results, no_ignore
-- Empty results name the scope: "0 coincidencias en nombres de fichero" or "0 coincidencias en contenido". A path that is a file forces content search. There is no mode parameter; do not infer content search from a regex alone.
+- Key params: path, pattern, file_types, include, include_content, include_context, case_sensitive, count_only, max_results, no_ignore
+- include: comma-separated globs (*.go, *.ts) or brace alternatives ({A.cs,B.cs}, {Test,ObservacionesPedido}/*.razor, *.{go,razor}). Commas inside {} are alternatives, not separators. * does not cross /. ** matches any depth. A pattern with / is relative to path. Unbalanced braces, empty alternatives, and more than 64 expansions are INVALID_PARAMS (retryable false), not an empty search. file_types does not expand braces; if both are set, file_types wins.
+- Empty results name the scope: "0 coincidencias en nombres de fichero" or "0 coincidencias en contenido". A path that is a file forces content search. There is no mode parameter; do not infer content search from a regex alone. A valid include with no hits is still an empty search, not an error.
 - structured message is a short summary. Hits live in matches. The text content block keeps the listing for text-only clients.
 
 ## File Operations (5)
@@ -180,7 +181,8 @@ server_info
 diff_files
 - Purpose: Unified diff between two paths, or a file vs its last backup (against=backup).
 - When: preview before apply_patch or to compare two files
-- Key params: path_a, path_b, path, against
+- Key params: path_a, path_b, path, against, normalize, normalize_json
+- identical means original bytes match. equivalent means equal only after normalize. A normalized diff is not an applicable patch.
 
 apply_patch
 - Purpose: Apply a unified diff. One file: path is the destination. Several files: path is the directory root; all files are validated then applied as an in-process transaction (not crash-durable). dry_run + expected_hash is the happy path for one file. Destination EOL wins. If PATCH_FAILED: read_file and regenerate; do not retry the same patch.
@@ -190,8 +192,10 @@ apply_patch
 ## Version Control, JavaScript, Analysis, and Discovery (5)
 
 git
-- Purpose: Safe Git status, diff, log, show, review, add, commit, push, fetch, restore, branch, init, and remote actions
-- Key params: action, path, paths, output, rev, max_lines, offset, expected_status_hash, delete, prune, remote
+- Purpose: Safe Git status, diff, log, show, review, add, commit, push, fetch, pull, restore, branch, init, remote, and stash actions
+- Key params: action, path, paths, output, rev, max_lines, offset, expected_status_hash, delete, prune, remote, stash_action, include_untracked
+- pull requires --git-network and is fast-forward only. Divergence does not merge. Fetch and integration are reported separately.
+- stash show/apply/drop/pop take rev as a commit OID, not stash@{n}. drop and pop require force:true.
 - review returns a paged file list plus status_hash. Continue with the same hash; a mismatch is STALE_GIT.
 - remote lists effective fetch/push URLs (credentials redacted) without --git-network
 - commit risk is informational (staged file/insertion counts); it does not block the commit
@@ -219,7 +223,7 @@ minify_js
 - Key params: path, output_path
 
 analyze_code
-- Purpose: Read-only symbols/lint/sec/impact. For editing use apply_patch/edit_file. Do not use git grep or bash. Ultra only. Impact is text search, not a callgraph.
+- Purpose: Read-only symbols/lint/sec/impact. symbols return start_line/end_line when range_status is exact. unavailable is not a guessed range. For editing use replace_range with the same content_hash. Ultra only.
 - Key params: action (symbols|lint|sec|impact), path, query, max_findings
 
 context_pack

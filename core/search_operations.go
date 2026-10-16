@@ -584,7 +584,7 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 			}
 		}
 
-		if !FileMatchesTypeFilter(currentPath, fileTypes) {
+		if !FileMatchesTypeFilterIn(currentPath, path, fileTypes) {
 			return nil
 		}
 
@@ -850,7 +850,7 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 		if d.IsDir() {
 			return nil
 		}
-		if !FileMatchesTypeFilter(currentPath, fileTypes) {
+		if !FileMatchesTypeFilterIn(currentPath, path, fileTypes) {
 			return nil
 		}
 
@@ -1172,7 +1172,7 @@ func (e *UltraFastEngine) CountOccurrencesOpts(ctx context.Context, opts SearchO
 	if info.IsDir() {
 		return e.countOccurrencesInDir(ctx, validPath, pattern, regexPattern, returnLines, noIgnore, fileTypes)
 	}
-	if !FileMatchesTypeFilter(validPath, fileTypes) {
+	if !FileMatchesTypeFilterIn(validPath, filepath.Dir(validPath), fileTypes) {
 		return "0 matches", nil
 	}
 	return e.countOccurrencesInFile(validPath, pattern, regexPattern, returnLines)
@@ -1286,7 +1286,7 @@ func (e *UltraFastEngine) countOccurrencesInDir(ctx context.Context, dirPath, pa
 		if skipWalkDir(d.Name(), path, dirPath, false, ign, noIgnore) {
 			return nil
 		}
-		if !FileMatchesTypeFilter(path, fileTypes) {
+		if !FileMatchesTypeFilterIn(path, dirPath, fileTypes) {
 			return nil
 		}
 		if !isTextCandidate(path) || isMinifiedFile(path) {

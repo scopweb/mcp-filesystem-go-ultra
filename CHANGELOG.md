@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### feat: structured responses, symbol ranges, normalized diff, git pull/stash
+
+- `--response-mode=structured` keeps each `read_file` body once. Batch bodies live in `files[].content`; the text fallback is a summary. Default remains `compat`.
+- `analyze_code symbols` returns `start_line`/`end_line` and `range_status`. Go ranges come from the AST. C#, JS, and Razor `@code`/`@functions` use brace matching and return `unavailable` instead of a guessed range when strings, templates, or preprocessor conditionals make the end ambiguous. SQL stays name + line.
+- `diff_files` accepts `normalize` rules. `identical` is original-byte equality. `equivalent` means equal only after the rules. A normalized diff is labeled and is not an applicable patch.
+- `git pull` requires `--git-network` and uses `--ff-only`. A failed integration does not claim the fetch did not happen. `git stash` list/show/push/apply/drop/pop identifies entries by commit OID. drop and pop require `force:true`.
+
 ### fix(issues): error payloads conform to outputSchema
 
 `github_issues` and `gitlab_issues` error results now include `status: failed` and `action` in `structuredContent`. Strict clients validate that object even when `isError` is true; the previous `{error: ...}` shape was rejected as `-32602` and hid the real cause. The text envelope is unchanged.

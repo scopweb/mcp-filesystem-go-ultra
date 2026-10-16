@@ -26,6 +26,7 @@ type Configuration struct {
 	LogLevel         string        // Log level (info, debug, error)
 	AllowedPaths     []string      // List of allowed base paths for access control
 	CompactMode      bool          // Enable compact responses (minimal tokens)
+	ResponseMode     string        // compat or structured
 	MaxResponseSize  int64         // Max response size in bytes
 	MaxSearchResults int           // Max search results to return
 	MaxListItems     int           // Max items in directory listings
@@ -123,6 +124,7 @@ func Run() {
 		gitNetwork       = flag.Bool("git-network", false, "Enable git push/fetch (network). Off by default; ignored in profile=strict. Honored by ultra and agent.")
 		gitRemoteAllow   = flag.String("git-remote-allow", "", "Optional. Comma-separated allowed push/fetch destinations (host, host/org, or repo URL). Empty = no extra lock (any configured remote). Example: github.com,gitlab.com. force:true does not bypass. git(action:\"remote\") works without --git-network.")
 		compactMode      = flag.Bool("compact-mode", false, "Enable compact responses (minimal tokens for Claude Desktop)")
+		responseMode     = flag.String("response-mode", "compat", "Text fallback: compat (full text + structured) or structured (brief text; bodies stay once in structuredContent)")
 		maxResponseSize  = flag.String("max-response-size", "10MB", "Maximum response size")
 		maxSearchResults = flag.Int("max-search-results", 1000, "Maximum search results to return")
 		maxListItems     = flag.Int("max-list-items", 500, "Maximum items in directory listings")
@@ -143,7 +145,7 @@ func Run() {
 
 		// Auto-OCC (new point 4): automatic optimistic-concurrency check on edits
 		// without an explicit expected_hash. off | warn (default) | block.
-		autoOCC = flag.String("auto-occ", "warn", "Auto optimistic-concurrency on edits: off|warn|block (default warn)")
+		autoOCC            = flag.String("auto-occ", "warn", "Auto optimistic-concurrency on edits: off|warn|block (default warn)")
 		fileSecurityConfig = flag.String("file-security-config", "", "Path to a JSON file security policy. Invalid config aborts startup. Immutable for the process lifetime.")
 
 		// Risk thresholds
@@ -192,6 +194,12 @@ func Run() {
 	config.DebugMode = *debugMode
 	config.LogLevel = *logLevel
 	config.CompactMode = *compactMode
+	mode, modeErr := core.ParseResponseMode(*responseMode)
+	if modeErr != nil {
+		fmt.Fprintln(os.Stderr, modeErr.Error())
+		os.Exit(2)
+	}
+	config.ResponseMode = mode
 	config.MaxSearchResults = *maxSearchResults
 	config.MaxListItems = *maxListItems
 
@@ -255,6 +263,7 @@ func Run() {
 		AllowedPaths:     config.AllowedPaths,
 		BinaryThreshold:  config.BinaryThreshold,
 		CompactMode:      config.CompactMode,
+		ResponseMode:     config.ResponseMode,
 		MaxResponseSize:  config.MaxResponseSize,
 		MaxSearchResults: config.MaxSearchResults,
 		MaxListItems:     config.MaxListItems,

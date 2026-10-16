@@ -96,6 +96,7 @@ func allowedDirectoriesStructured(reg *toolRegistry, text string) map[string]any
 		"profile":       profile,
 		"roots_mode":    rootsMode,
 		"readonly":      engine.IsReadOnly(),
+		"response_mode": engine.ResponseMode(),
 		"tool_count":    toolCount,
 		"version":       serverVersion,
 		"commit":        BuildCommit,

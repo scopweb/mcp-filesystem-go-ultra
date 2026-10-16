@@ -513,7 +513,11 @@ func registerCoreTools(reg *toolRegistry) {
 			detail := parseDetailArg(args)
 			files, combined = applyBatchReadDetail(files, combined, detail)
 			sc := readStructured("", combined, "", anyTrunc, startLine, endLine, files)
-			return structuredOrError(anyOK || !anyFail, sc, combined), nil
+			summary := batchReadSummary(files, anyTrunc)
+			if detail == detailSummary {
+				summary = combined
+			}
+			return presentRead(engine, sc, combined, summary, detail != detailSummary, anyOK || !anyFail), nil
 		}
 
 		path, err := request.RequireString("path")
@@ -568,7 +572,8 @@ func registerCoreTools(reg *toolRegistry) {
 			} else {
 				body = fmt.Sprintf("# File: %s (%d bytes)\n# Base64 encoded:\n%s", path, len(snap.Bytes), encoded)
 			}
-			return mcp.NewToolResultStructured(readStructured(resolveAbsForResponse(path), body, contentHash, false, 0, 0, nil), body), nil
+			sc, text := finishRead(engine, readStructured(resolveAbsForResponse(path), body, contentHash, false, 0, 0, nil), body, readSummary(path, contentHash, 0, false), false)
+			return mcp.NewToolResultStructured(sc, text), nil
 		}
 
 		if startLine > 0 && endLine == 0 {
@@ -599,10 +604,13 @@ func registerCoreTools(reg *toolRegistry) {
 		} else {
 			core.SetLinesRead(ctx, proj.TotalLines)
 		}
-		return mcp.NewToolResultStructured(
+		sc, text := finishRead(engine,
 			readStructuredMeta(resolveAbsForResponse(path), proj.Text, contentHash, proj, nil),
 			proj.Text,
-		), nil
+			readSummary(path, contentHash, proj.TotalLines, proj.Truncated),
+			false,
+		)
+		return mcp.NewToolResultStructured(sc, text), nil
 	})
 	reg.addTool(readFileTool, reg.readFileHandler,
 		`read_file(path:"file.go")`,

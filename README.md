@@ -138,6 +138,7 @@ Keep this trio in the MCP `args` (and leave `--readonly` off so the agent can wr
 |------|-----|
 | `--profile=strict` | Registers the 17-tool agent core (`list_allowed_directories`, `directory_tree`, `read_file` / `write_file` / `edit_file` / `apply_patch`, `backup` for undo, `security_policy`, …). Omits `git`, `wsl`, `minify_js`, `analyze_code`, `batch_operations`, `copy_file`, `server_info`, … so `tools/list` stays small. `--profile=agent` is that core plus `git`. Default is `ultra` (30 tools) so existing configs do not break. |
 | `--compact-mode` | Short token-efficient responses (hashes, UNDO ids, no emoji walls). |
+| `--response-mode=structured` | Opt-in. Brief text fallback; file bodies stay once in structuredContent. Default `compat` keeps the full text fallback. |
 | `--roots-mode=union` | MCP client Roots are **added** to the CLI allowlist. Default `replace` is wrong for OpenCode: it sends the workspace as Roots and **wipes** every other CLI path, so `list_allowed_directories` only shows one folder. |
 
 Do not pass `--git-network` unless the agent must `git push` / `git fetch`. Do not pass `--readonly` unless the session should be read-only.
@@ -368,7 +369,7 @@ Copy [examples/harness/](examples/harness/) — do not guess flags. One MCP inst
 
 ## Available Tools
 
-29 in `--profile=ultra` (default). `--profile=agent` is the 17-tool core plus `git`. `--profile=strict` is those 17, marked **strict**. `server_info` is not read-only: `artifact/write` can overwrite a file.
+30 in `--profile=ultra` (default). `--profile=agent` is the 17-tool core plus `git`. `--profile=strict` is those 17, marked **strict**. `server_info` is not read-only: `artifact/write` can overwrite a file.
 
 | Tool | Purpose | When to use |
 |------|---------|-------------|

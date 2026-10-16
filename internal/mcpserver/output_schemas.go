@@ -22,7 +22,8 @@ var readFileOutputSchema = json.RawMessage(`{
     "end_line": {"type": "integer", "description": "Last line returned (1-based, inclusive, clamped to file length)"},
     "total_lines": {"type": "integer", "description": "Total lines in the full file"},
     "files": {"type": "array", "description": "Per-file results for batch reads (paths). Item errors are listed here; status=partial when mixed.", "items": {"type": "object"}},
-    "continuation": {"type": "object", "description": "Present only when truncated. auto-cap includes start_line and max_lines for the next chunk. line-width uses kind=line_width and does not invent a next line range. Not a suggestion to continue a completed explicit range."}
+    "continuation": {"type": "object", "description": "Present only when truncated. auto-cap includes start_line and max_lines for the next chunk. line-width uses kind=line_width and does not invent a next line range. Not a suggestion to continue a completed explicit range."},
+    "presentation": {"type": "string", "description": "structured when --response-mode=structured. Batch bodies then live only in files[].content; top-level content and the text fallback are a summary. Absent in compat mode."}
   },
   "required": ["content"]
 }`)
@@ -148,6 +149,7 @@ var listAllowedDirectoriesOutputSchema = json.RawMessage(`{
     "profile": {"type": "string", "description": "Tool catalog: strict | ultra"},
     "roots_mode": {"type": "string", "description": "How MCP client Roots combine with CLI paths: replace | union | ignore"},
     "readonly": {"type": "boolean", "description": "True when --readonly is set"},
+    "response_mode": {"type": "string", "description": "compat or structured. structured keeps file bodies once in structuredContent."},
     "tool_count": {"type": "integer", "description": "Number of tools registered on this server"},
     "version": {"type": "string", "description": "Server version. initialize already sends it; this is the copy the model sees."},
     "commit": {"type": "string", "description": "Build commit, or dev when go build did not stamp -ldflags."},
@@ -160,14 +162,20 @@ var listAllowedDirectoriesOutputSchema = json.RawMessage(`{
 var diffFilesOutputSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "status": {"type": "string", "description": "ok | identical"},
+    "status": {"type": "string", "description": "ok | identical | equivalent"},
     "path_a": {"type": "string"},
     "path_b": {"type": "string"},
     "identical": {"type": "boolean"},
     "added": {"type": "integer"},
     "removed": {"type": "integer"},
     "against": {"type": "string", "description": "Present when comparing against a backup"},
-    "message": {"type": "string", "description": "Unified diff or identical notice, identical to the text content block"}
+    "equivalent": {"type": "boolean", "description": "True only when normalize rules made the sides equal. identical stays false unless the original bytes match."},
+    "comparison_basis": {"type": "string", "description": "literal or normalized"},
+    "rules_applied": {"type": "integer"},
+    "matches_a": {"type": "integer", "description": "Normalize matches on the left side"},
+    "matches_b": {"type": "integer", "description": "Normalize matches on the right side"},
+    "normalized_diff": {"type": "boolean", "description": "True when message is a diff of rewritten text, not a patch for the original files"},
+    "message": {"type": "string", "description": "Unified diff, identical notice, or normalized comparison. Identical to the text content block"}
   },
   "required": ["status", "message"]
 }`)
@@ -275,7 +283,8 @@ var analyzeCodeOutputSchema = json.RawMessage(`{
   "properties": {
     "status": {"type": "string", "description": "ok | empty | unavailable | error | partial"},
     "action": {"type": "string", "description": "symbols | lint | sec | impact"},
-    "findings": {"type": "array", "items": {"type": "object"}, "description": "Hits {path,line,col,symbol,kind,message,severity,suggestion}"},
+    "findings": {"type": "array", "items": {"type": "object"}, "description": "Hits {path,line,col,symbol,kind,message,severity,suggestion,start_line,end_line,container,signature,range_kind,range_status,content_hash,parser}. range_status exact is safe for replace_range; unavailable is not."},
+    "content_hash": {"type": "string", "description": "FNV-1a of the single file analyzed. Omitted for a directory of several files; each finding then carries its own content_hash."},
     "truncated": {"type": "boolean"},
     "tool": {"type": "string", "description": "go-ast | go-vet | staticcheck | govulncheck | search"},
     "retryable": {"type": "boolean"},

@@ -70,10 +70,12 @@ var toolSchemas = map[string]ToolParamSchema{
 		"mode":           {Type: ParamString},
 	},
 	"diff_files": {
-		"path_a":  {ParamString, false},
-		"path_b":  {ParamString, false},
-		"path":    {ParamString, false},
-		"against": {ParamString, false},
+		"path_a":         {ParamString, false},
+		"path_b":         {ParamString, false},
+		"path":           {ParamString, false},
+		"against":        {ParamString, false},
+		"normalize":      {ParamArray, false},
+		"normalize_json": {ParamString, false},
 	},
 	"apply_patch": {
 		"path":          {ParamString, true},
@@ -299,6 +301,8 @@ var toolSchemas = map[string]ToolParamSchema{
 		"update":               {ParamBoolean, false}, // add: true → git add -u (tracked only)
 		"offset":               {ParamNumber, false},
 		"expected_status_hash": {ParamString, false},
+		"stash_action":         {ParamString, false},
+		"include_untracked":    {ParamBoolean, false},
 	},
 	"context_pack": {
 		"path":         {ParamString, true},

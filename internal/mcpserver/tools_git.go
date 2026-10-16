@@ -17,15 +17,17 @@ func registerGitTools(reg *toolRegistry) {
 	engine := reg.engine
 	gitNetwork := reg.gitNetwork
 
-	gitActions := []string{"status", "diff", "log", "show", "add", "commit", "restore", "branch", "init", "remote", "review"}
-	gitDesc := "git — Git operations: status, diff, review, log, show, add, commit, restore, branch, init, remote. " +
+	gitActions := []string{"status", "diff", "log", "show", "add", "commit", "restore", "branch", "init", "remote", "review", "stash"}
+	gitDesc := "git — Git operations: status, diff, review, log, show, add, commit, restore, branch, init, remote, stash. " +
+		"stash is local (list/show/push/apply/drop/pop). pull requires --git-network and is fast-forward only. " +
 		"Must be run from within a git repository. Related: analyze_operation, edit_file, help."
-	actionHelp := `git(action:"status")  // or: diff, log, show, add, commit, restore, branch, init, remote`
+	actionHelp := `git(action:"status")  // or: diff, log, show, add, commit, restore, branch, init, remote, stash`
 	if gitNetwork {
-		gitActions = []string{"status", "diff", "log", "show", "add", "commit", "push", "fetch", "restore", "branch", "init", "remote", "review"}
-		gitDesc = "git — Git operations: status, diff, review, log, show, add, commit, push, fetch, restore, branch, init, remote. " +
+		gitActions = []string{"status", "diff", "log", "show", "add", "commit", "push", "fetch", "pull", "restore", "branch", "init", "remote", "review", "stash"}
+		gitDesc = "git — Git operations: status, diff, review, log, show, add, commit, push, fetch, pull, restore, branch, init, remote, stash. " +
+			"pull is --ff-only (no merge, no rebase). stash identifies entries by commit OID. " +
 			"Must be run from within a git repository. Related: analyze_operation, edit_file, help."
-		actionHelp = `git(action:"status")  // or: diff, log, show, add, commit, push, fetch, restore, branch, init, remote`
+		actionHelp = `git(action:"status")  // or: diff, log, show, add, commit, push, fetch, pull, restore, branch, init, remote, stash`
 	}
 
 	gitOpts := []mcp.ToolOption{
@@ -52,6 +54,8 @@ func registerGitTools(reg *toolRegistry) {
 		mcp.WithBoolean("force", mcp.Description("branch: with delete:true, true → -D (else -d). push: true → --force-with-lease (never plain --force). Other actions: ignored.")),
 		mcp.WithBoolean("prune", mcp.Description("fetch: true → --prune (drop stale remote-tracking refs). Default: false.")),
 		mcp.WithBoolean("update", mcp.Description("add: true → git add -u (tracked modifications only; does not stage untracked paths such as .agent/). paths optional.")),
+		mcp.WithString("stash_action", mcp.Description("stash: list (default) | show | push | apply | drop | pop. show/apply/drop/pop require rev as a commit OID, not stash@{n}. drop and pop are destructive and require force:true.")),
+		mcp.WithBoolean("include_untracked", mcp.Description("stash push: include untracked files (-u). Ignored files stay excluded.")),
 		mcp.WithNumber("offset", mcp.Description("review/diff page start (0-based file index). Omit on diff to keep the unpaged stat/full output. review always pages.")),
 		mcp.WithString("expected_status_hash", mcp.Description("review/diff: status_hash from the previous page. Mismatch returns STALE_GIT and no diff body.")),
 	}
@@ -147,6 +151,13 @@ func registerGitTools(reg *toolRegistry) {
 				return usageError("git fetch requires --git-network", `restart the server with --git-network`), nil
 			}
 			return gitFetch(ctx, engine, repoRoot, args)
+		case "pull":
+			if !gitNetwork {
+				return usageError("git pull requires --git-network", `restart the server with --git-network`), nil
+			}
+			return gitPull(ctx, engine, repoRoot, args)
+		case "stash":
+			return gitStash(ctx, engine, repoRoot, args)
 		case "restore":
 			return gitRestore(ctx, engine, repoRoot, args)
 		case "branch":
@@ -177,9 +188,12 @@ func gitHelpExamples(gitNetwork bool) []string {
 			`git(action:"push")`,
 			`git(action:"push", name:"feature/new")`,
 			`git(action:"fetch", prune:true)`,
+			`git(action:"pull")`,
 		)
 	}
 	return append(ex,
+		`git(action:"stash", stash_action:"push", message:"wip")`,
+		`git(action:"stash", stash_action:"apply", rev:"abc1234")`,
 		`git(action:"remote")`,
 		`git(action:"restore", paths:["file.txt"], staged:true)`,
 		`git(action:"review")`,
@@ -1294,6 +1308,9 @@ func isDestructiveGitAction(action string, args map[string]any) bool {
 		// history; flagging it here means it only proceeds when the caller
 		// explicitly passed force:true (the gate above rejects otherwise).
 		return getBoolArg(args, "force")
+	case "stash":
+		op, _ := args["stash_action"].(string)
+		return op == "drop" || op == "pop"
 	}
 	return false
 }

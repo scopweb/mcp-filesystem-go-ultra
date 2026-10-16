@@ -274,12 +274,62 @@ func renameRootWithRetry(root *os.Root, oldRel, newRel string) error {
 }
 
 func relWithinBases(path string, bases []string) (base, rel string, err error) {
-	abs, err := filepath.Abs(path)
+	cleaned, err := canonicalOpPath(path)
 	if err != nil {
 		return "", "", err
 	}
-	cleaned := filepath.Clean(abs)
-	target := foldRootPath(cleaned)
+	if kept, ok := unfollowedSymlinkLeaf(path); ok {
+		cleaned = kept
+	}
+	best, err := pickRootBase(cleaned, bases)
+	if err != nil {
+		return "", "", err
+	}
+	rel, err = relPreserveCase(cleaned, best)
+	if err != nil {
+		return "", "", err
+	}
+	return best, rel, nil
+}
+
+func canonicalOpPath(path string) (string, error) {
+	if path == "" {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Clean(abs), nil
+	}
+	cleaned := CanonicalPath(path)
+	if cleaned == "" {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Clean(abs), nil
+	}
+	return cleaned, nil
+}
+
+func unfollowedSymlinkLeaf(path string) (string, bool) {
+	abs, err := filepath.Abs(NormalizePath(path))
+	if err != nil {
+		return "", false
+	}
+	abs = filepath.Clean(abs)
+	info, err := os.Lstat(abs)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return "", false
+	}
+	parent := CanonicalPath(filepath.Dir(abs))
+	if parent == "" {
+		return "", false
+	}
+	return filepath.Join(parent, filepath.Base(abs)), true
+}
+
+func pickRootBase(path string, bases []string) (string, error) {
+	target := foldRootPath(path)
 	var best string
 	for _, b := range bases {
 		nb := foldRootPath(b)
@@ -290,13 +340,9 @@ func relWithinBases(path string, bases []string) (base, rel string, err error) {
 		}
 	}
 	if best == "" {
-		return "", "", fmt.Errorf("path is outside os.Root bases")
+		return "", fmt.Errorf("path is outside os.Root bases")
 	}
-	rel, err = relPreserveCase(cleaned, best)
-	if err != nil {
-		return "", "", err
-	}
-	return best, rel, nil
+	return best, nil
 }
 
 func relPreserveCase(cleaned, best string) (string, error) {

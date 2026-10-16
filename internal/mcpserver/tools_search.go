@@ -178,7 +178,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal pattern")),
 		mcp.WithBoolean("include_content", mcp.Description("Include file content search (default: false)")),
 		mcp.WithString("file_types", mcp.Description("Comma-separated file extensions (e.g., '.go,.txt')")),
-		mcp.WithString("include", mcp.Description("Glob pattern to filter files — alias for file_types (e.g., '*.go', '**/*.ts')")),
+		mcp.WithString("include", mcp.Description("Glob filter. Comma-separated globs (*.go, *.ts) or brace alternatives ({A.cs,B.cs}, {Test,ObservacionesPedido}/*.razor, *.{go,razor}). Commas inside {} are alternatives, not separators. * does not cross /. ** matches any depth. A pattern with / is relative to path. Unbalanced braces, empty alternatives, and more than 64 expansions are INVALID_PARAMS, not an empty search. file_types does not expand braces.")),
 		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive search (default: true)")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false)")),
 		mcp.WithBoolean("include_context", mcp.Description("Include context lines (default: false)")),
@@ -247,10 +247,12 @@ func registerSearchTools(reg *toolRegistry) {
 					fileTypes = append(fileTypes, strings.TrimSpace(part))
 				}
 			} else if inc, ok := args["include"].(string); ok && inc != "" {
-				// "include" is the ripgrep-compatible alias for file_types
-				parts := strings.Split(inc, ",")
-				for _, part := range parts {
-					fileTypes = append(fileTypes, strings.TrimSpace(part))
+				expanded, expErr := core.ExpandIncludeFilter(inc)
+				if expErr != nil {
+					return validationResult(expErr.Error(), "include", "comma-separated globs; {a,b} alternatives; commas inside braces are not separators"), nil
+				}
+				for _, part := range expanded {
+					fileTypes = append(fileTypes, part)
 				}
 			}
 			if rl, ok := args["return_lines"].(string); ok {
