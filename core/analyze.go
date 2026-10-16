@@ -39,25 +39,34 @@ type AnalyzeOptions struct {
 
 // AnalyzeFinding is one structured hit.
 type AnalyzeFinding struct {
-	Path       string `json:"path"`
-	Line       int    `json:"line,omitempty"`
-	Col        int    `json:"col,omitempty"`
-	Symbol     string `json:"symbol,omitempty"`
-	Kind       string `json:"kind,omitempty"`
-	Message    string `json:"message"`
-	Severity   string `json:"severity,omitempty"`
-	Suggestion string `json:"suggestion,omitempty"`
+	Path        string `json:"path"`
+	Line        int    `json:"line,omitempty"`
+	Col         int    `json:"col,omitempty"`
+	Symbol      string `json:"symbol,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	Message     string `json:"message"`
+	Severity    string `json:"severity,omitempty"`
+	Suggestion  string `json:"suggestion,omitempty"`
+	StartLine   int    `json:"start_line,omitempty"`
+	EndLine     int    `json:"end_line,omitempty"`
+	Container   string `json:"container,omitempty"`
+	Signature   string `json:"signature,omitempty"`
+	RangeKind   string `json:"range_kind,omitempty"`
+	RangeStatus string `json:"range_status,omitempty"`
+	ContentHash string `json:"content_hash,omitempty"`
+	Parser      string `json:"parser,omitempty"`
 }
 
 // AnalyzeResult is the structured analyze_code payload.
 type AnalyzeResult struct {
-	Status    string
-	Action    string
-	Findings  []AnalyzeFinding
-	Truncated bool
-	Tool      string
-	Retryable bool
-	Message   string
+	Status      string
+	Action      string
+	Findings    []AnalyzeFinding
+	Truncated   bool
+	Tool        string
+	Retryable   bool
+	Message     string
+	ContentHash string
 }
 
 // ErrToolUnavailable means an allowlisted binary was not on PATH.
@@ -175,7 +184,7 @@ func AnalyzeSymbols(e *UltraFastEngine, path, query string, maxFindings int) Ana
 			return alt
 		}
 		res.Status = "empty"
-		res.Message = "no supported source files (go, js, jsx, ts, tsx, cs, sql)"
+		res.Message = "no supported source files (go, js, jsx, ts, tsx, cs, razor, sql)"
 		return res
 	}
 	fset := token.NewFileSet()
@@ -188,6 +197,10 @@ func AnalyzeSymbols(e *UltraFastEngine, path, query string, maxFindings int) Ana
 		src, err := analyzeRead(e, fpath)
 		if err != nil {
 			continue
+		}
+		fileHash := contentHashFNV(string(src))
+		if len(files) == 1 {
+			res.ContentHash = fileHash
 		}
 		f, err := parser.ParseFile(fset, fpath, src, parser.ParseComments)
 		if err != nil {
@@ -207,10 +220,10 @@ func AnalyzeSymbols(e *UltraFastEngine, path, query string, maxFindings int) Ana
 				if x.Recv != nil {
 					kind = "method"
 				}
-				addSymbol(&res, fset, fpath, x.Name, kind, query)
+				addSymbol(&res, fset, fpath, x.Name, x, kind, query, goRecvName(x), goFuncSignature(x), fileHash)
 			case *ast.TypeSpec:
 				if x.Name != nil {
-					addSymbol(&res, fset, fpath, x.Name, "type", query)
+					addSymbol(&res, fset, fpath, x.Name, x, "type", query, "", x.Name.Name, fileHash)
 				}
 			}
 			return true
@@ -233,7 +246,7 @@ func AnalyzeSymbols(e *UltraFastEngine, path, query string, maxFindings int) Ana
 					continue
 				}
 				for _, ident := range vs.Names {
-					addSymbol(&res, fset, fpath, ident, kind, query)
+					addSymbol(&res, fset, fpath, ident, vs, kind, query, "", ident.Name, fileHash)
 				}
 			}
 			return true
@@ -260,7 +273,7 @@ func AnalyzeSymbols(e *UltraFastEngine, path, query string, maxFindings int) Ana
 	return res
 }
 
-func addSymbol(res *AnalyzeResult, fset *token.FileSet, fpath string, ident *ast.Ident, kind, query string) {
+func addSymbol(res *AnalyzeResult, fset *token.FileSet, fpath string, ident *ast.Ident, node ast.Node, kind, query, container, signature, hash string) {
 	if ident == nil {
 		return
 	}
@@ -269,15 +282,91 @@ func addSymbol(res *AnalyzeResult, fset *token.FileSet, fpath string, ident *ast
 		return
 	}
 	pos := fset.Position(ident.Pos())
-	res.Findings = append(res.Findings, AnalyzeFinding{
-		Path:     fpath,
-		Line:     pos.Line,
-		Col:      pos.Column,
-		Symbol:   name,
-		Kind:     kind,
-		Message:  kind + " " + name,
-		Severity: "info",
-	})
+	finding := AnalyzeFinding{
+		Path:        fpath,
+		Line:        pos.Line,
+		Col:         pos.Column,
+		Symbol:      name,
+		Kind:        kind,
+		Message:     kind + " " + name,
+		Severity:    "info",
+		Container:   container,
+		Signature:   signature,
+		ContentHash: hash,
+		Parser:      "go-ast",
+		RangeKind:   symbolRangeDeclaration,
+	}
+	if node != nil && node.Pos().IsValid() && node.End().IsValid() {
+		start := fset.Position(node.Pos())
+		end := fset.Position(node.End())
+		endLine := end.Line
+		if end.Line > start.Line && end.Column == 1 {
+			endLine--
+		}
+		finding.StartLine = start.Line
+		finding.Line = start.Line
+		finding.Col = start.Column
+		if endLine >= start.Line {
+			finding.EndLine = endLine
+			finding.RangeStatus = symbolRangeExact
+		} else {
+			finding.RangeStatus = symbolRangeUnavailable
+		}
+	} else {
+		finding.StartLine = pos.Line
+		finding.RangeStatus = symbolRangeUnavailable
+	}
+	res.Findings = append(res.Findings, finding)
+}
+
+func goRecvName(fn *ast.FuncDecl) string {
+	if fn == nil || fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return ""
+	}
+	return goExprName(fn.Recv.List[0].Type)
+}
+
+func goFuncSignature(fn *ast.FuncDecl) string {
+	if fn == nil || fn.Name == nil || fn.Type == nil {
+		return ""
+	}
+	var params []string
+	if fn.Type.Params != nil {
+		for _, field := range fn.Type.Params.List {
+			n := len(field.Names)
+			if n == 0 {
+				n = 1
+			}
+			t := goExprName(field.Type)
+			for i := 0; i < n; i++ {
+				params = append(params, t)
+			}
+		}
+	}
+	return fn.Name.Name + "(" + strings.Join(params, ",") + ")"
+}
+
+func goExprName(e ast.Expr) string {
+	switch x := e.(type) {
+	case *ast.Ident:
+		return x.Name
+	case *ast.StarExpr:
+		return "*" + goExprName(x.X)
+	case *ast.SelectorExpr:
+		return goExprName(x.X) + "." + x.Sel.Name
+	case *ast.ArrayType:
+		return "[]" + goExprName(x.Elt)
+	case *ast.IndexExpr:
+		return goExprName(x.X) + "[" + goExprName(x.Index) + "]"
+	case *ast.IndexListExpr:
+		parts := make([]string, 0, len(x.Indices))
+		for _, idx := range x.Indices {
+			parts = append(parts, goExprName(idx))
+		}
+		return goExprName(x.X) + "[" + strings.Join(parts, ",") + "]"
+	default:
+		return ""
+	}
 }
 
 func AnalyzeSec(e *UltraFastEngine, path string, maxFindings int) AnalyzeResult {
@@ -459,7 +548,19 @@ func formatAnalyzeText(r AnalyzeResult) string {
 	}
 	b.WriteByte('\n')
 	for _, f := range r.Findings {
-		fmt.Fprintf(&b, "%s:%d: %s\n", f.Path, f.Line, f.Message)
+		loc := fmt.Sprintf("%s:%d", f.Path, f.Line)
+		start := f.Line
+		if f.StartLine > 0 {
+			start = f.StartLine
+		}
+		if f.EndLine > 0 {
+			loc = fmt.Sprintf("%s:%d-%d", f.Path, start, f.EndLine)
+		}
+		mark := ""
+		if f.RangeStatus != "" {
+			mark = " [" + f.RangeStatus + "]"
+		}
+		fmt.Fprintf(&b, "%s: %s%s\n", loc, f.Message, mark)
 	}
 	return strings.TrimRightFunc(b.String(), unicode.IsSpace)
 }

@@ -14,7 +14,7 @@ func registerAnalyzeTools(reg *toolRegistry) {
 	tool := mcp.NewTool("analyze_code",
 		mcp.WithTitleAnnotation("Analyze Code"),
 		mcp.WithRawOutputSchema(analyzeCodeOutputSchema),
-		mcp.WithDescription("analyze_code — Read-only code analysis (symbols, lint, local sec, impact). symbols: Go via AST; JS/TS/C#/SQL via regex (name + line). "+
+		mcp.WithDescription("analyze_code — Read-only code analysis (symbols, lint, local sec, impact). symbols: Go via AST (exact ranges); C#/JS/Razor via regex plus brace matching (exact or unavailable, never a guessed range). SQL is name + line only. "+
 			"For editing use apply_patch/edit_file. For understanding code use analyze_code. Do not use git grep or bash. "+
 			"Ultra profile only. Related: search_files, read_file, help."),
 		mcp.WithReadOnlyHintAnnotation(true),
@@ -112,13 +112,37 @@ func analyzeStructured(r core.AnalyzeResult) map[string]any {
 		if f.Suggestion != "" {
 			item["suggestion"] = f.Suggestion
 		}
+		if f.StartLine > 0 {
+			item["start_line"] = f.StartLine
+		}
+		if f.EndLine > 0 {
+			item["end_line"] = f.EndLine
+		}
+		if f.Container != "" {
+			item["container"] = f.Container
+		}
+		if f.Signature != "" {
+			item["signature"] = f.Signature
+		}
+		if f.RangeKind != "" {
+			item["range_kind"] = f.RangeKind
+		}
+		if f.RangeStatus != "" {
+			item["range_status"] = f.RangeStatus
+		}
+		if f.ContentHash != "" {
+			item["content_hash"] = f.ContentHash
+		}
+		if f.Parser != "" {
+			item["parser"] = f.Parser
+		}
 		findings = append(findings, item)
 	}
 	status := r.Status
 	if status == "" {
 		status = statusOK
 	}
-	return map[string]any{
+	m := map[string]any{
 		"status":    status,
 		"action":    r.Action,
 		"findings":  findings,
@@ -127,4 +151,8 @@ func analyzeStructured(r core.AnalyzeResult) map[string]any {
 		"retryable": false,
 		"message":   r.Message,
 	}
+	if r.ContentHash != "" {
+		m["content_hash"] = r.ContentHash
+	}
+	return m
 }

@@ -30,6 +30,7 @@ type Config struct {
 	AllowedPaths     []string
 	BinaryThreshold  int64
 	CompactMode      bool   // Enable compact responses
+	ResponseMode     string // compat (default) or structured. Presentation only; not a freshness control.
 	MaxResponseSize  int64  // Max response size
 	MaxSearchResults int    // Max search results
 	MaxListItems     int    // Max list items
@@ -1524,9 +1525,39 @@ func (e *UltraFastEngine) GetLastArtifactInfo() string {
 	return fmt.Sprintf("Last artifact: %d bytes, %d lines", len(e.lastArtifact), lines)
 }
 
+const (
+	ResponseModeCompat     = "compat"
+	ResponseModeStructured = "structured"
+)
+
+// ParseResponseMode validates --response-mode. Empty means compat.
+func ParseResponseMode(s string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", ResponseModeCompat:
+		return ResponseModeCompat, nil
+	case ResponseModeStructured:
+		return ResponseModeStructured, nil
+	default:
+		return "", fmt.Errorf("invalid --response-mode %q (want compat|structured)", s)
+	}
+}
+
 // IsCompactMode returns whether compact mode is enabled
 func (e *UltraFastEngine) IsCompactMode() bool {
 	return e.config.CompactMode
+}
+
+// ResponseMode returns compat or structured. Empty config is compat.
+func (e *UltraFastEngine) ResponseMode() string {
+	if e == nil || e.config == nil || e.config.ResponseMode == "" {
+		return ResponseModeCompat
+	}
+	return e.config.ResponseMode
+}
+
+// StructuredResponses reports whether text fallbacks should omit duplicated bodies.
+func (e *UltraFastEngine) StructuredResponses() bool {
+	return e.ResponseMode() == ResponseModeStructured
 }
 
 // GetHookManager returns the hook manager for external use (e.g., git operations)

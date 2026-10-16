@@ -638,27 +638,21 @@ func (bm *BackupManager) RestorePreviousInChain(currentBackupID string, filePath
 	return restoredFiles, previousID, hasMore, nil
 }
 
-// CompareWithBackup compara un archivo actual con su versión en el backup
-func (bm *BackupManager) CompareWithBackup(backupID string, filePath string) (string, error) {
-	// Sanitize backup ID to prevent path traversal
+// ReadBackupBytes returns the stored bytes for filePath inside backupID.
+func (bm *BackupManager) ReadBackupBytes(backupID string, filePath string) ([]byte, error) {
 	if err := sanitizeBackupID(backupID); err != nil {
-		return "", err
+		return nil, err
 	}
-
 	info, err := bm.GetBackupInfo(backupID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if err := bm.authorizeOriginal(filePath, OpRead); err != nil {
 		if pe, ok := err.(*FilePolicyError); ok && pe.Hidden {
-			return "", &FilePolicyError{Op: "compare", Path: filePath, Hidden: true}
+			return nil, &FilePolicyError{Op: "compare", Path: filePath, Hidden: true}
 		}
-		return "", err
+		return nil, err
 	}
-
-	backupBaseDir := filepath.Join(bm.backupDir, backupID)
-
-	// Buscar el archivo en el backup (normalize paths for consistent matching)
 	normalizedFilePath := filepath.Clean(filePath)
 	var backupFile *BackupMetadata
 	for i := range info.Files {
@@ -667,15 +661,33 @@ func (bm *BackupManager) CompareWithBackup(backupID string, filePath string) (st
 			break
 		}
 	}
-
 	if backupFile == nil {
-		return "", fmt.Errorf("file %s not found in backup", filePath)
+		return nil, fmt.Errorf("file %s not found in backup", filePath)
 	}
-
-	// Leer archivo del backup
-	backupContent, err := os.ReadFile(filepath.Join(backupBaseDir, backupFile.BackupPath))
+	backupContent, err := os.ReadFile(filepath.Join(bm.backupDir, backupID, backupFile.BackupPath))
 	if err != nil {
-		return "", fmt.Errorf("failed to read backup file: %w", err)
+		return nil, fmt.Errorf("failed to read backup file: %w", err)
+	}
+	return backupContent, nil
+}
+
+// CompareWithBackup compara un archivo actual con su versión en el backup
+func (bm *BackupManager) CompareWithBackup(backupID string, filePath string) (string, error) {
+	backupContent, err := bm.ReadBackupBytes(backupID, filePath)
+	if err != nil {
+		return "", err
+	}
+	info, err := bm.GetBackupInfo(backupID)
+	if err != nil {
+		return "", err
+	}
+	normalizedFilePath := filepath.Clean(filePath)
+	original := filePath
+	for i := range info.Files {
+		if filepath.Clean(info.Files[i].OriginalPath) == normalizedFilePath {
+			original = info.Files[i].OriginalPath
+			break
+		}
 	}
 
 	// Leer archivo actual (si existe)
@@ -688,7 +700,7 @@ func (bm *BackupManager) CompareWithBackup(backupID string, filePath string) (st
 	}
 
 	// Generar diff simple
-	diff := generateSimpleDiff(string(backupContent), string(currentContent), backupFile.OriginalPath)
+	diff := generateSimpleDiff(string(backupContent), string(currentContent), original)
 
 	return diff, nil
 }

@@ -7,7 +7,7 @@ description: Tool catalog for filesystem-ultra MCP server v4.8.0. 30 tools ultra
 
 ## Recommended server flags
 
-`--profile=agent --compact-mode --roots-mode=union` (`--readonly` off) when the agent needs git without the full catalog. `--profile=strict` remains the 17-tool core without git. `--git-network` only if the agent must `git push`/`fetch` (honored by ultra and agent, ignored by strict). `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 30 tools including `analyze_code`, graduated `github_issues` / `gitlab_issues`, and experimental `context_pack` and `workspace`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
+`--profile=agent --compact-mode --roots-mode=union` (`--readonly` off) when the agent needs git without the full catalog. `--profile=strict` remains the 17-tool core without git. `--git-network` only if the agent must `git push`/`fetch`/`pull` (`pull` is fast-forward only; honored by ultra and agent, ignored by strict). `--response-mode=structured` is opt-in and keeps file bodies once in structuredContent; default `compat` is unchanged. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 30 tools including `analyze_code`, graduated `github_issues` / `gitlab_issues`, and experimental `context_pack` and `workspace`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
 
 ## Bind each project to one filesystem tool family
 
@@ -92,7 +92,7 @@ Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `gr
 
 | Native | Alias | Purpose |
 |--------|-------|---------|
-| `file_types` | `include` | Glob (e.g. `*.go`) |
+| `file_types` | `include` | Glob. `include` also expands `{a,b}` (`{A.cs,B.cs}`, `{Test,ObservacionesPedido}/*.razor`). Commas inside `{}` are alternatives. `*` does not cross `/`; `**` is any depth. Invalid braces are `INVALID_PARAMS`, not an empty search. `file_types` does not expand braces. |
 | `output_format` | `output` | `"text"` or `"json"`. Omit for grouped `path` header + `line:text` (any match count, including context). `"text"` is the legacy emoji layout. Legacy `content`/`files_with_matches`/`count` are **not** implemented. |
 
 `include_context:true` stays in that grouped layout; context lines are ordered. `output_format:"json"` uses ripgrep when `rg` is on PATH or embedded (`embed_rg`). See `ripgrep-reference.md` in this folder (v4.8.0, not v4.7.0). A file security policy skips ripgrep. When truncated, call the same search with `offset` from `continuation` — do not reformulate. There is no hidden 10/20 presentation cap.

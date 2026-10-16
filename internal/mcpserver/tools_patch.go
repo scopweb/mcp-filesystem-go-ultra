@@ -18,7 +18,7 @@ func registerPatchTools(reg *toolRegistry) {
 	diffTool := mcp.NewTool("diff_files",
 		mcp.WithTitleAnnotation("Diff Files"),
 		mcp.WithRawOutputSchema(diffFilesOutputSchema),
-		mcp.WithDescription("diff_files — Unified diff between two paths, or a file vs its last backup (against:\"backup\"). Related: apply_patch, backup, edit_file."),
+		mcp.WithDescription("diff_files — Unified diff between two paths, or a file vs its last backup (against:\"backup\"). normalize rewrites both sides in memory before compare; identical means original bytes match, equivalent means equal only after rules. A normalized diff is not an applicable patch. Related: apply_patch, backup, edit_file."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -26,6 +26,15 @@ func registerPatchTools(reg *toolRegistry) {
 		mcp.WithString("path_b", mcp.Description("Right/new path (required unless against=backup)")),
 		mcp.WithString("path", mcp.Description("File to compare when against=backup")),
 		mcp.WithString("against", mcp.Description("backup: compare path (or path_a) to last backup")),
+		mcp.WithArray("normalize", mcp.Description("Rules applied to both sides before compare. Array of {pattern, replacement}. Does not modify files. Legacy: normalize_json."),
+			mcp.Items(map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"pattern":     map[string]any{"type": "string"},
+					"replacement": map[string]any{"type": "string"},
+				},
+			})),
+		mcp.WithString("normalize_json", mcp.Description("JSON array adapter for normalize: [{\"pattern\":\"idSub=[0-9]+\",\"replacement\":\"idSub=<ignored>\"}]")),
 	)
 	reg.addTool(diffTool, auditWrap(engine, "diff_files", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args, _ := request.Params.Arguments.(map[string]interface{})
@@ -50,18 +59,33 @@ func registerPatchTools(reg *toolRegistry) {
 		var contentA, contentB []byte
 		var err error
 		nameB := pathB
+		rules, ruleErr := parseNormalizeRules(args)
+		if ruleErr != nil {
+			return mcp.NewToolResultError(ruleErr.Error()), nil
+		}
 		if strings.EqualFold(against, "backup") {
 			id := engine.GetCurrentBackupID(pathA)
 			if id == "" || engine.GetBackupManager() == nil {
 				return mcp.NewToolResultError("no backup in this session for " + pathA), nil
 			}
-			cmp, err := engine.GetBackupManager().CompareWithBackup(id, pathA)
+			if len(rules) == 0 {
+				cmp, err := engine.GetBackupManager().CompareWithBackup(id, pathA)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				return mcp.NewToolResultStructured(map[string]any{
+					"status": statusOK, "path_a": pathA, "against": "backup", "message": cmp,
+				}, cmp), nil
+			}
+			backupBytes, err := engine.GetBackupManager().ReadBackupBytes(id, pathA)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			return mcp.NewToolResultStructured(map[string]any{
-				"status": statusOK, "path_a": pathA, "against": "backup", "message": cmp,
-			}, cmp), nil
+			current, err := os.ReadFile(pathA)
+			if err != nil {
+				return mcp.NewToolResultError(formatToolError(err)), nil
+			}
+			return diffResult(pathA, pathA, filepath.Base(pathA), "backup", string(backupBytes), string(current), rules)
 		}
 		if pathB == "" {
 			return mcp.NewToolResultError("path_b is required unless against=backup"), nil
@@ -81,21 +105,7 @@ func registerPatchTools(reg *toolRegistry) {
 		if err != nil {
 			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
-		a, b := string(contentA), string(contentB)
-		if a == b {
-			msg := fmt.Sprintf("identical: %s %s", pathA, pathB)
-			return mcp.NewToolResultStructured(map[string]any{
-				"status": "identical", "path_a": pathA, "path_b": pathB, "identical": true,
-				"added": 0, "removed": 0, "message": msg,
-			}, msg), nil
-		}
-		added, removed, _ := core.DiffCounts(a, b)
-		diff := core.UnifiedDiff(a, b, filepath.Base(nameB))
-		msg := fmt.Sprintf("%s\n+%d -%d", strings.TrimSpace(diff), added, removed)
-		return mcp.NewToolResultStructured(map[string]any{
-			"status": statusOK, "path_a": pathA, "path_b": pathB, "identical": false,
-			"added": added, "removed": removed, "message": msg,
-		}, msg), nil
+		return diffResult(pathA, pathB, filepath.Base(nameB), "", string(contentA), string(contentB), rules)
 	}))
 
 	patchTool := mcp.NewTool("apply_patch",

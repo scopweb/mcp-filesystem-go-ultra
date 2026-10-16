@@ -9,8 +9,9 @@ import (
 var textSymbolExts = map[string]string{
 	".js": "js", ".jsx": "js", ".mjs": "js", ".cjs": "js",
 	".ts": "ts", ".tsx": "ts",
-	".cs":  "cs",
-	".sql": "sql",
+	".cs":    "cs",
+	".sql":   "sql",
+	".razor": "razor",
 }
 
 var (
@@ -42,7 +43,11 @@ func analyzeTextSymbols(e *UltraFastEngine, path, query string, maxFindings int)
 			continue
 		}
 		lang := textSymbolExts[strings.ToLower(filepath.Ext(fpath))]
-		scanTextSymbols(&res, fpath, string(b), lang, query)
+		text := string(b)
+		scanTextSymbols(&res, fpath, text, lang, query, contentHashFNV(text))
+		if len(files) == 1 {
+			res.ContentHash = contentHashFNV(text)
+		}
 	}
 	res.Findings, res.Truncated = capFindings(res.Findings, maxFindings)
 	if len(res.Findings) == 0 {
@@ -81,21 +86,43 @@ func textSymbolFiles(e *UltraFastEngine, path string) ([]string, error) {
 	return out, nil
 }
 
-func scanTextSymbols(res *AnalyzeResult, path, content, lang, query string) {
+func scanTextSymbols(res *AnalyzeResult, path, content, lang, query, hash string) {
 	switch lang {
 	case "js", "ts":
-		addRegexSymbols(res, path, content, "func", jsFuncRe, 1, query)
-		addRegexSymbols(res, path, content, "class", jsClassRe, 1, query)
-		addRegexSymbols(res, path, content, "func", jsArrowRe, 1, query)
+		addRegexSymbols(res, path, content, "func", jsFuncRe, 1, query, lang, hash)
+		addRegexSymbols(res, path, content, "class", jsClassRe, 1, query, lang, hash)
+		addRegexSymbols(res, path, content, "func", jsArrowRe, 1, query, lang, hash)
 	case "cs":
-		addRegexSymbols(res, path, content, "type", csTypeRe, 2, query)
-		addRegexSymbols(res, path, content, "method", csMethRe, 2, query)
+		addRegexSymbols(res, path, content, "type", csTypeRe, 2, query, lang, hash)
+		addRegexSymbols(res, path, content, "method", csMethRe, 2, query, lang, hash)
+	case "razor":
+		scanRazorSymbols(res, path, content, query, hash)
 	case "sql":
-		addRegexSymbols(res, path, content, "object", sqlObjRe, 1, query)
+		addRegexSymbols(res, path, content, "object", sqlObjRe, 1, query, lang, hash)
 	}
 }
 
-func addRegexSymbols(res *AnalyzeResult, path, content, kind string, re *regexp.Regexp, nameGroup int, query string) {
+func scanRazorSymbols(res *AnalyzeResult, path, content, query, hash string) {
+	for _, block := range razorCodeBlocks(content) {
+		before := len(res.Findings)
+		scanTextSymbols(res, path, block.text, "cs", query, hash)
+		offset := lineNumberAt(content, block.start) - 1
+		for i := before; i < len(res.Findings); i++ {
+			f := &res.Findings[i]
+			if f.Line > 0 {
+				f.Line += offset
+			}
+			if f.StartLine > 0 {
+				f.StartLine += offset
+			}
+			if f.EndLine > 0 {
+				f.EndLine += offset
+			}
+		}
+	}
+}
+
+func addRegexSymbols(res *AnalyzeResult, path, content, kind string, re *regexp.Regexp, nameGroup int, query, lang, hash string) {
 	for _, loc := range re.FindAllStringSubmatchIndex(content, -1) {
 		if len(loc) < (nameGroup+1)*2 || loc[nameGroup*2] < 0 {
 			continue
@@ -108,13 +135,26 @@ func addRegexSymbols(res *AnalyzeResult, path, content, kind string, re *regexp.
 			continue
 		}
 		line := strings.Count(content[:loc[0]], "\n") + 1
-		res.Findings = append(res.Findings, AnalyzeFinding{
-			Path:     path,
-			Line:     line,
-			Symbol:   name,
-			Kind:     kind,
-			Message:  kind + " " + name,
-			Severity: "info",
-		})
+		f := AnalyzeFinding{
+			Path:        path,
+			Line:        line,
+			Symbol:      name,
+			Kind:        kind,
+			Message:     kind + " " + name,
+			Severity:    "info",
+			ContentHash: hash,
+		}
+		switch lang {
+		case "cs":
+			annotateCS(&f, content, loc[0], loc[1], kind)
+		case "js", "ts":
+			annotateJS(&f, content, loc[0], loc[1])
+		default:
+			f.StartLine = line
+			f.RangeStatus = symbolRangeUnavailable
+			f.RangeKind = symbolRangeDeclaration
+			f.Parser = "regex"
+		}
+		res.Findings = append(res.Findings, f)
 	}
 }
