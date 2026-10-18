@@ -32,7 +32,9 @@ type SearchOptions struct {
 //
 //	Match unit: filename-only = one path; content = one matching line;
 //	count_only is a total, not a page.
-//	max_results is the page size in that unit. offset is 0-based into the
+//	max_results is the page size in that unit. Omitted, the page is
+//	DefaultSearchPage (40), never the ceiling. An explicit value is honored
+//	up to MaxSearchResults (default 1000). offset is 0-based into the
 //	stable list (path, then line, then match_start). Offset rather than a
 //	cursor: WalkDir order plus an explicit sort is stable for an unchanged
 //	tree, and agents already continue with offset-style read_file ranges.
@@ -422,9 +424,25 @@ func SliceSearchPage(matches []SearchMatch, offset, pageSize int) (page []Search
 	return page, truncated, next
 }
 
+// SearchPageSize resolves a search page. requested <= 0 means max_results
+// was omitted. The result never exceeds ceiling; ceiling <= 0 uses
+// MaxSearchResults.
+func SearchPageSize(ceiling, requested int) int {
+	if ceiling <= 0 {
+		ceiling = MaxSearchResults
+	}
+	if requested <= 0 {
+		requested = DefaultSearchPage
+	}
+	if requested > ceiling {
+		return ceiling
+	}
+	return requested
+}
+
 func SearchContinuationHint(offset, pageSize int, reason string) string {
 	if pageSize <= 0 {
-		pageSize = 50
+		pageSize = DefaultSearchPage
 	}
 	hint := "search_files(..., offset:" + strconv.Itoa(offset) + ", max_results:" + strconv.Itoa(pageSize) + ")"
 	if reason != "" {

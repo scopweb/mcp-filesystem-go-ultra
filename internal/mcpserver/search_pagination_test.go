@@ -147,6 +147,90 @@ func TestSearch_IncludeContextNumbered(t *testing.T) {
 	}
 }
 
+func TestSearch_OmittedMaxResultsPagesAt40(t *testing.T) {
+	dir := t.TempDir()
+	reg := newHelpTestRegistry(t, dir)
+	for i := 1; i <= 50; i++ {
+		p := filepath.Join(dir, fmt.Sprintf("o%02d.txt", i))
+		if err := os.WriteFile(p, []byte("page-needle\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := callNamed(t, reg, context.Background(), "search_files", map[string]interface{}{
+		"path": dir, "pattern": "page-needle", "include_content": true,
+	})
+	if res.IsError {
+		t.Fatal(resultText(t, res))
+	}
+	m, _ := res.StructuredContent.(map[string]any)
+	if len(e5Maps(m["matches"])) != 40 {
+		t.Fatalf("omitted page=%d", len(e5Maps(m["matches"])))
+	}
+	if m["truncated"] != true {
+		t.Fatal("omitted page should truncate")
+	}
+	cont, ok := m["continuation"].(map[string]any)
+	if !ok {
+		t.Fatalf("continuation %#v", m["continuation"])
+	}
+	if !integralEquals(cont["next_offset"], 40) || !integralEquals(cont["max_results"], 40) {
+		t.Fatalf("continuation=%v", cont)
+	}
+}
+
+func TestSearch_ExplicitMaxResultsHonored(t *testing.T) {
+	dir := t.TempDir()
+	reg := newHelpTestRegistry(t, dir)
+	for i := 1; i <= 50; i++ {
+		p := filepath.Join(dir, fmt.Sprintf("e%02d.txt", i))
+		if err := os.WriteFile(p, []byte("explicit-needle\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := callNamed(t, reg, context.Background(), "search_files", map[string]interface{}{
+		"path": dir, "pattern": "explicit-needle", "include_content": true, "max_results": float64(200),
+	})
+	if res.IsError {
+		t.Fatal(resultText(t, res))
+	}
+	m, _ := res.StructuredContent.(map[string]any)
+	if len(e5Maps(m["matches"])) != 50 {
+		t.Fatalf("explicit 200 got %d", len(e5Maps(m["matches"])))
+	}
+	if m["truncated"] == true {
+		t.Fatal("50 hits with max_results 200 must not truncate")
+	}
+}
+
+func TestSearch_MaxResultsAboveCeilingCuts(t *testing.T) {
+	dir := t.TempDir()
+	reg := newHelpTestRegistry(t, dir)
+	reg.engine.GetConfig().MaxSearchResults = 10
+	for i := 1; i <= 15; i++ {
+		p := filepath.Join(dir, fmt.Sprintf("c%02d.txt", i))
+		if err := os.WriteFile(p, []byte("ceiling-needle\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := callNamed(t, reg, context.Background(), "search_files", map[string]interface{}{
+		"path": dir, "pattern": "ceiling-needle", "include_content": true, "max_results": float64(200),
+	})
+	if res.IsError {
+		t.Fatal(resultText(t, res))
+	}
+	m, _ := res.StructuredContent.(map[string]any)
+	if len(e5Maps(m["matches"])) != 10 {
+		t.Fatalf("ceiling cut got %d", len(e5Maps(m["matches"])))
+	}
+	if m["truncated"] != true {
+		t.Fatal("expected truncated at ceiling")
+	}
+	cont, _ := m["continuation"].(map[string]any)
+	if !integralEquals(cont["max_results"], 10) {
+		t.Fatalf("continuation=%v", cont)
+	}
+}
+
 func integralEquals(v any, want int) bool {
 	switch n := v.(type) {
 	case int:

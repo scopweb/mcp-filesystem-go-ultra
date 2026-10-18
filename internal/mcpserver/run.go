@@ -126,7 +126,7 @@ func Run() {
 		compactMode      = flag.Bool("compact-mode", false, "Enable compact responses (minimal tokens for Claude Desktop)")
 		responseMode     = flag.String("response-mode", "compat", "Text fallback: compat (full text + structured) or structured (brief text; bodies stay once in structuredContent)")
 		maxResponseSize  = flag.String("max-response-size", "10MB", "Maximum response size")
-		maxSearchResults = flag.Int("max-search-results", 1000, "Maximum search results to return")
+		maxSearchResults = flag.Int("max-search-results", 1000, "Ceiling for search_files max_results (omitted page is 40)")
 		maxListItems     = flag.Int("max-list-items", 500, "Maximum items in directory listings")
 		hooksEnabled     = flag.Bool("hooks-enabled", false, "Enable hooks system for pre/post operation validation and formatting")
 		hooksConfig      = flag.String("hooks-config", "", "Path to hooks configuration JSON file (e.g., hooks.json)")

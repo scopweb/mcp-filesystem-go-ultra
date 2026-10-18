@@ -12,7 +12,7 @@ Forbidden: native Write/Edit/Read/Glob/Grep, `apply_patch`, `write_file`, `edit_
 
 Rules:
 1. First call `list_allowed_directories`. Use structured `profile`, `roots_mode`, `readonly`, `tool_count`.
-2. Then `directory_tree` or `help(tool:X)` on demand. Do not dump the catalog.
+2. If the client already lists these tools, do not call `help()`. `directory_tree` only when the path is unknown. `help(tool:X)` only when a parameter is missing.
 3. Return **paths + content_hash**, not full file dumps.
 4. If the parent passed a handoff (roots, path, content_hash, backup_id, profile), re-read. Do not reuse the parent's file body.
 5. One disk family: never mix native Read with `read_file`.

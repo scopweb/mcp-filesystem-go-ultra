@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### feat(search): omitted search_files page is 40, not the ceiling
+
+`search_files` without `max_results` returns a page of 40 and a `continuation`. An explicit `max_results` is still honored up to `--max-search-results` (default 1000). The skill, `CLAUDE.md`, `help(topic:"tools")`, and the harness explorer no longer require `directory_tree` or `help()` at startup. Native `oldString` / `replaceAll` are not this server.
+
+**Verification:** `TestSearchPageSize`, `TestSearch_OmittedMaxResultsPagesAt40`, `TestSearch_ExplicitMaxResultsHonored`, `TestSearch_MaxResultsAboveCeilingCuts`. Live check on `C:\temp` against build `20767dc`: omitted page 40 with `offset:40`, explicit 200 returned all 50.
+
+Root plan files (`ROADMAP.md`, `HOJA-DE-RUTA.md`, `PLAN-*.md`) are removed. Shipped behavior stays in this changelog.
+
 ### feat: structured responses, symbol ranges, normalized diff, git pull/stash
 
 - `--response-mode=structured` keeps each `read_file` body once. Batch bodies live in `files[].content`; the text fallback is a summary. Default remains `compat`.
@@ -159,7 +167,7 @@ Non-blocking. Covers `.json`, `.xml`, `.csproj`, `.config`, `.resx`.
 
 ### docs: one living roadmap
 
-The repo root keeps a single plan, [ROADMAP.md](ROADMAP.md). Closed plans (agent reliability, operational reliability, cache phase 0, Failure Intelligence, the old pending plan) are local copies under `docs/history/`. That folder stays gitignored. Shipped behavior remains in this changelog.
+Shipped behavior remains in this changelog. Root plan files were later removed.
 
 ### fix(apply_patch): incomplete multi-file rollback is reported
 

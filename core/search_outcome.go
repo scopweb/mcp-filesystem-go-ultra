@@ -26,6 +26,14 @@ type SearchOutcome struct {
 	ExactTotal   bool
 }
 
+func (e *UltraFastEngine) searchPageSize(requested int) int {
+	ceiling := 0
+	if e != nil && e.config != nil {
+		ceiling = e.config.MaxSearchResults
+	}
+	return SearchPageSize(ceiling, requested)
+}
+
 // SearchFiles runs filename, content, or count search and returns a typed outcome.
 func (e *UltraFastEngine) SearchFiles(ctx context.Context, opts SearchOptions) (SearchOutcome, error) {
 	if opts.CountOnly {
@@ -102,10 +110,7 @@ func (e *UltraFastEngine) advancedSearchOutcomeFromOpts(ctx context.Context, opt
 		outputFormat = "auto"
 	}
 	contextLines := opts.ContextLines
-	maxResults := e.config.MaxSearchResults
-	if opts.MaxResults > 0 {
-		maxResults = opts.MaxResults
-	}
+	maxResults := e.searchPageSize(opts.MaxResults)
 	offset := opts.Offset
 	if offset < 0 {
 		offset = 0

@@ -37,8 +37,13 @@ const (
 	DirCacheExpiration  = 2 * time.Minute  // How long to cache directory listings
 	MetaCacheExpiration = 10 * time.Minute // How long to cache file metadata
 
-	// Maximum entries to search before returning results
+	// MaxSearchResults is the ceiling for one search_files page
+	// (--max-search-results). It is not the page size when max_results is omitted.
 	MaxSearchResults = 1000
+
+	// DefaultSearchPage is the page size when search_files omits max_results.
+	// Explicit max_results is honored up to MaxSearchResults.
+	DefaultSearchPage = 40
 
 	// Maximum items to return in directory listings
 	MaxListItems = 10000

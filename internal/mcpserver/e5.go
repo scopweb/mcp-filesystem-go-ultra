@@ -248,7 +248,7 @@ func searchStructuredFromOutcome(out core.SearchOutcome, scope map[string]any, e
 
 func searchContinuationObject(next, page int, reason string) map[string]any {
 	if page <= 0 {
-		page = 50
+		page = core.DefaultSearchPage
 	}
 	hint := core.SearchContinuationHint(next, page, reason)
 	if reason == "" {

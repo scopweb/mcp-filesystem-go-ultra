@@ -78,9 +78,9 @@ server_info(action:"stats")
 `)
 
 	case "tools":
-		sb.WriteString(`# COMPLETE TOOL LIST (24 Tools)
+		sb.WriteString(`# REGISTERED TOOLS
 
-Use help(tool:"X") on demand. First call list_allowed_directories, then directory_tree. help() lists the live registered catalog — do not dump it at startup.
+First call list_allowed_directories. If the client already lists the tools, do not call help(). help(tool:"X") only when a parameter is missing. directory_tree only when the path is unknown. Do not dump this catalog at startup.
 
 ## Discovery (2)
 

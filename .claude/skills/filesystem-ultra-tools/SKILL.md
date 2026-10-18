@@ -1,6 +1,6 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.8.0. 30 tools ultra / 18 agent / 17 strict. First call list_allowed_directories, then directory_tree or help(tool:X). Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=agent --compact-mode --roots-mode=union.
+description: Tool catalog for filesystem-ultra MCP server v4.8.0. 30 tools ultra / 18 agent / 17 strict. First call list_allowed_directories. If the client already lists the tools, do not call help(). help(tool:X) only when a parameter is missing. Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=agent --compact-mode --roots-mode=union.
 ---
 
 # Filesystem Ultra v4.8.0 — Tool Discovery
@@ -12,8 +12,8 @@ description: Tool catalog for filesystem-ultra MCP server v4.8.0. 30 tools ultra
 ## Bind each project to one filesystem tool family
 
 - `filesystem-ultra` operates on the real host filesystem (`C:\...`, host-mounted `/mnt/...`). Runtime-native `create_file`, `str_replace`, `view` may target a different sandbox.
-- First call `list_allowed_directories` (before any read). Then `directory_tree` or `help(tool:"X")` on demand. Do not dump the full catalog at startup.
-- For host projects, use only filesystem-ultra tools. After every host create/edit, verify with `get_file_info` or `list_directory`; `read_file` when content matters.
+- First call `list_allowed_directories` (before any read). If the client already lists the tools, do not call `help()`. `help(tool:"X")` only when a parameter is missing from the schema. `directory_tree` only when the path is unknown. Do not dump the full catalog at startup.
+- For host projects, use only filesystem-ultra tools. If the harness also offers native Read/Grep/Edit, do not call both. After every host create/edit, verify with `get_file_info` or `list_directory`; `read_file` when content matters.
 - `File not found` for a known file is a filesystem-mismatch signal: stop, confirm with the host reader, audit recent writes. Never switch tool families silently.
 
 ## Subagents do not inherit this skill
@@ -24,9 +24,13 @@ Harness subagents start without this file. The portable contract is `server.With
 
 ## Discovery order
 
-1. `list_allowed_directories` — sandbox roots. Zero parameters.
-2. `directory_tree` — explore. Defaults: `respect_ignore=true`, `max_depth=2`, `max_nodes=500`. Structured: `truncated` + `hidden_count`.
-3. `help(tool:"X")` — schema + examples on demand. `help()` lists the tools actually registered. Read `profile` and `tool_count` from `list_allowed_directories`; do not assume a fixed catalog.
+1. `list_allowed_directories` — sandbox roots. Zero parameters. That is the whole startup.
+2. `directory_tree` — only when the path is unknown. Defaults: `respect_ignore=true`, `max_depth=2`, `max_nodes=500`.
+3. `help(tool:"X")` — only when a parameter is missing from the client schema. If the client already lists the tools, do not call `help()`.
+
+Native `oldString` / `replaceAll` / `search` / `edit` are not this server. `edit_file` uses `old_text` / `new_text`. Omitting `occurrence` replaces every exact match. A pattern uses `mode:"search_replace"`.
+
+Search first: `search_files` with `include_content:false` or `detail:"summary"`, and `max_results` (omitted page is 40). Then `read_file` only with a range.
 
 If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (`paths[]` / `mode` head|tail).
 
@@ -35,9 +39,9 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 | Tool | When / notes |
 |------|----------------|
 | `list_allowed_directories` | First call |
-| `directory_tree` | After roots. Gitignore ON |
+| `directory_tree` | Only when the path is unknown. Gitignore ON |
 | `list_directory` | Copy exact paths (case) before edits |
-| `search_files` | Gitignore ON (`no_ignore=false`). `max_results` is the page size; continue with `offset`. Structured: `truncated` + `hidden_count` + `continuation`. Do not pair `count_only` with `detail=full` |
+| `search_files` | Gitignore ON. Omit `max_results` and the page is 40; pass it to continue via `offset`. Prefer `include_content:false` or `detail:"summary"` before a content read. `read_file` only with a range. Do not pair `count_only` with `detail=full` |
 | `get_file_info` | Verify after a host mutation. Batch `paths[]` |
 | `read_file` | Full / range / head / tail / base64 / `paths[]`. Logs: `mode:"tail"` `max_lines:40` |
 | `write_file` | New files or whole-file rewrite. `mode:"append"` skips rewrite-guard |
@@ -49,7 +53,7 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 | `move_file` | Move or rename |
 | `delete_file` | Soft-delete default; `permanent:true` hard |
 | `backup` | Undo: `undo_last` / `undo_chain` / `restore` (`backup_id`). Trash: `list_trash` / `restore_trash` (`sd_id`, not `backup_id`) / `purge_trash` |
-| `help` | On demand, not at startup |
+| `help` | Skip when the client already lists the tools. Otherwise only for a missing parameter |
 
 ## Ultra only (absent in `--profile=strict`)
 

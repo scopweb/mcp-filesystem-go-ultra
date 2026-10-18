@@ -562,7 +562,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest: v4.8.0). Remaining work: [ROADMAP.md](ROADMAP.md).
+See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest: v4.8.0).
 
 ---
 

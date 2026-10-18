@@ -82,10 +82,11 @@ func (e *UltraFastEngine) SmartSearch(ctx context.Context, request mcp.CallToolR
 		}, nil
 	}
 
-	maxResults := e.config.MaxSearchResults
+	maxResults := 0
 	if mr, ok := request.Arguments["max_results"].(float64); ok && mr > 0 {
 		maxResults = int(mr)
 	}
+	maxResults = e.searchPageSize(maxResults)
 	out, err := e.performSmartSearchOutcome(ctx, validPath, pattern, includeContent, fileTypes, noIgnore, maxResults, 0)
 	if err != nil {
 		return &mcp.CallToolResponse{
@@ -131,10 +132,11 @@ func (e *UltraFastEngine) AdvancedTextSearch(ctx context.Context, request mcp.Ca
 		contextLines = int(cl)
 	}
 
-	maxResults := e.config.MaxSearchResults
+	maxResults := 0
 	if mr, ok := request.Arguments["max_results"].(float64); ok && mr > 0 {
 		maxResults = int(mr)
 	}
+	maxResults = e.searchPageSize(maxResults)
 	noIgnore, _ := request.Arguments["no_ignore"].(bool)
 	fileTypes := FileTypeFiltersFromArg(request.Arguments["file_types"])
 
@@ -509,9 +511,7 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 	var resultsMu sync.Mutex
 	var results []string
 	var contentMatches []SearchMatch
-	if maxResults <= 0 {
-		maxResults = e.config.MaxSearchResults
-	}
+	maxResults = e.searchPageSize(maxResults)
 	if offset < 0 {
 		offset = 0
 	}

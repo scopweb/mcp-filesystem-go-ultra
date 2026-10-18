@@ -187,7 +187,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithString("return_lines", mcp.Description("Return line numbers of count matches (true/false, for count_only mode)")),
 		mcp.WithString("output_format", mcp.Description("Output format. Omit for grouped path + line:text (including context). 'text' = legacy verbose with emojis. 'json' = structured.")),
 		mcp.WithString("output", mcp.Description("Alias for output_format. Accepts 'text' or 'json'. Legacy values 'content'|'files_with_matches'|'count' are NOT implemented and fall through to the default text branch.")),
-		mcp.WithNumber("max_results", mcp.Description("Page size. Filename search: matching filenames. Content search: matching lines. Default: engine config. Pair with offset to continue.")),
+		mcp.WithNumber("max_results", mcp.Description("Page size. Filename search: matching filenames. Content search: matching lines. Omitted: 40. Explicit values are honored up to --max-search-results (default 1000). Pair with offset to continue.")),
 		mcp.WithNumber("offset", mcp.Description("0-based index into the stable result list (path, line). Default 0. When truncated, structured continuation includes the next offset.")),
 		mcp.WithBoolean("no_ignore", mcp.Description("If true, do not honor .gitignore/.cursorignore (default: false)")),
 		mcp.WithString("detail", mcp.Description("summary|normal|full. summary: paths + count. full: keep snippets. detail shapes structuredContent; compact-mode trims text."), mcp.Enum("summary", "normal", "full")),
@@ -277,6 +277,11 @@ func registerSearchTools(reg *toolRegistry) {
 			if mr, ok := args["max_results"].(float64); ok && mr > 0 {
 				maxResults = int(mr)
 			}
+			ceiling := 0
+			if cfg := engine.GetConfig(); cfg != nil {
+				ceiling = cfg.MaxSearchResults
+			}
+			maxResults = core.SearchPageSize(ceiling, maxResults)
 			if off, ok := args["offset"].(float64); ok && off > 0 {
 				offset = int(off)
 			}
