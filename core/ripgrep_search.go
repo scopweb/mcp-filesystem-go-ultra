@@ -106,11 +106,8 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 	for dir := range searchSkipDirs {
 		args = append(args, "--glob", "!**/"+dir+"/**")
 	}
-	// v4.5.31: exclude generated/minified bundles from ripgrep searches too.
-	// (*.min.* catches .min.js/.min.css and any future variant; *.map catches
-	// source maps which are also single-line JSON blobs.)
-	for _, pat := range searchMinifiedPatterns {
-		args = append(args, "--glob", "!**/"+pat)
+	for _, pat := range ripgrepMinifiedExcludeGlobs() {
+		args = append(args, "--glob", pat)
 	}
 	for _, g := range FileTypeGlobsForRipgrep(fileTypes) {
 		args = append(args, "--glob", g)

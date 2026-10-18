@@ -184,6 +184,11 @@ func TestRunRipgrepSearch_ArgvConstruction(t *testing.T) {
 	if !strings.Contains(joined, "--glob !**/node_modules/**") {
 		t.Errorf("missing skip-dir exclusion glob; argv: %v", argv)
 	}
+	for _, glob := range []string{"--glob !**/*.min.*", "--glob !**/*.map"} {
+		if !strings.Contains(joined, glob) {
+			t.Errorf("missing minified exclusion %s; argv: %v", glob, argv)
+		}
+	}
 	for _, a := range argv {
 		if a == "--ignore" {
 			t.Errorf("invalid boolean --ignore flag present; argv: %v", argv)

@@ -3,8 +3,10 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -15,11 +17,11 @@ type AutoSyncConfig struct {
 	SyncOnWrite     bool              `json:"sync_on_write"`
 	SyncOnEdit      bool              `json:"sync_on_edit"`
 	SyncOnDelete    bool              `json:"sync_on_delete"`
-	TargetMapping   map[string]string `json:"target_mapping,omitempty"`   // Custom path mappings
-	ExcludePatterns []string          `json:"exclude_patterns,omitempty"` // Patterns to exclude from auto-sync
-	Silent          bool              `json:"silent"`                     // If true, don't log sync operations
-	OnlySubdirs     []string          `json:"only_subdirs,omitempty"`     // Only sync files under these subdirectories
-	ConfigVersion   string            `json:"config_version"`             // Config file version
+	TargetMapping   map[string]string `json:"target_mapping,omitempty"`
+	ExcludePatterns []string          `json:"exclude_patterns,omitempty"`
+	Silent          bool              `json:"silent"`
+	OnlySubdirs     []string          `json:"only_subdirs,omitempty"`
+	ConfigVersion   string            `json:"config_version"`
 }
 
 // DefaultAutoSyncConfig returns the default auto-sync configuration
@@ -37,12 +39,23 @@ func DefaultAutoSyncConfig() *AutoSyncConfig {
 	}
 }
 
+func cloneAutoSyncConfig(c *AutoSyncConfig) AutoSyncConfig {
+	if c == nil {
+		return *DefaultAutoSyncConfig()
+	}
+	out := *c
+	out.TargetMapping = maps.Clone(c.TargetMapping)
+	out.ExcludePatterns = slices.Clone(c.ExcludePatterns)
+	out.OnlySubdirs = slices.Clone(c.OnlySubdirs)
+	return out
+}
+
 // AutoSyncManager handles automatic syncing between WSL and Windows
 type AutoSyncManager struct {
-	config       *AutoSyncConfig
-	configMu     sync.RWMutex
-	isWSL        bool
-	winUser      string
+	config        *AutoSyncConfig
+	configMu      sync.RWMutex
+	isWSL         bool
+	winUser       string
 	enabled       bool
 	policyBlocked bool
 	configPath    string
@@ -77,24 +90,49 @@ func (m *AutoSyncManager) SetAllowedPaths(paths []string) {
 // under the current AllowedPaths policy. If no policy is set, everything is allowed.
 func (m *AutoSyncManager) isTargetAllowed(targetPath string) bool {
 	m.configMu.RLock()
-	allowed := m.allowedPaths
+	allowed := append([]string(nil), m.allowedPaths...)
 	m.configMu.RUnlock()
+	return targetWithinAllowed(targetPath, allowed)
+}
 
+func targetWithinAllowed(targetPath string, allowed []string) bool {
 	if len(allowed) == 0 {
 		return true
 	}
-
-	normalized := NormalizePath(targetPath)
+	targetAbs, err := filepath.Abs(NormalizePath(targetPath))
+	if err != nil {
+		return false
+	}
+	targetAbs = cleanForContainment(targetAbs)
 	for _, base := range allowed {
-		baseNorm := NormalizePath(base)
-		if strings.HasPrefix(normalized, baseNorm) {
+		baseAbs, err := filepath.Abs(NormalizePath(base))
+		if err != nil {
+			continue
+		}
+		baseAbs = cleanForContainment(baseAbs)
+		if targetAbs == baseAbs {
+			return true
+		}
+		rel, err := filepath.Rel(baseAbs, targetAbs)
+		if err != nil {
+			continue
+		}
+		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return true
 		}
 	}
 	return false
 }
 
-// getConfigPath returns the configuration file path
+func cleanForContainment(p string) string {
+	p = filepath.Clean(p)
+	if os.PathSeparator == '\\' {
+		return strings.ToLower(p)
+	}
+	return p
+}
+
+// getConfigPath returns the configuration file path. Caller must hold configMu.
 func (m *AutoSyncManager) getConfigPath() string {
 	if m.configPath != "" {
 		return m.configPath
@@ -141,7 +179,9 @@ func (m *AutoSyncManager) loadConfig() error {
 	}
 
 	// Try to load from config file
+	m.configMu.Lock()
 	configPath := m.getConfigPath()
+	m.configMu.Unlock()
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -172,7 +212,10 @@ func (m *AutoSyncManager) loadConfig() error {
 
 // saveConfig saves the current configuration to file
 func (m *AutoSyncManager) saveConfig() error {
+	m.configMu.Lock()
 	configPath := m.getConfigPath()
+	cfg := cloneAutoSyncConfig(m.config)
+	m.configMu.Unlock()
 
 	// Create directory if needed
 	configDir := filepath.Dir(configPath)
@@ -184,7 +227,7 @@ func (m *AutoSyncManager) saveConfig() error {
 	fileConfig := struct {
 		WSLAutoSync *AutoSyncConfig `json:"wsl_auto_sync"`
 	}{
-		WSLAutoSync: m.config,
+		WSLAutoSync: &cfg,
 	}
 
 	// Marshal to JSON with indentation
@@ -221,20 +264,22 @@ func (m *AutoSyncManager) IsEnabled() bool {
 
 // UpdateConfig updates the configuration
 func (m *AutoSyncManager) UpdateConfig(config *AutoSyncConfig) error {
+	if config == nil {
+		return fmt.Errorf("autosync config is nil")
+	}
 	m.configMu.Lock()
-	defer m.configMu.Unlock()
-
-	// Validate that any custom target mappings point to allowed paths
-	if len(m.allowedPaths) > 0 && config.TargetMapping != nil {
+	if len(m.allowedPaths) > 0 {
 		for src, dst := range config.TargetMapping {
-			if !m.isTargetAllowed(dst) {
+			if !targetWithinAllowed(dst, m.allowedPaths) {
+				m.configMu.Unlock()
 				return fmt.Errorf("target mapping %s -> %s points outside allowed paths", src, dst)
 			}
 		}
 	}
-
-	m.config = config
-	m.enabled = config.Enabled && m.isWSL
+	cloned := cloneAutoSyncConfig(config)
+	m.config = &cloned
+	m.enabled = cloned.Enabled && m.isWSL
+	m.configMu.Unlock()
 
 	return m.saveConfig()
 }
@@ -243,7 +288,7 @@ func (m *AutoSyncManager) UpdateConfig(config *AutoSyncConfig) error {
 func (m *AutoSyncManager) GetConfig() AutoSyncConfig {
 	m.configMu.RLock()
 	defer m.configMu.RUnlock()
-	return *m.config
+	return cloneAutoSyncConfig(m.config)
 }
 
 // ShouldSyncPath determines if a given path should be auto-synced
@@ -307,39 +352,37 @@ func (m *AutoSyncManager) policyBlocksSync() bool {
 	return m.policyBlocked
 }
 
+func (m *AutoSyncManager) syncDecision(want func(AutoSyncConfig) bool) (proceed bool, silent bool) {
+	m.configMu.RLock()
+	defer m.configMu.RUnlock()
+	if m.policyBlocked || !m.enabled || m.config == nil || !want(*m.config) {
+		return false, true
+	}
+	return true, m.config.Silent
+}
+
 // AfterWrite is called after a write operation to potentially auto-sync
 func (m *AutoSyncManager) AfterWrite(path string) error {
-	if m.policyBlocksSync() || !m.IsEnabled() || !m.config.SyncOnWrite {
+	proceed, _ := m.syncDecision(func(cfg AutoSyncConfig) bool { return cfg.SyncOnWrite })
+	if !proceed || !m.ShouldSyncPath(path) {
 		return nil
 	}
-
-	if !m.ShouldSyncPath(path) {
-		return nil
-	}
-
 	return m.syncToWindows(path)
 }
 
 // AfterEdit is called after an edit operation to potentially auto-sync
 func (m *AutoSyncManager) AfterEdit(path string) error {
-	if m.policyBlocksSync() || !m.IsEnabled() || !m.config.SyncOnEdit {
+	proceed, _ := m.syncDecision(func(cfg AutoSyncConfig) bool { return cfg.SyncOnEdit })
+	if !proceed || !m.ShouldSyncPath(path) {
 		return nil
 	}
-
-	if !m.ShouldSyncPath(path) {
-		return nil
-	}
-
 	return m.syncToWindows(path)
 }
 
 // AfterDelete is called after a delete operation to potentially auto-sync
 func (m *AutoSyncManager) AfterDelete(path string) error {
-	if m.policyBlocksSync() || !m.IsEnabled() || !m.config.SyncOnDelete {
-		return nil
-	}
-
-	if !m.ShouldSyncPath(path) {
+	proceed, silent := m.syncDecision(func(cfg AutoSyncConfig) bool { return cfg.SyncOnDelete })
+	if !proceed || !m.ShouldSyncPath(path) {
 		return nil
 	}
 
@@ -350,7 +393,7 @@ func (m *AutoSyncManager) AfterDelete(path string) error {
 	}
 
 	if !m.isTargetAllowed(winPath) {
-		if !m.config.Silent {
+		if !silent {
 			fmt.Fprintf(os.Stderr, "[AutoSync] Blocked delete sync to path outside allowed directories: %s\n", winPath)
 		}
 		return nil
@@ -363,24 +406,30 @@ func (m *AutoSyncManager) AfterDelete(path string) error {
 
 // syncToWindows performs the actual sync operation
 func (m *AutoSyncManager) syncToWindows(wslPath string) error {
+	m.configMu.RLock()
+	silent := true
+	var custom string
+	hasCustom := false
+	if m.config != nil {
+		silent = m.config.Silent
+		custom, hasCustom = m.config.TargetMapping[wslPath]
+	}
+	m.configMu.RUnlock()
+
 	// Convert to Windows path
 	winPath, err := WSLToWindows(wslPath)
 	if err != nil {
-		if !m.config.Silent {
+		if !silent {
 			fmt.Fprintf(os.Stderr, "[AutoSync] Failed to convert path %s: %v\n", wslPath, err)
 		}
 		return nil // Don't fail the operation
 	}
-
-	// Check for custom mapping
-	m.configMu.RLock()
-	if customTarget, exists := m.config.TargetMapping[wslPath]; exists {
-		winPath = customTarget
+	if hasCustom {
+		winPath = custom
 	}
-	m.configMu.RUnlock()
 
 	if !m.isTargetAllowed(winPath) {
-		if !m.config.Silent {
+		if !silent {
 			fmt.Fprintf(os.Stderr, "[AutoSync] Blocked sync to path outside allowed directories: %s\n", winPath)
 		}
 		return nil
@@ -389,13 +438,13 @@ func (m *AutoSyncManager) syncToWindows(wslPath string) error {
 	// Perform copy asynchronously to not block the main operation
 	go func() {
 		if err := CopyFileWithConversion(wslPath, winPath, true); err != nil {
-			if !m.config.Silent {
+			if !silent {
 				fmt.Fprintf(os.Stderr, "[AutoSync] Failed to sync %s -> %s: %v\n", wslPath, winPath, err)
 			}
-		} else {
-			if !m.config.Silent {
-				fmt.Fprintf(os.Stderr, "[AutoSync] Synced: %s -> %s\n", wslPath, winPath)
-			}
+			return
+		}
+		if !silent {
+			fmt.Fprintf(os.Stderr, "[AutoSync] Synced: %s -> %s\n", wslPath, winPath)
 		}
 	}()
 
@@ -404,20 +453,25 @@ func (m *AutoSyncManager) syncToWindows(wslPath string) error {
 
 // GetStatus returns the current auto-sync status
 func (m *AutoSyncManager) GetStatus() map[string]interface{} {
-	m.configMu.RLock()
-	defer m.configMu.RUnlock()
+	m.configMu.Lock()
+	cfg := cloneAutoSyncConfig(m.config)
+	configPath := m.getConfigPath()
+	enabled := m.enabled
+	isWSL := m.isWSL
+	winUser := m.winUser
+	m.configMu.Unlock()
 
 	return map[string]interface{}{
-		"enabled":          m.enabled,
-		"is_wsl":           m.isWSL,
-		"windows_user":     m.winUser,
-		"sync_on_write":    m.config.SyncOnWrite,
-		"sync_on_edit":     m.config.SyncOnEdit,
-		"sync_on_delete":   m.config.SyncOnDelete,
-		"config_path":      m.getConfigPath(),
-		"exclude_patterns": m.config.ExcludePatterns,
-		"only_subdirs":     m.config.OnlySubdirs,
-		"custom_mappings":  m.config.TargetMapping,
-		"config_version":   m.config.ConfigVersion,
+		"enabled":          enabled,
+		"is_wsl":           isWSL,
+		"windows_user":     winUser,
+		"sync_on_write":    cfg.SyncOnWrite,
+		"sync_on_edit":     cfg.SyncOnEdit,
+		"sync_on_delete":   cfg.SyncOnDelete,
+		"config_path":      configPath,
+		"exclude_patterns": cfg.ExcludePatterns,
+		"only_subdirs":     cfg.OnlySubdirs,
+		"custom_mappings":  cfg.TargetMapping,
+		"config_version":   cfg.ConfigVersion,
 	}
 }

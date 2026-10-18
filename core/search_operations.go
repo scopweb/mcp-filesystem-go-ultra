@@ -1007,6 +1007,12 @@ var searchMinifiedPatterns = []string{
 	".map",  // source maps
 }
 
+// ripgrepMinifiedExcludeGlobs are real globs. searchMinifiedPatterns are
+// substrings and must not be concatenated into !**/<fragment>.
+func ripgrepMinifiedExcludeGlobs() []string {
+	return []string{"!**/*.min.*", "!**/*.map"}
+}
+
 // isMinifiedFile reports whether a file is a generated/minified bundle that should
 // be skipped by content search by default.
 func isMinifiedFile(path string) bool {

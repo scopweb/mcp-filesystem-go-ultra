@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -188,10 +189,69 @@ func TestBatchOperationsPathValidation(t *testing.T) {
 	})
 }
 
-// TestBatchPathValidationJSON is temporarily disabled due to incomplete cleanup.
-// TODO: Restore this test properly.
 func TestBatchPathValidationJSON(t *testing.T) {
-	t.Skip("Test temporarily disabled - needs restoration after cleanup")
+	allowedDir := t.TempDir()
+	forbiddenDir := t.TempDir()
+	forbiddenFile := filepath.Join(forbiddenDir, "secret.txt")
+	if err := os.WriteFile(forbiddenFile, []byte("secret data"), 0644); err != nil {
+		t.Fatalf("Failed to create forbidden file: %v", err)
+	}
+
+	cacheInstance, err := cache.NewIntelligentCache(1024 * 1024)
+	if err != nil {
+		t.Fatalf("Failed to create cache: %v", err)
+	}
+	engine, err := core.NewUltraFastEngine(&core.Config{
+		Cache:        cacheInstance,
+		AllowedPaths: []string{allowedDir},
+		ParallelOps:  2,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create engine: %v", err)
+	}
+	batchManager := core.NewBatchOperationManager("", 10)
+	batchManager.SetBackupManager(engine.GetBackupManager())
+	batchManager.SetEngine(engine)
+
+	raw, err := json.Marshal(core.BatchRequest{Operations: []core.FileOperation{{
+		Type:    "write",
+		Path:    filepath.Join(forbiddenDir, "injected.txt"),
+		Content: "pwned",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req core.BatchRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		t.Fatal(err)
+	}
+	result := batchManager.ExecuteBatch(req)
+	if result.Success {
+		t.Fatal("json batch write to forbidden path should have been blocked")
+	}
+	assertContains(t, result.Errors, "access denied")
+
+	pathJSON, err := json.Marshal(forbiddenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasRaw := []byte(`{"operations":[{"type":"search_and_replace","path":` + string(pathJSON) + `,"find":"secret","replace":"hacked"}]}`)
+	var alias core.BatchRequest
+	if err := json.Unmarshal(aliasRaw, &alias); err != nil {
+		t.Fatal(err)
+	}
+	aliasResult := batchManager.ExecuteBatch(alias)
+	if aliasResult.Success {
+		t.Fatal("json alias batch should have been blocked")
+	}
+	assertContains(t, aliasResult.Errors, "access denied")
+	content, err := os.ReadFile(forbiddenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "secret data" {
+		t.Fatalf("forbidden file changed: %q", content)
+	}
 }
 
 // TestBatchOperationsRespectHooks verifies that hooks configured by the user

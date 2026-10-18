@@ -308,45 +308,38 @@ func (hm *HookManager) matchesWildcard(pattern, text string) bool {
 	return true
 }
 
-// executeHooksParallel executes multiple hooks in parallel
+func hookIdentity(h *Hook) string {
+	if h.Type == HookTypeScript {
+		return "script:" + h.Script
+	}
+	return "command:" + h.Command
+}
+
+// executeHooksParallel executes unique hooks concurrently, but returns results
+// in configuration order. Aggregation of modified_content is last-configured,
+// not last-finished.
 func (hm *HookManager) executeHooksParallel(ctx context.Context, hooks []*Hook, hookCtx *HookContext) []*HookResult {
-	// Deduplicate hooks by command
-	uniqueHooks := make(map[string]*Hook)
+	seen := make(map[string]struct{}, len(hooks))
+	ordered := make([]*Hook, 0, len(hooks))
 	for _, hook := range hooks {
-		key := hook.Command
-		if hook.Type == HookTypeScript {
-			key = hook.Script
+		key := hookIdentity(hook)
+		if _, ok := seen[key]; ok {
+			continue
 		}
-		if _, exists := uniqueHooks[key]; !exists {
-			uniqueHooks[key] = hook
-		}
+		seen[key] = struct{}{}
+		ordered = append(ordered, hook)
 	}
 
-	// Execute in parallel
-	results := make([]*HookResult, 0, len(uniqueHooks))
-	resultsChan := make(chan *HookResult, len(uniqueHooks))
-
+	results := make([]*HookResult, len(ordered))
 	var wg sync.WaitGroup
-	for _, hook := range uniqueHooks {
+	for i, hook := range ordered {
 		wg.Add(1)
-		go func(h *Hook) {
+		go func(i int, h *Hook) {
 			defer wg.Done()
-			result := hm.executeHook(ctx, h, hookCtx)
-			resultsChan <- result
-		}(hook)
+			results[i] = hm.executeHook(ctx, h, hookCtx)
+		}(i, hook)
 	}
-
-	// Wait for all hooks to complete
-	go func() {
-		wg.Wait()
-		close(resultsChan)
-	}()
-
-	// Collect results
-	for result := range resultsChan {
-		results = append(results, result)
-	}
-
+	wg.Wait()
 	return results
 }
 
