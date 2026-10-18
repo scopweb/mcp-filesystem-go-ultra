@@ -123,6 +123,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"output_format":  {ParamString, false},
 		"max_depth":      {ParamNumber, false},
 		"exclude":        {ParamString, false},
+		"include":        {ParamString, false},
 		"respect_ignore": {ParamBoolean, false},
 		"max_nodes":      {ParamNumber, false},
 		"detail":         {ParamString, false},

@@ -81,13 +81,36 @@ func formatToolError(err error) string {
 			return pathErrorJSON(errCodeSecretDenied, pe.Error(), pe.Path, nil, "pass --allow-secrets to read (writes still audited)")
 		}
 		if pe.Err != nil && strings.Contains(pe.Err.Error(), "access denied") {
-			return marshalPathError(errCodeNotAllowed, pe.Error(), pe.Path, notAllowedDetailsFromPathError(pe), suggestionNotAllowed)
+			return marshalPathError(errCodeNotAllowed, pe.Error()+sandboxMountHint(pe.Path), pe.Path, notAllowedDetailsFromPathError(pe), suggestionNotAllowed)
 		}
 	}
 	if errors.Is(err, fs.ErrNotExist) {
 		return pathErrorJSON(errCodeNotFound, err.Error(), path, nil, filesystemMismatchHint)
 	}
+	if hint := sandboxMountHint(err.Error()); hint != "" && strings.Contains(err.Error(), "access denied") {
+		return fmt.Sprintf("Error: %v\n→ %s", err, strings.TrimSpace(hint))
+	}
 	return fmt.Sprintf("Error: %v", err)
+}
+
+func sandboxMountHint(path string) string {
+	p := strings.ToLower(strings.ReplaceAll(path, "\\", "/"))
+	if strings.Contains(p, "$home/mnt") || strings.Contains(p, "${home}/mnt") || strings.Contains(p, "~/mnt/") {
+		return " sandbox path, not this server. Use the Windows path from list_allowed_directories. Do not find/wc/cat."
+	}
+	if strings.Contains(p, "/home/") && strings.Contains(p, "/mnt/") && !wslDriveMount(p) {
+		return " sandbox path, not this server. Use the Windows path from list_allowed_directories. Do not find/wc/cat."
+	}
+	return ""
+}
+
+func wslDriveMount(p string) bool {
+	i := strings.Index(p, "/mnt/")
+	if i < 0 || i+6 >= len(p) {
+		return false
+	}
+	drive := p[i+5]
+	return drive >= 'a' && drive <= 'z' && (i+6 == len(p) || p[i+6] == '/')
 }
 
 // pathsFromArgs extracts the pathspec from args["paths"] as []string.

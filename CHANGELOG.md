@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### feat(list): line census replaces find | wc
+
+`list_directory` `output_format:"lines"` counts newlines per text file, skips `bin`/`obj`, and accepts `include` (`.cs,.json,*.csproj`). A `$HOME/mnt` or `/home/.../mnt` path that is not a WSL drive mount is called a sandbox path: use the Windows path from `list_allowed_directories`. Do not `find`/`wc`/`cat`.
+
 ### feat(search): omitted search_files page is 40, not the ceiling
 
 `search_files` without `max_results` returns a page of 40 and a `continuation`. An explicit `max_results` is still honored up to `--max-search-results` (default 1000). The skill, `CLAUDE.md`, `help(topic:"tools")`, and the harness explorer no longer require `directory_tree` or `help()` at startup. Native `oldString` / `replaceAll` are not this server.

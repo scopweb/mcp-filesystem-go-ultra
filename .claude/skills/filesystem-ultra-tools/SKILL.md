@@ -83,11 +83,12 @@ Actions: `status`, `diff`, `review`, `log`, `show`, `add`, `commit`, `push`, `fe
 
 ## Never bash for filesystem
 
-Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `grep`, `find`, `rg`, or `stat` on host project files.
+Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `grep`, `find`, `wc`, `rg`, or `stat` on host project files. `$HOME/mnt` is a sandbox path; use the Windows path from `list_allowed_directories`.
 
 | Need | Call |
 |------|------|
 | Last 40 log lines | `read_file(path, mode:"tail", max_lines:40)` |
+| Line census (replaces find \| wc -l) | `list_directory(path, output_format:"lines", include:".cs,.json,.csproj")` |
 | First N lines | `read_file(path, max_lines:N)` (mode omitted/`"all"`) or `mode:"head"` |
 | Exact line range | `read_file(path, start_line, end_line)` — also honored on `paths[]` |
 | Line cut override | `max_line_length:N` or `0` to disable |

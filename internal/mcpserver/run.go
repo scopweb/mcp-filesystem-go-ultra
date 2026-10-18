@@ -64,7 +64,7 @@ func DefaultConfiguration() *Configuration {
 // Never dump the full catalog here.
 const serverInstructions = `MCP Filesystem Ultra operates on the real host filesystem (C:\, D:\, /mnt/...). Runtime-native tools may target a different sandbox.
 First call list_allowed_directories.
-Do not use native Read/Edit/Write/Glob for host paths. Prefer these tools over bash cat/head/tail/cut/ls/grep/find/stat.
+Do not use native Read/Edit/Write/Glob for host paths. Prefer these tools over bash cat/head/tail/cut/ls/grep/find/wc/stat. Line census: list_directory output_format=lines. $HOME/mnt is a sandbox path; use the Windows path from list_allowed_directories.
 Subagent: request a handoff (path + content_hash). Do not assume the parent session's file body.
 help(tool:X) on demand. Do not load the full catalog at startup.`
 

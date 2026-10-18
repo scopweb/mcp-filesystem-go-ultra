@@ -22,14 +22,15 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithTitleAnnotation("List Directory"),
 		mcp.WithRawOutputSchema(listDirectoryOutputSchema),
 		mcp.WithDescription("list_directory — List directory contents on the real host filesystem; use it to verify a host creation/edit independently. "+
-			"Replaces bash ls/dir/tree — NEVER use the shell. "+
-			"output_format: 'compact' (default), 'json' (structured entries with name/type/size/modified), 'tree' (recursive JSON tree, use max_depth). "+
+			"Replaces bash ls/dir/tree/find/wc — NEVER use the shell. "+
+			"output_format: 'compact' (default), 'json', 'tree', 'sizes', 'lines' (recursive newline counts; include filters extensions). "+
 			"Related: search_files, read_file, edit_file, create_directory, batch_operations."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Path to directory (WSL or Windows format)")),
-		mcp.WithString("output_format", mcp.Description("Output format: 'compact' (default), 'json', 'tree' (recursive tree), 'sizes'")),
+		mcp.WithString("output_format", mcp.Description("Output format: 'compact' (default), 'json', 'tree' (recursive tree), 'sizes', 'lines' (newline counts, replaces find|wc -l)")),
+		mcp.WithString("include", mcp.Description("lines only: comma-separated extensions or globs (.cs,.json,*.csproj). Empty counts text files.")),
 		mcp.WithNumber("max_depth", mcp.Description("Recursion depth for output_format:'tree' (default: 2)")),
 		mcp.WithString("exclude", mcp.Description("JSON array or comma-separated globs to skip in tree")),
 		mcp.WithBoolean("respect_ignore", mcp.Description("Honor .gitignore/.cursorignore/.fsultraignore in tree (default: true)")),
@@ -43,8 +44,10 @@ func registerSearchTools(reg *toolRegistry) {
 
 		outputFormat := ""
 		maxDepth := 2
+		depthExplicit := false
 		maxNodes := 500
 		respectIgnore := true
+		var include []string
 		detail := detailNormal
 		var exclude []string
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
@@ -54,6 +57,10 @@ func registerSearchTools(reg *toolRegistry) {
 			}
 			if md, ok := args["max_depth"].(float64); ok && md > 0 {
 				maxDepth = int(md)
+				depthExplicit = true
+			}
+			if inc, ok := args["include"].(string); ok && inc != "" {
+				include = core.ParseFileTypeFilters(inc)
 			}
 			if mn, ok := args["max_nodes"].(float64); ok && mn > 0 {
 				maxNodes = int(mn)
@@ -90,6 +97,16 @@ func registerSearchTools(reg *toolRegistry) {
 			trEntries = tr.Entries
 		case "sizes":
 			listing, err = engine.ListDirectoryJSON(ctx, path)
+		case "lines":
+			depth := 0
+			if depthExplicit {
+				depth = maxDepth
+			}
+			census, censusErr := engine.ListLineCounts(ctx, path, core.LineCountOpts{
+				MaxDepth: depth, MaxNodes: maxNodes, Include: include, Exclude: exclude, RespectIgnore: respectIgnore,
+			})
+			listing, err = census.Text, censusErr
+			treeTruncated = census.Truncated
 		default: // "" / "compact" / "text" — current behaviour
 			listing, err = engine.ListDirectoryContent(ctx, path)
 		}
