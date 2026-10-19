@@ -981,10 +981,16 @@ func registerBatchTools(reg *toolRegistry) {
 			if targetFile != "" {
 				currentBackupID := engine.GetCurrentBackupID(targetFile)
 				if currentBackupID != "" {
-					restoredFiles, prevID, hasMore, err := engine.GetBackupManager().RestorePreviousInChain(currentBackupID, targetFile)
+					info, err := engine.GetBackupManager().GetBackupInfo(currentBackupID)
 					if err == nil {
-						// Preview/dry-run: show what would happen without executing
+						prevID := info.PreviousBackupID
+						hasMore := prevID != ""
+						restoredFiles := []string{targetFile}
+						// Preview/dry-run: inspect the snapshot without restoring it.
 						if isDryRun || isPreview {
+							if _, err := engine.GetBackupManager().ReadBackupBytes(currentBackupID, targetFile); err != nil {
+								return mcp.NewToolResultError(fmt.Sprintf("Failed to preview undo: %v", err)), nil
+							}
 							var output strings.Builder
 							output.WriteString(fmt.Sprintf("Preview — Would undo step for: %s\n\n", targetFile))
 							output.WriteString(fmt.Sprintf("Backup being reverted: %s\n", currentBackupID))
@@ -999,6 +1005,11 @@ func registerBatchTools(reg *toolRegistry) {
 							}
 							output.WriteString("\nRun without preview/dry_run to execute undo\n")
 							return backupResult(action, output.String(), nil), nil
+						}
+
+						restoredFiles, _, _, err = engine.GetBackupManager().RestorePreviousInChain(currentBackupID, targetFile)
+						if err != nil {
+							return mcp.NewToolResultError(fmt.Sprintf("Failed to undo: %v", err)), nil
 						}
 
 						// Update chain
@@ -1024,7 +1035,7 @@ func registerBatchTools(reg *toolRegistry) {
 						}
 						return backupResult(action, output.String(), nil), nil
 					}
-					// Fall through to old behavior if error
+					return mcp.NewToolResultError(fmt.Sprintf("Failed to undo: %v", err)), nil
 				}
 			}
 

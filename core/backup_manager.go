@@ -563,79 +563,22 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 	return restoredFiles, preRestoreID, nil
 }
 
-// RestorePreviousInChain restaura el backup anterior en la cadena de undo para un archivo.
-// Devuelve (restoredFiles, previousBackupID, hasMoreBackups, error).
-// Si hasMoreBackups es true, hay más backups disponibles para deshacer.
+// RestorePreviousInChain restores the pre-mutation snapshot at the current undo
+// cursor. Its parent is the next cursor, not the snapshot to restore now.
 func (bm *BackupManager) RestorePreviousInChain(currentBackupID string, filePath string) ([]string, string, bool, error) {
 	info, err := bm.GetBackupInfo(currentBackupID)
 	if err != nil {
 		return nil, "", false, err
 	}
-
-	previousID := info.PreviousBackupID
-	hasMore := previousID != ""
-
-	restoredFiles := []string{}
-
-	// If no parent, restore from current backup (this is the first backup in chain)
-	if previousID == "" {
-		// Find the file in this backup
-		var prevFile *BackupMetadata
-		for i := range info.Files {
-			if info.Files[i].OriginalPath == filePath {
-				prevFile = &info.Files[i]
-				break
-			}
-		}
-		if prevFile == nil {
-			return restoredFiles, "", false, fmt.Errorf("file %s not found in backup %s", filePath, currentBackupID)
-		}
-		// Restore from current backup
-		prevBackupDir := filepath.Join(bm.backupDir, currentBackupID)
-		prevBackupFilePath := filepath.Join(prevBackupDir, prevFile.BackupPath)
-		if err := copyFile(prevBackupFilePath, filePath); err != nil {
-			return restoredFiles, "", false, fmt.Errorf("failed to restore file: %w", err)
-		}
-		restoredFiles = append(restoredFiles, filePath)
-		return restoredFiles, "", false, nil
+	if filePath == "" {
+		return nil, "", false, fmt.Errorf("file path is required for chain undo")
 	}
-
-	// Get previous backup info to find the file
-	prevInfo, err := bm.GetBackupInfo(previousID)
+	// Reuse restore authorization and snapshot hash verification.
+	restoredFiles, _, err := bm.RestoreBackup(currentBackupID, filePath, false)
 	if err != nil {
-		return restoredFiles, "", false, fmt.Errorf("failed to get previous backup info: %w", err)
+		return restoredFiles, "", false, err
 	}
-
-	// Find the file in previous backup
-	var prevFile *BackupMetadata
-	for i := range prevInfo.Files {
-		if prevInfo.Files[i].OriginalPath == filePath {
-			prevFile = &prevInfo.Files[i]
-			break
-		}
-	}
-	if prevFile == nil {
-		return restoredFiles, "", false, fmt.Errorf("file %s not found in previous backup %s", filePath, previousID)
-	}
-
-	// Restore from previous backup
-	prevBackupDir := filepath.Join(bm.backupDir, previousID)
-	prevBackupFilePath := filepath.Join(prevBackupDir, prevFile.BackupPath)
-	if err := copyFile(prevBackupFilePath, filePath); err != nil {
-		return restoredFiles, "", false, fmt.Errorf("failed to restore file: %w", err)
-	}
-	found := false
-	for _, f := range restoredFiles {
-		if f == filePath {
-			found = true
-			break
-		}
-	}
-	if !found {
-		restoredFiles = append(restoredFiles, filePath)
-	}
-
-	return restoredFiles, previousID, hasMore, nil
+	return restoredFiles, info.PreviousBackupID, info.PreviousBackupID != "", nil
 }
 
 // ReadBackupBytes returns the stored bytes for filePath inside backupID.

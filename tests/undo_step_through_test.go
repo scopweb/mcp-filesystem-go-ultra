@@ -139,23 +139,26 @@ func TestUndoChain_RestorePreviousInChain(t *testing.T) {
 		engine.ClearBackupID(testFile)
 	}
 
-	// File should now have original content (from b1) - AAA without AAA1, and BBB without BBB2
-	content3, _ := os.ReadFile(testFile)
-	if strings.Contains(string(content3), "AAA1") {
-		t.Errorf("Expected AAA1 NOT in file after undo, got: %s", content3)
-	}
-	if strings.Contains(string(content3), "BBB2") {
-		t.Errorf("Expected BBB2 NOT in file after undo, got: %s", content3)
-	}
-	// b1 contains original state (before first edit)
-	if !strings.Contains(string(content3), "AAA\nBBB\nCCC") {
-		t.Errorf("Expected original content in file after undo, got: %s", content3)
+	// b2 contains the state before edit 2, so edit 1 must survive this undo.
+	content3, err := os.ReadFile(testFile)
+	if err != nil || string(content3) != "AAA1\nBBB\nCCC\n" {
+		t.Fatalf("first undo: got %q (%v), want state after edit 1", content3, err)
 	}
 
 	// Chain should now point to b1
 	current := engine.GetCurrentBackupID(testFile)
 	if current != b1 {
 		t.Errorf("GetCurrentBackupID: got %q, want %q", current, b1)
+	}
+
+	// The next undo consumes b1 and restores the original bytes exactly.
+	_, prevID, hasMore, err = engine.GetBackupManager().RestorePreviousInChain(b1, testFile)
+	if err != nil || prevID != "" || hasMore {
+		t.Fatalf("last undo: previous=%q hasMore=%v error=%v", prevID, hasMore, err)
+	}
+	content4, err := os.ReadFile(testFile)
+	if err != nil || string(content4) != original {
+		t.Fatalf("last undo: got %q (%v), want %q", content4, err, original)
 	}
 }
 
