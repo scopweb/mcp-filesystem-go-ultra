@@ -27,7 +27,7 @@ func TestSoftDeleteDirectoryRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cacheSystem.Close()
-	engine, err := core.NewUltraFastEngine(&core.Config{
+	engine, err := newManagedEngine(t, &core.Config{
 		Cache:        cacheSystem,
 		ParallelOps:  2,
 		AllowedPaths: []string{allowedDir},
@@ -36,7 +36,7 @@ func TestSoftDeleteDirectoryRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	info, err := engine.SoftDeleteFile(context.Background(), dir)
 	if err != nil {

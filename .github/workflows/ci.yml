@@ -31,16 +31,31 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: Download dependencies
         run: go mod download
+
+      # The matrix test forces the native walker and invokes rg directly,
+      # so a broken accelerated backend cannot pass via silent fallback.
+      - name: Install ripgrep (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Install ripgrep (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ripgrep --no-progress -y
+
+      - name: Search contract (native and ripgrep)
+        env:
+          MCP_REQUIRE_RIPGREP: '1'
+        run: go test ./core ./internal/mcpserver -run 'TestSearchFilterIntersectionBackends|TestRunRipgrepSearch_ExtensionCaseAndExclusions|TestSearchFiles_FilterIntersectionContract|TestSearchFiles_IncludeBraceAlternatives' -count=1 -v
 
       - name: Run go vet
         run: go vet ./...
@@ -100,10 +115,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -116,6 +131,10 @@ jobs:
         shell: bash
         run: bash embed/ripgrep/download.sh
 
+      - name: Embedded ripgrep search contract
+        env:
+          MCP_REQUIRE_RIPGREP: '1'
+        run: go test -tags embed_rg ./core ./internal/mcpserver -run 'TestSearchFilterIntersectionBackends|TestRunRipgrepSearch_ExtensionCaseAndExclusions|TestSearchFiles_FilterIntersectionContract|TestSearchFiles_IncludeBraceAlternatives' -count=1 -v
       - name: Build all binaries (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
@@ -144,7 +163,7 @@ jobs:
           test -f bin/mcp-proxy || exit 1
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: binaries-${{ matrix.os }}
           path: bin/
@@ -159,12 +178,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true

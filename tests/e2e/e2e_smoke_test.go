@@ -15,6 +15,7 @@ package e2e
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -25,9 +26,32 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+// liveTempDir keeps C:\temp coverage isolated across simultaneous test runs.
+func liveTempDir(t *testing.T, root, prefix string) string {
+	t.Helper()
+	dir, err := os.MkdirTemp(root, prefix+"-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("remove live fixture: %v", err)
+		}
+	})
+	return dir
+}
+
 // buildServer compiles the server binary into a temp dir.
 func buildServer(t *testing.T) string {
 	t.Helper()
+	// Release checks can exercise the exact built artifact, including embed_rg.
+	if candidate := os.Getenv("MCP_E2E_BINARY"); candidate != "" {
+		info, err := os.Stat(candidate)
+		if err != nil || info.IsDir() || !filepath.IsAbs(candidate) {
+			t.Fatalf("MCP_E2E_BINARY must be an existing absolute executable path: %q (%v)", candidate, err)
+		}
+		return candidate
+	}
 	exe := filepath.Join(t.TempDir(), "fsu-e2e")
 	if runtime.GOOS == "windows" {
 		exe += ".exe"

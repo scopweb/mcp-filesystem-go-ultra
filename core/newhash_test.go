@@ -17,6 +17,7 @@ func TestEditFile_SetsNewHash(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := newTestEngine(dir)
+	t.Cleanup(func() { _ = engine.Close() })
 
 	res, err := engine.EditFile(context.Background(), path, "beta", "BETA", true, false, false)
 	if err != nil {
@@ -38,6 +39,7 @@ func TestDeleteLineRange_SetsNewHash(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := newTestEngine(dir)
+	t.Cleanup(func() { _ = engine.Close() })
 
 	_, res, err := engine.DeleteLineRange(context.Background(), path, 2, 3, false)
 	if err != nil {

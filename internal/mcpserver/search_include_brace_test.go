@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,7 +102,7 @@ func TestSearchFiles_IncludeBraceAlternatives(t *testing.T) {
 		t.Fatalf("valid include with no hits must not error: %s", resultText(t, empty))
 	}
 	emptyText := resultText(t, empty)
-	if strings.Contains(emptyText, "INVALID_PARAMS") || strings.Contains(emptyText, "A.cs") {
+	if strings.Contains(emptyText, errCodeInvalidParams) || strings.Contains(emptyText, "A.cs") {
 		t.Fatalf("valid empty include should be an empty search, got:\n%s", emptyText)
 	}
 
@@ -112,8 +113,12 @@ func TestSearchFiles_IncludeBraceAlternatives(t *testing.T) {
 		t.Fatalf("unbalanced braces should error, got:\n%s", resultText(t, bad))
 	}
 	badText := resultText(t, bad)
-	if !strings.Contains(badText, "INVALID_PARAMS") || !strings.Contains(badText, "unbalanced") {
-		t.Fatalf("invalid braces should be INVALID_PARAMS, got:\n%s", badText)
+	var envelope pathErrorEnvelope
+	if err := json.Unmarshal([]byte(badText), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error.Code != errCodeInvalidParams || envelope.Error.Retryable || envelope.Error.Details["field"] != "include" || !strings.Contains(envelope.Error.Message, "unbalanced") {
+		t.Fatalf("invalid braces must use the VALIDATION envelope, got:\n%s", badText)
 	}
 	if strings.Contains(badText, "0 coincidencias") {
 		t.Fatalf("invalid braces must not look like an empty search, got:\n%s", badText)

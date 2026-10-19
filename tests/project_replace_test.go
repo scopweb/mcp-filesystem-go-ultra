@@ -12,7 +12,7 @@ import (
 func TestProjectReplace_Basic(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := createTestEngineWithPath(t, tmpDir)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	// Create test files
 	testFiles := []string{
@@ -60,7 +60,7 @@ func TestProjectReplace_Basic(t *testing.T) {
 func TestProjectReplace_DryRun(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := createTestEngineWithPath(t, tmpDir)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	testFile := filepath.Join(tmpDir, "test.php")
 	originalContent := "<?php utf8_encode($x); utf8_encode($y); ?>"
@@ -91,7 +91,7 @@ func TestProjectReplace_DryRun(t *testing.T) {
 func TestProjectReplace_FileTypeFilter(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := createTestEngineWithPath(t, tmpDir)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	// Create .php and .txt files
 	phpFile := filepath.Join(tmpDir, "test.php")
@@ -129,7 +129,7 @@ func TestProjectReplace_FileTypeFilter(t *testing.T) {
 func TestProjectReplace_ExcludePaths(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := createTestEngineWithPath(t, tmpDir)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	// Create files in main dir and subdir
 	mainFile := filepath.Join(tmpDir, "main.php")
@@ -169,7 +169,7 @@ func TestProjectReplace_ExcludePaths(t *testing.T) {
 func TestProjectReplace_Regex(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := createTestEngineWithPath(t, tmpDir)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	testFile := filepath.Join(tmpDir, "test.php")
 	if err := os.WriteFile(testFile, []byte("item_1 item_2 item_3"), 0644); err != nil {
@@ -196,7 +196,7 @@ func TestProjectReplace_Regex(t *testing.T) {
 func TestProjectReplace_CaseInsensitive(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := createTestEngineWithPath(t, tmpDir)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	testFile := filepath.Join(tmpDir, "test.php")
 	if err := os.WriteFile(testFile, []byte("UTF8_ENCODE Utf8_Encode utf8_encode"), 0644); err != nil {
@@ -222,7 +222,7 @@ func TestProjectReplace_CaseInsensitive(t *testing.T) {
 func TestProjectReplace_MaxFilesCap(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := createTestEngineWithPath(t, tmpDir)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	// Create 20 files
 	for i := 0; i < 20; i++ {
@@ -247,7 +247,7 @@ func TestProjectReplace_MaxFilesCap(t *testing.T) {
 func TestProjectReplace_NoMatches(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := createTestEngineWithPath(t, tmpDir)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	testFile := filepath.Join(tmpDir, "test.php")
 	if err := os.WriteFile(testFile, []byte("something else"), 0644); err != nil {
@@ -271,7 +271,7 @@ func TestProjectReplace_NoMatches(t *testing.T) {
 func TestProjectReplace_BackupCreation(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := createTestEngineWithPath(t, tmpDir)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	testFile := filepath.Join(tmpDir, "test.php")
 	originalContent := "<?php utf8_encode(); ?>"
@@ -302,7 +302,7 @@ func TestProjectReplace_BackupCreation(t *testing.T) {
 func TestProjectReplace_EmptyDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := createTestEngineWithPath(t, tmpDir)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	// Create empty directory
 	emptyDir := filepath.Join(tmpDir, "empty")
@@ -329,7 +329,7 @@ func TestProjectReplace_EmptyDirectory(t *testing.T) {
 func TestProjectReplace_BackupRestoresOriginalContent(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := createTestEngineWithPath(t, tmpDir)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	testFiles := []string{
 		filepath.Join(tmpDir, "a.go"),
@@ -393,7 +393,7 @@ func TestProjectReplace_BackupRestoresOriginalContent(t *testing.T) {
 func TestProjectReplace_BackupRegistersUndoChain(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := createTestEngineWithPath(t, tmpDir)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	testFile := filepath.Join(tmpDir, "chain.go")
 	original := "package x\n\nfunc Alpha() {}\n"

@@ -28,7 +28,7 @@ func TestDeleteAllowedPathRootBlocked(t *testing.T) {
 	}
 	defer cacheSystem.Close()
 
-	engine, err := core.NewUltraFastEngine(&core.Config{
+	engine, err := newManagedEngine(t, &core.Config{
 		Cache:        cacheSystem,
 		ParallelOps:  2,
 		AllowedPaths: []string{allowedDir},
@@ -36,7 +36,7 @@ func TestDeleteAllowedPathRootBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	ctx := context.Background()
 
@@ -95,7 +95,7 @@ func TestDeleteAllowedPathRootVariations(t *testing.T) {
 	}
 	defer cacheSystem.Close()
 
-	engine, err := core.NewUltraFastEngine(&core.Config{
+	engine, err := newManagedEngine(t, &core.Config{
 		Cache:        cacheSystem,
 		ParallelOps:  2,
 		AllowedPaths: []string{allowedDir},
@@ -103,7 +103,7 @@ func TestDeleteAllowedPathRootVariations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	ctx := context.Background()
 
@@ -145,7 +145,7 @@ func TestSoftDeleteFallsBackWhenNoBackupDir(t *testing.T) {
 	}
 	defer cacheSystem.Close()
 
-	engine, err := core.NewUltraFastEngine(&core.Config{
+	engine, err := newManagedEngine(t, &core.Config{
 		Cache:        cacheSystem,
 		ParallelOps:  2,
 		AllowedPaths: []string{allowedDir},
@@ -154,7 +154,7 @@ func TestSoftDeleteFallsBackWhenNoBackupDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	ctx := context.Background()
 	info, err := engine.SoftDeleteFile(ctx, srcFile)

@@ -23,7 +23,7 @@ func createMinifiedSearchTestEngine(t *testing.T) (*core.UltraFastEngine, string
 		t.Fatalf("Failed to create cache: %v", err)
 	}
 
-	engine, err := core.NewUltraFastEngine(&core.Config{
+	engine, err := newManagedEngine(t, &core.Config{
 		Cache:        cacheInstance,
 		AllowedPaths: []string{tempDir},
 		ParallelOps:  2,

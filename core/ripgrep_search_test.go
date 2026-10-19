@@ -169,7 +169,7 @@ func TestRunRipgrepSearch_ArgvConstruction(t *testing.T) {
 			patIdx = i
 		case "--":
 			dashIdx = i
-		case dir:
+		case ".":
 			pathIdx = i
 		}
 	}

@@ -27,7 +27,7 @@ func setupTestEngine(t *testing.T) *core.UltraFastEngine {
 		ParallelOps:  2,
 	}
 
-	engine, err := core.NewUltraFastEngine(config)
+	engine, err := newManagedEngine(t, config)
 	if err != nil {
 		t.Fatalf("Failed to create test engine: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestMCPToolParameterParsing(t *testing.T) {
 // TestWrapperMethodsCallable tests that all wrapper methods are callable
 func TestWrapperMethodsCallable(t *testing.T) {
 	engine := setupTestEngine(t)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	ctx := context.Background()
 	tempDir := t.TempDir()
@@ -227,7 +227,7 @@ func WriteFile() {
 		DebugMode:   false,
 	}
 
-	engine, err := core.NewUltraFastEngine(cfg)
+	engine, err := newManagedEngine(t, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create engine: %v", err)
 	}
@@ -297,7 +297,7 @@ func LargeChange() {
 		DebugMode:   false,
 	}
 
-	engine, err := core.NewUltraFastEngine(cfg)
+	engine, err := newManagedEngine(t, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create engine: %v", err)
 	}
@@ -359,7 +359,7 @@ func BenchmarkTelemetryLogging(b *testing.B) {
 		DebugMode:   false,
 	}
 
-	engine, _ := core.NewUltraFastEngine(cfg)
+	engine, _ := newManagedEngine(b, cfg)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -384,7 +384,7 @@ func createSearchTestEngine(t *testing.T) *core.UltraFastEngine {
 		MaxSearchResults: 100,
 	}
 
-	engine, err := core.NewUltraFastEngine(cfg)
+	engine, err := newManagedEngine(t, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create engine: %v", err)
 	}
@@ -651,7 +651,7 @@ func TestAdvancedTextSearchCompactModeContext(t *testing.T) {
 		CompactMode:      true,
 		MaxSearchResults: 100,
 	}
-	engine, err := core.NewUltraFastEngine(cfg)
+	engine, err := newManagedEngine(t, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create engine: %v", err)
 	}
@@ -722,7 +722,7 @@ func TestWriteBase64(t *testing.T) {
 		ParallelOps:  2,
 	}
 
-	engine, err := core.NewUltraFastEngine(cfg)
+	engine, err := newManagedEngine(t, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create engine: %v", err)
 	}
@@ -826,7 +826,7 @@ func TestReadBase64(t *testing.T) {
 		ParallelOps:  2,
 	}
 
-	engine, err := core.NewUltraFastEngine(cfg)
+	engine, err := newManagedEngine(t, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create engine: %v", err)
 	}
@@ -912,7 +912,7 @@ func TestBase64RoundTrip(t *testing.T) {
 		ParallelOps:  2,
 	}
 
-	engine, err := core.NewUltraFastEngine(cfg)
+	engine, err := newManagedEngine(t, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create engine: %v", err)
 	}

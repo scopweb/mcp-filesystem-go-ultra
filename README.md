@@ -6,7 +6,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server wr
 
 Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are disabled. Default `--profile=ultra` registers all 30 tools; `--profile=agent` is the 17-tool core plus `git`; `--profile=strict` registers the 17-tool core (includes `backup` for undo and `security_policy`; no `analyze_code`, no `git`, no `context_pack`, no `github_issues`, no `gitlab_issues`).
 
-Transport is **stdio only**. Spec 2026-07-28 (Tasks, stateless Streamable HTTP) is out of scope.
+Transport is **stdio only**, using the MCP **2025-11-25** lifecycle (`initialize`, with optional client Roots). Protocol revision **2026-07-28 is not yet qualified for this application**. The SDK has modern protocol primitives, but upgrading it alone does not establish application compatibility. CLI allowlists (`--allowed-paths` or positional directories) remain the recommended deployment configuration and work without client Roots. Dual-era stdio support requires separate lifecycle, error-code and message-limit tests before it can be advertised; HTTP transport is a separate concern.
 
 ## Compared with the reference server
 
@@ -14,8 +14,8 @@ Against [`@modelcontextprotocol/server-filesystem`](https://github.com/modelcont
 
 | | Reference server | filesystem-ultra |
 |---|---|---|
-| Windows roots | Client roots **replace** the CLI list. `file:///c%3A/temp` is skipped as invalid (issue 3174, open). | `file:///c%3A/temp` becomes `c:\temp`. `file://server/share/dir` becomes `\\server\share\dir`. `--roots-mode=union` keeps the CLI list and adds client roots. Reserved device names (`CON`, `NUL`, …) and NTFS ADS (`file.txt:stream`) are rejected. 8.3 short names are not rewritten. |
-| Search | `search_files` is a glob on **names**, not file contents. | Names by default. Content with `include_content:true`. |
+| Windows roots | Client roots **replace** the CLI list. `file:///c%3A/temp` is skipped as invalid (issue 3174, open). | `file:///c%3A/temp` becomes `c:\temp`. `file://server/share/dir` becomes `\\server\share\dir`. `--roots-mode=union` keeps the CLI list and adds client roots. Reserved device names (`CON`, `NUL`, …) and NTFS ADS (`file.txt:stream`) are rejected. 8.3 short names are canonicalized before selecting the `os.Root` base. |
+| Search | `search_files` is a glob on **names**, not file contents. | Names by default. Content with `include_content:true`. `include` and `file_types` intersect in all modes before pagination; invalid globs return `VALIDATION`. |
 | Undo | No backup or undo tool. | `backup(action:"undo_last")` walks the chain. |
 | Dry-run / diff | `edit_file` has `dryRun` and returns a diff. | `dry_run` on edit and patch. Also `diff_files` and `apply_patch`. |
 

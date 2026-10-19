@@ -25,7 +25,7 @@ func setupCompareEngine(t *testing.T) (*core.UltraFastEngine, string) {
 		ParallelOps:  2,
 	}
 
-	engine, err := core.NewUltraFastEngine(config)
+	engine, err := newManagedEngine(t, config)
 	if err != nil {
 		t.Fatalf("Failed to create test engine: %v", err)
 	}

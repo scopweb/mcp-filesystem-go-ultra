@@ -18,10 +18,7 @@ func TestE2E_E6_CTemp(t *testing.T) {
 	if st, err := os.Stat(root); err != nil || !st.IsDir() {
 		t.Skip("C:\\temp not present")
 	}
-	workDir := filepath.Join(root, "fsu-e6-live")
-	if err := os.MkdirAll(workDir, 0755); err != nil {
-		t.Fatal(err)
-	}
+	workDir := liveTempDir(t, root, "fsu-e6-live")
 	runLiveE6(t, workDir)
 }
 

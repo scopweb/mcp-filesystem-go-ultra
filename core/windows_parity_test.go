@@ -106,7 +106,8 @@ func TestRealpathENOENT_DoesNotDenyOrPanic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Clean(resolved) != filepath.Clean(missing) && !strings.EqualFold(filepath.Clean(resolved), filepath.Clean(missing)) {
+	expected := CanonicalPath(missing)
+	if !strings.EqualFold(filepath.Clean(resolved), filepath.Clean(expected)) {
 		t.Fatalf("resolved %q", resolved)
 	}
 }

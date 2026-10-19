@@ -4,12 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 )
-
-var searchCountRe = regexp.MustCompile(`(?i)(\d+)\s+matches?`)
 
 // SearchOutcome is the typed search result. Handlers must publish
 // structuredContent from these fields — never by scraping Text.
@@ -46,15 +43,11 @@ func (e *UltraFastEngine) SearchFiles(ctx context.Context, opts SearchOptions) (
 }
 
 func (e *UltraFastEngine) searchCountOutcome(ctx context.Context, opts SearchOptions) (SearchOutcome, error) {
-	text, err := e.CountOccurrencesOpts(ctx, opts)
+	text, n, err := e.countOccurrencesOpts(ctx, opts)
 	if err != nil {
 		return SearchOutcome{}, err
 	}
-	n := 0
-	if m := searchCountRe.FindStringSubmatch(text); m != nil {
-		fmt.Sscanf(m[1], "%d", &n)
-	}
-	return SearchOutcome{Text: text, MatchCount: n, Matches: []SearchMatch{}}, nil
+	return SearchOutcome{Text: text, MatchCount: n, Matches: []SearchMatch{}, ExactTotal: true}, nil
 }
 
 func (e *UltraFastEngine) filenameSearchOutcome(ctx context.Context, opts SearchOptions) (SearchOutcome, error) {
@@ -86,7 +79,7 @@ func (e *UltraFastEngine) filenameSearchOutcome(ctx context.Context, opts Search
 	if _, err := e.hookManager.ExecuteHooks(ctx, HookPreSearch, hookCtx); err != nil {
 		return SearchOutcome{Text: fmt.Sprintf("❌ Error: pre-search hook denied: %v", err), FilenameOnly: true}, nil
 	}
-	out, err := e.performSmartSearchOutcome(ctx, validPath, pattern, false, opts.FileTypes, opts.NoIgnore, opts.MaxResults, opts.Offset)
+	out, err := e.performSmartSearchOutcome(ctx, validPath, pattern, false, opts.FileTypes, opts.NoIgnore, opts.MaxResults, opts.Offset, opts.Include)
 	if err != nil {
 		return SearchOutcome{Text: fmt.Sprintf("❌ Error: Search error: %v", err), FilenameOnly: true}, nil
 	}
@@ -137,7 +130,7 @@ func (e *UltraFastEngine) advancedSearchOutcomeFromOpts(ctx context.Context, opt
 		return SearchOutcome{Text: fmt.Sprintf("❌ Error: pre-search hook denied: %v", err)}, nil
 	}
 
-	matches, hidden, err := e.performAdvancedTextSearch(ctx, validPath, pattern, opts.CaseSensitive, opts.WholeWord, opts.IncludeContext, contextLines, outputFormat, opts.NoIgnore, opts.FileTypes)
+	matches, hidden, err := e.performAdvancedTextSearch(ctx, validPath, pattern, opts.CaseSensitive, opts.WholeWord, opts.IncludeContext, contextLines, outputFormat, opts.NoIgnore, opts.FileTypes, opts.Include)
 	if err != nil {
 		return SearchOutcome{Text: fmt.Sprintf("❌ Error: %v", err)}, nil
 	}

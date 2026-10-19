@@ -195,7 +195,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal pattern")),
 		mcp.WithBoolean("include_content", mcp.Description("Include file content search (default: false)")),
 		mcp.WithString("file_types", mcp.Description("Comma-separated file extensions (e.g., '.go,.txt')")),
-		mcp.WithString("include", mcp.Description("Glob filter. Comma-separated globs (*.go, *.ts) or brace alternatives ({A.cs,B.cs}, {Test,ObservacionesPedido}/*.razor, *.{go,razor}). Commas inside {} are alternatives, not separators. * does not cross /. ** matches any depth. A pattern with / is relative to path. Unbalanced braces, empty alternatives, and more than 64 expansions are INVALID_PARAMS, not an empty search. file_types does not expand braces.")),
+		mcp.WithString("include", mcp.Description("Glob filter. Comma-separated globs (*.go, *.ts) or brace alternatives ({A.cs,B.cs}, {Test,ObservacionesPedido}/*.razor, *.{go,razor}). Commas inside {} are alternatives, not separators. * does not cross /. ** matches any depth. A pattern with / is relative to path. Invalid globs, unbalanced braces, empty alternatives, and more than 64 expansions return VALIDATION (retryable:false), not an empty search. file_types does not expand braces. When both filters are set, their intersection is used in all search modes.")),
 		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive search (default: true)")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false)")),
 		mcp.WithBoolean("include_context", mcp.Description("Include context lines (default: false)")),
@@ -229,7 +229,8 @@ func registerSearchTools(reg *toolRegistry) {
 		wholeWord := false
 		includeContext := false
 		contextLines := 3
-		fileTypes := []interface{}{}
+		var fileTypes []string
+		var include []string
 		returnLines := false
 		outputFormat := ""     // empty → engine defaults to "auto"; explicit "text" preserves legacy verbose/compact
 		contentIntent := false // content-only params passed → content search implied
@@ -259,18 +260,14 @@ func registerSearchTools(reg *toolRegistry) {
 				contextLines = int(cl)
 			}
 			if ft, ok := args["file_types"].(string); ok && ft != "" {
-				parts := strings.Split(ft, ",")
-				for _, part := range parts {
-					fileTypes = append(fileTypes, strings.TrimSpace(part))
-				}
-			} else if inc, ok := args["include"].(string); ok && inc != "" {
+				fileTypes = core.ParseFileTypeFilters(ft)
+			}
+			if inc, ok := args["include"].(string); ok && inc != "" {
 				expanded, expErr := core.ExpandIncludeFilter(inc)
 				if expErr != nil {
 					return validationResult(expErr.Error(), "include", "comma-separated globs; {a,b} alternatives; commas inside braces are not separators"), nil
 				}
-				for _, part := range expanded {
-					fileTypes = append(fileTypes, part)
-				}
+				include = expanded
 			}
 			if rl, ok := args["return_lines"].(string); ok {
 				returnLines = (rl == "true" || rl == "True" || rl == "TRUE")
@@ -327,7 +324,7 @@ func registerSearchTools(reg *toolRegistry) {
 		}
 		scope := map[string]any{"path": path, "pattern": pattern, "include_content": includeContent, "count_only": countOnly, "offset": offset, "max_results": maxResults, "searched": searched}
 		out, err := engine.SearchFiles(ctx, core.SearchOptions{
-			Path: path, Pattern: pattern, FileTypes: core.FileTypeFiltersFromArg(fileTypes),
+			Path: path, Pattern: pattern, FileTypes: fileTypes, Include: include,
 			CaseSensitive: caseSensitive, WholeWord: wholeWord, IncludeContent: includeContent,
 			IncludeContext: includeContext, ContextLines: contextLines, CountOnly: countOnly,
 			ReturnLines: returnLines, NoIgnore: noIgnore, MaxResults: maxResults, Offset: offset, OutputFormat: outputFormat,
@@ -347,7 +344,7 @@ func registerSearchTools(reg *toolRegistry) {
 				out.TruncReason = "byte_budget"
 			}
 		}
-		if !includeContent && !countOnly && len(out.Text) > 8000 && len(fileTypes) == 0 {
+		if !includeContent && !countOnly && len(out.Text) > 8000 && len(fileTypes) == 0 && len(include) == 0 {
 			out.Text += "\n\n💡 hint: this search returned many matches across many files. Next time, pass `file_types` (e.g. \".razor,.cs\") or `include` to skip unrelated trees and keep latency under 1s."
 		}
 		sc := searchStructuredFromOutcome(out, scope, extraTrunc)

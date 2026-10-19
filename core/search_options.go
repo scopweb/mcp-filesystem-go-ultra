@@ -15,6 +15,7 @@ type SearchOptions struct {
 	Path           string
 	Pattern        string
 	FileTypes      []string
+	Include        []string
 	CaseSensitive  bool
 	WholeWord      bool
 	IncludeContent bool
@@ -84,6 +85,13 @@ func ExpandIncludeFilter(raw string) ([]string, error) {
 		expanded, err := expandBraceToken(p, 0)
 		if err != nil {
 			return nil, err
+		}
+		for i, glob := range expanded {
+			glob = strings.ReplaceAll(glob, `\`, "/")
+			if _, err := path.Match(glob, ""); err != nil {
+				return nil, fmt.Errorf("invalid include glob %q: %w", glob, err)
+			}
+			expanded[i] = glob
 		}
 		out = append(out, expanded...)
 		if len(out) > maxIncludeExpansions {
@@ -260,6 +268,20 @@ func FileTypeFiltersFromArg(v interface{}) []string {
 // when no search root is known.
 func FileMatchesTypeFilter(path string, fileTypes []string) bool {
 	return FileMatchesTypeFilterIn(path, "", fileTypes)
+}
+
+// fileMatchesSearchFilters intersects independent groups; alternatives within
+// each group remain a union. Filtering always happens before pagination.
+func fileMatchesSearchFilters(path, root string, fileTypes []string, includeGroups ...[]string) bool {
+	if !FileMatchesTypeFilterIn(path, root, fileTypes) {
+		return false
+	}
+	for _, group := range includeGroups {
+		if !FileMatchesTypeFilterIn(path, root, group) {
+			return false
+		}
+	}
+	return true
 }
 
 // FileMatchesTypeFilterIn is FileMatchesTypeFilter with the search root.

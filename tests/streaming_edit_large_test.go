@@ -22,7 +22,7 @@ func TestStreamingEditLargeFile_Regression(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cache: %v", err)
 	}
-	engine, err := core.NewUltraFastEngine(&core.Config{
+	engine, err := newManagedEngine(t, &core.Config{
 		Cache:        cacheInstance,
 		AllowedPaths: []string{dir},
 		ParallelOps:  2,

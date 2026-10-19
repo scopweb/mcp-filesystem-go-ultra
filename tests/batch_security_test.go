@@ -34,7 +34,7 @@ func TestBatchOperationsPathValidation(t *testing.T) {
 		AllowedPaths: []string{allowedDir},
 		ParallelOps:  2,
 	}
-	engine, err := core.NewUltraFastEngine(config)
+	engine, err := newManagedEngine(t, config)
 	if err != nil {
 		t.Fatalf("Failed to create engine: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestBatchPathValidationJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create cache: %v", err)
 	}
-	engine, err := core.NewUltraFastEngine(&core.Config{
+	engine, err := newManagedEngine(t, &core.Config{
 		Cache:        cacheInstance,
 		AllowedPaths: []string{allowedDir},
 		ParallelOps:  2,
@@ -267,7 +267,7 @@ func TestBatchOperationsRespectHooks(t *testing.T) {
 		ParallelOps:  2,
 	}
 
-	engine, err := core.NewUltraFastEngine(config)
+	engine, err := newManagedEngine(t, config)
 	if err != nil {
 		t.Fatalf("Failed to create engine: %v", err)
 	}

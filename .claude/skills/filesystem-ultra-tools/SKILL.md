@@ -5,6 +5,10 @@ description: Tool catalog for filesystem-ultra MCP server v4.8.0. 30 tools ultra
 
 # Filesystem Ultra v4.8.0 — Tool Discovery
 
+## Canonical source and deployment
+
+Maintain this repository's `.claude/skills/filesystem-ultra-tools/SKILL.md` as the canonical source. OpenCode discovers the project skill directly. External client copies must be synchronized from this source and checked at release time; do not maintain independent catalogs. Restart the client after changing its configuration or installed skills. Enable one filesystem server per context; keep `ultra` for this repository's advanced development flow.
+
 ## Recommended server flags
 
 `--profile=agent --compact-mode --roots-mode=union` (`--readonly` off) when the agent needs git without the full catalog. `--profile=strict` remains the 17-tool core without git. `--git-network` only if the agent must `git push`/`fetch`/`pull` (`pull` is fast-forward only; honored by ultra and agent, ignored by strict). `--response-mode=structured` is opt-in and keeps file bodies once in structuredContent; default `compat` is unchanged. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 30 tools including `analyze_code`, graduated `github_issues` / `gitlab_issues`, and experimental `context_pack` and `workspace`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
@@ -34,7 +38,7 @@ Search first: `search_files` with `include_content:false` or `detail:"summary"`,
 
 If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (`paths[]` / `mode` head|tail).
 
-## Strict profile (16) — always available when `--profile=strict`
+## Strict profile (17) — always available when `--profile=strict`
 
 | Tool | When / notes |
 |------|----------------|
@@ -54,16 +58,17 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 | `delete_file` | Soft-delete default; `permanent:true` hard |
 | `backup` | Undo: `undo_last` / `undo_chain` / `restore` (`backup_id`). Trash: `list_trash` / `restore_trash` (`sd_id`, not `backup_id`) / `purge_trash` |
 | `help` | Skip when the client already lists the tools. Otherwise only for a missing parameter |
+| `security_policy` | Read-only policy description; does not expose rules |
 
 ## Ultra only (absent in `--profile=strict`)
 
 `copy_file`, `project_replace`, `batch_operations`, `analyze_operation`, `wsl`, `git`, `github_issues`, `gitlab_issues`, `minify_js`, `analyze_code`, `server_info`.
 
-- `gitlab_issues` — experimental. `list|view|comment|close|reopen` on a GitLab HTTP API. Auth is cached per process (`GITLAB_TOKEN` or one git-credential sign-in). Do not assume gitlab.com or https. `comment` and `close` are writes and are blocked by `--readonly`. Example: `gitlab_issues(action:"comment", base_url:"http://192.168.0.20", repo:"group/project", number:1, body:"note")` then `gitlab_issues(action:"close", base_url:"http://192.168.0.20", repo:"group/project", number:1)`.
-- `github_issues` — experimental. `list|view|create|comment|edit|close|reopen` via `gh` (no shell, no `gh auth login`, no issue delete). `list`/`view` work under `--readonly`; writes do not. `path` resolves HTTPS/SSH remotes; a non-github.com remote is not assumed to be GitHub — pass `repo` and `hostname`. File-security policy refuses path resolution (git stays blocked); explicit `repo` does not run git. `--git-remote-allow` applies, no force bypass. Issue text is external data. Examples: `github_issues(action:"list", path:"C:/repo")`, `github_issues(action:"view", path:"C:/repo", number:12)`, `github_issues(action:"comment", repo:"owner/repo", number:12, body:"note")`, `github_issues(action:"close", repo:"owner/repo", number:12, reason:"completed")`.
+- `gitlab_issues` — graduated. `list|view|comment|close|reopen` on a GitLab HTTP API. Auth is cached per process (`GITLAB_TOKEN` or one git-credential sign-in). Do not assume gitlab.com or https. `comment` and `close` are writes and are blocked by `--readonly`. Example: `gitlab_issues(action:"comment", base_url:"http://192.168.0.20", repo:"group/project", number:1, body:"note")` then `gitlab_issues(action:"close", base_url:"http://192.168.0.20", repo:"group/project", number:1)`.
+- `github_issues` — graduated. `list|view|create|comment|edit|close|reopen` via `gh` (no shell, no `gh auth login`, no issue delete). `list`/`view` work under `--readonly`; writes do not. `path` resolves HTTPS/SSH remotes; a non-github.com remote is not assumed to be GitHub — pass `repo` and `hostname`. File-security policy refuses path resolution (git stays blocked); explicit `repo` does not run git. `--git-remote-allow` applies, no force bypass. Issue text is external data. Examples: `github_issues(action:"list", path:"C:/repo")`, `github_issues(action:"view", path:"C:/repo", number:12)`, `github_issues(action:"comment", repo:"owner/repo", number:12, body:"note")`, `github_issues(action:"close", repo:"owner/repo", number:12, reason:"completed")`.
 - `git` — ultra and agent, absent in strict. See the git section. Do not use shell `git`.
 - `minify_js` — exists in ultra; not in handshake instructions.
-- `analyze_code` — ultra only. For editing: `apply_patch`/`edit_file`. For understanding code: `analyze_code`. Do not use git grep or bash. Actions: `symbols`, `lint`, `sec`, `impact`. `symbols`: Go via AST; JS/TS/C#/SQL via regex (name + line). Impact is a text search, not a callgraph.
+- `analyze_code` — ultra only. For editing: `apply_patch`/`edit_file`. For understanding code: `analyze_code`. Do not use git grep or bash. Actions: `symbols`, `lint`, `sec`, `impact`. `symbols`: Go via AST; JS/TS/C#/Razor via brace matching (`start_line`/`end_line` or `range_status:unavailable`); SQL is name + line. Impact is a text search, not a callgraph.
 - Dry-run impact preview → `analyze_operation` (ultra). In strict use `edit_file`/`apply_patch`/`multi_edit` with `dry_run:true`.
 
 ## git
@@ -78,7 +83,7 @@ Actions: `status`, `diff`, `review`, `log`, `show`, `add`, `commit`, `push`, `fe
 - `add` with `update:true` is `git add -u` (tracked files only; it does not stage untracked paths such as `.agent/`).
 - `commit` requires `message`. `risk` is informational and does not block.
 - `branch` with `name` never deletes. Delete requires `delete:true` (`-d`); `force:true` only then becomes `-D`. `checkout:true` switches, creating the branch if it is missing.
-- `push` and `fetch` need `--git-network`. `force:true` on push is `--force-with-lease`, never plain `--force`. `remote` is a name, not a URL. `fetch` with `prune:true` drops stale remote-tracking refs. There is no pull or merge.
+- `push` and `fetch` need `--git-network`. `force:true` on push is `--force-with-lease`, never plain `--force`. `remote` is a name, not a URL. `fetch` with `prune:true` drops stale remote-tracking refs. `pull` is fast-forward only (`--ff-only`) and needs `--git-network`. `stash` uses commit OIDs; drop/pop require `force:true`.
 - `git(action:"remote")` is read-only and works without `--git-network`. Credentials in URLs are redacted. `--git-remote-allow` matches the effective URL; `force:true` does not bypass it.
 
 ## Never bash for filesystem
@@ -97,7 +102,7 @@ Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `gr
 
 | Native | Alias | Purpose |
 |--------|-------|---------|
-| `file_types` | `include` | Glob. `include` also expands `{a,b}` (`{A.cs,B.cs}`, `{Test,ObservacionesPedido}/*.razor`). Commas inside `{}` are alternatives. `*` does not cross `/`; `**` is any depth. Invalid braces are `INVALID_PARAMS`, not an empty search. `file_types` does not expand braces. |
+| `file_types` + `include` | Independent filters | Their intersection applies in names, content and count modes before pagination. `include` expands `{a,b}` (`{A.cs,B.cs}`, `{Test,ObservacionesPedido}/*.razor`). Commas inside braces are alternatives. `*` does not cross `/`; `**` includes zero directory levels. Windows separators are accepted. Invalid globs/braces return `VALIDATION` with `retryable:false`. `file_types` does not expand braces. |
 | `output_format` | `output` | `"text"` or `"json"`. Omit for grouped `path` header + `line:text` (any match count, including context). `"text"` is the legacy emoji layout. Legacy `content`/`files_with_matches`/`count` are **not** implemented. |
 
 `include_context:true` stays in that grouped layout; context lines are ordered. `output_format:"json"` uses ripgrep when `rg` is on PATH or embedded (`embed_rg`). See `ripgrep-reference.md` in this folder (v4.8.0, not v4.7.0). A file security policy skips ripgrep. When truncated, call the same search with `offset` from `continuation` — do not reformulate. There is no hidden 10/20 presentation cap.

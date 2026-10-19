@@ -28,7 +28,7 @@ func TestBackupRestoreTrash(t *testing.T) {
 	}
 	defer cacheSystem.Close()
 
-	engine, err := core.NewUltraFastEngine(&core.Config{
+	engine, err := newManagedEngine(t, &core.Config{
 		Cache:        cacheSystem,
 		ParallelOps:  2,
 		AllowedPaths: []string{allowedDir},
@@ -37,7 +37,7 @@ func TestBackupRestoreTrash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	ctx := context.Background()
 	info, err := engine.SoftDeleteFile(ctx, srcFile)
@@ -87,7 +87,7 @@ func TestRestoreTrashRejectsPathTraversal(t *testing.T) {
 	}
 	defer cacheSystem.Close()
 
-	engine, err := core.NewUltraFastEngine(&core.Config{
+	engine, err := newManagedEngine(t, &core.Config{
 		Cache:        cacheSystem,
 		ParallelOps:  2,
 		AllowedPaths: []string{t.TempDir()},
@@ -96,7 +96,7 @@ func TestRestoreTrashRejectsPathTraversal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	maliciousIDs := []string{
 		"../../etc/passwd",
@@ -136,7 +136,7 @@ func TestRestoreTrashRefusesIfOriginalPathExists(t *testing.T) {
 	}
 	defer cacheSystem.Close()
 
-	engine, err := core.NewUltraFastEngine(&core.Config{
+	engine, err := newManagedEngine(t, &core.Config{
 		Cache:        cacheSystem,
 		ParallelOps:  2,
 		AllowedPaths: []string{allowedDir},
@@ -145,7 +145,7 @@ func TestRestoreTrashRefusesIfOriginalPathExists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	ctx := context.Background()
 	info, err := engine.SoftDeleteFile(ctx, srcFile)

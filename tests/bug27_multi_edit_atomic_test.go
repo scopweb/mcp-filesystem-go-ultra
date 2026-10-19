@@ -17,7 +17,7 @@ import (
 func TestBug27_MultiEditAtomicRollback(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := createTestEngineWithPath(t, tmpDir)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	// Create a test file with known content
 	testFile := filepath.Join(tmpDir, "atomic_test.go")
@@ -94,7 +94,7 @@ func main() {
 func TestBug27_MultiEditAllSucceed(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := createTestEngineWithPath(t, tmpDir)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	testFile := filepath.Join(tmpDir, "success_test.go")
 	originalContent := `package main
@@ -151,7 +151,7 @@ func goodbye() {
 func TestBug27_MultiEditQuoteMismatch(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := createTestEngineWithPath(t, tmpDir)
-	defer engine.Close()
+	// Engine lifecycle is owned by newManagedEngine's test cleanup.
 
 	testFile := filepath.Join(tmpDir, "quotes_test.html")
 	originalContent := `<script>

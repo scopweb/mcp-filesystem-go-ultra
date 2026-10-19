@@ -502,7 +502,7 @@ func formatSearchGrouped(matches []SearchMatch, includeContext bool, contextLine
 }
 
 // performSmartSearch
-func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, pattern string, includeContent bool, fileTypes []string, noIgnore bool, maxResults int, offset int) (SearchOutcome, error) {
+func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, pattern string, includeContent bool, fileTypes []string, noIgnore bool, maxResults int, offset int, includeGroups ...[]string) (SearchOutcome, error) {
 	// Check context before starting
 	if err := ctx.Err(); err != nil {
 		return SearchOutcome{}, &ContextError{Op: "search", Details: "operation cancelled before start"}
@@ -584,7 +584,7 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 			}
 		}
 
-		if !FileMatchesTypeFilterIn(currentPath, path, fileTypes) {
+		if !fileMatchesSearchFilters(currentPath, path, fileTypes, includeGroups...) {
 			return nil
 		}
 
@@ -787,7 +787,7 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 }
 
 // performAdvancedTextSearch implements advanced text search with parallelization
-func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, pattern string, caseSensitive, wholeWord, includeContext bool, contextLines int, outputFormat string, noIgnore bool, fileTypes []string) ([]SearchMatch, int, error) {
+func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, pattern string, caseSensitive, wholeWord, includeContext bool, contextLines int, outputFormat string, noIgnore bool, fileTypes []string, includeGroups ...[]string) ([]SearchMatch, int, error) {
 	var matchesMu sync.Mutex
 	var matches []SearchMatch
 
@@ -800,7 +800,7 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 	// exclusions are parsed for full parity with the native path; on any
 	// ripgrep failure we fall through to the native implementation.
 	if e.ripgrepAvailable && !e.PolicyEnabled() {
-		rgMatches, rgErr := e.RunRipgrepSearch(ctx, path, pattern, caseSensitive, wholeWord, includeContext, contextLines, noIgnore, fileTypes)
+		rgMatches, rgErr := e.RunRipgrepSearch(ctx, path, pattern, caseSensitive, wholeWord, includeContext, contextLines, noIgnore, fileTypes, includeGroups...)
 		if rgErr == nil {
 			return rgMatches, 0, nil
 		}
@@ -850,7 +850,7 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 		if d.IsDir() {
 			return nil
 		}
-		if !FileMatchesTypeFilterIn(currentPath, path, fileTypes) {
+		if !fileMatchesSearchFilters(currentPath, path, fileTypes, includeGroups...) {
 			return nil
 		}
 
@@ -1122,8 +1122,14 @@ func (e *UltraFastEngine) CountOccurrences(ctx context.Context, path, pattern st
 // CountOccurrencesOpts is the typed entry point; FileTypes are applied to
 // directory walks and to a single-file target (mismatch → zero matches).
 func (e *UltraFastEngine) CountOccurrencesOpts(ctx context.Context, opts SearchOptions) (string, error) {
+	text, _, err := e.countOccurrencesOpts(ctx, opts)
+	return text, err
+}
+
+// countOccurrencesOpts preserves the numeric total independently of presentation.
+func (e *UltraFastEngine) countOccurrencesOpts(ctx context.Context, opts SearchOptions) (string, int, error) {
 	if err := e.acquireOperation(ctx, "count"); err != nil {
-		return "", err
+		return "", 0, err
 	}
 	start := time.Now()
 	defer e.releaseOperation("count", start)
@@ -1138,16 +1144,16 @@ func (e *UltraFastEngine) CountOccurrencesOpts(ctx context.Context, opts SearchO
 
 	validPath, err := e.validatePath(path)
 	if err != nil {
-		return "", fmt.Errorf("path validation error: %w", err)
+		return "", 0, fmt.Errorf("path validation error: %w", err)
 	}
 
 	// Check if file exists
 	info, err := e.statWithinRoot(validPath)
 	if os.IsNotExist(err) {
-		return "", fmt.Errorf("file does not exist: %s", validPath)
+		return "", 0, fmt.Errorf("file does not exist: %s", validPath)
 	}
 	if err != nil {
-		return "", fmt.Errorf("failed to stat file: %w", err)
+		return "", 0, fmt.Errorf("failed to stat file: %w", err)
 	}
 
 	// Try to compile as regex first, fallback to literal if fails (uses engine cache)
@@ -1176,19 +1182,19 @@ func (e *UltraFastEngine) CountOccurrencesOpts(ctx context.Context, opts SearchO
 	}
 
 	if info.IsDir() {
-		return e.countOccurrencesInDir(ctx, validPath, pattern, regexPattern, returnLines, noIgnore, fileTypes)
+		return e.countOccurrencesInDir(ctx, validPath, pattern, regexPattern, returnLines, noIgnore, fileTypes, opts.Include)
 	}
-	if !FileMatchesTypeFilterIn(validPath, filepath.Dir(validPath), fileTypes) {
-		return "0 matches", nil
+	if !fileMatchesSearchFilters(validPath, filepath.Dir(validPath), fileTypes, opts.Include) {
+		return "0 matches", 0, nil
 	}
 	return e.countOccurrencesInFile(validPath, pattern, regexPattern, returnLines)
 }
 
 // countOccurrencesInFile counts occurrences in a single file
-func (e *UltraFastEngine) countOccurrencesInFile(filePath, pattern string, regexPattern *regexp.Regexp, returnLines bool) (string, error) {
+func (e *UltraFastEngine) countOccurrencesInFile(filePath, pattern string, regexPattern *regexp.Regexp, returnLines bool) (string, int, error) {
 	content, err := e.readWithinRoot(filePath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read file: %w", err)
+		return "", 0, fmt.Errorf("failed to read file: %w", err)
 	}
 
 	lines := strings.Split(string(content), "\n")
@@ -1251,11 +1257,11 @@ func (e *UltraFastEngine) countOccurrencesInFile(filePath, pattern string, regex
 		result.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 	}
 
-	return result.String(), nil
+	return result.String(), totalOccurrences, nil
 }
 
 // countOccurrencesInDir counts occurrences across all text files in a directory
-func (e *UltraFastEngine) countOccurrencesInDir(ctx context.Context, dirPath, pattern string, regexPattern *regexp.Regexp, returnLines bool, noIgnore bool, fileTypes []string) (string, error) {
+func (e *UltraFastEngine) countOccurrencesInDir(ctx context.Context, dirPath, pattern string, regexPattern *regexp.Regexp, returnLines bool, noIgnore bool, fileTypes []string, includeGroups ...[]string) (string, int, error) {
 	type fileCount struct {
 		path  string
 		count int
@@ -1292,7 +1298,7 @@ func (e *UltraFastEngine) countOccurrencesInDir(ctx context.Context, dirPath, pa
 		if skipWalkDir(d.Name(), path, dirPath, false, ign, noIgnore) {
 			return nil
 		}
-		if !FileMatchesTypeFilterIn(path, dirPath, fileTypes) {
+		if !fileMatchesSearchFilters(path, dirPath, fileTypes, includeGroups...) {
 			return nil
 		}
 		if !isTextCandidate(path) || isMinifiedFile(path) {
@@ -1333,7 +1339,7 @@ func (e *UltraFastEngine) countOccurrencesInDir(ctx context.Context, dirPath, pa
 		return nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to walk directory: %w", err)
+		return "", 0, fmt.Errorf("failed to walk directory: %w", err)
 	}
 
 	var out strings.Builder
@@ -1391,7 +1397,7 @@ func (e *UltraFastEngine) countOccurrencesInDir(ctx context.Context, dirPath, pa
 		out.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 	}
 
-	return out.String(), nil
+	return out.String(), totalOccurrences, nil
 }
 
 // calculateCharacterOffset - Determine exact character position of pattern match in line

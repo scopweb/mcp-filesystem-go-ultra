@@ -38,7 +38,7 @@ func main() {
 		AllowedPaths: []string{tmpDir},
 		ParallelOps:  2,
 	}
-	engine, _ := core.NewUltraFastEngine(config)
+	engine, _ := newManagedEngine(t, config)
 
 	// Test SmartSearch with include_content=true to search file contents
 	req := localmcp.CallToolRequest{
@@ -86,7 +86,7 @@ End of file`
 		AllowedPaths: []string{tmpDir},
 		ParallelOps:  2,
 	}
-	engine, _ := core.NewUltraFastEngine(config)
+	engine, _ := newManagedEngine(t, config)
 
 	// Test AdvancedTextSearch
 	req := localmcp.CallToolRequest{
@@ -146,7 +146,7 @@ func AnotherFunc() {
 		AllowedPaths: []string{tmpDir},
 		ParallelOps:  2,
 	}
-	engine, _ := core.NewUltraFastEngine(config)
+	engine, _ := newManagedEngine(t, config)
 
 	// Search with context enabled
 	req := localmcp.CallToolRequest{
@@ -196,7 +196,7 @@ yyy`
 		AllowedPaths: []string{tmpDir},
 		ParallelOps:  2,
 	}
-	engine, _ := core.NewUltraFastEngine(config)
+	engine, _ := newManagedEngine(t, config)
 
 	// Search for "pattern" which appears at different positions
 	req := localmcp.CallToolRequest{
@@ -247,7 +247,7 @@ func TestBackwardCompatibility(t *testing.T) {
 		AllowedPaths: []string{tmpDir},
 		ParallelOps:  2,
 	}
-	engine, _ := core.NewUltraFastEngine(config)
+	engine, _ := newManagedEngine(t, config)
 
 	// Basic search - should still work
 	req := localmcp.CallToolRequest{
@@ -298,7 +298,7 @@ The fox is fast`
 		AllowedPaths: []string{tmpDir},
 		ParallelOps:  2,
 	}
-	engine, _ := core.NewUltraFastEngine(config)
+	engine, _ := newManagedEngine(t, config)
 
 	// Search for "fox" which appears in multiple places
 	req := localmcp.CallToolRequest{
@@ -347,7 +347,7 @@ func TestMultipleOccurrencesOnSameLine(t *testing.T) {
 		AllowedPaths: []string{tmpDir},
 		ParallelOps:  2,
 	}
-	engine, _ := core.NewUltraFastEngine(config)
+	engine, _ := newManagedEngine(t, config)
 
 	// Search for "test" which appears multiple times
 	req := localmcp.CallToolRequest{

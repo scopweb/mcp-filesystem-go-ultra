@@ -84,11 +84,7 @@ func TestE2E_CTemp(t *testing.T) {
 	if st, err := os.Stat(root); err != nil || !st.IsDir() {
 		t.Skip("C:\\temp not present")
 	}
-	workDir := filepath.Join(root, "fsu-v46-live")
-	if err := os.MkdirAll(workDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(workDir) })
+	workDir := liveTempDir(t, root, "fsu-v46-live")
 	runLiveV46(t, workDir)
 }
 
@@ -213,12 +209,7 @@ func TestE2E_MultiAgent_CTemp(t *testing.T) {
 	if err := os.MkdirAll(root, 0755); err != nil {
 		t.Fatal(err)
 	}
-	workDir := filepath.Join(root, "fsu-multi-agent")
-	_ = os.RemoveAll(workDir)
-	if err := os.MkdirAll(workDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(workDir) })
+	workDir := liveTempDir(t, root, "fsu-multi-agent")
 
 	exe := buildServer(t)
 	shared := filepath.Join(workDir, "shared.txt")

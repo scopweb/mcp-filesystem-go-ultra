@@ -27,7 +27,7 @@ func createEncodingTestEngine(t *testing.T) *core.UltraFastEngine {
 		MaxSearchResults: 100,
 	}
 
-	engine, err := core.NewUltraFastEngine(cfg)
+	engine, err := newManagedEngine(t, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create engine: %v", err)
 	}

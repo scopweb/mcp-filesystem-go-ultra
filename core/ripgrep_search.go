@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/mcp/filesystem-ultra/embed/ripgrep"
 )
@@ -72,7 +75,7 @@ type ripgrepMatch struct {
 // Falls back to returning an error if ripgrep is not available or fails.
 // The caller is responsible for passing a validated path that passes IsPathAllowed.
 func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern string,
-	caseSensitive, wholeWord, includeContext bool, contextLines int, noIgnore bool, fileTypes []string) ([]SearchMatch, error) {
+	caseSensitive, wholeWord, includeContext bool, contextLines int, noIgnore bool, fileTypes []string, includeGroups ...[]string) ([]SearchMatch, error) {
 
 	args := []string{
 		"--json",
@@ -98,19 +101,29 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 		args = append(args, "-C", fmt.Sprintf("%d", contextLines))
 	}
 
-	// Exclude noisy directories via glob. The former `--ignore <dir>` form was
-	// wrong: --ignore is a boolean flag (counterpart of --no-ignore), so every
-	// dir name was parsed as a positional argument — the first one became the
-	// search pattern and the user's real pattern/path became search paths,
-	// making ripgrep error out (silent fallback to native search).
+	// ripgrep unions positive globs. Use one group to prune traversal, then
+	// enforce all groups with the shared matcher before pagination.
+	prefilter := fileTypes
+	if len(prefilter) == 0 && len(includeGroups) > 0 {
+		prefilter = includeGroups[0]
+	}
+	for _, ft := range prefilter {
+		for _, g := range FileTypeGlobsForRipgrep([]string{ft}) {
+			if !isNameOrPathFilter(ft) {
+				// Do not mix --iglob and --glob: rg gives --iglob priority
+				// even over later exclusions. Use one ordered glob set.
+				g = caseInsensitiveExtensionGlob(g)
+			}
+			args = append(args, "--glob", g)
+		}
+	}
+	// Later globs win in ripgrep. Exclusions must follow positive filters so
+	// file_types/include cannot re-enable noisy directories or minified files.
 	for dir := range searchSkipDirs {
 		args = append(args, "--glob", "!**/"+dir+"/**")
 	}
 	for _, pat := range ripgrepMinifiedExcludeGlobs() {
 		args = append(args, "--glob", pat)
-	}
-	for _, g := range FileTypeGlobsForRipgrep(fileTypes) {
-		args = append(args, "--glob", g)
 	}
 
 	// `-e` forces the next argument to be parsed as the pattern even when it
@@ -118,7 +131,17 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 	// "--pre=<cmd>" would otherwise make ripgrep execute an arbitrary
 	// preprocessor command per file). `--` marks the end of flags so the
 	// search path is always positional.
-	args = append(args, "-e", pattern, "--", path)
+	root := path
+	target := path
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		// Slash globs must be relative to the requested search root, not
+		// the server's working directory or the absolute temp path.
+		target = "."
+	} else {
+		root = filepath.Dir(path)
+		target = filepath.Base(path)
+	}
+	args = append(args, "-e", pattern, "--", target)
 
 	// Determine which ripgrep binary to use
 	rgBin := "rg" // default: PATH
@@ -129,6 +152,7 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 	}
 
 	cmd := exec.CommandContext(ctx, rgBin, args...)
+	cmd.Dir = root
 	output, err := cmd.Output()
 	if err != nil {
 		// ripgrep exit code 1 means "no matches found" — a valid result,
@@ -139,7 +163,35 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 		return nil, fmt.Errorf("ripgrep failed: %w", err)
 	}
 
-	return parseRipgrepOutput(output, includeContext, contextLines)
+	matches, err := parseRipgrepOutput(output, includeContext, contextLines)
+	if err != nil {
+		return nil, err
+	}
+	filtered := matches[:0]
+	for _, match := range matches {
+		if !filepath.IsAbs(match.File) {
+			match.File = filepath.Join(root, match.File)
+		}
+		if fileMatchesSearchFilters(match.File, root, fileTypes, includeGroups...) {
+			filtered = append(filtered, match)
+		}
+	}
+	return filtered, nil
+}
+
+// caseInsensitiveExtensionGlob preserves the native extension-case contract
+// without changing the case sensitivity or precedence of include/exclude globs.
+func caseInsensitiveExtensionGlob(glob string) string {
+	var b strings.Builder
+	for _, r := range glob {
+		lower, upper := unicode.ToLower(r), unicode.ToUpper(r)
+		if lower != upper {
+			fmt.Fprintf(&b, "[%c%c]", lower, upper)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // Keep absolute line numbers: rg emits disjoint context groups and suppresses

@@ -661,7 +661,7 @@ func createTestEngineWithPath(t *testing.T, allowedPath string) *core.UltraFastE
 		CompactMode:  false,
 	}
 
-	engine, err := core.NewUltraFastEngine(config)
+	engine, err := newManagedEngine(t, config)
 	if err != nil {
 		t.Fatalf("failed to create engine: %v", err)
 	}

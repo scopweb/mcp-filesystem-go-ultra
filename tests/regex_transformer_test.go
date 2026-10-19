@@ -477,7 +477,7 @@ func setupRegexTestEngine(t *testing.T) *core.UltraFastEngine {
 		t.Fatalf("Failed to create cache: %v", err)
 	}
 
-	engine, err := core.NewUltraFastEngine(&core.Config{
+	engine, err := newManagedEngine(t, &core.Config{
 		Cache:       cacheSystem,
 		ParallelOps: 4,
 		BackupDir:   t.TempDir(),

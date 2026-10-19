@@ -59,6 +59,40 @@ func TestOpenCodeModel_PrefixIsolatesServers(t *testing.T) {
 	}
 }
 
+// A resolver must reopen an existing database read-only and remain safe when
+// several proxy calls resolve their model concurrently after a driver upgrade.
+func TestOpenCodeModel_ReadOnlyPersistenceAndConcurrency(t *testing.T) {
+	path := seedOpenCodeDB(t, "xai", "grok-4.7", "filesystem-ultra_read_file")
+	at := time.UnixMilli(1_700_000_000_000)
+	r := newOpenCodeModels(path, "filesystem-ultra", "fallback")
+	t.Cleanup(r.Close)
+	db, err := r.conn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("DELETE FROM message"); err == nil {
+		t.Fatal("resolver connection allowed a write")
+	}
+	const readers = 16
+	done := make(chan bool, readers)
+	for range readers {
+		go func() {
+			model, source := r.resolve("read_file", at)
+			done <- model == "xai/grok-4.7" && source == "opencode"
+		}()
+	}
+	for range readers {
+		if !<-done {
+			t.Error("concurrent read lost the persisted model")
+		}
+	}
+	r.Close()
+	reopened := newOpenCodeModels(path, "filesystem-ultra", "fallback")
+	t.Cleanup(reopened.Close)
+	if model, source := reopened.resolve("read_file", at); model != "xai/grok-4.7" || source != "opencode" {
+		t.Fatalf("reopened database: %s %s", model, source)
+	}
+}
 func seedOpenCodeDB(t *testing.T, provider, model, tool string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "opencode.db")

@@ -7,6 +7,22 @@ import (
 	"testing"
 )
 
+// Prove the edited file itself is movable while the engine's root is alive.
+func checkRangeFileHandles(t *testing.T, path string, remove bool) {
+	t.Helper()
+	renamed := path + ".renamed"
+	if err := os.Rename(path, renamed); err != nil {
+		t.Fatalf("file handle retained: %v", err)
+	}
+	if remove {
+		if err := os.Remove(renamed); err != nil {
+			t.Fatalf("remove after edit: %v", err)
+		}
+	} else if err := os.Rename(renamed, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestComputeLineRangeReplacement(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -69,6 +85,7 @@ func TestReplaceLineRange_EndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := newTestEngine(dir)
+	t.Cleanup(func() { _ = engine.Close() })
 
 	res, err := engine.ReplaceLineRange(context.Background(), path, 2, 3, "X\nY\n", false)
 	if err != nil {
@@ -81,6 +98,7 @@ func TestReplaceLineRange_EndToEnd(t *testing.T) {
 	if want := contentHashFNV(string(raw)); res.NewHash != want {
 		t.Errorf("NewHash = %s, want %s (hash of file on disk)", res.NewHash, want)
 	}
+	checkRangeFileHandles(t, path, true)
 }
 
 func TestReplaceLineRange_DryRunDoesNotWrite(t *testing.T) {
@@ -91,6 +109,7 @@ func TestReplaceLineRange_DryRunDoesNotWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := newTestEngine(dir)
+	t.Cleanup(func() { _ = engine.Close() })
 	res, err := engine.ReplaceLineRange(context.Background(), path, 2, 3, "X\nY\n", true)
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +124,7 @@ func TestReplaceLineRange_DryRunDoesNotWrite(t *testing.T) {
 	if res.NewHash != contentHashFNV("a\nX\nY\nd\n") {
 		t.Fatalf("predicted hash = %s", res.NewHash)
 	}
+	checkRangeFileHandles(t, path, false)
 	applied, err := engine.ReplaceLineRange(context.Background(), path, 2, 3, "X\nY\n", false)
 	if err != nil {
 		t.Fatal(err)
@@ -112,4 +132,5 @@ func TestReplaceLineRange_DryRunDoesNotWrite(t *testing.T) {
 	if applied.NewHash != res.NewHash {
 		t.Fatalf("apply hash %s != dry_run hash %s", applied.NewHash, res.NewHash)
 	}
+	checkRangeFileHandles(t, path, true)
 }

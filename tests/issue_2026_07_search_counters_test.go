@@ -30,7 +30,7 @@ func setupIssue202607Engine(t *testing.T, compact bool) (*core.UltraFastEngine, 
 		MaxSearchResults: 100,
 	}
 
-	engine, err := core.NewUltraFastEngine(config)
+	engine, err := newManagedEngine(t, config)
 	if err != nil {
 		t.Fatalf("Failed to create test engine: %v", err)
 	}

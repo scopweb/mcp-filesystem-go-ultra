@@ -26,7 +26,7 @@ func setupUndoEngine(t *testing.T) (*core.UltraFastEngine, string) {
 		ParallelOps:  2,
 	}
 
-	engine, err := core.NewUltraFastEngine(config)
+	engine, err := newManagedEngine(t, config)
 	if err != nil {
 		t.Fatalf("Failed to create test engine: %v", err)
 	}
@@ -400,7 +400,7 @@ func TestVerifyIntegrity_TruncatedFile(t *testing.T) {
 		AllowedPaths: []string{tempDir},
 		ParallelOps:  2,
 	}
-	engine, _ := core.NewUltraFastEngine(config)
+	engine, _ := newManagedEngine(t, config)
 
 	// Call directly with expectedChangePct > 50 (should trigger warning)
 	result := engine.VerifyFileIntegrity(smallFile, 80.0)

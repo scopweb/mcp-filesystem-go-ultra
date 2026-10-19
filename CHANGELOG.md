@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+### fix(search): intersect filters and preserve structured counts
+
+- `include` and `file_types` now intersect in filename, content and count searches, before pagination. Previously `file_types` silently discarded `include`.
+- Ripgrep runs relative to the search root, fixing slash globs such as `{Test,ObservacionesPedido}/*.razor` against absolute paths. A shared post-filter preserves intersection semantics (ripgrep unions its positive globs).
+- Invalid globs/braces use the existing `VALIDATION` envelope with `retryable:false`; documentation and tests now agree. Windows separators in `include` are normalized on all platforms.
+- `count_only` publishes the numeric total directly instead of parsing display text, fixing zero structured counts in non-compact mode.
+- Regression coverage exercises native and direct ripgrep paths, the MCP handler, disjoint filters and pagination. CI requires ripgrep for this matrix.
+
+### fix(windows): canonical identities and test engine lifecycle
+
+The 8.3 fix canonicalizes operation paths before selecting an `os.Root` base, in both long-root/short-operation and short-root/long-operation directions. The missing-path parity test now compares canonical identities. Range-edit/hash tests and integration fixtures release their engines before temporary-directory cleanup; the retained handles belonged to test engine roots, not an unclosed edited file.
+
+### chore: dependencies, CI and client catalog maintenance
+
+Update mcp-go to v1.3.0, x/sys to v0.49.0, x/sync to v0.24.0, x/text to v0.43.0 and sqlite to v1.60.1 (libc v1.77.1 transitively). Proxy tests cover reopening a persisted SQLite database read-only and concurrent model lookups. Actions move to the validated Node-24-era releases. A serialized-catalog budget tracks schema growth in bytes, not guessed tokens. The canonical skill documents intersecting filters and current capabilities.
+
+These changes remain unreleased until the candidate commit passes required remote CI and release checks.
+
 ### feat(list): line census replaces find | wc
 
 `list_directory` `output_format:"lines"` counts newlines per text file, skips `bin`/`obj`, and accepts `include` (`.cs,.json,*.csproj`). A `$HOME/mnt` or `/home/.../mnt` path that is not a WSL drive mount is called a sandbox path: use the Windows path from `list_allowed_directories`. Do not `find`/`wc`/`cat`.
