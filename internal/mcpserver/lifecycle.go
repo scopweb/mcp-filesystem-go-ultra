@@ -96,10 +96,16 @@ func (l *lifecycleLogger) installCrashOutput() string {
 
 // removeEmptyCrashFile drops the crash file after a clean stop so the log dir
 // only keeps files that carry a real crash report.
+//
+// The runtime keeps its own duplicate of the crash descriptor open, and
+// Windows refuses to delete an open file. Detaching crash output first makes
+// the runtime close that handle; a fatal error during the remaining shutdown
+// then goes to stderr, which is what an unconfigured process does anyway.
 func (l *lifecycleLogger) removeEmptyCrashFile() {
 	if l == nil || l.crashPath == "" {
 		return
 	}
+	_ = debug.SetCrashOutput(nil, debug.CrashOptions{})
 	if info, err := os.Stat(l.crashPath); err == nil && info.Size() == 0 {
 		_ = os.Remove(l.crashPath)
 	}
