@@ -201,7 +201,7 @@ func (t *FileTxn) Commit(ctx context.Context, newBytes []byte, dryRun bool, back
 	t.snap = after
 	t.snap.Bytes = append([]byte(nil), newBytes...)
 	t.engine.invalidateMutatedPath(path)
-	t.engine.RecordWriteHash(path, contentHashFNV(string(newBytes)))
+	RecordWriteHash(path, contentHashFNV(string(newBytes)))
 	return backupID, nil
 }
 

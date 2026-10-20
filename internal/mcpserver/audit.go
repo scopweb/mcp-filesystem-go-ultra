@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -36,6 +37,7 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 			Tool:      tool,
 			SessionID: engine.CurrentSessionID(),
 			RequestID: newRequestID(),
+			PID:       os.Getpid(),
 		}
 		ctx = context.WithValue(ctx, core.AuditEntryKey{}, entry)
 		ctx = core.WithSessionID(ctx, engine.CurrentSessionID())

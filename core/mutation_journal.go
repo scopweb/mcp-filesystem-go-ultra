@@ -118,11 +118,7 @@ func (j *mutationJournal) rollback(ctx context.Context, e *UltraFastEngine) (str
 			e.invalidateMutatedPath(path)
 		}
 		if entry.before.Exists {
-			if e != nil {
-				e.RecordWriteHash(path, entry.before.Hash)
-			} else {
-				RecordWriteHash(path, entry.before.Hash)
-			}
+			RecordWriteHash(path, entry.before.Hash)
 		} else {
 			InvalidateKnownHash(path)
 		}

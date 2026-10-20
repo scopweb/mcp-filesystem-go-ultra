@@ -27,11 +27,41 @@ func logicalServerName(pathOrBase string) string {
 	return base
 }
 
+// companionSuffixes name sibling binaries that share the server's logical
+// prefix but are not the server: the proxy must never reap them.
+var companionSuffixes = []string{"dashboard", "proxy"}
+
+// sameLogicalServer reports whether procName is a build of the logical server
+// (exact name, or name-<suffix>). Companion binaries such as
+// filesystem-ultra-v4-dashboard.exe are excluded even though they share the
+// prefix.
 func sameLogicalServer(procName, logical string) bool {
 	n := strings.ToLower(strings.TrimSuffix(procName, ".exe"))
 	l := strings.ToLower(logical)
 	if l == "" {
 		return false
 	}
-	return n == l || strings.HasPrefix(n, l+"-")
+	if n == l {
+		return true
+	}
+	if !strings.HasPrefix(n, l+"-") {
+		return false
+	}
+	rest := n[len(l)+1:]
+	for _, c := range companionSuffixes {
+		if strings.Contains(rest, c) {
+			return false
+		}
+	}
+	return true
+}
+
+// gitHashOf returns the git-sha suffix of a hashed build name
+// (filesystem-ultra-c00a9cc.exe → "c00a9cc"), or "" for plain and versioned
+// builds (filesystem-ultra.exe, filesystem-ultra-v4-embed_rg.exe).
+func gitHashOf(pathOrBase string) string {
+	if m := gitSHASuffix.FindStringSubmatch(exeBasename(pathOrBase)); m != nil {
+		return strings.ToLower(m[2])
+	}
+	return ""
 }

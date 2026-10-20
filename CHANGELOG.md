@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### fix(concurrency): several conversations through one server process
+
+Claude Desktop runs one server process for all its chats; four conversations on one project is four request streams into one process, not four processes.
+
+- **Lifecycle trace.** `--log-dir` now also gets `lifecycle.jsonl` (`start`/`stop` with pid, commit, uptime and stop reason) and routes the Go runtime crash report (unrecovered panic in any goroutine, `fatal error: concurrent map writes`) to `crash-<ts>-<pid>.log` via `debug.SetCrashOutput`. `server.WithRecovery` only covers tool handlers. Empty crash files are removed on clean stop. `operations.jsonl` entries carry `pid`.
+- **`LOCK_BUSY`.** Per-file mutation locks wait at most `--lock-timeout` (default 10s; `0` = previous behaviour, wait until the client cancels) and then fail with `{"error":{"code":"LOCK_BUSY","retryable":true,"recovery":"retry_same","details":{"path","waited_ms","held_by_pid"}}}` instead of hanging until the client drops the call. The IPC lock file records the holder's pid.
+- **Auto-OCC scope is the process.** The per-session hash state was written by `file_txn.Commit` only and read by nobody; it is removed. All feedback/auto-OCC state is explicitly process-wide (`globalSession`), and `CurrentSessionID` is documented as a log-grouping heuristic, not an isolation boundary. `--auto-occ block` refuses an edit only while the known hash is younger than 2 minutes; an older baseline (likely another chat's) degrades to a warning that says so.
+- **Proxy `--reap-stale` narrowed.** It reaps orphans of the logical server (parent gone, any variant) and old-hash builds (both names carry a git sha and they differ). It no longer kills `filesystem-ultra-v4-dashboard.exe`, another client's `-v4`/`-v4-embed_rg` copy, or any `*-proxy`. A target without a git hash cannot declare another build old.
+
+**Verification:** `core/file_lock_timeout_test.go`, `core/auto_occ_test.go` (block window, interleaved conversations), `cmd/proxy` reap/logical tables, `internal/mcpserver/lifecycle_test.go`.
+
 ### feat(inspect): bounded JSON queries, byte diagnostics and SHA-256
 
 - Add experimental ultra-only read tools `json_query`, `file_bytes`, and `file_hash`, without outputSchemas. Ultra now has 33 tools; agent/strict remain 18/17.

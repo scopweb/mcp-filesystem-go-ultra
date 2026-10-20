@@ -1,6 +1,9 @@
 package core
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // PathError represents an error that occurred during a path operation
 // OCCMismatchError is a stale-edit conflict detected under the file lock.
@@ -112,4 +115,22 @@ func (e *PipelineStepError) Error() string {
 
 func (e *PipelineStepError) Unwrap() error {
 	return e.Err
+}
+
+// LockBusyError is returned when a per-path mutation lock could not be
+// acquired within Config.LockTimeout. The lock is held either by another
+// goroutine in this process or by another server process (Claude Desktop,
+// OpenCode and Claude Code each run their own) coordinating through the IPC
+// lock file. It is retryable: nothing was written.
+type LockBusyError struct {
+	Path   string        // canonical path whose lock is busy
+	HeldBy int           // pid recorded in the IPC lock file, 0 if unknown or in-process
+	Waited time.Duration // how long Acquire waited before giving up
+}
+
+func (e *LockBusyError) Error() string {
+	if e.HeldBy > 0 {
+		return fmt.Sprintf("lock busy: %s is being modified by another process (pid %d); waited %s", e.Path, e.HeldBy, e.Waited.Round(time.Millisecond))
+	}
+	return fmt.Sprintf("lock busy: %s is being modified by another operation; waited %s", e.Path, e.Waited.Round(time.Millisecond))
 }

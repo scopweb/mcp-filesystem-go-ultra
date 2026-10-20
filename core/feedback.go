@@ -78,12 +78,27 @@ type sessionState struct {
 	staleWarned map[string]bool
 }
 
-var globalSession = &sessionState{
-	failedOldText: make(map[string]map[string]int),
-	lastRead:      make(map[string]time.Time),
-	knownHash:     make(map[string]string),
-	staleWarned:   make(map[string]bool),
-}
+// globalSession is the ONE feedback/auto-OCC state of this server process.
+//
+// Scope is the process, not the conversation: MCP stdio carries no
+// conversation identity, and Claude Desktop runs a single server process for
+// all its chats. Every read/write hash, stale-read mark and failed-old_text
+// counter recorded here can therefore come from another conversation of the
+// same client. That is why auto-OCC "block" is bounded by autoOCCBlockWindow:
+// a baseline older than that is not trusted to be this conversation's.
+// Engine.CurrentSessionID() groups log lines by inactivity; it is not an
+// isolation boundary and nothing here is keyed by it.
+var globalSession = newSessionState()
+
+// autoOCCBlockWindow bounds how old a known hash may be for --auto-occ block to
+// refuse an edit. Older baselines degrade to a warning: with several
+// conversations multiplexed through one process, an old hash most likely
+// belongs to another chat, and blocking on it would stall work that never
+// saw the file.
+const autoOCCBlockWindow = 2 * time.Minute
+
+// autoOCCStaleWindow is how long a known hash stays a usable baseline at all.
+const autoOCCStaleWindow = 10 * time.Minute
 
 // autoOCCMode controls automatic optimistic-concurrency checking (new point 4):
 // "off" disables it, "warn" (default) emits a non-blocking warning when the file
@@ -101,7 +116,6 @@ func SetAutoOCCMode(mode string) {
 	}
 }
 
-// RecordRead marks a file as recently read (resets stale-read detection).
 func newSessionState() *sessionState {
 	return &sessionState{
 		failedOldText: make(map[string]map[string]int),
@@ -111,24 +125,7 @@ func newSessionState() *sessionState {
 	}
 }
 
-func (e *UltraFastEngine) occState() *sessionState {
-	if e == nil {
-		return globalSession
-	}
-	id := e.CurrentSessionID()
-	e.occMu.Lock()
-	defer e.occMu.Unlock()
-	if e.occBySession == nil {
-		e.occBySession = make(map[string]*sessionState)
-	}
-	s := e.occBySession[id]
-	if s == nil {
-		s = newSessionState()
-		e.occBySession[id] = s
-	}
-	return s
-}
-
+// RecordRead marks a file as recently read (resets stale-read detection).
 func RecordRead(path string) {
 	path = CanonicalOCCKey(path)
 	globalSession.mu.Lock()
@@ -141,17 +138,10 @@ func RecordRead(path string) {
 // read, and refreshes its last-seen timestamp. Together with RecordWriteHash
 // this is the "known hash" auto-OCC compares against (new point 4).
 func RecordReadHash(path, hash string) {
-	recordReadHashOn(globalSession, path, hash)
-}
-
-func (e *UltraFastEngine) RecordReadHash(path, hash string) {
-	recordReadHashOn(e.occState(), path, hash)
-}
-
-func recordReadHashOn(st *sessionState, path, hash string) {
-	if hash == "" || st == nil {
+	if hash == "" {
 		return
 	}
+	st := globalSession
 	path = CanonicalOCCKey(path)
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -166,17 +156,10 @@ func recordReadHashOn(st *sessionState, path, hash string) {
 // external-change warning. By tracking the session's own writes, auto-OCC only
 // fires on changes the session did not make.
 func RecordWriteHash(path, hash string) {
-	recordWriteHashOn(globalSession, path, hash)
-}
-
-func (e *UltraFastEngine) RecordWriteHash(path, hash string) {
-	recordWriteHashOn(e.occState(), path, hash)
-}
-
-func recordWriteHashOn(st *sessionState, path, hash string) {
-	if hash == "" || st == nil {
+	if hash == "" {
 		return
 	}
+	st := globalSession
 	path = CanonicalOCCKey(path)
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -226,47 +209,51 @@ func RefreshKnownHashes(paths []string) {
 	}
 }
 
-// CheckAutoOCC compares the file's current on-disk hash against the hash the
-// session last saw (new point 4). It returns a signal only when ALL hold:
+// CheckAutoOCC compares the file's current on-disk hash against the hash this
+// process last saw (new point 4). It returns a signal only when ALL hold:
 //   - auto-OCC is enabled (mode != "off"),
-//   - the session has a known hash for this path that is still fresh (read/written
-//     within the stale window — an old hash is not a reliable baseline),
+//   - the process has a known hash for this path that is still fresh (read or
+//     written within autoOCCStaleWindow — an old hash is not a reliable baseline),
 //   - the on-disk hash differs from the known hash (an external change).
 //
-// BlockOp follows the mode: false for "warn" (default, non-blocking), true for
-// "block". Returns OK() otherwise. This complements explicit expected_hash: it
-// catches lost updates even when the caller did not opt into OCC.
+// BlockOp follows the mode: false for "warn" (default, non-blocking); for
+// "block" it is true only while the baseline is younger than
+// autoOCCBlockWindow, otherwise the signal degrades to a warning (see
+// globalSession). This complements explicit expected_hash: it catches lost
+// updates even when the caller did not opt into OCC.
 func CheckAutoOCC(path, diskHash string) *FeedbackSignal {
-	return checkAutoOCCOn(globalSession, path, diskHash)
-}
-
-func (e *UltraFastEngine) CheckAutoOCC(path, diskHash string) *FeedbackSignal {
-	return checkAutoOCCOn(e.occState(), path, diskHash)
-}
-
-func checkAutoOCCOn(st *sessionState, path, diskHash string) *FeedbackSignal {
-	if autoOCCMode == "off" || diskHash == "" || st == nil {
+	if autoOCCMode == "off" || diskHash == "" {
 		return OK()
 	}
+	st := globalSession
 	path = CanonicalOCCKey(path)
 	st.mu.Lock()
 	known, hasKnown := st.knownHash[path]
 	lastRead, hasRead := st.lastRead[path]
 	st.mu.Unlock()
 
-	if !hasKnown || !hasRead || time.Since(lastRead) > 10*time.Minute {
+	if !hasKnown || !hasRead {
+		return OK()
+	}
+	age := time.Since(lastRead)
+	if age > autoOCCStaleWindow {
 		return OK()
 	}
 	if known == diskHash {
 		return OK()
 	}
+	block := autoOCCMode == "block" && age <= autoOCCBlockWindow
+	msg := fmt.Sprintf(
+		"file changed on disk since this process last saw it (known hash %s, on-disk %s) — another process may have modified it.",
+		known, diskHash)
+	if autoOCCMode == "block" && !block {
+		msg += fmt.Sprintf(" The known hash is %s old and may belong to another conversation of this server; warning instead of blocking.", age.Round(time.Second))
+	}
 	return &FeedbackSignal{
 		Status:  FeedbackWarn,
 		Pattern: PatternExternalChange,
-		BlockOp: autoOCCMode == "block",
-		Message: fmt.Sprintf(
-			"file changed on disk since this session last saw it (known hash %s, on-disk %s) — another process may have modified it.",
-			known, diskHash),
+		BlockOp: block,
+		Message: msg,
 		Suggestion: "Re-read the file with read_file to get the current content (and content_hash) before editing, " +
 			"or pass expected_hash to control concurrency explicitly.",
 	}

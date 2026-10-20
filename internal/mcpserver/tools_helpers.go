@@ -62,6 +62,10 @@ func filesystemMismatchSuffix(err error) string {
 // known (NOT_ALLOWED, SECRET_DENIED, NOT_FOUND). Other errors keep the
 // existing "Error:" prefix so callers that match on that string stay stable.
 func formatToolError(err error) string {
+	var lb *core.LockBusyError
+	if errors.As(err, &lb) {
+		return lockBusyJSON(lb)
+	}
 	var fpe *core.FilePolicyError
 	if errors.As(err, &fpe) {
 		if fpe.Hidden {

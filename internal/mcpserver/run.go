@@ -137,6 +137,7 @@ func Run() {
 		// Backup configuration
 		backupDir      = flag.String("backup-dir", "", "Directory for backup storage (default: temp/mcp-batch-backups)")
 		receiptDir     = flag.String("receipt-dir", "", "Directory for e3-v1 retry receipts (empty = process-local memory only)")
+		lockTimeout    = flag.Duration("lock-timeout", 10*time.Second, "Max wait for a per-file mutation lock held by another operation or server process; on expiry the call fails with LOCK_BUSY (retryable). 0 = wait until the client cancels.")
 		backupMaxAge   = flag.Int("backup-max-age", 7, "Max age of backups in days")
 		backupMaxCount = flag.Int("backup-max-count", 100, "Max number of backups to keep")
 
@@ -146,7 +147,7 @@ func Run() {
 
 		// Auto-OCC (new point 4): automatic optimistic-concurrency check on edits
 		// without an explicit expected_hash. off | warn (default) | block.
-		autoOCC            = flag.String("auto-occ", "warn", "Auto optimistic-concurrency on edits: off|warn|block (default warn)")
+		autoOCC            = flag.String("auto-occ", "warn", "Auto optimistic-concurrency on edits: off|warn|block (default warn). State is per process; block only refuses while the known hash is under 2m old, older baselines warn.")
 		fileSecurityConfig = flag.String("file-security-config", "", "Path to a JSON file security policy. Invalid config aborts startup. Immutable for the process lifetime.")
 
 		// Risk thresholds
@@ -235,6 +236,30 @@ func Run() {
 
 	// Setup logging
 	setupLogging(config)
+
+	// Process lifecycle trace (start/stop/crash) under --log-dir. Nil when
+	// --log-dir is empty; every call on it is then a no-op.
+	lifecycle := newLifecycleLogger(*logDir)
+	crashFile := lifecycle.installCrashOutput()
+	startedAt := time.Now()
+	lifecycle.event("start", map[string]any{
+		"version":    serverVersion,
+		"commit":     BuildCommit,
+		"build_date": BuildDate,
+		"profile":    *profileFlag,
+		"args":       os.Args[1:],
+		"crash_file": crashFile,
+	})
+	defer func() {
+		if r := recover(); r != nil {
+			lifecycle.event("stop", map[string]any{
+				"reason":   "panic",
+				"value":    fmt.Sprint(r),
+				"uptime_s": int64(time.Since(startedAt).Seconds()),
+			})
+			panic(r) // the runtime crash report lands in crash_file
+		}
+	}()
 	if *insecureOpen {
 		log.Printf("WARNING: --insecure-open: sandbox disabled (entire disk). Labs only.")
 	}
@@ -285,6 +310,7 @@ func Run() {
 		LogDir:              *logDir,
 		NormalizerRulesPath: *normalizerRules,
 		ReceiptDir:          *receiptDir,
+		LockTimeout:         *lockTimeout,
 
 		// Risk thresholds
 		RiskThresholdMedium:   *riskThresholdMedium,
@@ -343,8 +369,21 @@ func Run() {
 
 	log.Printf("Server ready - Waiting for connections...")
 
-	// Start the stdio server using new API
-	if err := server.ServeStdio(s); err != nil {
-		log.Fatalf("Server error: %v", err)
+	// Start the stdio server using new API. ServeStdio returns nil on stdin
+	// EOF (client closed the pipe) and on SIGINT/SIGTERM, which it handles
+	// itself; any other return is a transport error.
+	serveErr := server.ServeStdio(s)
+	stop := map[string]any{
+		"reason":   "stdin_closed_or_signal",
+		"uptime_s": int64(time.Since(startedAt).Seconds()),
+	}
+	if serveErr != nil {
+		stop["reason"] = "serve_error"
+		stop["error"] = serveErr.Error()
+	}
+	lifecycle.event("stop", stop)
+	lifecycle.removeEmptyCrashFile()
+	if serveErr != nil {
+		log.Fatalf("Server error: %v", serveErr)
 	}
 }

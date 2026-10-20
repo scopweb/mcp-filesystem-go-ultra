@@ -53,6 +53,11 @@ type Config struct {
 
 	// ReceiptDir persists e3-v1 retry receipts across process restarts (empty = memory only)
 	ReceiptDir string
+	// LockTimeout bounds how long a mutation waits for a per-path lock held by
+	// another goroutine or another server process before failing with
+	// LockBusyError. 0 waits until the caller's context is cancelled, which
+	// with MCP stdio means until the client gives up on the call.
+	LockTimeout time.Duration
 
 	// Normalizer
 	NormalizerRulesPath string // Path to external normalizer rules JSON file (optional)
@@ -145,8 +150,12 @@ type UltraFastEngine struct {
 	// Request normalizer for parameter aliasing and coercion
 	normalizer *Normalizer
 
-	// Session tracking: groups consecutive operations into conversation sessions.
-	// A new session starts when > sessionInactivityTimeout elapses between operations.
+	// Session tracking: groups consecutive operations in the audit log. A new id
+	// starts when > sessionInactivityTimeout elapses between operations. It is a
+	// log-grouping heuristic only: MCP stdio carries no conversation identity and
+	// Claude Desktop multiplexes all its chats through one process, so this id
+	// is NOT an isolation boundary for feedback/auto-OCC state (see
+	// feedback.go globalSession).
 	session struct {
 		mu       sync.Mutex
 		id       string
@@ -158,9 +167,6 @@ type UltraFastEngine struct {
 	ripgrepVersion   string
 
 	pathLocks *pathLockManager
-
-	occMu        sync.Mutex
-	occBySession map[string]*sessionState
 
 	filePolicy   *FilePolicy
 	filePolicyMu sync.RWMutex
@@ -230,13 +236,12 @@ func NewUltraFastEngine(config *Config) (*UltraFastEngine, error) {
 	}
 
 	engine := &UltraFastEngine{
-		config:       config,
-		cache:        config.Cache,
-		metrics:      &PerformanceMetrics{StartedAt: time.Now()},
-		semaphore:    make(chan struct{}, config.ParallelOps),
-		backupChain:  make(map[string]string),
-		pathLocks:    newPathLockManager(),
-		occBySession: make(map[string]*sessionState),
+		config:      config,
+		cache:       config.Cache,
+		metrics:     &PerformanceMetrics{StartedAt: time.Now()},
+		semaphore:   make(chan struct{}, config.ParallelOps),
+		backupChain: make(map[string]string),
+		pathLocks:   newPathLockManagerTimeout(config.LockTimeout),
 	}
 	engine.mutationBudget.limit = config.MutationBudget
 	if engine.cache != nil {
@@ -447,9 +452,11 @@ func (e *UltraFastEngine) ReceiptDir() string {
 	return strings.TrimSpace(e.config.ReceiptDir)
 }
 
-// CurrentSessionID returns the active session identifier, starting a new session
+// CurrentSessionID returns the active session identifier, starting a new one
 // if more than sessionInactivityTimeout has elapsed since the last operation.
-// Sessions group operations belonging to the same Claude conversation.
+// It groups operations in operations.jsonl by activity burst. It does not
+// identify a Claude conversation: several chats of one client share this
+// process and therefore one id.
 func (e *UltraFastEngine) CurrentSessionID() string {
 	e.session.mu.Lock()
 	defer e.session.mu.Unlock()

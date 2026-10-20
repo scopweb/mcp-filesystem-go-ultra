@@ -25,6 +25,7 @@ const (
 	errCodeBudgetExceeded   = "BUDGET_EXCEEDED"
 	errCodeStaleGit         = "STALE_GIT"
 	errCodeStaleWorkspace   = "STALE_WORKSPACE"
+	errCodeLockBusy         = "LOCK_BUSY"
 	errCodeRollbackPartial  = "ROLLBACK_PARTIAL"
 	errCodeRollbackFailed   = "ROLLBACK_FAILED"
 	errCodeRollbackComplete = "ROLLBACK_COMPLETE"
@@ -65,6 +66,7 @@ const (
 	suggestionValidation     = "Correct the listed parameters; do not retry with the same arguments"
 	suggestionOCCMismatch    = "Rebase against current content; retry with current_hash."
 	suggestionBudgetExceeded = "Raise --mutation-budget or start a new server process."
+	suggestionLockBusy       = "Another operation holds this file; retry the same call after a short pause. Nothing was written."
 	suggestionBeginPatch     = "send a unified diff; do not retry this patch"
 	beginPatchExample        = "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
 )
@@ -158,6 +160,8 @@ func recoveryForCode(code string) string {
 		return recoveryReadAndRebase
 	case errCodeRollbackPartial, errCodeRollbackFailed, errCodeRollbackComplete:
 		return recoveryCheckAlreadyApplied
+	case errCodeLockBusy:
+		return recoveryRetrySame
 	default:
 		return recoveryFixArguments
 	}
@@ -299,4 +303,15 @@ func validationFieldExpected(msg string) (field, expected string) {
 	default:
 		return quotedField(msg), ""
 	}
+}
+
+func lockBusyJSON(lb *core.LockBusyError) string {
+	details := map[string]any{
+		"path":      lb.Path,
+		"waited_ms": lb.Waited.Milliseconds(),
+	}
+	if lb.HeldBy > 0 {
+		details["held_by_pid"] = lb.HeldBy
+	}
+	return marshalPathError(errCodeLockBusy, lb.Error(), lb.Path, details, suggestionLockBusy)
 }

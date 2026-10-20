@@ -138,7 +138,12 @@ type AuditEntry struct {
 	// req_id; an in_progress line with no matching ok/warn/error line marks a
 	// call that was interrupted mid-flight (e.g. the MCP transport was cut when
 	// the user switched app surface), which would otherwise leave no trace.
-	RequestID      string                 `json:"req_id,omitempty"`
+	RequestID string `json:"req_id,omitempty"`
+	// PID distinguishes server processes sharing one log dir (Claude Desktop,
+	// OpenCode and Claude Code each spawn their own). Desktop multiplexes all
+	// its conversations through a single process, so pid identifies the
+	// client process, not the conversation.
+	PID            int                    `json:"pid,omitempty"`
 	Path           string                 `json:"path,omitempty"`
 	DurationMs     int64                  `json:"duration_ms"`
 	BytesIn        int64                  `json:"bytes_in,omitempty"`
