@@ -1,8 +1,8 @@
 package mcpserver
 
 import (
+	"log/slog"
 	"context"
-	"log"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -30,21 +30,21 @@ func (r *rootsSync) applyFromClient(ctx context.Context) {
 	defer cancel()
 	res, err := r.server.RequestRoots(ctx, mcp.ListRootsRequest{})
 	if err != nil {
-		log.Printf("roots/list skipped: %v", err)
+		slog.Warn("roots/list skipped", "err", err)
 		return
 	}
 	clientPaths := make([]string, 0, len(res.Roots))
 	for _, root := range res.Roots {
 		p, err := core.FileURIToPath(root.URI)
 		if err != nil {
-			log.Printf("skipping root URI %q: %v", root.URI, err)
+			slog.Warn("skipping root URI", "uri", root.URI, "err", err)
 			continue
 		}
 		clientPaths = append(clientPaths, core.NormalizePath(p))
 	}
 	merged, source := core.MergeAllowedPaths(r.cli, clientPaths, r.mode)
 	r.engine.SetAllowedPaths(merged, source)
-	log.Printf("sandbox roots applied source=%s count=%d", source, len(merged))
+	slog.Info("sandbox roots applied", "source", source, "count", len(merged))
 }
 
 func (r *rootsSync) applyFromClientAsync(ctx context.Context) {

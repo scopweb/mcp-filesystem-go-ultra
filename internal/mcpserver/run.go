@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"log/slog"
 	"context"
 	"flag"
 	"fmt"
@@ -113,7 +114,7 @@ func Run() {
 		binaryThreshold  = flag.String("binary-threshold", "1MB", "File size threshold for binary protocol")
 		vsCodeAPI        = flag.Bool("vscode-api", true, "Enable VSCode API integration when available")
 		debugMode        = flag.Bool("debug", false, "Enable debug mode")
-		logLevel         = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+		logLevel         = flag.String("log-level", "info", "Stderr log level: debug, info, warn, error. debug is the same as --debug.")
 		allowedPaths     = flag.String("allowed-paths", "", "Comma-separated list of allowed base paths (required unless --insecure-open; alternative: pass paths as positional arguments)")
 		insecureOpen     = flag.Bool("insecure-open", false, "Disable access control (entire disk). Labs only. Default since v4.6.0 is fail-closed.")
 		rootsMode        = flag.String("roots-mode", "replace", "How MCP client Roots combine with CLI paths: replace (default), union, ignore")
@@ -235,7 +236,10 @@ func Run() {
 	}
 
 	// Setup logging
-	setupLogging(config)
+	if err := setupLogging(config); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(2)
+	}
 
 	// Process lifecycle trace (start/stop/crash) under --log-dir. Nil when
 	// --log-dir is empty; every call on it is then a no-op.
@@ -261,13 +265,13 @@ func Run() {
 		}
 	}()
 	if *insecureOpen {
-		log.Printf("WARNING: --insecure-open: sandbox disabled (entire disk). Labs only.")
+		slog.Warn("--insecure-open: sandbox disabled (entire disk). Labs only.")
 	}
 
-	log.Printf("Starting MCP Filesystem Server Ultra-Fast v%s (commit %s)", serverVersion, BuildCommit)
-	log.Printf("Config: Cache=%s ttl=%s, Parallel=%d, Binary=%s, VSCode=%v, Compact=%v",
-		formatSize(config.CacheSize), config.CacheTTL, config.ParallelOps,
-		formatSize(config.BinaryThreshold), config.VSCodeAPIEnabled, config.CompactMode)
+	slog.Info("starting filesystem-ultra", "version", serverVersion, "commit", BuildCommit)
+	slog.Info("config", "cache", formatSize(config.CacheSize), "ttl", config.CacheTTL,
+		"parallel", config.ParallelOps, "binary", formatSize(config.BinaryThreshold),
+		"vscode", config.VSCodeAPIEnabled, "compact", config.CompactMode)
 
 	if *benchmark {
 		runBenchmark(config)
@@ -344,7 +348,7 @@ func Run() {
 			os.Exit(2)
 		}
 		engine.SetFilePolicy(policy)
-		log.Printf("File security policy loaded (immutable until restart)")
+		slog.Info("file security policy loaded (immutable until restart)")
 	}
 
 	s := newFilesystemMCPServer()
@@ -367,7 +371,7 @@ func Run() {
 	// Start performance monitoring
 	go engine.StartMonitoring(ctx)
 
-	log.Printf("Server ready - Waiting for connections...")
+	slog.Info("server ready")
 
 	// Start the stdio server using new API. ServeStdio returns nil on stdin
 	// EOF (client closed the pipe) and on SIGINT/SIGTERM, which it handles

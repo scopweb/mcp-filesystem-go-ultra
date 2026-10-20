@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"log/slog"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -674,12 +675,44 @@ func formatSize(bytes int64) string {
 }
 
 // setupLogging configures logging based on configuration
-func setupLogging(config *Configuration) {
+// parseLogLevel maps --log-level to a slog level. Empty means info.
+func parseLogLevel(s string) (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "info":
+		return slog.LevelInfo, nil
+	case "debug":
+		return slog.LevelDebug, nil
+	case "warn", "warning":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	default:
+		return 0, fmt.Errorf("--log-level must be one of debug, info, warn, error (got %q)", s)
+	}
+}
+
+// setupLogging applies --log-level and --debug to the process logger.
+// Diagnostics go to stderr through slog's default handler; log.Fatalf and the
+// few remaining log.Printf in core stay unfiltered. --debug is an alias for
+// --log-level debug and also adds file:line to every line.
+func setupLogging(config *Configuration) error {
+	level, err := parseLogLevel(config.LogLevel)
+	if err != nil {
+		return err
+	}
+	if config.DebugMode {
+		level = slog.LevelDebug
+	}
+	if level == slog.LevelDebug {
+		config.DebugMode = true
+	}
+	slog.SetLogLoggerLevel(level)
 	if config.DebugMode {
 		log.SetFlags(log.LstdFlags | log.Lshortfile)
 	} else {
 		log.SetFlags(log.LstdFlags)
 	}
+	return nil
 }
 
 // runBenchmark runs performance benchmarks

@@ -1,11 +1,11 @@
 package mcpserver
 
 import (
+	"log/slog"
 	"context"
 	"encoding/base64"
 	"fmt"
 	"hash/fnv"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -160,7 +160,7 @@ func registerToolsOpts(s *server.MCPServer, engine *core.UltraFastEngine, opts r
 	registerHelpTool(reg)
 	registerSecurityTools(reg)
 
-	log.Printf("Registered %d tools for v%s (profile=%s)", len(s.ListTools()), serverVersion, opts.Profile)
+	slog.Info("tools registered", "count", len(s.ListTools()), "version", serverVersion, "profile", opts.Profile)
 	return nil
 }
 
