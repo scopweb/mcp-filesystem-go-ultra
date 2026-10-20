@@ -1,6 +1,6 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.8.0. 30 tools ultra / 18 agent / 17 strict. First call list_allowed_directories. If the client already lists the tools, do not call help(). help(tool:X) only when a parameter is missing. Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=agent --compact-mode --roots-mode=union.
+description: Tool catalog for filesystem-ultra MCP server v4.8.0. 33 tools ultra / 18 agent / 17 strict. First call list_allowed_directories. If the client already lists the tools, do not call help(). help(tool:X) only when a parameter is missing. Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=agent --compact-mode --roots-mode=union.
 ---
 
 # Filesystem Ultra v4.8.0 — Tool Discovery
@@ -11,7 +11,9 @@ Maintain this repository's `.claude/skills/filesystem-ultra-tools/SKILL.md` as t
 
 ## Recommended server flags
 
-`--profile=agent --compact-mode --roots-mode=union` (`--readonly` off) when the agent needs git without the full catalog. `--profile=strict` remains the 17-tool core without git. `--git-network` only if the agent must `git push`/`fetch`/`pull` (`pull` is fast-forward only; honored by ultra and agent, ignored by strict). `--response-mode=structured` is opt-in and keeps file bodies once in structuredContent; default `compat` is unchanged. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 30 tools including `analyze_code`, graduated `github_issues` / `gitlab_issues`, and experimental `context_pack` and `workspace`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
+`--profile=agent --compact-mode --roots-mode=union` (`--readonly` off) when the agent needs git without the full catalog. `--profile=strict` remains the 17-tool core without git. `--git-network` only if the agent must `git push`/`fetch`/`pull` (`pull` is fast-forward only; honored by ultra and agent, ignored by strict). `--response-mode=structured` is opt-in and keeps file bodies once in structuredContent; default `compat` is unchanged. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 33 tools including `analyze_code`, graduated `github_issues` / `gitlab_issues`, and experimental `context_pack` and `workspace`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
+
+For JSON queries, byte diagnostics or baseline hashes, use `--profile=ultra --compact-mode --roots-mode=union`. `json_query`, `file_bytes` and `file_hash` are absent from both `agent` and `strict`, and work under `--readonly`. After changing the binary/profile, reconnect the client so it refreshes the catalog.
 
 ## Bind each project to one filesystem tool family
 
@@ -62,6 +64,10 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 
 ## Ultra only (absent in `--profile=strict`)
 
+- `json_query` — experimental, ultra only, read-only. Standard JMESPath (not jq), default 100/max 1000 array items, `json|table|csv|text`. Reuse the arguments from response `continuation` including `expected_hash`; no input `continuation`. `lot.json` already groups problems. Example: `json_query(path:"lot.json", query:"problemes[?mena == 'text']", output_format:"table")`.
+- `file_bytes` — experimental, ultra only, read-only. `mode:encoding|bytes|all`; diagnostic prefix defaults to 1 MiB, dump to 512 bytes. Byte offsets are 0-based; line ranges 1-based. Check `scan_complete` for partial statistics. `end_byte_offset` preserves exclusive range ends in continuations.
+- `file_hash` — experimental, ultra only, read-only. `path` XOR `paths` (max 64); SHA-256 of original bytes. `compare:true` requires two paths and directly compares bytes, reporting the first difference. SHA-256 is not an OCC token. Details and limits: `doc/inspection-tools.md` in this repository.
+
 `copy_file`, `project_replace`, `batch_operations`, `analyze_operation`, `wsl`, `git`, `github_issues`, `gitlab_issues`, `minify_js`, `analyze_code`, `server_info`.
 
 - `gitlab_issues` — graduated. `list|view|comment|close|reopen` on a GitLab HTTP API. Auth is cached per process (`GITLAB_TOKEN` or one git-credential sign-in). Do not assume gitlab.com or https. `comment` and `close` are writes and are blocked by `--readonly`. Example: `gitlab_issues(action:"comment", base_url:"http://192.168.0.20", repo:"group/project", number:1, body:"note")` then `gitlab_issues(action:"close", base_url:"http://192.168.0.20", repo:"group/project", number:1)`.
@@ -70,6 +76,19 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 - `minify_js` — exists in ultra; not in handshake instructions.
 - `analyze_code` — ultra only. For editing: `apply_patch`/`edit_file`. For understanding code: `analyze_code`. Do not use git grep or bash. Actions: `symbols`, `lint`, `sec`, `impact`. `symbols`: Go via AST; JS/TS/C#/Razor via brace matching (`start_line`/`end_line` or `range_status:unavailable`); SQL is name + line. Impact is a text search, not a callgraph.
 - Dry-run impact preview → `analyze_operation` (ultra). In strict use `edit_file`/`apply_patch`/`multi_edit` with `dry_run:true`.
+
+## JSON and byte inspection workflow (ultra)
+
+- Prefer `json_query` over reading entire JSON documents or using `ConvertFrom-Json`/jq. Use standard JMESPath: `linies[*].{article: codArticulo, precio: precio}`. `[]` is also standard but flattens one level; `[*]` preserves an array projection. No custom `group_by`.
+- Bounds: 16 MiB JSON input, 64 KiB encoded MCP response (or a smaller server cap), default 100/max 1000 array items. `limit:0` is invalid. Large values or expensive queries may require a smaller projection. Integers outside ±(2^53−1) must be strings; numeric evaluation is binary64, not exact decimal arithmetic.
+- Pagination: reuse `continuation` arguments and its server-returned `expected_hash`; never invent a hash or substitute a SHA-256 digest. On `OCC_MISMATCH`, restart from the current document rather than combining pages from different versions.
+- Text-only clients: normal JSON/table/CSV text does not display pagination metadata. If `structuredContent` is unavailable, repeat the query with `detail:"summary"` to obtain its hash/counts; use that hash in subsequent data calls. Prefer JSON arrays for counting received items. Advance by the actual number of data items received, not the requested limit or a summary page's count: summary and normal pages can fit different item counts under the byte cap. Do not assume a table is complete merely because no truncation marker is visible.
+- Object iteration (`keys()`, `values()`, object wildcards) is unordered. Such results must fit in one page, or project homogeneous scalar values and finish with `| sort(@)` before paginating. Source-array projections/filters retain source order.
+- `file_bytes`: `max_bytes` limits the dump (default 512/max 4096); `max_scan_bytes` limits diagnostic sampling (default 1 MiB; server ceiling controlled by `--max-inspect-scan-bytes`). Check `scan_complete` independently of dump `truncated`. `sample_boundary_pending:true` is a sample cut, not evidence of invalid encoding. Non-ASCII is not an error; inspect `invisible` and `invalid_sequences` separately.
+- For a truncated line dump, reuse the returned byte-offset continuation, including exclusive `end_byte_offset`, so it stays within the selected range. Do not combine byte selectors with line selectors.
+- `file_hash(compare:true)` compares original bytes directly, including BOM/EOL. A first-difference byte of null means EOF. A detected concurrent change fails the whole batch; do not interpret an error as partial equality. SHA-256 hashes are not OCC tokens.
+
+Full limits and evaluator cancellation semantics: `doc/inspection-tools.md` in this repository. These tools inspect/query content; they do not translate or modify JSON values.
 
 ## git
 
@@ -92,6 +111,9 @@ Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `gr
 
 | Need | Call |
 |------|------|
+| Filter/project JSON | `json_query(path, query, limit:100)` (ultra) |
+| BOM/EOL, invisible characters or hex | `file_bytes(path, mode:"all")` (ultra) |
+| Baseline byte parity / SHA-256 | `file_hash(paths:[baseline, generated], compare:true)` (ultra) |
 | Last 40 log lines | `read_file(path, mode:"tail", max_lines:40)` |
 | Line census (replaces find \| wc -l) | `list_directory(path, output_format:"lines", include:".cs,.json,.csproj")` |
 | First N lines | `read_file(path, max_lines:N)` (mode omitted/`"all"`) or `mode:"head"` |

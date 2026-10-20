@@ -50,6 +50,34 @@ type ToolParamSchema map[string]ParamDef
 // toolSchemas is the authoritative registry of every parameter accepted by each
 // MCP tool. Unknown parameters are rejected at validation time.
 var toolSchemas = map[string]ToolParamSchema{
+	"json_query": {
+		"path":          {ParamString, true},
+		"query":         {ParamString, false},
+		"output_format": {ParamString, false},
+		"columns":       {ParamArray, false},
+		"limit":         {ParamNumber, false},
+		"offset":        {ParamNumber, false},
+		"expected_hash": {ParamString, false},
+		"detail":        {ParamString, false},
+	},
+	"file_bytes": {
+		"path":            {ParamString, true},
+		"mode":            {ParamString, false},
+		"detail":          {ParamString, false},
+		"start_line":      {ParamNumber, false},
+		"end_line":        {ParamNumber, false},
+		"byte_offset":     {ParamNumber, false},
+		"end_byte_offset": {ParamNumber, false},
+		"max_bytes":       {ParamNumber, false},
+		"max_scan_bytes":  {ParamNumber, false},
+	},
+	"file_hash": {
+		"path":    {ParamString, false},
+		"paths":   {ParamArray, false},
+		"compare": {ParamBoolean, false},
+		"detail":  {ParamString, false},
+	},
+
 	// ---- CORE (5) ----
 	"read_file": {
 		"path":            {Type: ParamString, Required: true},

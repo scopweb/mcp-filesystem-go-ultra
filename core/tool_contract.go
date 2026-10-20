@@ -107,6 +107,11 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 	setEnum("read_file", "mode", "all", "head", "tail")
 	setEnum("read_file", "encoding", "utf-8", "utf8", "base64")
 	setEnum("read_file", "detail", "summary", "normal", "full")
+	setEnum("json_query", "detail", "summary", "normal", "full")
+	setEnum("file_bytes", "detail", "summary", "normal", "full")
+	setEnum("file_hash", "detail", "summary", "normal", "full")
+	setEnum("json_query", "output_format", "json", "table", "csv", "text")
+	setEnum("file_bytes", "mode", "encoding", "bytes", "all")
 	setEnum("directory_tree", "detail", "summary", "normal", "full")
 	setEnum("list_directory", "detail", "summary", "normal", "full")
 	setEnum("search_files", "detail", "summary", "normal", "full")
@@ -143,6 +148,8 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 		c.Params[param] = p
 	}
 	setItems("read_file", "paths", "string")
+	setItems("json_query", "columns", "string")
+	setItems("file_hash", "paths", "string")
 	setItems("delete_file", "paths", "string")
 	setItems("get_file_info", "paths", "string")
 	setItems("git", "paths", "string")

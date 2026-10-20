@@ -62,6 +62,9 @@ type Config struct {
 	// a marker telling the model to use count_only:true or a narrower path.
 	MaxSearchOutputBytes int
 
+	// MaxInspectScanBytes bounds file_bytes diagnostic scans; 0 uses 16 MiB.
+	MaxInspectScanBytes int
+
 	ReadOnly       bool
 	AllowSecrets   bool
 	RootsMode      RootsMode // How MCP client Roots combine with CLI paths (replace|union|ignore)

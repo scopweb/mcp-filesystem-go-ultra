@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### feat(inspect): bounded JSON queries, byte diagnostics and SHA-256
+
+- Add experimental ultra-only read tools `json_query`, `file_bytes`, and `file_hash`, without outputSchemas. Ultra now has 33 tools; agent/strict remain 18/17.
+- `json_query` uses pinned standard JMESPath v0.4.0, bounded token decoding/evaluation admission, 100-item default pages, CSV/table/text/JSON, and hash-bound continuation arguments. Numeric policy rejects unsafe binary64 integers and overflow.
+- `file_bytes` reports BOM/EOL, invalid sequences and Unicode/invisibles with explicit sampling. Default scan 1 MiB; ceiling controlled by `--max-inspect-scan-bytes` (16 MiB default). Hex offsets are absolute; `end_byte_offset` keeps line-range continuations within their original end.
+- `file_hash` streams original bytes through SHA-256 and directly compares two files, reporting byte/EOF differences and detecting observed concurrent changes.
+- Usage, limits and cancellation semantics: `doc/inspection-tools.md`. Exact write verification and dotnet-builder TRX changes remain separate phases.
+
+**Verification:** document examples, OCC pagination, response caps, CSV, sample boundaries, binary parity, policies, symlinks and profile/experimental contract tests.
+
 ### fix(search): intersect filters and preserve structured counts
 
 - `include` and `file_types` now intersect in filename, content and count searches, before pagination. Previously `file_types` silently discarded `include`.

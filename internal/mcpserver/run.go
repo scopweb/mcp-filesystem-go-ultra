@@ -128,6 +128,7 @@ func Run() {
 		maxResponseSize  = flag.String("max-response-size", "10MB", "Maximum response size")
 		maxSearchResults = flag.Int("max-search-results", 1000, "Ceiling for search_files max_results (omitted page is 40)")
 		maxListItems     = flag.Int("max-list-items", 500, "Maximum items in directory listings")
+		maxInspectScan   = flag.Int("max-inspect-scan-bytes", inspectScanMaximum, "Maximum file_bytes diagnostic prefix in bytes (1..67108864); default scan is 1 MiB")
 		hooksEnabled     = flag.Bool("hooks-enabled", false, "Enable hooks system for pre/post operation validation and formatting")
 		hooksConfig      = flag.String("hooks-config", "", "Path to hooks configuration JSON file (e.g., hooks.json)")
 		version          = flag.Bool("version", false, "Show version information")
@@ -202,6 +203,10 @@ func Run() {
 	config.ResponseMode = mode
 	config.MaxSearchResults = *maxSearchResults
 	config.MaxListItems = *maxListItems
+	if *maxInspectScan <= 0 || *maxInspectScan > 64<<20 {
+		fmt.Fprintln(os.Stderr, "--max-inspect-scan-bytes must be in 1..67108864")
+		os.Exit(2)
+	}
 
 	// Parse max response size
 	if size, err := parseSize(*maxResponseSize); err != nil {
@@ -256,19 +261,20 @@ func Run() {
 
 	// Initialize core engine
 	engine, err := core.NewUltraFastEngine(&core.Config{
-		Cache:            cacheSystem,
-		ParallelOps:      config.ParallelOps,
-		VSCodeAPIEnabled: config.VSCodeAPIEnabled,
-		DebugMode:        config.DebugMode,
-		AllowedPaths:     config.AllowedPaths,
-		BinaryThreshold:  config.BinaryThreshold,
-		CompactMode:      config.CompactMode,
-		ResponseMode:     config.ResponseMode,
-		MaxResponseSize:  config.MaxResponseSize,
-		MaxSearchResults: config.MaxSearchResults,
-		MaxListItems:     config.MaxListItems,
-		HooksEnabled:     *hooksEnabled,
-		HooksConfigPath:  *hooksConfig,
+		Cache:               cacheSystem,
+		ParallelOps:         config.ParallelOps,
+		VSCodeAPIEnabled:    config.VSCodeAPIEnabled,
+		DebugMode:           config.DebugMode,
+		AllowedPaths:        config.AllowedPaths,
+		BinaryThreshold:     config.BinaryThreshold,
+		CompactMode:         config.CompactMode,
+		ResponseMode:        config.ResponseMode,
+		MaxResponseSize:     config.MaxResponseSize,
+		MaxSearchResults:    config.MaxSearchResults,
+		MaxListItems:        config.MaxListItems,
+		MaxInspectScanBytes: *maxInspectScan,
+		HooksEnabled:        *hooksEnabled,
+		HooksConfigPath:     *hooksConfig,
 
 		// Backup configuration
 		BackupDir:      *backupDir,

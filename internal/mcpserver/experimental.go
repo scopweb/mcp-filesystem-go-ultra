@@ -37,6 +37,9 @@ import (
 // v4.6.1 graduated the v4.6.0 cohort: list_allowed_directories, directory_tree,
 // diff_files, apply_patch, native edits/batch, strict match, and e3-v1 retries.
 var experimentalFeatures = map[string]string{
+	"json_query":                    "4.8.0",
+	"file_bytes":                    "4.8.0",
+	"file_hash":                     "4.8.0",
 	"context_pack":                  "4.8.0",
 	"workspace":                     "4.8.0",
 	"read_file:structured-response": "4.8.0",
