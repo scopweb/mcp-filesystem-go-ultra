@@ -402,7 +402,7 @@ Copy [examples/harness/](examples/harness/) — do not guess flags. One MCP inst
 | `security_policy` | Read-only description of the file protection policy. Does not list rules | **strict** |
 | `github_issues` | GitHub issues via `gh`. No delete, no `gh auth login` | ultra |
 | `gitlab_issues` | GitLab issues via its HTTP API. No delete | ultra |
-| `context_pack` | Ranked files and short snippets for a task. Experimental | ultra |
+| `context_pack` | Definition-centred task context: ranked files, exact line ranges, bounded snippets, explicit omissions. Experimental. [doc](doc/context-pack.md) | ultra |
 
 ---
 

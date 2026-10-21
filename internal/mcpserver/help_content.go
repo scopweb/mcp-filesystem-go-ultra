@@ -229,8 +229,17 @@ analyze_code
 - Key params: action (symbols|lint|sec|impact), path, query, max_findings
 
 context_pack
-- Purpose: Deterministic ranked context (files, signatures, short snippets, optional git review). Experimental. Not an embedding index. Ultra only.
+- Purpose: Deterministic task context: ranked files, the definition that answers the query, its exact line range, a bounded snippet, and an explicit account of what was left out. Experimental. Not an embedding index. Ultra only.
 - Key params: path, query, focus_paths, budget_chars, max_files, include_git
+- budget_chars counts Unicode code points of the TEXT fallback (header, per-file blocks, coverage notes, truncation marker). The text never exceeds it. The structured payload is a projection of the same selection, so it never keeps a body the budget removed. text_chars, structured_chars and content_chars are reported.
+- Progressive reduction: snippet -> signature (signature + locator) -> locator (path, range, symbol) -> omitted and counted. The envelope is reserved before any body is admitted.
+- range_status is exact (an analyzer resolved it), approximate (a window or a merged span) or unavailable (no reliable end). range_source says which analyzer produced it. A range is never invented; without an analyzer the pack falls back to a textual window.
+- content_hash is the FNV-1a OCC token of the same snapshot the fragments came from; pass it as expected_hash.
+- coverage separates "nothing matched", "the candidate search was capped", "files omitted by max_files", "fragments reduced or omitted by the budget" and "files unreadable". It carries counts only, never the path of a denied file.
+- focus_paths always outranks query matches. A query is compared to symbol names only when it is a plain identifier; a regex stays a content query.
+- An identifier query also gets a source-file scan, so a definition is not lost when the general search is truncated. source_candidates counts what it added.
+- An analyzer range is never widened by a looser fragment: a doc-comment window next to a definition is folded in and counted, but the definition keeps its own bounds.
+- Doc: doc/context-pack.md
 
 workspace
 - Purpose: Experimental real git worktree. begin/status/diff/export/discard. Ultra only. Not a sandbox and not crash-durable. promote and query are not registered.

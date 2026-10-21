@@ -4,6 +4,79 @@
 
 ## [Unreleased]
 
+### feat(context_pack): definition-centred context under a coherent budget
+
+`context_pack` was a ranking plus a byte cut. The text was truncated by bytes (which can
+split a UTF-8 sequence), the marker was appended after the limit, the structured payload
+ignored the budget entirely, the symbols shown were the first of the file rather than the
+ones related to the query, and a capped candidate search was not reported.
+
+- **Budget.** `budget_chars` now counts Unicode code points of the text representation
+  (header, per-file blocks, coverage notes, truncation marker) and the text never exceeds
+  it. The structured payload is a projection of the same selection, so it cannot keep a body
+  the budget removed; `text_chars`, `structured_chars` and `content_chars` are reported. The
+  parameter keeps its name, type, default (12000) and range (500..32000).
+- **Progressive reduction.** A fragment is admitted as `snippet`, degraded to `signature`
+  (signature + locator), then to `locator` (path, range, symbol), then dropped and counted.
+  The envelope is measured and reserved before any body is admitted. Files are enriched in
+  relevance order.
+- **Definition-centred selection.** The analyzers and ranges behind `analyze_code` are reused:
+  a symbol whose name is the query identifier outranks a mention, the symbol that encloses
+  the textual match is selected when a reliable range exists, and the file is annotated with
+  its signature, start line, end line and a bounded snippet. A query is compared to symbol
+  names only when it is a plain identifier; a regex stays a content query. Without an
+  analyzer the pack falls back to a textual window and says so (`range_source:"window"`,
+  `range_status:"approximate"`). No range is invented.
+- **Provenance.** Every file that shows content carries the server's FNV-1a OCC token taken
+  from the same snapshot the fragments were cut from, so it can be passed back as
+  `expected_hash`. Ranges read from another revision are downgraded and counted.
+- **Coverage.** `coverage` separates "nothing matched", "the candidate search was capped",
+  "files omitted by max_files", "fragments reduced or omitted by the budget" and "files
+  unreadable". It carries counts only, never the path of a denied file. The text fallback
+  marks a reduced pack with `[TRUNCADO: budget_chars]` and repeats the reasons.
+- **Deduplication.** Duplicate and overlapping ranges are folded into one fragment, keeping
+  the union of the content; the fold is counted separately from "nothing was found".
+- **Attribution.** The design is conceptually inspired by
+  [XERJ](https://github.com/xerj-org/xerj) (definition-centred retrieval, passage-window
+  fallback, progressive reduction). The implementation is original Go on this repository's
+  architecture: no XERJ code was copied and no XERJ dependency was added. XERJ is an
+  independent Apache-2.0 project and is not affiliated with, endorsed by or connected to
+  this server.
+- **Scope.** The tool stays experimental, keeps its `ultra` profile and gains no outputSchema.
+  The 17 core tools are untouched.
+
+### fix(context_pack): keep the analyzer range, and never lose the definition
+
+Two defects found by running the tool against real repositories, not by the unit tests.
+
+- **An analyzer range was widened by a looser fragment.** When the identifier also appears in
+  the doc comment above its definition, the textual window around the comment overlaps the
+  range the analyzer resolved, and the merge replaced it: `core/feedback.go` reported
+  `135-151 [approximate merged]` — starting on the closing brace of the previous function —
+  instead of the definition's own `140-151`. An analyzer-resolved range is now never widened
+  by a looser one: the window is folded in and counted, the definition keeps its bounds, and
+  the range stays `exact`. Those bounds are what `replace_range` and `analyze_code` agree on.
+- **A definition could be lost to a truncated search.** The general search is ordered by
+  path, so on a large tree its cap can be spent entirely on prose and data files while the
+  source file that defines the identifier is never a candidate. On a real .NET repository a
+  query with 32 321 matches returned JSON and Markdown windows and no C# definition at all.
+  An identifier query now also gets a second scan restricted to the extensions the analyzers
+  understand (`.go .js .jsx .mjs .cjs .ts .tsx .cs .razor .sql`); it is a second look, not a
+  replacement, and the files it adds are counted in `coverage.source_candidates`. A query
+  that is not a plain identifier gets no definition ranking and needs no second scan.
+
+**Verification:** `internal/mcpserver/context_pack_test.go` — the exact range survives an
+adjacent window, and the definition file ranks first when the general search is truncated.
+Confirmed against real trees: `mcp-filesystem-go-ultra` (Go, exact AST ranges),
+`ConversorDeComandes` (C#, regex-brace ranges) and `C:\temp` (large mixed tree, 32 321
+matches, search truncation reported).
+
+**Verification:** `internal/mcpserver/context_pack_test.go` — budget ceiling at six budgets,
+progressive degradation, Unicode integrity, text/structured coherence, a relevant symbol past
+the first six, definitions against mentions, the textual fallback, overlapping and duplicate
+ranges, search truncation, hash against snapshot and against `read_file`, deterministic order,
+regex queries and access restrictions.
+
 ### fix(concurrency): several conversations through one server process
 
 Claude Desktop runs one server process for all its chats; four conversations on one project is four request streams into one process, not four processes.

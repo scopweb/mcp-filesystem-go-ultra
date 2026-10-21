@@ -3,8 +3,6 @@ package mcpserver
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -16,8 +14,10 @@ func registerContextTools(reg *toolRegistry) {
 	engine := reg.engine
 	tool := mcp.NewTool("context_pack",
 		mcp.WithTitleAnnotation("Context Pack"),
-		mcp.WithDescription("context_pack — Deterministic task context: ranked files, signatures, short snippets, and related git status. "+
-			"Not a semantic index. Omissions and status_hash are explicit. Pass focus_paths or query; then read_file only the ranges you need. "+
+		mcp.WithDescription("context_pack — Deterministic task context: ranked files, definition-centred ranges, bounded snippets, and related git status. "+
+			"Not a semantic index. budget_chars bounds the characters carried by the text fallback and the structured payload together; "+
+			"fragments degrade to signature, then locator, and every omission is counted in coverage. "+
+			"Pass focus_paths or query; then read_file only the ranges you need. "+
 			"Ultra only. Related: search_files, analyze_code, git, read_file."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -26,7 +26,7 @@ func registerContextTools(reg *toolRegistry) {
 		mcp.WithString("path", mcp.Required(), mcp.Description("Repository or directory root inside allowed paths")),
 		mcp.WithString("query", mcp.Description("Literal/regex content query used to rank files. Omit when focus_paths is enough.")),
 		mcp.WithArray("focus_paths", mcp.WithStringItems(), mcp.Description("Files to rank first. Relative to path or absolute.")),
-		mcp.WithNumber("budget_chars", mcp.Description("Max text characters. Default 12000. Max 32000.")),
+		mcp.WithNumber("budget_chars", mcp.Description("Total characters the pack may carry across the text fallback and the structured payload. Default 12000. Min 500. Max 32000.")),
 		mcp.WithNumber("max_files", mcp.Description("Max files in the pack. Default 8. Max 20.")),
 		mcp.WithBoolean("include_git", mcp.Description("Include a compact git review when path is a repository. Default true. Skipped while a file security policy is active.")),
 	)
@@ -41,14 +41,6 @@ func registerContextTools(reg *toolRegistry) {
 	)
 }
 
-type packFile struct {
-	Path    string
-	Score   int
-	Line    int
-	Snippet string
-	Symbols []map[string]any
-}
-
 func contextPack(ctx context.Context, engine *core.UltraFastEngine, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	path, _ := args["path"].(string)
 	if strings.TrimSpace(path) == "" {
@@ -56,7 +48,7 @@ func contextPack(ctx context.Context, engine *core.UltraFastEngine, args map[str
 	}
 	path = core.NormalizePath(path)
 	if !engine.IsPathAllowed(path) {
-		return mcp.NewToolResultError("access denied: path outside allowed directories" + engine.AllowedDirsSuffix()), nil
+		return notAllowedResult(engine, path), nil
 	}
 	query := strings.TrimSpace(stringArg(args, "query"))
 	budget := parseIntArg(args, "budget_chars", 12000)
@@ -82,158 +74,80 @@ func contextPack(ctx context.Context, engine *core.UltraFastEngine, args map[str
 		return errRes, nil
 	}
 
-	ranked := map[string]*packFile{}
-	var omitted int
-	add := func(p string, score, line int, snippet string) {
-		p = core.NormalizePath(p)
-		if p == "" || !engine.IsPathAllowed(p) {
-			omitted++
-			return
-		}
-		if core.IsSecretPath(p) && !engine.AllowSecrets() {
-			omitted++
-			return
-		}
-		if err := engine.Authorize(core.OpRead, p); err != nil {
-			omitted++
-			return
-		}
-		st, err := os.Stat(p)
-		if err != nil || st.IsDir() {
-			omitted++
-			return
-		}
-		cur, ok := ranked[p]
-		if !ok {
-			ranked[p] = &packFile{Path: p, Score: score, Line: line, Snippet: snippet}
-			return
-		}
-		if score > cur.Score {
-			cur.Score = score
-			if line > 0 {
-				cur.Line = line
-			}
-			if snippet != "" {
-				cur.Snippet = snippet
-			}
-		}
+	disc, err := packDiscover(ctx, engine, path, query, focus)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("context_pack search failed: %v", err)), nil
 	}
-	for _, f := range focus {
-		fp := f
-		if !filepath.IsAbs(fp) {
-			fp = filepath.Join(path, fp)
+
+	// Open the candidates that can still make the cut and derive their
+	// fragments from one snapshot each.
+	ident := packQueryIdentifier(query)
+	examined := 0
+	for _, c := range disc.Candidates {
+		if examined >= packCandidateScanLimit {
+			break
 		}
-		add(fp, 1000, 0, "")
+		examined++
+		packBuildCandidate(ctx, engine, c, ident)
 	}
-	if query != "" {
-		out, err := engine.SearchFiles(ctx, core.SearchOptions{
-			Path: path, Pattern: query, IncludeContent: true, MaxResults: 40,
-		})
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("context_pack search failed: %v", err)), nil
-		}
-		counts := map[string]int{}
-		for _, m := range out.Matches {
-			counts[m.File]++
-			if counts[m.File] == 1 {
-				add(m.File, 100+counts[m.File], m.LineNumber, trimPackLine(m.Line))
-			}
-		}
-		for file, n := range counts {
-			if cur, ok := ranked[core.NormalizePath(file)]; ok && cur.Score < 1000 {
-				cur.Score += n
-			}
-		}
-	}
-	files := make([]*packFile, 0, len(ranked))
-	for _, f := range ranked {
-		files = append(files, f)
-	}
-	sort.Slice(files, func(i, j int) bool {
-		if files[i].Score == files[j].Score {
-			return files[i].Path < files[j].Path
-		}
-		return files[i].Score > files[j].Score
+	// The class of a candidate is only known once its fragments are, so the
+	// order is settled here and not before.
+	sort.SliceStable(disc.Candidates, func(i, j int) bool {
+		return packCandidateLess(disc.Candidates[i], disc.Candidates[j])
 	})
-	dropped := 0
-	if len(files) > maxFiles {
-		dropped = len(files) - maxFiles
-		files = files[:maxFiles]
+
+	cov := packCoverage{
+		Scope:                 path,
+		Query:                 query,
+		QueryMatched:          disc.QueryHadMatches,
+		CandidateFiles:        len(disc.Candidates),
+		SearchTruncated:       disc.SearchTruncated,
+		SearchMatches:         disc.SearchMatches,
+		FilesDenied:           disc.Denied,
+		CandidatesNotExamined: len(disc.Candidates) - examined,
+		SourceCandidates:      disc.SourceCandidates,
 	}
-	entries := make([]map[string]any, 0, len(files))
-	for _, f := range files {
-		f.Symbols = signatureLines(engine, f.Path, 6)
-		if f.Snippet == "" && f.Line == 0 && len(f.Symbols) > 0 {
-			if line, ok := f.Symbols[0]["line"].(int); ok {
-				f.Line = line
-			}
-		}
-		if f.Snippet == "" && f.Line > 0 {
-			f.Snippet = lineAt(f.Path, f.Line)
-		}
-		entries = append(entries, map[string]any{
-			"path": f.Path, "score": f.Score, "line": f.Line, "snippet": f.Snippet, "symbols": f.Symbols,
-		})
+
+	selected := disc.Candidates
+	if len(selected) > maxFiles {
+		cov.FilesOmittedMaxFiles = len(selected) - maxFiles
+		selected = selected[:maxFiles]
 	}
+	for _, c := range selected {
+		if c.Unreadable {
+			cov.FilesUnreadable++
+			continue
+		}
+		if c.Stale {
+			cov.RangesStale++
+		}
+		cov.RangesMerged += c.Merged
+	}
+
 	gitText, gitPayload, gitNote := packGit(ctx, engine, path, includeGit)
-	text := renderPack(path, query, entries, omitted+dropped, gitText, gitNote)
-	truncated := false
-	if len(text) > budget {
-		text = text[:budget] + "\n[TRUNCADO: budget_chars]\n"
-		truncated = true
-	}
-	payload := map[string]any{
-		"action": "context_pack", "path": path, "files": entries,
-		"omitted": omitted + dropped, "truncated": truncated, "budget_chars": budget,
-	}
-	if query != "" {
-		payload["query"] = query
-	}
-	if gitPayload != nil {
-		payload["git"] = gitPayload
-	}
-	if gitNote != "" {
-		payload["git_omitted"] = gitNote
+	text, payload, cov := packRender(selected, cov, gitText, gitPayload, gitNote, budget)
+
+	if engine.StructuredResponses() {
+		text = packSummary(cov, payload)
+		payload["presentation"] = core.ResponseModeStructured
 	}
 	return mcp.NewToolResultStructured(payload, text), nil
 }
 
-func renderPack(path, query string, files []map[string]any, omitted int, gitText, gitNote string) string {
+// packSummary is the brief text used under --response-mode=structured. The
+// context itself stays in structuredContent, so the body appears once.
+func packSummary(cov packCoverage, payload map[string]any) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "context_pack %s", path)
-	if query != "" {
-		fmt.Fprintf(&b, " query=%q", query)
+	fmt.Fprintf(&b, "context_pack %s", cov.Scope)
+	if cov.Query != "" {
+		fmt.Fprintf(&b, " query=%q", cov.Query)
 	}
-	fmt.Fprintf(&b, " files:%d omitted:%d\n", len(files), omitted)
-	if gitNote != "" {
-		fmt.Fprintf(&b, "git: %s\n", gitNote)
+	files, _ := payload["files"].([]map[string]any)
+	fmt.Fprintf(&b, " files:%d/%d budget_chars:%v", len(files), cov.CandidateFiles, payload["budget_chars"])
+	if truncated, _ := payload["truncated"].(bool); truncated {
+		b.WriteString(" truncated")
 	}
-	if gitText != "" {
-		b.WriteString(gitText)
-		if !strings.HasSuffix(gitText, "\n") {
-			b.WriteByte('\n')
-		}
-	}
-	for _, f := range files {
-		p, _ := f["path"].(string)
-		line, _ := f["line"].(int)
-		fmt.Fprintf(&b, "\n%s", p)
-		if line > 0 {
-			fmt.Fprintf(&b, ":%d", line)
-		}
-		b.WriteByte('\n')
-		if syms, ok := f["symbols"].([]map[string]any); ok {
-			for _, s := range syms {
-				fmt.Fprintf(&b, "  %s %v:%v\n", s["kind"], s["name"], s["line"])
-			}
-		}
-		if snip, _ := f["snippet"].(string); snip != "" {
-			fmt.Fprintf(&b, "  > %s\n", snip)
-		}
-	}
-	if len(files) == 0 {
-		b.WriteString("no files selected; pass query or focus_paths\n")
-	}
+	b.WriteString(" | context in structured content")
 	return b.String()
 }
 
@@ -260,43 +174,6 @@ func packGit(ctx context.Context, engine *core.UltraFastEngine, path string, inc
 	}
 	payload, _ := res.StructuredContent.(map[string]any)
 	return text, payload, ""
-}
-
-func signatureLines(engine *core.UltraFastEngine, path string, max int) []map[string]any {
-	res := core.AnalyzeSymbols(engine, path, "", max)
-	out := make([]map[string]any, 0, len(res.Findings))
-	for _, f := range res.Findings {
-		if len(out) >= max {
-			break
-		}
-		out = append(out, map[string]any{
-			"name": f.Symbol, "kind": f.Kind, "line": f.Line, "signature": lineAt(path, f.Line),
-		})
-	}
-	return out
-}
-
-func lineAt(path string, line int) string {
-	if line < 1 {
-		return ""
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	lines := strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n")
-	if line > len(lines) {
-		return ""
-	}
-	return trimPackLine(lines[line-1])
-}
-
-func trimPackLine(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) > 180 {
-		return s[:180] + "…"
-	}
-	return s
 }
 
 func stringListArg(args map[string]interface{}, key string) ([]string, *mcp.CallToolResult) {
