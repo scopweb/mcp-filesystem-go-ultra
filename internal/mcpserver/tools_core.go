@@ -1,11 +1,11 @@
 package mcpserver
 
 import (
-	"log/slog"
 	"context"
 	"encoding/base64"
 	"fmt"
 	"hash/fnv"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -378,7 +378,8 @@ func editStructuredFromContents(path, oldContent, newContent string, replacement
 }
 
 // diffFormatArg reads the optional diff_format argument (point 1). Empty string
-// means "auto" — see core.RenderDiff for the supported values.
+// means the caller did not ask for a diff. Pass "auto", "full", or "summary"
+// to render one. See core.RenderDiff.
 func diffFormatArg(args map[string]interface{}) string {
 	if args != nil {
 		if df, ok := args["diff_format"].(string); ok {
@@ -386,6 +387,32 @@ func diffFormatArg(args map[string]interface{}) string {
 		}
 	}
 	return ""
+}
+
+// wantEditDiff is true only when the caller asked for a diff body.
+// Omitted, "stat", and "none" stay a one-line success.
+func wantEditDiff(args map[string]interface{}) bool {
+	switch strings.ToLower(strings.TrimSpace(diffFormatArg(args))) {
+	case "full", "auto", "summary":
+		return true
+	default:
+		return false
+	}
+}
+
+func shortUndo(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+func shortEditOK(path string, added, removed int, backupID string) string {
+	msg := fmt.Sprintf("OK %s | +%d -%d", path, added, removed)
+	if backupID != "" {
+		msg += " | UNDO:" + shortUndo(backupID)
+	}
+	return msg
 }
 
 // registerCoreTools registers read_file, write_file, edit_file
@@ -699,7 +726,7 @@ func registerCoreTools(reg *toolRegistry) {
 
 			_, err := engine.WriteBase64(ctx, path, b64Content)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+				return mcp.NewToolResultError(formatToolError(err)), nil
 			}
 			// Reopen the final host file so the payload carries actual disk
 			// evidence, not merely the decoded input length.
@@ -744,7 +771,7 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			err = engine.WriteFileContent(ctx, path, content)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+				return mcp.NewToolResultError(formatToolError(err)), nil
 			}
 			verifiedPath, bytesWritten, writeContentHash, verified := verifyOnDiskWrite(engine, path)
 			if verified {
@@ -789,7 +816,7 @@ func registerCoreTools(reg *toolRegistry) {
 			// and restore command remain literal and visible to the AI/operator.
 			err = engine.WriteFileContent(ctx, path, content)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+				return mcp.NewToolResultError(formatToolError(err)), nil
 			}
 			// Reopen once after the write so hooks/EOL transformations are reflected
 			// in both the byte count and OCC token.
@@ -834,7 +861,7 @@ func registerCoreTools(reg *toolRegistry) {
 
 		err = engine.WriteFileContent(ctx, path, content)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
 		verifiedPath, bytesWritten, writeContentHash, verified := verifyOnDiskWrite(engine, path)
 		if verified {
@@ -898,7 +925,7 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive matching (default: true, for regex mode)")),
 		mcp.WithBoolean("create_backup", mcp.Description("Create backup before transformation (default: true, for regex mode)")),
 		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Supported in all modes (replace, search_replace, regex, insert, replace_range, delete_range, occurrence). Does not create backups or update the undo chain. Default: false.")),
-		mcp.WithString("diff_format", mcp.Description("Controls how the diff is rendered (point 1). \"\"/\"auto\" (default): full diff when small, else a summary with anchors + ranges to save tokens; \"full\": always the complete unified diff; \"summary\": per-hunk ranges + first/last anchor lines, eliding large bodies (ideal for big block deletions); \"stat\": just \"+added -removed\"; \"none\": no diff."), mcp.Enum("auto", "full", "summary", "stat", "none")),
+		mcp.WithString("diff_format", mcp.Description("Omitted: one-line OK + UNDO, no diff body. \"auto\": full diff when small, else summary; \"full\": complete unified diff; \"summary\": hunk ranges + anchors; \"stat\": \"+added -removed\"; \"none\": no diff."), mcp.Enum("auto", "full", "summary", "stat", "none")),
 		mcp.WithString("detail", mcp.Description("Set to full to include a bounded diff in an OCC conflict."), mcp.Enum("full")),
 		mcp.WithBoolean("include_diff", mcp.Description("Include a bounded diff in an OCC conflict.")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false, for occurrence mode)")),
@@ -1180,7 +1207,7 @@ func registerCoreTools(reg *toolRegistry) {
 
 			resp, err := engine.SearchAndReplace(ctx, path, pattern, replacement, false, dryRun)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return mcp.NewToolResultError(formatToolError(err)), nil
 			}
 			if len(resp.Content) == 0 {
 				oldStr := string(oldContentRaw)
@@ -1211,7 +1238,9 @@ func registerCoreTools(reg *toolRegistry) {
 			} else {
 				newContentRaw, _ := os.ReadFile(normPath)
 				newContentStr = string(newContentRaw)
-				unifiedDiff = core.RenderDiff(string(oldContentRaw), newContentStr, path, diffFormatArg(args))
+				if wantEditDiff(args) {
+					unifiedDiff = core.RenderDiff(string(oldContentRaw), newContentStr, path, diffFormatArg(args))
+				}
 				core.RefreshKnownHashes([]string{normPath})
 			}
 
@@ -1293,7 +1322,7 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			result, rerr := engine.ReplaceLineRange(ctx, path, startLine, endLine, newText, dryRun)
 			if rerr != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", rerr)), nil
+				return mcp.NewToolResultError(formatToolError(rerr)), nil
 			}
 			if dryRun {
 				extra := fmt.Sprintf("Would replace lines %d-%d\n", startLine, endLine)
@@ -1362,7 +1391,7 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			_, result, derr := engine.DeleteLineRange(ctx, path, startLine, endLine, dryRun)
 			if derr != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", derr)), nil
+				return mcp.NewToolResultError(formatToolError(derr)), nil
 			}
 			if dryRun {
 				extra := fmt.Sprintf("Would delete lines %d-%d\n", startLine, endLine)
@@ -1451,13 +1480,24 @@ func registerCoreTools(reg *toolRegistry) {
 			if newRaw, readErr := os.ReadFile(normPath); readErr == nil {
 				newContentStr = string(newRaw)
 			}
-			unifiedDiff := core.RenderDiff(oldContentStr, newContentStr, path, diffFormatArg(args))
-			if unifiedDiff != "" {
-				core.SetDiffLines(ctx, strings.Count(unifiedDiff, "\n"))
+			unifiedDiff := ""
+			if wantEditDiff(args) {
+				unifiedDiff = core.RenderDiff(oldContentStr, newContentStr, path, diffFormatArg(args))
+				if unifiedDiff != "" {
+					core.SetDiffLines(ctx, strings.Count(unifiedDiff, "\n"))
+				}
 			}
 
-			msg := fmt.Sprintf("OK: inserted %s anchor (line %d)", position, result.StartLine)
-			if result.BackupID != "" && !engine.IsCompactMode() {
+			msg := shortEditOK(path, result.LinesAdded, result.LinesRemoved, result.BackupID)
+			if !wantEditDiff(args) {
+				msg = fmt.Sprintf("OK %s | inserted %s line %d", path, position, result.StartLine)
+				if result.BackupID != "" {
+					msg += " | UNDO:" + shortUndo(result.BackupID)
+				}
+			} else {
+				msg = fmt.Sprintf("OK: inserted %s anchor (line %d)", position, result.StartLine)
+			}
+			if wantEditDiff(args) && result.BackupID != "" && !engine.IsCompactMode() {
 				msg += fmt.Sprintf("\nBackup ID: %s", result.BackupID)
 			}
 			if autoOCCWarn != "" {
@@ -1532,7 +1572,7 @@ func registerCoreTools(reg *toolRegistry) {
 
 			result, err := engine.ReplaceNthOccurrence(ctx, path, oldText, newText, occurrence, wholeWord, dryRun)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+				return mcp.NewToolResultError(formatToolError(err)), nil
 			}
 			if dryRun {
 				extra := fmt.Sprintf("Would replace occurrence #%d\n", occurrence)
@@ -1598,17 +1638,53 @@ func registerCoreTools(reg *toolRegistry) {
 
 		newContentRaw, _ := os.ReadFile(normPath)
 		newContentStr := string(newContentRaw)
-		unifiedDiff := core.RenderDiff(oldContentStr, newContentStr, path, diffFormatArg(args))
-		if unifiedDiff != "" {
-			core.SetDiffLines(ctx, strings.Count(unifiedDiff, "\n"))
-		}
-
 		editSignal := core.CheckEditOp(path, oldText, fileSize, expectedHash != "")
 		newTextSignal := core.CheckEditNewText(newText, fileSize)
 		if editSignal.Status != core.FeedbackOK {
 			core.SetFeedback(ctx, editSignal)
 		} else {
 			core.SetFeedback(ctx, newTextSignal)
+		}
+		if result.BackupID != "" {
+			prevID := ""
+			if info, err := engine.GetBackupManager().GetBackupInfo(result.BackupID); err == nil {
+				prevID = info.PreviousBackupID
+			}
+			core.SetBackupID(ctx, result.BackupID, prevID)
+		}
+		if result.Integrity != nil {
+			core.SetIntegrityStatus(ctx, result.Integrity.Verification, result.Integrity.Warning)
+		}
+		if !wantEditDiff(args) {
+			msg := shortEditOK(path, result.LinesAdded, result.LinesRemoved, result.BackupID)
+			if result.RiskWarning != "" {
+				msg += " | " + strings.TrimPrefix(result.RiskWarning, "⚠️ ")
+			}
+			if result.StructureWarning != "" {
+				msg += "\n" + result.StructureWarning
+			}
+			if autoOCCWarn != "" {
+				msg += "\n" + autoOCCWarn
+			}
+			if result.Integrity != nil && result.Integrity.Verification != "OK" {
+				msg += "\nintegrity:" + result.Integrity.Verification
+				if result.Integrity.Warning != "" {
+					msg += " | " + result.Integrity.Warning
+				}
+			}
+			msg += syntaxWarning(normPath)
+			msg = core.FormatFeedback(editSignal, msg)
+			sc := editStructured(path, result)
+			if autoOCCWarn != "" {
+				sc["external_change"] = autoOCCWarn
+			}
+			attachParentBackup(sc, engine, result.BackupID)
+			return mcp.NewToolResultStructured(attachMessage(sc, msg), msg), nil
+		}
+
+		unifiedDiff := core.RenderDiff(oldContentStr, newContentStr, path, diffFormatArg(args))
+		if unifiedDiff != "" {
+			core.SetDiffLines(ctx, strings.Count(unifiedDiff, "\n"))
 		}
 
 		if engine.IsCompactMode() {

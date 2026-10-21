@@ -6,7 +6,7 @@ import "sync"
 // a file security policy is active. It keeps directory walks from reading
 // protected or hidden files. Nil means no extra filter.
 var (
-	analyzeBlockMu       sync.Mutex
+	analyzeBlockMu        sync.Mutex
 	analyzeContentBlocked func(string) bool
 )
 

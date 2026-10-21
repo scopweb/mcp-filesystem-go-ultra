@@ -92,9 +92,10 @@ func TestEditFile_DiffInResponse_VerboseMode(t *testing.T) {
 	reg := buildEditRegistry(t, dir, false /* verbose */)
 
 	result := callEdit(t, reg, map[string]interface{}{
-		"path":     file,
-		"old_text": "\"old\"",
-		"new_text": "\"new\"",
+		"path":        file,
+		"old_text":    "\"old\"",
+		"new_text":    "\"new\"",
+		"diff_format": "full",
 	})
 
 	text := resultText(t, result)
@@ -128,9 +129,10 @@ func TestEditFile_DiffInResponse_CompactMode(t *testing.T) {
 	reg := buildEditRegistry(t, dir, true /* compact */)
 
 	result := callEdit(t, reg, map[string]interface{}{
-		"path":     file,
-		"old_text": "\"1.0\"",
-		"new_text": "\"2.0\"",
+		"path":        file,
+		"old_text":    "\"1.0\"",
+		"new_text":    "\"2.0\"",
+		"diff_format": "full",
 	})
 
 	text := resultText(t, result)
@@ -210,5 +212,32 @@ func TestEditFile_NoMatchOldText_NoDiff(t *testing.T) {
 	}
 	if strings.Contains(text, "--- a/") {
 		t.Error("error response must NOT contain a diff")
+	}
+}
+
+func TestEditFile_DefaultResponseIsOneLine(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "short.go")
+	if err := os.WriteFile(file, []byte("package main\n\nvar X = 1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	reg := buildEditRegistry(t, dir, false)
+	result := callEdit(t, reg, map[string]interface{}{
+		"path":     file,
+		"old_text": "var X = 1",
+		"new_text": "var X = 2",
+	})
+	text := resultText(t, result)
+	if result.IsError {
+		t.Fatalf("edit failed: %s", text)
+	}
+	if strings.Contains(text, "--- a/") || strings.Contains(text, "Change Analysis") {
+		t.Fatalf("default edit must not include a diff or analysis:\n%s", text)
+	}
+	if !strings.Contains(text, "OK ") || !strings.Contains(text, "UNDO:") || !strings.Contains(text, "+1 -1") {
+		t.Fatalf("want one-line OK + UNDO, got:\n%s", text)
+	}
+	if strings.Count(text, "\n") > 2 {
+		t.Fatalf("default edit should stay short, got:\n%s", text)
 	}
 }

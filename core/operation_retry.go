@@ -85,9 +85,9 @@ type operationRetries struct {
 	entries map[string]*operationReceipt
 }
 type operationReceipt struct {
-	args      [32]byte
-	done      chan struct{}
-	completed time.Time
+	args       [32]byte
+	done       chan struct{}
+	completed  time.Time
 	result     []byte
 	err        error
 	unknown    bool

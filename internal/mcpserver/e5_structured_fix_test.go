@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
 )
 
 func TestE5_SearchFilenameHitNotEmpty(t *testing.T) {
@@ -16,7 +15,7 @@ func TestE5_SearchFilenameHitNotEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	res := callNamed(t, reg, context.Background(), "search_files", map[string]interface{}{
-		"path": dir, "pattern": "sample",
+		"path": dir, "pattern": "sample", "include_content": false,
 	})
 	if res.IsError {
 		t.Fatal(resultText(t, res))

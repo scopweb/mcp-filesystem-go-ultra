@@ -125,7 +125,7 @@ search_files
 - Purpose: Search by filename or content. Honors .gitignore by default (no_ignore=false). truncated + hidden_count in structured output.
 - Key params: path, pattern, file_types, include, include_content, include_context, case_sensitive, count_only, max_results, no_ignore
 - include: comma-separated globs (*.go, *.ts) or brace alternatives ({A.cs,B.cs}, {Test,ObservacionesPedido}/*.razor, *.{go,razor}). Commas inside {} are alternatives, not separators. * does not cross /. ** matches any depth. A pattern with / is relative to path. Invalid globs, unbalanced braces, empty alternatives, and more than 64 expansions return VALIDATION (retryable false), not an empty search. file_types does not expand braces; if both are set, their intersection applies in names, content and count modes before pagination.
-- Empty results name the scope: "0 coincidencias en nombres de fichero" or "0 coincidencias en contenido". A path that is a file forces content search. There is no mode parameter; do not infer content search from a regex alone. A valid include with no hits is still an empty search, not an error.
+- include_content omitted searches content, unless pattern is a filename glob (* ? [), which stays filename-only. Explicit false searches names only. Empty results name the scope: "0 coincidencias en contenido" or "0 coincidencias en nombres de fichero". A names-only zero is not proof the text is absent. A path that is a file forces content search. There is no mode parameter. A valid include with no hits is still an empty search, not an error.
 - structured message is a short summary. Hits live in matches. The text content block keeps the listing for text-only clients.
 
 ## File Operations (5)
@@ -470,6 +470,8 @@ FIX: Use edit_file with occurrence=N:
 
 ## "access denied" / "permission error"
 CAUSE: Path not in allowed paths or file locked
+ENVELOPE: {"error":{"code":"NOT_ALLOWED","path":"...","retryable":false}}
+retryable:false means stop. Do not retry the same call and do not switch to native Read/Edit/Write.
 FIXES:
 1. Check --allowed-paths configuration
 2. Close any programs using the file

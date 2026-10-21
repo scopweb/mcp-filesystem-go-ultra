@@ -37,7 +37,7 @@ func registerAliases(reg *toolRegistry) {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Base directory or file (WSL or Windows format)")),
 		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal pattern")),
-		mcp.WithBoolean("include_content", mcp.Description("Include file content search (default: false)")),
+		mcp.WithBoolean("include_content", mcp.Description("Search file contents. Omitted: true, unless pattern is a filename glob. Explicit false: names only.")),
 		mcp.WithString("file_types", mcp.Description("Comma-separated file extensions (e.g., '.go,.txt')")),
 		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive search (default: false)")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false)")),

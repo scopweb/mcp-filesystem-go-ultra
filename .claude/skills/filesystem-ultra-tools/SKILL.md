@@ -36,7 +36,9 @@ Harness subagents start without this file. The portable contract is `server.With
 
 Native `oldString` / `replaceAll` / `search` / `edit` are not this server. `edit_file` uses `old_text` / `new_text`. Omitting `occurrence` replaces every exact match. A pattern uses `mode:"search_replace"`.
 
-Search first: `search_files` with `include_content:false` or `detail:"summary"`, and `max_results` (omitted page is 40). Then `read_file` only with a range.
+Host files = `read_file` / `search_files` / `edit_file` / `write_file`. Native Read/Edit/Write/Grep = error. On failure, read `path` and `retryable`; `retryable:false` means stop.
+
+Search first: `search_files` (omitted `include_content` searches content; globs stay filename-only; `include_content:false` is names only). Empty results name the scope. Page is 40. Then `read_file` only with a range.
 
 If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (`paths[]` / `mode` head|tail).
 
@@ -47,7 +49,7 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 | `list_allowed_directories` | First call |
 | `directory_tree` | Only when the path is unknown. Gitignore ON |
 | `list_directory` | Copy exact paths (case) before edits |
-| `search_files` | Gitignore ON. Omit `max_results` and the page is 40; pass it to continue via `offset`. Prefer `include_content:false` or `detail:"summary"` before a content read. `read_file` only with a range. Do not pair `count_only` with `detail=full` |
+| `search_files` | Gitignore ON. Omit `max_results` and the page is 40. Omitted `include_content` searches content; a glob (`* ? [`) stays filename-only; `include_content:false` is names only. Empty results name the scope. Do not pair `count_only` with `detail=full` |
 | `get_file_info` | Verify after a host mutation. Batch `paths[]` |
 | `read_file` | Full / range / head / tail / base64 / `paths[]`. Logs: `mode:"tail"` `max_lines:40` |
 | `write_file` | New files or whole-file rewrite. `mode:"append"` skips rewrite-guard |

@@ -80,7 +80,7 @@ func TestSearchEmpty_StatesScope(t *testing.T) {
 		t.Fatalf("text missing content scope:\n%s", resultText(t, content))
 	}
 	name := callNamed(t, reg, context.Background(), "search_files", map[string]interface{}{
-		"path": dir, "pattern": "ZZZ_NO_MATCH",
+		"path": dir, "pattern": "ZZZ_NO_MATCH", "include_content": false,
 	})
 	nm, _ := name.StructuredContent.(map[string]any)
 	if asString(nm["message"]) != "0 coincidencias en nombres de fichero" {

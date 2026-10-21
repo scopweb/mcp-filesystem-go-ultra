@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
 )
 
 func TestE4_NativePathsEquivalentToJSON(t *testing.T) {

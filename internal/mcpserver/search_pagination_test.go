@@ -10,6 +10,33 @@ import (
 	"testing"
 )
 
+func TestSearch_OmittedIncludeContentSearchesContent(t *testing.T) {
+	dir := t.TempDir()
+	reg := newHelpTestRegistry(t, dir)
+	file := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(file, []byte("alpha hidden-token beta\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	res := callNamed(t, reg, context.Background(), "search_files", map[string]interface{}{
+		"path": dir, "pattern": "hidden-token",
+	})
+	text := resultText(t, res)
+	if res.IsError {
+		t.Fatal(text)
+	}
+	if !strings.Contains(text, "hidden-token") || strings.Contains(text, "nombres de fichero") {
+		t.Fatalf("omitted include_content must search content, got:\n%s", text)
+	}
+
+	names := callNamed(t, reg, context.Background(), "search_files", map[string]interface{}{
+		"path": dir, "pattern": "hidden-token", "include_content": false,
+	})
+	nameText := resultText(t, names)
+	if !strings.Contains(nameText, "nombres de fichero") {
+		t.Fatalf("explicit false must stay filename-only, got:\n%s", nameText)
+	}
+}
+
 func TestSearch_CompactHonorsMaxResultsOverHidden20(t *testing.T) {
 	dir := t.TempDir()
 	reg := newHelpTestRegistry(t, dir)

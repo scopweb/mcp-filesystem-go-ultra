@@ -323,10 +323,10 @@ func (e *UltraFastEngine) policySkipWalk(path string, isDir bool) bool {
 
 // visibleDirEntries drops hidden names and marks protected entries.
 type visibleEntry struct {
-	name       string
-	isDir      bool
-	level      ProtectionLevel
-	entry      os.DirEntry
+	name  string
+	isDir bool
+	level ProtectionLevel
+	entry os.DirEntry
 }
 
 func (e *UltraFastEngine) visibleDirEntries(dir string, entries []os.DirEntry) []visibleEntry {

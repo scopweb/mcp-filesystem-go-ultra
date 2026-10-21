@@ -10,6 +10,13 @@ import (
 	"github.com/mcp/filesystem-ultra/core"
 )
 
+func TestFormatToolError_AccessDeniedHasPathAndRetryable(t *testing.T) {
+	raw := formatToolError(errors.New("access denied: path 'C:\\secret\\file.go' is not in allowed paths"))
+	if !strings.Contains(raw, `"code":"NOT_ALLOWED"`) || !strings.Contains(raw, `"retryable":false`) || !strings.Contains(raw, `C:\\secret\\file.go`) {
+		t.Fatalf("access denied must name path and retryable:false, got %s", raw)
+	}
+}
+
 func TestPathErrorJSON_Envelope(t *testing.T) {
 	raw := pathErrorJSON(errCodeNotAllowed, "nope", `C:\x`, map[string]string{"k": "v"}, "call list_allowed_directories")
 	var env pathErrorEnvelope

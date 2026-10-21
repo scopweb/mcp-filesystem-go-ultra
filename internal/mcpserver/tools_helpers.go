@@ -91,10 +91,30 @@ func formatToolError(err error) string {
 	if errors.Is(err, fs.ErrNotExist) {
 		return pathErrorJSON(errCodeNotFound, err.Error(), path, nil, filesystemMismatchHint)
 	}
-	if hint := sandboxMountHint(err.Error()); hint != "" && strings.Contains(err.Error(), "access denied") {
-		return fmt.Sprintf("Error: %v\n→ %s", err, strings.TrimSpace(hint))
+	if strings.Contains(strings.ToLower(err.Error()), "access denied") {
+		deniedPath := path
+		if deniedPath == "" {
+			deniedPath = quotedPath(err.Error())
+		}
+		msg := err.Error() + sandboxMountHint(err.Error())
+		return marshalPathError(errCodeNotAllowed, msg, deniedPath, nil, suggestionNotAllowed)
 	}
 	return fmt.Sprintf("Error: %v", err)
+}
+
+func quotedPath(s string) string {
+	for _, q := range []string{"'", "\""} {
+		i := strings.Index(s, q)
+		if i < 0 {
+			continue
+		}
+		rest := s[i+len(q):]
+		j := strings.Index(rest, q)
+		if j > 0 {
+			return rest[:j]
+		}
+	}
+	return ""
 }
 
 func sandboxMountHint(path string) string {

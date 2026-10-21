@@ -99,6 +99,12 @@ Claude Desktop runs one server process for all its chats; four conversations on 
 
 **Verification:** document examples, OCC pagination, response caps, CSV, sample boundaries, binary parity, policies, symlinks and profile/experimental contract tests.
 
+### fix(agent): content search default, short edits, recoverable denials
+
+- `search_files` with `include_content` omitted searches content. A filename glob (`*`, `?`, `[`) stays filename-only, because content search would treat `*` as regex. Explicit `false` remains names-only. Empty text still names the scope.
+- `edit_file` and `multi_edit` omit the diff body unless `diff_format` is `auto`, `full`, or `summary`. The default success line is `OK path | +N -M | UNDO:id`. Hashes stay in structuredContent.
+- Access-denied failures use the `NOT_ALLOWED` envelope with `path` and `retryable:false`. Handshake instructions name the canonical tools and say not to switch to native file tools.
+
 ### fix(search): intersect filters and preserve structured counts
 
 - `include` and `file_types` now intersect in filename, content and count searches, before pagination. Previously `file_types` silently discarded `include`.

@@ -151,7 +151,7 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithBoolean("force", mcp.Description("Force operation even if CRITICAL risk (default: false)")),
 		mcp.WithBoolean("tolerant_whitespace", mcp.Description("Apply tolerant_whitespace semantics to all edits in the batch (1 tab = 4 spaces, CRLF = LF). Default: false.")),
 		mcp.WithBoolean("dry_run", mcp.Description("Preview changes without writing to disk. Default: false.")),
-		mcp.WithString("diff_format", mcp.Description("Controls how the aggregate diff of the whole batch is rendered (parity with edit_file): \"\"/\"auto\" (default): full diff when small, else summary with anchors; \"full\": complete unified diff; \"summary\": per-hunk ranges + anchor lines; \"stat\": just \"+added -removed\"; \"none\": no diff (previous behaviour)."), mcp.Enum("auto", "full", "summary", "stat", "none")),
+		mcp.WithString("diff_format", mcp.Description("Omitted: one-line summary + UNDO, no diff body. \"auto\"/\"full\"/\"summary\" include a diff. \"stat\" is \"+added -removed\". \"none\" is no diff."), mcp.Enum("auto", "full", "summary", "stat", "none")),
 		mcp.WithString("expected_hash", mcp.Description("Optional. The content_hash from the last read_file (full, range, head/tail, base64, and per-file batch entries). If the file's current hash doesn't match, the multi_edit is rejected so the model can re-read first. Same OCC token as edit_file, atomic over the whole batch.")),
 		mcp.WithBoolean("strict", mcp.Description("Opt-in strict matching: no implicit fallbacks. Default: false.")),
 		mcp.WithNumber("expected_matches", mcp.Description("If set, each old_text must match exactly this many times.")),
@@ -388,9 +388,10 @@ func registerBatchTools(reg *toolRegistry) {
 				msg += staleWarning
 			}
 			msg += syntaxWarning(normPath)
-			// diff_format (parity with edit_file): aggregate diff of the whole batch
-			if diffText := core.RenderDiff(result.OriginalContent, result.FinalContent, path, diffFormat); diffText != "" {
-				msg += "\n" + diffText
+			if wantEditDiff(args) {
+				if diffText := core.RenderDiff(result.OriginalContent, result.FinalContent, path, diffFormat); diffText != "" {
+					msg += "\n" + diffText
+				}
 			}
 			return mcp.NewToolResultStructured(attachMessage(attachParentBackup(multiEditStructured(path, result), engine, result.BackupID), msg), msg), nil
 		}
@@ -450,11 +451,12 @@ func registerBatchTools(reg *toolRegistry) {
 			sb.WriteString(result.RiskWarning)
 		}
 
-		// diff_format (parity with edit_file): aggregate diff of the whole batch
-		if diffText := core.RenderDiff(result.OriginalContent, result.FinalContent, path, diffFormat); diffText != "" {
-			sb.WriteString(diffText)
-			if !strings.HasSuffix(diffText, "\n") {
-				sb.WriteString("\n")
+		if wantEditDiff(args) {
+			if diffText := core.RenderDiff(result.OriginalContent, result.FinalContent, path, diffFormat); diffText != "" {
+				sb.WriteString(diffText)
+				if !strings.HasSuffix(diffText, "\n") {
+					sb.WriteString("\n")
+				}
 			}
 		}
 

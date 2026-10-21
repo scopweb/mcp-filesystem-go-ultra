@@ -193,7 +193,7 @@ func registerSearchTools(reg *toolRegistry) {
 			"Use search_files to find, then edit_file to modify. Related: edit_file, read_file, multi_edit, batch_operations."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Base directory or file (WSL or Windows format)")),
 		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal pattern")),
-		mcp.WithBoolean("include_content", mcp.Description("Include file content search (default: false)")),
+		mcp.WithBoolean("include_content", mcp.Description("Search file contents. Omitted: true, unless pattern is a filename glob (* ? [), which stays filename-only. Explicit false: names only. Empty results name the scope (contenido or nombres).")),
 		mcp.WithString("file_types", mcp.Description("Comma-separated file extensions (e.g., '.go,.txt')")),
 		mcp.WithString("include", mcp.Description("Glob filter. Comma-separated globs (*.go, *.ts) or brace alternatives ({A.cs,B.cs}, {Test,ObservacionesPedido}/*.razor, *.{go,razor}). Commas inside {} are alternatives, not separators. * does not cross /. ** matches any depth. A pattern with / is relative to path. Invalid globs, unbalanced braces, empty alternatives, and more than 64 expansions return VALIDATION (retryable:false), not an empty search. file_types does not expand braces. When both filters are set, their intersection is used in all search modes.")),
 		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive search (default: true)")),
@@ -225,6 +225,7 @@ func registerSearchTools(reg *toolRegistry) {
 		// Extract optional parameters
 		countOnly := false
 		includeContent := false
+		includeContentSet := false
 		caseSensitive := true // Bug #32: default is case-sensitive (true), user must explicitly set false
 		wholeWord := false
 		includeContext := false
@@ -246,6 +247,7 @@ func registerSearchTools(reg *toolRegistry) {
 			}
 			if ic, ok := args["include_content"].(bool); ok {
 				includeContent = ic
+				includeContentSet = true
 			}
 			if cs, ok := args["case_sensitive"].(bool); ok {
 				caseSensitive = cs
@@ -304,6 +306,13 @@ func registerSearchTools(reg *toolRegistry) {
 			}
 		}
 
+		// Omitted include_content searches content. A glob (* ? [) stays
+		// filename-only: content search would treat * as regex. Explicit false
+		// stays filename-only unless a later guard forces content.
+		if !includeContentSet && !strings.ContainsAny(pattern, "*?[") {
+			includeContent = true
+		}
+
 		// v4.5.24 false-negative guards:
 		// (1) path is a regular FILE → filename search is meaningless, force content search.
 		// (2) content-only params (output_format/output/context_lines) without
@@ -333,7 +342,7 @@ func registerSearchTools(reg *toolRegistry) {
 			ReturnLines: returnLines, NoIgnore: noIgnore, MaxResults: maxResults, Offset: offset, OutputFormat: outputFormat,
 		})
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
 		if engineTextIsError(out.Text) {
 			return mcp.NewToolResultError(out.Text), nil
@@ -387,14 +396,14 @@ func registerSearchTools(reg *toolRegistry) {
 		case "file":
 			analysis, err := engine.GetFileAnalysis(ctx, path)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+				return mcp.NewToolResultError(formatToolError(err)), nil
 			}
 			return mcp.NewToolResultText(analysis), nil
 
 		case "optimize":
 			suggestion, err := engine.GetOptimizationSuggestion(ctx, path)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+				return mcp.NewToolResultError(formatToolError(err)), nil
 			}
 			return mcp.NewToolResultText(suggestion), nil
 

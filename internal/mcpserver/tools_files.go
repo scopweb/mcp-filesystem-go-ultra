@@ -35,7 +35,7 @@ func registerFileTools(reg *toolRegistry) {
 
 		err = engine.CreateDirectory(ctx, path)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
 
 		text := fmt.Sprintf("Successfully created directory: %s", path)

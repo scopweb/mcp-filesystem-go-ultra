@@ -15,7 +15,7 @@ Against [`@modelcontextprotocol/server-filesystem`](https://github.com/modelcont
 | | Reference server | filesystem-ultra |
 |---|---|---|
 | Windows roots | Client roots **replace** the CLI list. `file:///c%3A/temp` is skipped as invalid (issue 3174, open). | `file:///c%3A/temp` becomes `c:\temp`. `file://server/share/dir` becomes `\\server\share\dir`. `--roots-mode=union` keeps the CLI list and adds client roots. Reserved device names (`CON`, `NUL`, …) and NTFS ADS (`file.txt:stream`) are rejected. 8.3 short names are canonicalized before selecting the `os.Root` base. |
-| Search | `search_files` is a glob on **names**, not file contents. | Names by default. Content with `include_content:true`. `include` and `file_types` intersect in all modes before pagination; invalid globs return `VALIDATION`. |
+| Search | `search_files` is a glob on **names**, not file contents. | Content by default; filename globs stay names-only. Explicit `include_content:false` searches names. `include` and `file_types` intersect in all modes before pagination; invalid globs return `VALIDATION`. |
 | Undo | No backup or undo tool. | `backup(action:"undo_last")` walks the chain. |
 | Dry-run / diff | `edit_file` has `dryRun` and returns a diff. | `dry_run` on edit and patch. Also `diff_files` and `apply_patch`. |
 
