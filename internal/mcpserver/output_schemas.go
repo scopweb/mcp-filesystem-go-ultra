@@ -324,3 +324,19 @@ var fileMutationOutputSchema = json.RawMessage(`{
   },
   "required": ["status", "message"]
 }`)
+
+var projectMapOutputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "roots": {"type": "array", "description": "Effective allowed roots of this server", "items": {"type": "string"}},
+    "truncated": {"type": "boolean", "description": "True when a limit (entries, time, metadata bytes) cut the walk"},
+    "limits": {"type": "object", "description": "Limits that were in force: max_entries, max_depth, max_time_ms, max_bytes_metadata, elapsed_ms, visited_entries"},
+    "summary_scope": {"type": "string", "description": "Scope of every counter: visited_entries. Totals describe what the walk reached, not the whole repository."},
+    "summary": {"type": "object", "description": "visited_files, visited_dirs, by_extension, largest_files, key_files. Hidden paths are never counted."},
+    "structure": {"type": "array", "description": "Pre-order skeleton {path, type, children, notable}. Directories carry a trailing slash. detail=summary: the top level only. detail=normal: directories only (the cheap orientation). detail=full: directories and files.", "items": {"type": "object"}},
+    "policy": {"type": "object", "description": "Public policy facts only (profile, roots_mode, auto_occ, readonly, notes). Never policy patterns or protected paths. Absent when include_policy is false."},
+    "warnings": {"type": "array", "description": "Non-fatal notes: truncation cause, unreadable directories, clamped depth", "items": {"type": "string"}},
+    "message": {"type": "string", "description": "Brief summary, identical to the text content block"}
+  },
+  "required": ["roots", "truncated", "limits", "summary_scope", "summary", "structure", "warnings", "message"]
+}`)

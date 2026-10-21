@@ -116,6 +116,13 @@ func SetAutoOCCMode(mode string) {
 	}
 }
 
+// AutoOCCMode returns the active auto-OCC mode ("off", "warn" or "block").
+// Read-only reporting (project_map policy block) uses it; it never changes
+// the configured behaviour.
+func AutoOCCMode() string {
+	return autoOCCMode
+}
+
 func newSessionState() *sessionState {
 	return &sessionState{
 		failedOldText: make(map[string]map[string]int),

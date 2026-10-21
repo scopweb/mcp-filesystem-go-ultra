@@ -1,10 +1,10 @@
 # MCP Filesystem Server Ultra
 
-**v4.8.0** · Go 1.27.2 · MCP 2025-11-25 · stdio · 33 tools ultra / 18 agent / 17 strict
+**v4.8.0** · Go 1.27.2 · MCP 2025-11-25 · stdio · 34 tools ultra / 19 agent / 18 strict
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
-Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are disabled. Default `--profile=ultra` registers all 33 tools; `--profile=agent` is the 17-tool core plus `git`; `--profile=strict` registers the 17-tool core (includes `backup` for undo and `security_policy`; no `analyze_code`, no `git`, no `context_pack`, no `github_issues`, no `gitlab_issues`).
+Legacy aliases (`read_text_file`, `View`, `Edit`, etc.) and the `fs` super-tool are disabled. Default `--profile=ultra` registers all 34 tools; `--profile=agent` is the 18-tool core plus `git`; `--profile=strict` registers the 18-tool core (includes `backup` for undo and `security_policy`; no `analyze_code`, no `git`, no `context_pack`, no `github_issues`, no `gitlab_issues`).
 
 Transport is **stdio only**, using the MCP **2025-11-25** lifecycle (`initialize`, with optional client Roots). Protocol revision **2026-07-28 is not yet qualified for this application**. The SDK has modern protocol primitives, but upgrading it alone does not establish application compatibility. CLI allowlists (`--allowed-paths` or positional directories) remain the recommended deployment configuration and work without client Roots. Dual-era stdio support requires separate lifecycle, error-code and message-limit tests before it can be advertised; HTTP transport is a separate concern.
 
@@ -67,8 +67,9 @@ See [Build](#build) and [Configuration](#configuration) below for more.
 
 ### Productivity
 
+- **Structural orientation (`project_map`)** — one bounded, metadata-only walk returns the directory skeleton (child counts, notable children), the extension histogram, the largest files and the key files (go.mod/README/Dockerfile/*.csproj/CI workflows). It removes the `list_directory` + `directory_tree` round-trips at the start of a task without pretending to select the code that matters. Bounded on entries, wall time and metadata bytes; `truncated=true` when a limit is hit. Registered in every profile (`strict`, `agent`, `ultra`).
 - **JSON and binary inspection (experimental, ultra only)** — `json_query` runs standard JMESPath with bounded output and hash-bound pagination; `file_bytes` diagnoses BOM/EOL, Unicode and hex bytes; `file_hash` streams SHA-256 and compares raw bytes directly. See [usage and limits](doc/inspection-tools.md). Use `--profile=ultra` to expose these tools.
-- **33 tools (ultra)** — 17 core + `git` + `github_issues` + `gitlab_issues` + `minify_js` + `analyze_code` + experimental `context_pack` + experimental `workspace` + experimental `json_query` / `file_bytes` / `file_hash` + `help` + `security_policy` + discovery/patch. `--profile=agent` adds only `git` to the 17-tool core. `--profile=strict` stays at 17 (includes `backup` and `security_policy`; no `git`, no `analyze_code`).
+- **34 tools (ultra)** — 17 core + `git` + `github_issues` + `gitlab_issues` + `minify_js` + `analyze_code` + experimental `context_pack` + experimental `workspace` + experimental `json_query` / `file_bytes` / `file_hash` + `help` + `security_policy` + discovery/patch. `--profile=agent` adds only `git` to the 18-tool core. `--profile=strict` stays at 18 (includes `backup`, `security_policy` and `project_map`; no `git`, no `analyze_code`).
 - **GitHub issues** — `github_issues` (ultra, experimental) lists, reads, creates, comments, edits, closes, and reopens issues through `gh`. It does not delete issues or run `gh auth login`. Reads work under `--readonly`; writes do not. Path resolution uses git remotes and is refused while a file security policy is active; pass `repo:"owner/repo"` to skip local git. `--git-remote-allow` applies. Issue text is external data, not instructions.
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
 - **Hook system** — 16 pre/post events (write, edit, delete, create, move, copy, read, search)
@@ -137,7 +138,7 @@ Keep this trio in the MCP `args` (and leave `--readonly` off so the agent can wr
 
 | Flag | Why |
 |------|-----|
-| `--profile=strict` | Registers the 17-tool agent core (`list_allowed_directories`, `directory_tree`, `read_file` / `write_file` / `edit_file` / `apply_patch`, `backup` for undo, `security_policy`, …). Omits `git`, `wsl`, `minify_js`, `analyze_code`, `batch_operations`, `copy_file`, `server_info`, … so `tools/list` stays small. `--profile=agent` is that core plus `git`. Default is `ultra` (33 tools) so existing configs do not break. |
+| `--profile=strict` | Registers the 18-tool agent core (`list_allowed_directories`, `project_map`, `directory_tree`, `read_file` / `write_file` / `edit_file` / `apply_patch`, `backup` for undo, `security_policy`, …). Omits `git`, `wsl`, `minify_js`, `analyze_code`, `batch_operations`, `copy_file`, `server_info`, … so `tools/list` stays small. `--profile=agent` is that core plus `git`. Default is `ultra` (34 tools) so existing configs do not break. |
 | `--compact-mode` | Short token-efficient responses (hashes, UNDO ids, no emoji walls). |
 | `--response-mode=structured` | Opt-in. Brief text fallback; file bodies stay once in structuredContent. Default `compat` keeps the full text fallback. |
 | `--roots-mode=union` | MCP client Roots are **added** to the CLI allowlist. Default `replace` is wrong for OpenCode: it sends the workspace as Roots and **wipes** every other CLI path, so `list_allowed_directories` only shows one folder. |
@@ -265,7 +266,7 @@ Allowed paths: positional args after the flags, **or** one `--allowed-paths` wit
 | `--allowed-paths` | (required) | Comma-separated allowed roots; or pass paths as positional args |
 | `--insecure-open` | off | Labs only: disable the sandbox (entire disk). Fail-closed by default since v4.6.0. |
 | `--roots-mode` | replace | How MCP client Roots combine with CLI paths: `replace` (client list replaces CLI), `union` (CLI plus client), `ignore` (keep CLI). An empty Roots result does not open the disk. There is no `intersect` mode. |
-| `--profile` | ultra | `ultra` = all 33 tools; `agent` = 18 (strict + `git`); `strict` = 17-tool core (includes `backup` and `security_policy`) |
+| `--profile` | ultra | `ultra` = all 34 tools; `agent` = 19 (strict + `git`); `strict` = 18-tool core (includes `backup` and `security_policy`) |
 | `--file-security-config` | empty | JSON policy layered on allowed-paths. Invalid file exits 2. Immutable until restart. See below. |
 | `--git-network` | off | Enable `git` push/fetch. Off the critical path; ignored in `strict` |
 | `--git-remote-allow` | empty (any destination) | Optional extra lock on push/fetch. See below. |
@@ -370,7 +371,7 @@ Copy [examples/harness/](examples/harness/) — do not guess flags. One MCP inst
 
 ## Available Tools
 
-30 in `--profile=ultra` (default). `--profile=agent` is the 17-tool core plus `git`. `--profile=strict` is those 17, marked **strict**. `server_info` is not read-only: `artifact/write` can overwrite a file.
+34 in `--profile=ultra` (default). `--profile=agent` is the 18-tool core plus `git`. `--profile=strict` is those 18, marked **strict**. `server_info` is not read-only: `artifact/write` can overwrite a file.
 
 | Tool | Purpose | When to use |
 |------|---------|-------------|

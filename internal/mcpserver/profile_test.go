@@ -84,12 +84,40 @@ func TestProfile_UltraHasFullCatalog(t *testing.T) {
 	dir := t.TempDir()
 	reg := newProfileRegistry(t, dir, registerOpts{Profile: profileUltra})
 	n := len(reg.server.ListTools())
-	if n != 33 {
-		t.Fatalf("ultra registered %d tools, want 33", n)
+	if n != 34 {
+		t.Fatalf("ultra registered %d tools, want 34", n)
 	}
-	for _, name := range []string{"git", "github_issues", "gitlab_issues", "minify_js", "backup", "help", "apply_patch", "workspace", "json_query", "file_bytes", "file_hash"} {
+	for _, name := range []string{"git", "github_issues", "gitlab_issues", "minify_js", "backup", "help", "apply_patch", "workspace", "json_query", "file_bytes", "file_hash", "project_map"} {
 		if _, ok := reg.server.ListTools()[name]; !ok {
 			t.Errorf("ultra missing %q", name)
+		}
+	}
+}
+
+// TestProfile_StrictInventoryIsExplicit locks the strict catalog. The
+// inventory is a deliberate contract: project_map (v4.8.1) was ADDED to the
+// 17-tool core (18 now) — nothing was dropped to make room for it, and the
+// 17 core tools stay frozen.
+func TestProfile_StrictInventoryIsExplicit(t *testing.T) {
+	want := []string{
+		"list_allowed_directories", "project_map", "directory_tree", "list_directory",
+		"search_files", "get_file_info", "read_file", "write_file", "edit_file",
+		"multi_edit", "apply_patch", "diff_files", "create_directory", "move_file",
+		"delete_file", "backup", "help", "security_policy",
+	}
+	if len(strictToolSet) != len(want) {
+		t.Fatalf("strict inventory has %d tools, want %d", len(strictToolSet), len(want))
+	}
+	for _, name := range want {
+		if _, ok := strictToolSet[name]; !ok {
+			t.Errorf("strict inventory missing %q", name)
+		}
+	}
+	dir := t.TempDir()
+	reg := newProfileRegistry(t, dir, registerOpts{Profile: profileStrict})
+	for _, name := range want {
+		if _, ok := reg.server.ListTools()[name]; !ok {
+			t.Errorf("strict profile did not register %q", name)
 		}
 	}
 }

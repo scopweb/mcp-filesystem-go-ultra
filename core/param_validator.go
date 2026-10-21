@@ -166,6 +166,12 @@ var toolSchemas = map[string]ToolParamSchema{
 		"max_nodes":      {ParamNumber, false},
 		"detail":         {ParamString, false},
 	},
+	"project_map": {
+		"path":           {ParamString, false},
+		"depth":          {ParamNumber, false},
+		"detail":         {ParamString, false},
+		"include_policy": {ParamBoolean, false},
+	},
 	"search_files": {
 		"path":            {ParamString, true},
 		"pattern":         {ParamString, true},

@@ -113,6 +113,7 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 	setEnum("json_query", "output_format", "json", "table", "csv", "text")
 	setEnum("file_bytes", "mode", "encoding", "bytes", "all")
 	setEnum("directory_tree", "detail", "summary", "normal", "full")
+	setEnum("project_map", "detail", "summary", "normal", "full")
 	setEnum("list_directory", "detail", "summary", "normal", "full")
 	setEnum("search_files", "detail", "summary", "normal", "full")
 	setEnum("project_replace", "detail", "summary", "normal", "full")
@@ -170,6 +171,13 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 	}
 	if c := cs["security_policy"]; c != nil {
 		c.Examples = []string{`security_policy()`}
+	}
+	if c := cs["project_map"]; c != nil {
+		c.Examples = []string{
+			`project_map()`,
+			`project_map(path:"C:/repo", depth:2)`,
+			`project_map(path:"C:/repo", detail:"summary", include_policy:false)`,
+		}
 	}
 	if c := cs["analyze_code"]; c != nil {
 		c.Examples = []string{

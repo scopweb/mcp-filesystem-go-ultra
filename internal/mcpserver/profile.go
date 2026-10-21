@@ -14,10 +14,17 @@ const (
 )
 
 // strictToolSet is the agent-core catalog. Order matches the discovery
-// workflow: roots → tree → I/O → patch → undo → help. Everything else
+// workflow: roots → orientation → I/O → patch → undo → help. Everything else
 // (git, wsl, minify_js, batch, …) stays on profile=ultra.
+//
+// Inventory (18 tools, v4.8.1): project_map joins the catalog as the cheap
+// structural orientation step. It is a STABLE tool from the start (explicit
+// exception to the experimental policy in experimental.go): it declares a
+// full outputSchema and has contract coverage. The 17 core tools stay
+// frozen; nothing was removed to make room for it.
 var strictToolSet = map[string]struct{}{
 	"list_allowed_directories": {},
+	"project_map":              {},
 	"directory_tree":           {},
 	"list_directory":           {},
 	"search_files":             {},

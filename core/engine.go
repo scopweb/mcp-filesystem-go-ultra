@@ -70,6 +70,13 @@ type Config struct {
 	// MaxInspectScanBytes bounds file_bytes diagnostic scans; 0 uses 16 MiB.
 	MaxInspectScanBytes int
 
+	// ProjectMapMaxEntries bounds how many entries one project_map walk may
+	// visit; 0 uses ProjectMapMaxEntries (5000).
+	ProjectMapMaxEntries int
+	// ProjectMapMaxTime bounds the wall time of one project_map walk; 0 uses
+	// ProjectMapMaxTime (2.5s).
+	ProjectMapMaxTime time.Duration
+
 	ReadOnly       bool
 	AllowSecrets   bool
 	RootsMode      RootsMode // How MCP client Roots combine with CLI paths (replace|union|ignore)

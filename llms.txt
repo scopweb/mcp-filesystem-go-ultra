@@ -1,0 +1,153 @@
+# llms.txt — MCP Filesystem Ultra (filesystem-ultra)
+
+Real guarantees of this MCP server, written for agent system prompts.
+Everything below is verified behaviour, not marketing. If a rule is not
+listed here, do not assume it.
+
+## 1. What this server is
+
+- Go MCP server for **safe filesystem editing by agents** on the real host disk
+  (`C:\`, `D:\`, `/mnt/...`). Runtime-native `Read`/`Edit`/`Write`/`Grep` tools
+  may point at a different sandbox: for host project paths use this server.
+- Recommended launch: `--profile=strict --compact-mode --roots-mode=union`.
+  `strict` is the product (18 tools); `ultra` is the lab (34 tools).
+- Discovery order: `list_allowed_directories` → `project_map` /
+  `directory_tree` → `help(tool:"X")` on demand. Do not dump the catalog.
+- Errors are a JSON envelope: `{"error":{"code","message","path","details",
+  "suggestion","retryable","recovery"}}`. **Read `retryable` first.**
+- Success payloads of the schema-declared tools carry `structuredContent`
+  (status, truncated, hashes, coverage). Prefer those fields over scraping
+  the text block.
+
+## 2. Golden rules
+
+### OCC (optimistic concurrency)
+- `read_file` returns `content_hash` (FNV-1a, 8 hex) of the **whole file**,
+  including range / head / tail / base64 reads. `write_file`, `edit_file` and
+  `multi_edit` return the post-write hash.
+- Pass that hash as `expected_hash` on the next mutation. If you do not have
+  one, read the file first.
+- Mismatch → `OCC_MISMATCH` with `retryable:true`, `recovery:read_and_rebase`
+  and a conflict report. Do **not** replay the same call blindly: re-read,
+  rebase, resend.
+- `--auto-occ` (default `warn`) adds an automatic check when you omit
+  `expected_hash`: `warn` appends a non-blocking notice, `block` refuses the
+  edit (`HASH_REQUIRED`), `off` disables it. The session tracks its own reads
+  and writes, so it only flags *external* changes.
+- `file_hash` (SHA-256) is a different token. It is **not** an `expected_hash`.
+
+### apply_patch
+- Preferred for multi-hunk or multi-file changes when the tool supports it.
+- `expected_hash` is **single-file only**: a multi-file patch rejects it with
+  `VALIDATION`. Multi-file patches rely on the per-file auto-OCC check.
+- Fail-closed: no fuzzy matching. `PATCH_FAILED` → re-read the file and
+  regenerate the hunk; do not retry the same patch.
+- Multi-file patches are an in-process transaction (all or nothing), not
+  crash-durable.
+
+### CRLF / Windows
+- The dry-run preview of a CRLF file can show the **whole file as changed**.
+  That is a rendering artefact, not a write.
+- Where a tool accepts them, use `diff_format:"stat"|"none"` and
+  `tolerant_whitespace:true` to read the preview without the artefact.
+- Ground truth is `git diff --stat` plus the real diff plus a build. A
+  successful compile does **not** prove the change is correct.
+
+### Backups
+- Mutating operations that create a backup report `UNDO:<id>` and
+  `chain:<parent>`; `backup(action:"undo_last")` walks the chain (add
+  `file_path` to step through one file at a time).
+- Restoring a specific snapshot needs the **full** backup id and
+  `backup(action:"restore", backup_id:"...")`.
+- Not every mutation creates a backup: it depends on `create_backup` and the
+  server configuration. Check the response instead of assuming.
+
+### Paths
+- Fail-closed. Only the roots reported by `list_allowed_directories` are
+  reachable; anything else fails with `NOT_ALLOWED` (`retryable:false`).
+- Use the Windows path exactly as listed (`C:\...`) or the WSL form
+  (`/mnt/c/...`). UNC paths are outside the verified surface: stay with the
+  roots the server reports.
+- Paths are case-sensitive in the response even when the filesystem is not:
+  copy them from a tool result, never retype them from memory.
+
+### Errors
+- `retryable:false` means **stop**. Do not retry the same call
+  (`VALIDATION`, `PATCH_FAILED`, `BUDGET_EXCEEDED`, `NOT_ALLOWED`,
+  `REWRITE_BLOCKED`, `HASH_REQUIRED` is the exception: it asks for a re-read).
+- `retryable:true` means a re-read or a short retry can succeed
+  (`OCC_MISMATCH`, `LOCK_BUSY`, `STALE_GIT`).
+
+### STALE_READ vs OCC
+- `STALE_READ` is a notice that the file was not read with `read_file` in
+  this session. It does not block the edit.
+- It is **not** the concurrency check: OCC compares content hashes, STALE_READ
+  only tracks "was this file read here".
+
+## 3. Recommended flow
+
+1. `list_allowed_directories` (roots, profile, readonly).
+2. `project_map` — cheap structural orientation: skeleton, extension
+   histogram, largest files, key files. Metadata only, bounded, read-only.
+   `detail:"summary"` = top level, `"normal"` = directories only (default),
+   `"full"` = directories and files. Use `directory_tree` when you need the
+   actual tree, `search_files` when you need content.
+3. `read_file` → keep `content_hash`.
+4. `edit_file` / `multi_edit` / `apply_patch` with `expected_hash`.
+5. Dry-run big or risky changes (`dry_run:true`).
+6. After every mutation, verify: `get_file_info` / `list_directory` for
+   existence and size, `read_file` when content matters, `git diff --stat`
+   plus the real diff when the environment allows it.
+
+## 4. Known caveats
+
+- Dry-run on CRLF files: whole-file diff artefact (see §2).
+- The structure checker does not understand verbatim C# strings ending in
+  `@"X:\"` and may report braces off by one. The compiler is the judge.
+- A session is a **process**. Claude Desktop multiplexes several
+  conversations over one process, so "read in this session" can be true for
+  a file another conversation read.
+- `diff_format` and `tolerant_whitespace` only exist on the tools that
+  declare them (`edit_file`, `multi_edit`).
+- `project_map` never follows symlinks and never reveals paths hidden by the
+  file-security policy; its counters describe **visited** entries only
+  (`summary_scope: "visited_entries"`), not the whole repository. It honours
+  the same ignore rules as the other discovery tools (gitignore-style files,
+  secret paths, build dirs).
+
+## 5. Tools in `--profile=strict` (18)
+
+Orientation and discovery
+- `list_allowed_directories` — sandbox roots, profile, readonly.
+- `project_map` — bounded structural orientation (path, depth, detail,
+  include_policy).
+- `directory_tree` — recursive compact tree (gitignore-aware).
+- `list_directory` — one directory (compact/json/tree/sizes/lines).
+- `search_files` — find by name or content (paginated, capped).
+
+Reading
+- `get_file_info` — metadata for one path or a batch.
+- `read_file` — contents; returns `content_hash` (the OCC token).
+
+Writing
+- `write_file` — create/overwrite; returns `content_hash` and `backup_id`.
+- `edit_file` — exact replace, `search_replace`, `regex`, `insert`,
+  `delete_range`, `replace_range`; `dry_run`, `expected_hash`.
+- `multi_edit` — several edits in one file, applied atomically.
+- `apply_patch` — unified diff, single or multi-file.
+- `diff_files` — unified diff between two paths (or against a backup).
+- `create_directory`, `move_file`, `delete_file` — filesystem moves.
+
+Safety
+- `backup` — list / info / compare / cleanup / restore / undo_last /
+  undo_chain / trash.
+- `security_policy` — is a file policy active? (never lists its patterns).
+- `help` — catalog, or `help(tool:"X")` for a tool's schema and examples.
+
+Other profiles add `git` (agent), and `analyze_code`, `analyze_operation`,
+`context_pack`, `workspace`, `json_query`, `file_bytes`, `file_hash`,
+`minify_js`, `batch_operations`, `project_replace`, `github_issues`,
+`gitlab_issues`, `wsl`, `server_info`, `copy_file` (ultra).
+
+Parameters are discovered with `help(tool:"X")`; enums, examples and the
+output contract come from there.
