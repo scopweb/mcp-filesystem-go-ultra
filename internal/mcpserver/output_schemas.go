@@ -97,7 +97,7 @@ var searchFilesOutputSchema = json.RawMessage(`{
     "match_count": {"type": "integer", "description": "Exact total when the walk finished; otherwise the count known so far (not a guessed total). May exceed len(matches) when this page was capped after a complete scan."},
     "truncated": {"type": "boolean", "description": "True when more matches exist beyond this page or a byte budget cut the response"},
     "hidden_count": {"type": "integer", "description": "Entries skipped by .gitignore/.cursorignore/.fsultraignore (0 when no_ignore:true)"},
-    "matches": {"type": "array", "description": "Structured hits {path, line, text}. Empty on filename-only/count_only when not parseable as line hits.", "items": {"type": "object"}},
+    "matches": {"type": "array", "description": "Structured hits {path, line, text}; context requests also include context (text lines) and aligned context_line_numbers. Empty on filename-only/count_only when not parseable as line hits.", "items": {"type": "object"}},
     "scope": {"type": "object", "description": "Path/pattern/filters actually used"},
     "continuation": {"type": "object", "description": "When truncated: next page of the same path/pattern. next_offset and max_results are integers. hint is the readable instruction. Never means retry the same mutation.", "properties": {"next_offset": {"type": "integer"}, "max_results": {"type": "integer"}, "hint": {"type": "string"}}},
     "message": {"type": "string", "description": "Brief summary of match_count and scope. Not a copy of matches or of the text content block."}

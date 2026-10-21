@@ -36,6 +36,7 @@ func registerInspectTools(reg *toolRegistry) {
 		mcp.WithString("output_format", mcp.Enum("json", "table", "csv", "text")),
 		mcp.WithArray("columns", mcp.WithStringItems(), mcp.Description("Ordered dot-separated field paths for table/csv")),
 		mcp.WithNumber("limit", mcp.Description("Array page size: 1..1000, default 100")),
+		mcp.WithNumber("budget_multiplier", mcp.Description("Evaluation/expansion budget multiplier: integer 1..4, default 1 (100 million work units / 64 MiB estimated expansion). Input and output limits stay fixed.")),
 		mcp.WithNumber("offset", mcp.Description("0-based result offset; non-arrays require 0")),
 		mcp.WithString("expected_hash", mcp.Description("OCC token from the previous response; included in continuation")),
 	)

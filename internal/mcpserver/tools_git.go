@@ -40,7 +40,7 @@ func registerGitTools(reg *toolRegistry) {
 		mcp.WithString("action", mcp.Required(), mcp.Description("Action: "+strings.Join(gitActions, ", ")), mcp.Enum(gitActions...)),
 		mcp.WithString("path", mcp.Description("Working directory or file path (default: auto-detect repo root). If a file path, used as implicit pathspec for diff/log/status.")),
 		mcp.WithArray("paths", mcp.WithStringItems(),
-			mcp.Description("Pathspec: native array of file/dir paths relative to repo root. Limits diff/log/status/add/restore to these paths. Equivalent to 'git <cmd> -- <paths>'.")),
+			mcp.Description("Pathspec: native array of file/dir paths relative to repo root. Limits diff/log/status/add/restore to these paths. Equivalent to 'git <cmd> -- <paths>'. Rejected for commit: use add(paths) first, then commit without paths.")),
 		mcp.WithString("output", mcp.Description("Output format. diff/show: 'stat' (default) | 'name-only' | 'full'. status: 'name-only' | 'full' — in compact mode, status without explicit output returns a one-line summary; pass output explicitly (either value) to get the changed-file listing. log: 'oneline' (default) | 'full'.")),
 		mcp.WithNumber("max_lines", mcp.Description("Max output lines before truncation with hint footer (default: 200)")),
 		mcp.WithNumber("limit", mcp.Description("log: max commits to return (default: 10)")),
@@ -687,9 +687,12 @@ func gitAdd(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 // gitCommit commits staged changes
 //
 // message: required (string)
-// paths:   optional native array; passed to `git commit -- <paths>` (commits only those)
+// paths is rejected: stage selected paths with add before committing.
 // When nothing is staged → usageError with the add example.
 func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	if _, supplied := args["paths"]; supplied {
+		return validationResult("paths is not supported for commit; use git action:add with paths, then commit the staged changes", "paths", "omit paths for commit"), nil
+	}
 	message, _ := args["message"].(string)
 	if message == "" {
 		return usageError(
@@ -707,12 +710,6 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 	}
 	if _, err := engine.GetHookManager().ExecuteHooks(ctx, core.HookPreWrite, hookCtx); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("git commit denied by hook: %v", err)), nil
-	}
-
-	// Optional paths filter (commits a subset of the staged changes)
-	paths, errRes := pathsFromArgs(args)
-	if errRes != nil {
-		return errRes, nil
 	}
 
 	// Get staged diff --stat for risk assessment
@@ -743,12 +740,6 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 	hookCtx.Metadata["staged_insertions"] = stagedInsertions
 
 	cmdArgs := append(gitIdentityArgs(ctx, repoRoot), "commit", "-m", message)
-	if len(paths) > 0 {
-		cmdArgs = append(cmdArgs, "--")
-		for _, p := range paths {
-			cmdArgs = append(cmdArgs, core.NormalizePath(p))
-		}
-	}
 
 	output, werr := execGitCommandCtx(ctx, repoRoot, "git", cmdArgs...)
 	if werr != nil {

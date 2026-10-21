@@ -215,6 +215,10 @@ func searchStructuredFromOutcome(out core.SearchOutcome, scope map[string]any, e
 		if m.Line != "" {
 			hit["text"] = m.Line
 		}
+		if len(m.Context) > 0 {
+			hit["context"] = m.Context
+			hit["context_line_numbers"] = m.ContextLineNumbers
+		}
 		matches = append(matches, hit)
 	}
 	count := out.MatchCount

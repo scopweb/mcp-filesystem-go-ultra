@@ -199,7 +199,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive search (default: true)")),
 		mcp.WithBoolean("whole_word", mcp.Description("Match whole words only (default: false)")),
 		mcp.WithBoolean("include_context", mcp.Description("Include context lines (default: false)")),
-		mcp.WithNumber("context_lines", mcp.Description("Number of context lines (default: 3)")),
+		mcp.WithNumber("context_lines", mcp.Description("Number of surrounding lines (default: 3). Passing a positive value enables context unless include_context:false is explicit. Structured hits include context and context_line_numbers.")),
 		mcp.WithBoolean("count_only", mcp.Description("Count pattern occurrences without listing hits (default: false). Do not combine with detail=full; count_only is a total, not a page.")),
 		mcp.WithString("return_lines", mcp.Description("Return line numbers of count matches (true/false, for count_only mode)")),
 		mcp.WithString("output_format", mcp.Description("Output format. Omit for grouped path + line:text (including context). 'text' = legacy verbose with emojis. 'json' = structured.")),
@@ -258,6 +258,9 @@ func registerSearchTools(reg *toolRegistry) {
 			}
 			if cl, ok := args["context_lines"].(float64); ok {
 				contextLines = int(cl)
+				if _, explicit := args["include_context"]; !explicit {
+					includeContext = contextLines > 0
+				}
 			}
 			if ft, ok := args["file_types"].(string); ok && ft != "" {
 				fileTypes = core.ParseFileTypeFilters(ft)

@@ -134,7 +134,7 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 	setEnum("server_info", "action", "help", "stats", "artifact")
 	setEnum("workspace", "action", "begin", "status", "diff", "export", "discard")
 	setEnum("github_issues", "action", "list", "view", "create", "comment", "edit", "close", "reopen")
-	setEnum("gitlab_issues", "action", "list", "view", "comment", "close", "reopen")
+	setEnum("gitlab_issues", "action", "list", "view", "create", "comment", "close", "reopen")
 	setEnum("gitlab_issues", "state", "opened", "closed", "all")
 	setEnum("github_issues", "state", "open", "closed", "all")
 	setEnum("github_issues", "reason", "completed", "not_planned")

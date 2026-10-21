@@ -51,14 +51,15 @@ type ToolParamSchema map[string]ParamDef
 // MCP tool. Unknown parameters are rejected at validation time.
 var toolSchemas = map[string]ToolParamSchema{
 	"json_query": {
-		"path":          {ParamString, true},
-		"query":         {ParamString, false},
-		"output_format": {ParamString, false},
-		"columns":       {ParamArray, false},
-		"limit":         {ParamNumber, false},
-		"offset":        {ParamNumber, false},
-		"expected_hash": {ParamString, false},
-		"detail":        {ParamString, false},
+		"path":              {ParamString, true},
+		"query":             {ParamString, false},
+		"budget_multiplier": {ParamNumber, false},
+		"output_format":     {ParamString, false},
+		"columns":           {ParamArray, false},
+		"limit":             {ParamNumber, false},
+		"offset":            {ParamNumber, false},
+		"expected_hash":     {ParamString, false},
+		"detail":            {ParamString, false},
 	},
 	"file_bytes": {
 		"path":            {ParamString, true},
@@ -287,6 +288,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"path":     {ParamString, false},
 		"repo":     {ParamString, false},
 		"base_url": {ParamString, false},
+		"title":    {ParamString, false},
 		"number":   {ParamNumber, false},
 		"state":    {ParamString, false},
 		"labels":   {ParamArray, false},

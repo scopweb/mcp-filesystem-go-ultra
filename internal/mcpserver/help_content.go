@@ -212,8 +212,10 @@ github_issues
 - Examples: github_issues(action:"list", path:"C:/repo"); github_issues(action:"view", path:"C:/repo", number:12); github_issues(action:"comment", repo:"owner/repo", number:12, body:"note"); github_issues(action:"close", repo:"owner/repo", number:12, reason:"completed")
 
 gitlab_issues
-- Purpose: List, view, comment, close, and reopen GitLab issues. Auth is cached per process (GITLAB_TOKEN or one git-credential sign-in). Does not delete issues. Ultra only. Graduated.
-- Key params: action, path, repo, base_url, number, body, page
+- Purpose: List, view, create, comment, close, and reopen GitLab issues. Auth is cached per process (GITLAB_TOKEN or one git-credential sign-in). Does not delete issues. Ultra only. Graduated.
+- Key params: action, path, repo, base_url, number, title, body, labels, limit, page
+- create requires title; body and labels are optional. Uses the same authentication and write policy as comment.
+- view paginates user comments (activity_filter=only_comments), oldest first; continuation preserves limit.
 - Do not assume gitlab.com or https. SSH remotes are not treated as GitLab; pass base_url.
 - Path resolution is refused while a file security policy is active. Explicit repo+base_url does not run git.
 - Examples: gitlab_issues(action:"view", base_url:"http://192.168.0.20", repo:"group/project", number:1); gitlab_issues(action:"comment", base_url:"http://192.168.0.20", repo:"group/project", number:1, body:"note"); gitlab_issues(action:"close", base_url:"http://192.168.0.20", repo:"group/project", number:1)

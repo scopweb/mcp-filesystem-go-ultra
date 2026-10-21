@@ -1874,8 +1874,7 @@ func (e *UltraFastEngine) validateEditContext(currentContent, oldText string) (b
 				}
 				return false, fmt.Sprintf(
 					"old_text not found in file (%d line(s)). "+
-						"ALWAYS read the file with read_file BEFORE editing. "+
-						"Copy the exact text from the read result as old_text — file may have been modified",
+						"No matching fragment was found in the current file; check old_text for differences in spelling, whitespace, or escaping",
 					lineCount,
 				)
 			}
@@ -1926,7 +1925,7 @@ func (e *UltraFastEngine) validateEditContext(currentContent, oldText string) (b
 	}
 
 	if !found {
-		return false, "old_text not found. ALWAYS read the file with read_file BEFORE editing. Copy the exact text from the read result as old_text"
+		return false, "old_text not found in the current file; check old_text for differences in spelling, whitespace, or escaping"
 	}
 
 	// Check context: verify that surrounding lines are stable

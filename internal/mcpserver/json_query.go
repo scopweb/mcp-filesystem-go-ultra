@@ -30,7 +30,7 @@ const (
 type jsonQueryOptions struct {
 	path, query, format, detail, expected string
 	columns                               []string
-	limit, offset                         int
+	limit, offset, budgetMultiplier       int
 }
 
 func inspectJSONOptions(args map[string]any) (jsonQueryOptions, error) {
@@ -49,6 +49,9 @@ func inspectJSONOptions(args map[string]any) (jsonQueryOptions, error) {
 		return o, err
 	}
 	if o.offset, err = inspectInt(args, "offset", 0, 0, math.MaxInt32); err != nil {
+		return o, err
+	}
+	if o.budgetMultiplier, err = inspectInt(args, "budget_multiplier", 1, 1, 4); err != nil {
 		return o, err
 	}
 	if o.columns, err = inspectStrings(args, "columns", 128); err != nil {
@@ -146,8 +149,10 @@ func inspectJSONQuery(ctx context.Context, engine *core.UltraFastEngine, args ma
 	if err != nil {
 		return validationResult(err.Error(), "query", "bounded standard JMESPath")
 	}
-	if int64(len(raw))*multiplier > inspectExpandedLimit || int64(nodes)*syntaxWork*multiplier > inspectQueryWork {
-		return inspectFailure("LIMIT_EXCEEDED", path, "query exceeds conservative evaluation/expansion budget; simplify the expression or use a smaller input")
+	expansion, work := int64(len(raw))*multiplier, int64(nodes)*syntaxWork*multiplier
+	expansionLimit, workLimit := int64(inspectExpandedLimit)*int64(o.budgetMultiplier), int64(inspectQueryWork)*int64(o.budgetMultiplier)
+	if expansion > expansionLimit || work > workLimit {
+		return inspectFailure("LIMIT_EXCEEDED", path, fmt.Sprintf("query exceeds conservative evaluation/expansion budget: estimated expansion=%d bytes (limit=%d), work=%d (limit=%d); budget_multiplier=%d (allowed 1..4). Simplify the expression, use a smaller input, or increase budget_multiplier", expansion, expansionLimit, work, workLimit, o.budgetMultiplier))
 	}
 	selected := document
 	if o.query != "" {
@@ -214,7 +219,7 @@ func inspectJSONQuery(ctx context.Context, engine *core.UltraFastEngine, args ma
 					reason = "response_bytes"
 				}
 				payload["truncation_reason"] = reason
-				next := map[string]any{"path": path, "query": o.query, "output_format": o.format, "limit": o.limit, "offset": o.offset + count, "detail": o.detail, "expected_hash": hash}
+				next := map[string]any{"path": path, "query": o.query, "output_format": o.format, "limit": o.limit, "offset": o.offset + count, "detail": o.detail, "expected_hash": hash, "budget_multiplier": o.budgetMultiplier}
 				if o.columns != nil {
 					next["columns"] = o.columns
 				}

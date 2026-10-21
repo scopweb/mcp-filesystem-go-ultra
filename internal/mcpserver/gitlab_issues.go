@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -51,6 +52,7 @@ func clearGitlabAuth() {
 var gitlabActionParams = map[string]map[string]bool{
 	"list":    {"action": true, "path": true, "repo": true, "base_url": true, "state": true, "labels": true, "assignee": true, "limit": true, "page": true},
 	"view":    {"action": true, "path": true, "repo": true, "base_url": true, "number": true, "limit": true, "page": true},
+	"create":  {"action": true, "path": true, "repo": true, "base_url": true, "title": true, "body": true, "labels": true},
 	"comment": {"action": true, "path": true, "repo": true, "base_url": true, "number": true, "body": true},
 	"close":   {"action": true, "path": true, "repo": true, "base_url": true, "number": true},
 	"reopen":  {"action": true, "path": true, "repo": true, "base_url": true, "number": true},
@@ -63,7 +65,7 @@ func handleGitLabIssues(ctx context.Context, engine *core.UltraFastEngine, args 
 	if !ok {
 		return ghFail(errCodeInvalidParams, fmt.Sprintf("unknown action %q", action),
 			`gitlab_issues(action:"view", base_url:"http://host", repo:"group/project", number:1)`,
-			false, map[string]any{"field": "action", "expected": "list, view, comment, close, reopen"})
+			false, map[string]any{"field": "action", "expected": "list, view, create, comment, close, reopen"})
 	}
 	for k := range args {
 		if !allowed[k] {
@@ -83,6 +85,8 @@ func handleGitLabIssues(ctx context.Context, engine *core.UltraFastEngine, args 
 		return gitlabList(ctx, target, args)
 	case "view":
 		return gitlabView(ctx, target, args)
+	case "create":
+		return gitlabCreate(ctx, target, args)
 	case "comment":
 		return gitlabComment(ctx, target, args)
 	case "close":
@@ -397,12 +401,20 @@ func gitlabView(ctx context.Context, t glTarget, args map[string]interface{}) *m
 	if errRes != nil {
 		return errRes
 	}
-	nstatus, nhdr, nbody, errRes := gitlabCall(ctx, t, http.MethodGet, fmt.Sprintf("/issues/%d/notes?per_page=%d&page=%d&sort=asc", n, limit, page), nil, false)
+	nstatus, nhdr, nbody, errRes := gitlabCall(ctx, t, http.MethodGet, fmt.Sprintf("/issues/%d/notes?per_page=%d&page=%d&sort=asc&order_by=created_at&activity_filter=only_comments", n, limit, page), nil, false)
+	if errRes != nil {
+		return errRes
+	}
+	if fail := gitlabStatus(nstatus, nbody, false); fail != nil {
+		return fail
+	}
 	notes := []map[string]any{}
 	truncated := false
-	if errRes == nil && nstatus == http.StatusOK {
+	if nstatus == http.StatusOK {
 		var raw []map[string]any
-		if json.Unmarshal(nbody, &raw) == nil {
+		if err := json.Unmarshal(nbody, &raw); err != nil {
+			return ghFail(errCodeGLNetwork, "GitLab returned non-JSON notes", "Retry this read.", true, nil)
+		} else {
 			for _, note := range raw {
 				if sys, _ := note["system"].(bool); sys {
 					continue
@@ -428,7 +440,11 @@ func gitlabView(ctx context.Context, t glTarget, args map[string]interface{}) *m
 		"untrusted_content": true,
 	}
 	if truncated {
-		payload["continuation"] = map[string]any{"page": nhdr.Get("X-Next-Page"), "hint": "pass page to read the next comment page"}
+		nextPage, err := strconv.Atoi(nhdr.Get("X-Next-Page"))
+		if err != nil || nextPage <= page {
+			return ghFail(errCodeGLNetwork, "GitLab returned an invalid next comment page", "Retry this read.", true, nil)
+		}
+		payload["continuation"] = map[string]any{"page": nextPage, "limit": limit, "hint": "pass page and limit to read the next comment page"}
 		payload["status"] = statusTruncated
 	}
 	var b strings.Builder
