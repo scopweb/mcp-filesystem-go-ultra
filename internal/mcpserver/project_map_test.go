@@ -407,3 +407,27 @@ func TestProjectMap_HelpDocumentsTheTool(t *testing.T) {
 		}
 	}
 }
+
+// TestProjectMap_CompactModeOmitsEmptyStructureHeader: compact mode drops
+// the file lines, so a directory with no subdirectories used to leave a
+// dangling "structure:" header with nothing under it.
+func TestProjectMap_CompactModeOmitsEmptyStructureHeader(t *testing.T) {
+	dir := t.TempDir()
+	projectMapWrite(t, dir, "only.txt", "x")
+	reg := newProfileRegistry(t, dir, registerOpts{Profile: profileStrict})
+	reg.engine.GetConfig().CompactMode = true
+
+	res := callProjectMap(t, reg, map[string]any{"path": dir, "detail": "full"})
+	if res.IsError {
+		t.Fatalf("project_map failed: %s", resultText(t, res))
+	}
+	text := resultText(t, res)
+	if strings.Contains(text, "structure:") {
+		t.Fatalf("compact mode left an empty structure section:\n%s", text)
+	}
+	// The structured payload keeps the file: compact mode trims the TEXT.
+	structure, _ := structuredPayload(t, res)["structure"].([]core.ProjectMapEntry)
+	if len(structure) == 0 {
+		t.Fatalf("compact mode dropped the structure from structuredContent: %+v", structure)
+	}
+}

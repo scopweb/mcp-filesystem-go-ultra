@@ -304,29 +304,37 @@ func projectMapText(engine *core.UltraFastEngine, path string, res core.ProjectM
 		b.WriteString("\n")
 	}
 
-	structure := res.Structure
-	if len(structure) > 0 {
+	// The structure lines are rendered first: compact mode omits the file
+	// lines, so the header is only written when something follows it.
+	var lines []string
+	omitted := 0
+	for _, e := range res.Structure {
+		if len(lines) >= projectMapMaxTextLines {
+			omitted++
+			continue
+		}
+		indent := strings.Repeat("  ", projectMapTextLevel(e.Path)-1)
+		if e.Type == "dir" {
+			line := fmt.Sprintf("%s%s (%d)", indent, e.Path, e.Children)
+			if len(e.Notable) > 0 {
+				line += " notable: " + strings.Join(e.Notable, ", ")
+			}
+			lines = append(lines, line)
+			continue
+		}
+		if compact {
+			continue
+		}
+		lines = append(lines, indent+e.Path)
+	}
+	if len(lines) > 0 {
 		b.WriteString("structure:\n")
-		shown := 0
-		for _, e := range structure {
-			if shown >= projectMapMaxTextLines {
-				fmt.Fprintf(&b, "… %d more entries (see structuredContent)\n", len(structure)-shown)
-				break
-			}
-			shown++
-			indent := strings.Repeat("  ", projectMapTextLevel(e.Path)-1)
-			if e.Type == "dir" {
-				fmt.Fprintf(&b, "%s%s (%d)", indent, e.Path, e.Children)
-				if len(e.Notable) > 0 {
-					fmt.Fprintf(&b, " notable: %s", strings.Join(e.Notable, ", "))
-				}
-				b.WriteString("\n")
-				continue
-			}
-			if compact {
-				continue
-			}
-			fmt.Fprintf(&b, "%s%s\n", indent, e.Path)
+		for _, line := range lines {
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+		if omitted > 0 {
+			fmt.Fprintf(&b, "… %d more entries (see structuredContent)\n", omitted)
 		}
 	}
 	if len(res.Warnings) > 0 {

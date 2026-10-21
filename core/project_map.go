@@ -228,7 +228,7 @@ func (e *UltraFastEngine) ProjectMap(ctx context.Context, root string, opts Proj
 	rootNode := w.walkDir(ctx, root, 0)
 	w.tree = rootNode
 	if w.skippedIgnore > 0 {
-		w.warn(fmt.Sprintf("%d entries skipped by ignore rules", w.skippedIgnore))
+		w.warn(fmt.Sprintf("%d entries skipped (ignore rules, secret paths or build dirs)", w.skippedIgnore))
 	}
 
 	res := ProjectMapResult{
