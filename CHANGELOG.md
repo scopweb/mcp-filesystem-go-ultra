@@ -4,6 +4,53 @@
 
 ## [Unreleased]
 
+### feat(project_map): cheap structural orientation, plus agent-first llms.txt
+
+An agent's first call used to be `list_directory` + `directory_tree` just to guess the shape of a
+repository. `project_map` answers that in ONE bounded, metadata-only walk: directory skeleton
+with child counts, extension histogram, largest files and key files (`go.mod`, `README`,
+`Dockerfile`, `*.csproj`, CI workflows). It never reads file contents, so it cannot be confused
+with code selection — `context_pack` and `search_files` still own that.
+
+- **Bounds, not just depth.** The walk stops at 5000 entries, 2.5 s of wall time or 512 KiB of
+  accumulated metadata, and the context is honoured: a cancelled walk stops and reports it.
+  Hitting any limit sets `truncated=true` and `summary_scope="visited_entries"`, so a partial
+  picture is never presented as a whole one.
+- **Detail.** `summary` = the top level, `normal` = the directory skeleton (the cheap
+  orientation), `full` = directories and files. The text fallback is capped at 120 structure
+  lines; the full skeleton stays in `structuredContent`. `depth` defaults to 2 and is clamped
+  to 3 (a smaller value is a `VALIDATION` error).
+- **Same exclusions as the rest of the server.** Gitignore-style files, secret paths and the
+  usual build directories are skipped, and the count of skipped entries is reported. Symlinks
+  are never followed, so a link cannot escape the root.
+- **The file-security policy is respected.** Paths hidden by the policy are skipped entirely:
+  no name, no size, no count. Protected entries expose name and type only.
+- **Stable from the first release** — an explicit exception to the experimental policy, since
+  the tool ships a complete `outputSchema` and has contract coverage, so there is nothing to
+  graduate later. It works under `--readonly` and `--compact-mode` and is annotated
+  `readOnly` / non-destructive / idempotent.
+- **Inventory.** The strict profile grows from 17 to 18 tools. Nothing was dropped to make
+  room for it: the 17 core tools stay frozen, `project_map` is added, and the inventory is now
+  asserted explicitly in `profile_test.go`. `agent` is 19 and `ultra` is 34.
+
+`llms.txt` (new, repository root) documents the guarantees an agent can actually rely on: OCC
+and what a mismatch returns, the single-file scope of `apply_patch`'s `expected_hash`, the CRLF
+dry-run artefact, when a backup exists and how to undo it, fail-closed paths, and how to read
+the `retryable` flag. It states what the server does NOT do instead of promising more than the
+code keeps.
+
+### fix(project_map): no empty structure section in compact mode
+
+Two defects found by running the tool against a real tree (`C:\temp`), not by the unit tests.
+
+- Compact mode omits the file lines of the skeleton, so a directory with no subdirectories left
+  a dangling `structure:` header with nothing under it. The lines are rendered first and the
+  header is only written when something follows it. The structured payload was always correct:
+  only the text fallback was misleading.
+- The warning about skipped entries said "ignore rules", but the skipped entries can also be
+  secret paths or build directories. The message now names the three reasons without saying
+  which one applied.
+
 ### feat(context_pack): definition-centred context under a coherent budget
 
 `context_pack` was a ranking plus a byte cut. The text was truncated by bytes (which can

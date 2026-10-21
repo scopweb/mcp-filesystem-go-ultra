@@ -1,6 +1,6 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.8.0. 33 tools ultra / 18 agent / 17 strict. First call list_allowed_directories. If the client already lists the tools, do not call help(). help(tool:X) only when a parameter is missing. Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=agent --compact-mode --roots-mode=union.
+description: Tool catalog for filesystem-ultra MCP server v4.8.0. 34 tools ultra / 19 agent / 18 strict. First call list_allowed_directories. If the client already lists the tools, do not call help(). help(tool:X) only when a parameter is missing. Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=agent --compact-mode --roots-mode=union.
 ---
 
 # Filesystem Ultra v4.8.0 — Tool Discovery
@@ -9,16 +9,18 @@ description: Tool catalog for filesystem-ultra MCP server v4.8.0. 33 tools ultra
 
 Maintain this repository's `.claude/skills/filesystem-ultra-tools/SKILL.md` as the canonical source. OpenCode discovers the project skill directly. External client copies must be synchronized from this source and checked at release time; do not maintain independent catalogs. Restart the client after changing its configuration or installed skills. Enable one filesystem server per context; keep `ultra` for this repository's advanced development flow.
 
+`llms.txt` (repository root) is the agent-first companion: the guarantees the server actually keeps (OCC, `apply_patch`, CRLF dry-run artefacts, backups, paths, `retryable`) and the strict inventory, for pasting into a system prompt.
+
 ## Recommended server flags
 
-`--profile=agent --compact-mode --roots-mode=union` (`--readonly` off) when the agent needs git without the full catalog. `--profile=strict` remains the 17-tool core without git. `--git-network` only if the agent must `git push`/`fetch`/`pull` (`pull` is fast-forward only; honored by ultra and agent, ignored by strict). `--response-mode=structured` is opt-in and keeps file bodies once in structuredContent; default `compat` is unchanged. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 33 tools including `analyze_code`, graduated `github_issues` / `gitlab_issues`, and experimental `context_pack` and `workspace`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
+`--profile=agent --compact-mode --roots-mode=union` (`--readonly` off) when the agent needs git without the full catalog. `--profile=strict` remains the 18-tool core without git. `--git-network` only if the agent must `git push`/`fetch`/`pull` (`pull` is fast-forward only; honored by ultra and agent, ignored by strict). `--response-mode=structured` is opt-in and keeps file bodies once in structuredContent; default `compat` is unchanged. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 34 tools including `analyze_code`, graduated `github_issues` / `gitlab_issues`, and experimental `context_pack` and `workspace`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
 
 For JSON queries, byte diagnostics or baseline hashes, use `--profile=ultra --compact-mode --roots-mode=union`. `json_query`, `file_bytes` and `file_hash` are absent from both `agent` and `strict`, and work under `--readonly`. After changing the binary/profile, reconnect the client so it refreshes the catalog.
 
 ## Bind each project to one filesystem tool family
 
 - `filesystem-ultra` operates on the real host filesystem (`C:\...`, host-mounted `/mnt/...`). Runtime-native `create_file`, `str_replace`, `view` may target a different sandbox.
-- First call `list_allowed_directories` (before any read). If the client already lists the tools, do not call `help()`. `help(tool:"X")` only when a parameter is missing from the schema. `directory_tree` only when the path is unknown. Do not dump the full catalog at startup.
+- First call `list_allowed_directories` (before any read). If the client already lists the tools, do not call `help()`. `help(tool:"X")` only when a parameter is missing from the schema. `project_map` when the shape of a project is unknown; `directory_tree` only when the actual tree is needed. Do not dump the full catalog at startup.
 - For host projects, use only filesystem-ultra tools. If the harness also offers native Read/Grep/Edit, do not call both. After every host create/edit, verify with `get_file_info` or `list_directory`; `read_file` when content matters.
 - `File not found` for a known file is a filesystem-mismatch signal: stop, confirm with the host reader, audit recent writes. Never switch tool families silently.
 
@@ -31,8 +33,9 @@ Harness subagents start without this file. The portable contract is `server.With
 ## Discovery order
 
 1. `list_allowed_directories` — sandbox roots. Zero parameters. That is the whole startup.
-2. `directory_tree` — only when the path is unknown. Defaults: `respect_ignore=true`, `max_depth=2`, `max_nodes=500`.
-3. `help(tool:"X")` — only when a parameter is missing from the client schema. If the client already lists the tools, do not call `help()`.
+2. `project_map` — cheap structural orientation when the shape of a project is unknown. Metadata only (skeleton, extension histogram, largest files, key files). It does not select code.
+3. `directory_tree` — only when the actual tree is needed. Defaults: `respect_ignore=true`, `max_depth=2`, `max_nodes=500`.
+4. `help(tool:"X")` — only when a parameter is missing from the client schema. If the client already lists the tools, do not call `help()`.
 
 Native `oldString` / `replaceAll` / `search` / `edit` are not this server. `edit_file` uses `old_text` / `new_text`. Omitting `occurrence` replaces every exact match. A pattern uses `mode:"search_replace"`.
 
@@ -42,12 +45,13 @@ Search first: `search_files` (omitted `include_content` searches content; globs 
 
 If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (`paths[]` / `mode` head|tail).
 
-## Strict profile (17) — always available when `--profile=strict`
+## Strict profile (18) — always available when `--profile=strict`
 
 | Tool | When / notes |
 |------|----------------|
 | `list_allowed_directories` | First call |
-| `directory_tree` | Only when the path is unknown. Gitignore ON |
+| `project_map` | Cheap structural orientation of an unknown project. Metadata only. `detail:"summary"` (top level) / `"normal"` (directories only, default) / `"full"` (directories + files). Bounded: 5000 entries, 2.5 s, 512 KiB of metadata; a limit sets `truncated=true` + `summary_scope="visited_entries"`. Never follows symlinks; hidden paths (file-security policy) are not counted or named |
+| `directory_tree` | Only when the actual tree is needed. Gitignore ON |
 | `list_directory` | Copy exact paths (case) before edits |
 | `search_files` | Gitignore ON. Omit `max_results` and the page is 40. Omitted `include_content` searches content; a glob (`* ? [`) stays filename-only; `include_content:false` is names only. Empty results name the scope. Do not pair `count_only` with `detail=full` |
 | `get_file_info` | Verify after a host mutation. Batch `paths[]` |
@@ -113,6 +117,7 @@ Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `gr
 
 | Need | Call |
 |------|------|
+| Orient yourself in an unknown project | `project_map(path, depth:2)` — metadata only, bounded |
 | Filter/project JSON | `json_query(path, query, limit:100)` (ultra) |
 | BOM/EOL, invisible characters or hex | `file_bytes(path, mode:"all")` (ultra) |
 | Baseline byte parity / SHA-256 | `file_hash(paths:[baseline, generated], compare:true)` (ultra) |

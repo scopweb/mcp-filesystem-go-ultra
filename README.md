@@ -343,19 +343,20 @@ Omit the flag if seeing the URL is enough.
 
 ## Tool Discovery
 
-Do **not** dump the full catalog at startup. Handshake instructions are short. First call `list_allowed_directories`, then `directory_tree` or `help(tool:"X")`.
+Do **not** dump the full catalog at startup. Handshake instructions are short. First call `list_allowed_directories`, then `project_map` / `directory_tree` or `help(tool:"X")`.
 
 | Step | Call | When |
 |------|------|------|
 | 1 | `list_allowed_directories` | Before the first read |
-| 2 | `directory_tree` or `help(tool:"X")` | Explore roots, or look up one tool on demand |
-| 3 | `help()` | Only if you need the live registered list |
+| 2 | `project_map` | Cheap structural orientation of a project (metadata only) |
+| 3 | `directory_tree` or `help(tool:"X")` | Explore a tree, or look up one tool on demand |
+| 4 | `help()` | Only if you need the live registered list |
 
-`--profile=strict` shrinks `tools/list` to the 16-tool agent core so lazy-loading clients see the useful set.
+`--profile=strict` shrinks `tools/list` to the 18-tool agent core so lazy-loading clients see the useful set.
 
 ### Using the skill
 
-The skill ships in `.claude/skills/filesystem-ultra-tools/`. Same order: `list_allowed_directories` first, then `directory_tree` / `help(tool:X)`.
+The skill ships in `.claude/skills/filesystem-ultra-tools/`. Same order: `list_allowed_directories` first, then `project_map` / `directory_tree` / `help(tool:X)`.
 
 ### Host filesystem vs runtime sandbox
 
@@ -376,6 +377,7 @@ Copy [examples/harness/](examples/harness/) — do not guess flags. One MCP inst
 | Tool | Purpose | When to use |
 |------|---------|-------------|
 | `list_allowed_directories` | Sandbox roots. Zero parameters. **strict** | Before the first read |
+| `project_map` | Cheap structural orientation: skeleton with child counts, extension histogram, largest files, key files. Metadata only. Bounded (entries, time, metadata bytes). **strict** | Orient yourself in an unknown project without listing every file |
 | `directory_tree` | Compact recursive tree. `respect_ignore=true`, `max_depth=2`, `max_nodes=500`. **strict** | After roots, to explore. `truncated` + `hidden_count` in structured output |
 | `diff_files` | Unified diff of two paths, or `against:"backup"`. **strict** | Preview before `apply_patch` or to compare two files |
 | `apply_patch` | Unified diff. One file or in-process multi-file transaction. `dry_run` + `expected_hash` (single-file). Dest EOL wins. **strict** | Surgical edit. If `PATCH_FAILED`: `read_file` and regenerate; do not retry the same patch |
@@ -404,6 +406,10 @@ Copy [examples/harness/](examples/harness/) — do not guess flags. One MCP inst
 | `github_issues` | GitHub issues via `gh`. No delete, no `gh auth login` | ultra |
 | `gitlab_issues` | GitLab issues via its HTTP API. No delete | ultra |
 | `context_pack` | Definition-centred task context: ranked files, exact line ranges, bounded snippets, explicit omissions. Experimental. [doc](doc/context-pack.md) | ultra |
+| `workspace` | Experimental real git worktree for agent edits: begin/status/diff/export/discard | ultra |
+| `json_query` | Standard JMESPath over JSON with bounded output and hash-bound pagination. Experimental. [doc](doc/inspection-tools.md) | ultra |
+| `file_bytes` | BOM/EOL, Unicode and hex diagnostics. Experimental. [doc](doc/inspection-tools.md) | ultra |
+| `file_hash` | Streaming SHA-256 of original bytes, with byte comparison. Experimental. [doc](doc/inspection-tools.md) | ultra |
 
 ---
 
@@ -561,6 +567,10 @@ tests/                      Black-box suite over the exported core API
 ## Documentation
 
 Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)**.
+
+For agent prompts: **[llms.txt](llms.txt)** states the guarantees this server actually keeps (OCC, `apply_patch`, CRLF dry-run artefacts, backups, paths, `retryable`) and the strict tool inventory, without promises the code does not back.
+
+Per-tool usage and limits: `doc/context-pack.md`, `doc/inspection-tools.md`.
 
 ## Changelog
 
