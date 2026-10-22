@@ -755,6 +755,22 @@ async function fetchProxyStats() {
     $('#p-error-rate').className = 'value ' + (errRate > 5 ? 'red' : 'green');
     $('#p-timespan').textContent = s.time_span || '—';
 
+    // Client/UI identity is independent of the model used for each call.
+    const clients = Object.entries(s.by_client || {}).sort((a, b) => b[1].count - a[1].count);
+    $('#p-by-client').innerHTML = clients.map(([name, c]) => {
+      const errClass = c.error_rate > 5 ? 'color:var(--red)' : '';
+      return `<tr>
+        <td><span class="badge">${escapeHtml(name)}</span></td>
+        <td>${c.count.toLocaleString()}</td>
+        <td>${c.tokens_in.toLocaleString()}</td>
+        <td>${c.tokens_out.toLocaleString()}</td>
+        <td><strong>${(c.tokens_in + c.tokens_out).toLocaleString()}</strong></td>
+        <td style="${errClass}">${c.errors}</td>
+        <td style="${errClass}">${c.error_rate.toFixed(1)}%</td>
+        <td>${formatDuration(c.avg_ms)}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="8" class="empty">No client data</td></tr>';
+
     // By model table
     const models = Object.entries(s.by_model || {}).sort((a, b) => b[1].count - a[1].count);
     const modelColors = ['var(--accent)', 'var(--green)', 'var(--yellow)', 'var(--orange)', 'var(--red)'];

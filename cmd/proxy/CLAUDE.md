@@ -22,6 +22,7 @@ mcp-proxy --model "sonnet-4" --log-dir C:\logs\mcp-proxy -- C:\path\to\filesyste
 
 | Flag | Required | Description |
 |------|----------|-------------|
+| `--client` | No | Client/UI label (e.g. `OpenCode`, `Claude Code`, `Codex`, `Claude Desktop`). Overrides auto-detected `clientInfo` for logs only. |
 | `--model` | No | Model name tag for logs (e.g., `opus-4`, `sonnet-4`) |
 | `--log-dir` | Yes | Directory where `proxy.jsonl` is written |
 | `--call-timeout` | No | Per-call timeout (default 60s). MCP `isError` if the child is silent. |
@@ -76,7 +77,7 @@ The MCP protocol **does not transmit the model name** in any message — there i
 | Field | Source | Identifies |
 |-------|--------|------------|
 | `model` | `--model` flag | The AI model (e.g. `sonnet-4`) — must be set manually |
-| `client` | `initialize` clientInfo | The MCP client app (e.g. `Claude Desktop/0.9.2`) — auto-detected |
+| `client` | `--client` override, otherwise `initialize` clientInfo | The MCP client app (e.g. `Claude Desktop/0.9.2`) — auto-detected by default |
 
 ### Token estimation
 
@@ -109,7 +110,7 @@ Tokens are approximated as `bytes / 4` — not exact, but good enough for relati
 |-------|------|-------------|
 | `ts` | datetime | When the request was sent |
 | `model` | string | From `--model` flag — AI model name (not in MCP wire format) |
-| `client` | string | Auto-detected from `initialize` clientInfo (e.g. `Claude Desktop/0.9.2`) |
+| `client` | string | From `--client` when set, otherwise auto-detected from `initialize` clientInfo (e.g. `Claude Desktop/0.9.2`). Older logs without this field appear as `Unknown client`. |
 | `tool` | string | MCP tool name (e.g., `read_file`, `edit_file`) |
 | `path` | string | Extracted from tool arguments `path` field |
 | `bytes_in` | int | Serialized argument size |
@@ -136,7 +137,8 @@ dashboard.exe --log-dir=C:\logs\mcp-filesystem --proxy-log-dir=C:\logs\mcp-proxy
 
 The dashboard's **Proxy / Tokens** page reads `proxy.jsonl` and shows:
 - Total calls, tokens in/out, error rate, time span
-- Breakdown by model (calls, tokens, avg duration)
+- Breakdown by client/UI (calls, tokens, errors, avg duration), with known client names grouped across versions
+- Breakdown by client/model (calls, tokens, avg duration)
 - Breakdown by tool (calls, tokens, error rate)
 - Token distribution bar chart
 

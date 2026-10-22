@@ -1149,6 +1149,7 @@ type ProxyStatsResponse struct {
 	ErrorRate      float64                    `json:"error_rate"`
 	AvgDurationMs  float64                    `json:"avg_duration_ms"`
 	TimeSpan       string                     `json:"time_span"`
+	ByClient       map[string]*ModelStats     `json:"by_client"`
 	ByModel        map[string]*ModelStats     `json:"by_model"`
 	ByTool         map[string]*ProxyToolStats `json:"by_tool"`
 	ByHour         []HourBucket               `json:"by_hour"`
@@ -1159,7 +1160,7 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		emptyResp := ProxyStatsResponse{ByModel: map[string]*ModelStats{}, ByTool: map[string]*ProxyToolStats{}}
+		emptyResp := ProxyStatsResponse{ByClient: map[string]*ModelStats{}, ByModel: map[string]*ModelStats{}, ByTool: map[string]*ProxyToolStats{}}
 		if proxyLogDir == "" {
 			emptyResp.Message = "Proxy logs not configured: set --proxy-log-dir to the proxy's --log-dir."
 			json.NewEncoder(w).Encode(emptyResp)
@@ -1176,6 +1177,8 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 
 		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 
+		byClient := map[string]*ModelStats{}
+		clientDurations := map[string]float64{}
 		byModel := map[string]*ModelStats{}
 		byTool := map[string]*ProxyToolStats{}
 		fileCounts := map[string]int64{}
@@ -1210,6 +1213,20 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 			}
 			if latest.IsZero() || e.Timestamp.After(latest) {
 				latest = e.Timestamp
+			}
+
+			clientKey := proxyClientLabel(e.Client)
+			cs := byClient[clientKey]
+			if cs == nil {
+				cs = &ModelStats{}
+				byClient[clientKey] = cs
+			}
+			cs.Count++
+			cs.TokensIn += e.TokensIn
+			cs.TokensOut += e.TokensOut
+			clientDurations[clientKey] += duration
+			if e.Status != "ok" {
+				cs.Errors++
 			}
 
 			modelKey := e.Model
@@ -1253,6 +1270,10 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 			hourCounts[h]++
 		}
 
+		for client, cs := range byClient {
+			cs.ErrorRate = float64(cs.Errors) / float64(cs.Count) * 100
+			cs.AvgMs = clientDurations[client] / float64(cs.Count)
+		}
 		for model, ms := range byModel {
 			if ms.Count > 0 {
 				ms.ErrorRate = float64(ms.Errors) / float64(ms.Count) * 100
@@ -1338,6 +1359,7 @@ func proxyStatsHandler(proxyLogDir string) http.HandlerFunc {
 			}(),
 			AvgDurationMs: avgDuration,
 			TimeSpan:      timeSpan,
+			ByClient:      byClient,
 			ByModel:       byModel,
 			ByTool:        byTool,
 			ByHour:        byHour,

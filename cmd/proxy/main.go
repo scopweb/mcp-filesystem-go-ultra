@@ -67,6 +67,7 @@ type pendingCall struct {
 }
 
 type config struct {
+	client             string
 	model              string
 	opencodeDB         string
 	opencodeToolPrefix string
@@ -79,6 +80,7 @@ type config struct {
 }
 
 func main() {
+	client := flag.String("client", "", "Client/UI label for logs (e.g. OpenCode, Claude Code, Codex, Claude Desktop); overrides initialize clientInfo")
 	model := flag.String("model", "", "Fallback model label when the client does not identify one (e.g. opus-4)")
 	opencodeDB := flag.String("opencode-db", "", "OpenCode sqlite database. Empty uses the default user database when it exists.")
 	opencodePrefix := flag.String("opencode-tool-prefix", "", "OpenCode MCP server name used to match tool ids, e.g. filesystem-ultra")
@@ -90,7 +92,7 @@ func main() {
 
 	args := flag.Args()
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: mcp-proxy [--model NAME] [--opencode-db PATH] [--opencode-tool-prefix NAME] [--log-dir DIR] [--timeout DURATION] [--call-timeout DURATION] [--reap-stale=false] -- <command> [args...]")
+		fmt.Fprintln(os.Stderr, "Usage: mcp-proxy [--client NAME] [--model NAME] [--opencode-db PATH] [--opencode-tool-prefix NAME] [--log-dir DIR] [--timeout DURATION] [--call-timeout DURATION] [--reap-stale=false] -- <command> [args...]")
 		fmt.Fprintln(os.Stderr, "  The target MCP server command follows after --")
 		os.Exit(1)
 	}
@@ -113,6 +115,7 @@ func main() {
 		dbPath = defaultOpenCodeDB()
 	}
 	os.Exit(runProxy(config{
+		client:             strings.TrimSpace(*client),
 		model:              *model,
 		opencodeDB:         dbPath,
 		opencodeToolPrefix: *opencodePrefix,
@@ -270,6 +273,9 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 					mu.Lock()
 					client := detectedClient
 					mu.Unlock()
+					if override := strings.TrimSpace(cfg.client); override != "" {
+						client = override
+					}
 
 					entry := ProxyLogEntry{
 						Timestamp: time.Now(),
