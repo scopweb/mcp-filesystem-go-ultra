@@ -169,7 +169,7 @@ Claude Desktop runs one server process for all its chats; four conversations on 
 
 ### fix(agent): content search default, short edits, recoverable denials
 
-- `search_files` with `include_content` omitted searches content. A filename glob (`*`, `?`, `[`) stays filename-only, because content search would treat `*` as regex. Explicit `false` remains names-only. Empty text still names the scope.
+- `search_files` with `include_content` omitted searches content. A filename glob (`*.go`, `file?.txt`, `Reports.*`) stays filename-only. A regex is not a glob: `preview.*range`, `foo[0-9]+`, and other non-glob metacharacters (`\ | + ( ) { } ^ $`) search content. A non-empty `include` searches content. Explicit `false` remains names-only. Empty text still names the scope.
 - `edit_file` and `multi_edit` omit the diff body unless `diff_format` is `auto`, `full`, or `summary`. The default success line is `OK path | +N -M | UNDO:id`. Hashes stay in structuredContent.
 - Access-denied failures use the `NOT_ALLOWED` envelope with `path` and `retryable:false`. Handshake instructions name the canonical tools and say not to switch to native file tools.
 

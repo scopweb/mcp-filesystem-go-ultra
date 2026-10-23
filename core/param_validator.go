@@ -327,6 +327,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"max_lines":            {ParamNumber, false}, // default 200
 		"limit":                {ParamNumber, false}, // log: default 10
 		"rev":                  {ParamString, false}, // single rev or range; replaces commit_range + source
+		"pickaxe":              {ParamString, false}, // log only: -S pattern, one argv ("-S"+pattern)
 		"staged":               {ParamBoolean, false},
 		"message":              {ParamString, false},
 		"name":                 {ParamString, false},  // branch: list when empty

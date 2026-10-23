@@ -226,6 +226,49 @@ func formatEditDryRun(path, oldContent, predicted string, replacements int, extr
 	return msg, attachMessage(sc, msg)
 }
 
+// rangeBoundCitations quotes the original range edges for a dry-run, not the
+// diff hunk. At most three lines, each trimmed to 120 characters: start_line,
+// end_line (when different), and end_line+1 or "end is last line".
+func rangeBoundCitations(content string, startLine, endLine int) string {
+	lines := strings.SplitAfter(content, "\n")
+	if n := len(lines); n > 0 && lines[n-1] == "" {
+		lines = lines[:n-1]
+	}
+	var b strings.Builder
+	cite := func(n int) {
+		if n < 1 || n > len(lines) {
+			return
+		}
+		text := strings.TrimRight(lines[n-1], "\r\n")
+		b.WriteString(trimRunes(fmt.Sprintf("%d: %s", n, text), 120))
+		b.WriteByte('\n')
+	}
+	cite(startLine)
+	if endLine != startLine {
+		cite(endLine)
+	}
+	if endLine >= len(lines) {
+		b.WriteString("end is last line\n")
+	} else {
+		cite(endLine + 1)
+	}
+	return b.String()
+}
+
+func trimRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	n := 0
+	for i := range s {
+		if n == max {
+			return s[:i]
+		}
+		n++
+	}
+	return s
+}
+
 // computeFileOCCHash returns the FNV-1a (8 hex) hash of the full file's raw
 // bytes — the same OCC token edit_file / multi_edit validate via expected_hash
 // (they hash os.ReadFile(path)). It reads the whole file from disk so that
@@ -1326,7 +1369,7 @@ func registerCoreTools(reg *toolRegistry) {
 				return mcp.NewToolResultError(formatToolError(rerr)), nil
 			}
 			if dryRun {
-				extra := fmt.Sprintf("Would replace lines %d-%d\n", startLine, endLine)
+				extra := fmt.Sprintf("Would replace lines %d-%d\n%s", startLine, endLine, rangeBoundCitations(string(oldContentRaw), startLine, endLine))
 				if autoOCCWarn != "" {
 					extra += autoOCCWarn + "\n"
 				}
@@ -1395,7 +1438,7 @@ func registerCoreTools(reg *toolRegistry) {
 				return mcp.NewToolResultError(formatToolError(derr)), nil
 			}
 			if dryRun {
-				extra := fmt.Sprintf("Would delete lines %d-%d\n", startLine, endLine)
+				extra := fmt.Sprintf("Would delete lines %d-%d\n%s", startLine, endLine, rangeBoundCitations(string(oldContentRaw), startLine, endLine))
 				if autoOCCWarn != "" {
 					extra += autoOCCWarn + "\n"
 				}
@@ -1673,7 +1716,7 @@ func registerCoreTools(reg *toolRegistry) {
 					msg += " | " + result.Integrity.Warning
 				}
 			}
-			msg += syntaxWarning(normPath)
+			msg += syntaxWarning(normPath, oldContentRaw, newContentRaw)
 			msg = core.FormatFeedback(editSignal, msg)
 			sc := editStructured(path, result)
 			if autoOCCWarn != "" {
@@ -1722,7 +1765,7 @@ func registerCoreTools(reg *toolRegistry) {
 			if unifiedDiff != "" {
 				msg += "\n" + unifiedDiff
 			}
-			msg += syntaxWarning(normPath)
+			msg += syntaxWarning(normPath, []byte(oldContentStr), newContentRaw)
 			sc := editStructured(path, result)
 			if autoOCCWarn != "" {
 				sc["external_change"] = autoOCCWarn
@@ -1746,7 +1789,7 @@ func registerCoreTools(reg *toolRegistry) {
 		// Append feedback signals (non-blocking)
 		msg = core.FormatFeedback(editSignal, msg)
 		msg = core.FormatFeedback(newTextSignal, msg)
-		msg += syntaxWarning(normPath)
+		msg += syntaxWarning(normPath, []byte(oldContentStr), []byte(newContentStr))
 		// Append unified diff
 		if unifiedDiff != "" {
 			msg += "\n\nDiff:\n" + unifiedDiff

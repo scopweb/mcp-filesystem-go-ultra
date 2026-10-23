@@ -125,7 +125,7 @@ search_files
 - Purpose: Search by filename or content. Honors .gitignore by default (no_ignore=false). truncated + hidden_count in structured output.
 - Key params: path, pattern, file_types, include, include_content, include_context, case_sensitive, count_only, max_results, no_ignore
 - include: comma-separated globs (*.go, *.ts) or brace alternatives ({A.cs,B.cs}, {Test,ObservacionesPedido}/*.razor, *.{go,razor}). Commas inside {} are alternatives, not separators. * does not cross /. ** matches any depth. A pattern with / is relative to path. Invalid globs, unbalanced braces, empty alternatives, and more than 64 expansions return VALIDATION (retryable false), not an empty search. file_types does not expand braces; if both are set, their intersection applies in names, content and count modes before pagination.
-- include_content omitted searches content, unless pattern is a filename glob (* ? [), which stays filename-only. Explicit false searches names only. Empty results name the scope: "0 coincidencias en contenido" or "0 coincidencias en nombres de fichero". A names-only zero is not proof the text is absent. A path that is a file forces content search. There is no mode parameter. A valid include with no hits is still an empty search, not an error.
+- include_content omitted searches content, unless pattern is a filename glob (* ? [) and not a regex. .* only as an extension suffix (Reports.*) stays filename-only; preview.*range does not. Non-glob metacharacters (\ | + ( ) { } ^ $) search content. A non-empty include searches content. Explicit false searches names only, even if include is set or the pattern looks like a regex. Empty results name the scope: "0 coincidencias en contenido" or "0 coincidencias en nombres de fichero". A names-only zero is not proof the text is absent. A path that is a file, or contentIntent (context_lines, output_format), still forces content search. There is no mode parameter. A valid include with no hits is still an empty search, not an error.
 - structured message is a short summary. Hits live in matches. The text content block keeps the listing for text-only clients.
 
 ## File Operations (5)
@@ -193,7 +193,8 @@ apply_patch
 
 git
 - Purpose: Safe Git status, diff, log, show, review, add, commit, push, fetch, pull, restore, branch, init, remote, and stash actions
-- Key params: action, path, paths, output, rev, max_lines, offset, expected_status_hash, delete, prune, remote, stash_action, include_untracked
+- Key params: action, path, paths, output, rev, pickaxe, max_lines, offset, expected_status_hash, delete, prune, remote, stash_action, include_untracked
+- pickaxe is log only: one argv, "-S"+pattern, so a pattern starting with "-" is data. Empty, NUL, newline, and more than 512 bytes are rejected. Not -G. rev, name, and remote that start with "-" stay rejected.
 - pull requires --git-network and is fast-forward only. Divergence does not merge. Fetch and integration are reported separately.
 - stash show/apply/drop/pop take rev as a commit OID, not stash@{n}. drop and pop require force:true.
 - review returns a paged file list plus status_hash. Continue with the same hash; a mismatch is STALE_GIT.

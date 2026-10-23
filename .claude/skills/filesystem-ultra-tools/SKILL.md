@@ -41,7 +41,7 @@ Native `oldString` / `replaceAll` / `search` / `edit` are not this server. `edit
 
 Host files = `read_file` / `search_files` / `edit_file` / `write_file`. Native Read/Edit/Write/Grep = error. On failure, read `path` and `retryable`; `retryable:false` means stop.
 
-Search first: `search_files` (omitted `include_content` searches content; globs stay filename-only; `include_content:false` is names only). Empty results name the scope. Page is 40. Then `read_file` only with a range.
+Search first: `search_files` (omitted `include_content` searches content; a filename glob such as `*.go` or `Reports.*` stays names-only, a regex such as `preview.*range` does not; `include_content:false` is names only). Empty results name the scope. Page is 40. Then `read_file` only with a range.
 
 If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (`paths[]` / `mode` head|tail).
 
@@ -53,7 +53,7 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 | `project_map` | Cheap structural orientation of an unknown project. Metadata only. `detail:"summary"` (top level) / `"normal"` (directories only, default) / `"full"` (directories + files). Bounded: 5000 entries, 2.5 s, 512 KiB of metadata; a limit sets `truncated=true` + `summary_scope="visited_entries"`. Never follows symlinks; hidden paths (file-security policy) are not counted or named |
 | `directory_tree` | Only when the actual tree is needed. Gitignore ON |
 | `list_directory` | Copy exact paths (case) before edits |
-| `search_files` | Gitignore ON. Omit `max_results` and the page is 40. Omitted `include_content` searches content; a glob (`* ? [`) stays filename-only; `include_content:false` is names only. Empty results name the scope. Do not pair `count_only` with `detail=full` |
+| `search_files` | Gitignore ON. Omit `max_results` and the page is 40. Omitted `include_content` searches content; a filename glob (`*.go`, `Reports.*`) stays names-only, a regex (`preview.*range`) does not; `include_content:false` is names only. Empty results name the scope. Do not pair `count_only` with `detail=full` |
 | `get_file_info` | Verify after a host mutation. Batch `paths[]` |
 | `read_file` | Full / range / head / tail / base64 / `paths[]`. Logs: `mode:"tail"` `max_lines:40` |
 | `write_file` | New files or whole-file rewrite. `mode:"append"` skips rewrite-guard |

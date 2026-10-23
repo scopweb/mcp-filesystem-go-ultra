@@ -387,7 +387,7 @@ func registerBatchTools(reg *toolRegistry) {
 			if staleWarning != "" {
 				msg += staleWarning
 			}
-			msg += syntaxWarning(normPath)
+			msg += syntaxWarning(normPath, []byte(result.OriginalContent), []byte(result.FinalContent))
 			if wantEditDiff(args) {
 				if diffText := core.RenderDiff(result.OriginalContent, result.FinalContent, path, diffFormat); diffText != "" {
 					msg += "\n" + diffText
@@ -419,7 +419,7 @@ func registerBatchTools(reg *toolRegistry) {
 			sb.WriteString(staleWarning)
 			sb.WriteString("\n")
 		}
-		if warn := syntaxWarning(normPath); warn != "" {
+		if warn := syntaxWarning(normPath, []byte(result.OriginalContent), []byte(result.FinalContent)); warn != "" {
 			sb.WriteString(warn)
 			sb.WriteString("\n")
 		}

@@ -45,6 +45,7 @@ func registerGitTools(reg *toolRegistry) {
 		mcp.WithNumber("max_lines", mcp.Description("Max output lines before truncation with hint footer (default: 200)")),
 		mcp.WithNumber("limit", mcp.Description("log: max commits to return (default: 10)")),
 		mcp.WithString("rev", mcp.Description("Revision or range (e.g. 'HEAD~3', 'abc123..def456', 'main'). diff/log/show.")),
+		mcp.WithString("pickaxe", mcp.Description("log only: git log -S as one argv (\"-S\"+pattern), so a leading '-' is data. Rejects empty, NUL, newline, and more than 512 bytes. Not -G.")),
 		mcp.WithBoolean("staged", mcp.Description("diff: compare index vs HEAD (--cached). Default: false.")),
 		mcp.WithString("message", mcp.Description("commit: message text (required for commit)")),
 		mcp.WithString("name", mcp.Description("branch: branch name to create/switch/delete. push: branch to push (default: current upstream).")),
@@ -120,6 +121,11 @@ func registerGitTools(reg *toolRegistry) {
 				}
 			}
 		}
+		// pickaxe is not option-like: it is concatenated onto -S so a leading
+		// '-' stays data. Do not run rejectOptionLike on it. rev/name/remote stay strict.
+		if _, ok := args["pickaxe"]; ok && action != "log" {
+			return mcp.NewToolResultError(`pickaxe is only valid for action:"log"`), nil
+		}
 
 		// Anti-destructive protection for dangerous git operations
 		if isDestructiveGitAction(action, args) && !getBoolArg(args, "force") {
@@ -179,6 +185,7 @@ func gitHelpExamples(gitNetwork bool) []string {
 		`git(action:"status")`,
 		`git(action:"diff", paths:["lib/dPeticiones.php"], output:"stat")`,
 		`git(action:"log", limit:5, paths:["public_html/ajax/"])`,
+		`git(action:"log", pickaxe:"IntroducedString")`,
 		`git(action:"show", rev:"HEAD", output:"full")`,
 		`git(action:"add", paths:["src/file.php"])`,
 		`git(action:"commit", message:"fix: short description")`,
@@ -495,6 +502,17 @@ func gitLog(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 			return errRes, nil
 		}
 	}
+	pickaxe := ""
+	if raw, ok := args["pickaxe"]; ok {
+		s, ok := raw.(string)
+		if !ok {
+			return mcp.NewToolResultError("invalid pickaxe: expected string"), nil
+		}
+		if errRes := validatePickaxe(s); errRes != nil {
+			return errRes, nil
+		}
+		pickaxe = s
+	}
 
 	out, errRes := parseOutputArg(args, "output", "oneline", []string{"oneline", "full"})
 	if errRes != nil {
@@ -514,6 +532,10 @@ func gitLog(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 	} else {
 		// full: hash + subject + author + date relative
 		cmdArgs = append(cmdArgs, "--format=%H|%s|%an|%ad", "--date=relative")
+	}
+	if pickaxe != "" {
+		// One argv. A pattern that starts with "-" is data, not an option.
+		cmdArgs = append(cmdArgs, "-S"+pickaxe)
 	}
 	if rev != "" {
 		cmdArgs = append(cmdArgs, rev)
@@ -1304,6 +1326,21 @@ func isDestructiveGitAction(action string, args map[string]any) bool {
 		return op == "drop" || op == "pop"
 	}
 	return false
+}
+
+// validatePickaxe rejects an empty, NUL, newline, or oversized -S pattern.
+// A leading "-" is allowed: gitLog concatenates it onto "-S" as one argv.
+func validatePickaxe(pattern string) *mcp.CallToolResult {
+	if pattern == "" {
+		return mcp.NewToolResultError("invalid pickaxe: must not be empty")
+	}
+	if len(pattern) > 512 {
+		return mcp.NewToolResultError("invalid pickaxe: must be at most 512 bytes")
+	}
+	if strings.Contains(pattern, "\x00") || strings.Contains(pattern, "\n") {
+		return mcp.NewToolResultError("invalid pickaxe: must not contain NUL or newline")
+	}
+	return nil
 }
 
 // rejectOptionLike guards against git argument injection. User-supplied

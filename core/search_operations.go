@@ -992,11 +992,47 @@ var searchSkipDirs = map[string]bool{
 	"build": true, ".cache": true, ".tmp": true,
 }
 
-// isGlobPattern returns true if the pattern contains glob wildcards (*, ?, [)
-// These should be matched via filepath.Match, not regex, to avoid misinterpretation.
-// For example, "Reports.*" as regex means "Report" + zero+ 's' + literal dot, not "anything after Report".
+// isGlobPattern reports whether a filename-only search should use filepath.Match.
+// A regex is not a glob. Non-glob metacharacters and a ".*" that is not only an
+// extension suffix stay on the regex path. Omitted include_content routing is
+// SearchContentByDefault, not this function.
 func isGlobPattern(pattern string) bool {
+	return isNameGlob(pattern)
+}
+
+// SearchContentByDefault reports whether an omitted include_content should
+// search file contents. An explicit include_content value is the caller's job
+// and always wins. A non-empty include filter implies content. A filename glob
+// (* ? [) stays names-only, except a regex: non-glob metacharacters
+// (\ | + ( ) { } ^ $) and ".*" that is not only an extension suffix
+// (Reports.* and *.go stay names; preview.*range does not).
+func SearchContentByDefault(pattern string, includeSet bool) bool {
+	if includeSet {
+		return true
+	}
+	return !isNameGlob(pattern)
+}
+
+func isNameGlob(pattern string) bool {
+	if strings.ContainsAny(pattern, `\|+(){}^$`) {
+		return false
+	}
+	if dotStarNotOnlyExtensionSuffix(pattern) {
+		return false
+	}
 	return strings.ContainsAny(pattern, "*?[")
+}
+
+// dotStarNotOnlyExtensionSuffix is true when ".*" appears and is not solely
+// the trailing extension wildcard (Reports.*, *.*). preview.*range is not a suffix.
+func dotStarNotOnlyExtensionSuffix(pattern string) bool {
+	if !strings.Contains(pattern, ".*") {
+		return false
+	}
+	if !strings.HasSuffix(pattern, ".*") {
+		return true
+	}
+	return strings.Contains(pattern[:len(pattern)-2], ".*")
 }
 
 // searchMinifiedPatterns lists filename fragments that identify generated/minified

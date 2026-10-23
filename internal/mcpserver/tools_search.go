@@ -193,7 +193,7 @@ func registerSearchTools(reg *toolRegistry) {
 			"Use search_files to find, then edit_file to modify. Related: edit_file, read_file, multi_edit, batch_operations."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Base directory or file (WSL or Windows format)")),
 		mcp.WithString("pattern", mcp.Required(), mcp.Description("Regex or literal pattern")),
-		mcp.WithBoolean("include_content", mcp.Description("Search file contents. Omitted: true, unless pattern is a filename glob (* ? [), which stays filename-only. Explicit false: names only. Empty results name the scope (contenido or nombres).")),
+		mcp.WithBoolean("include_content", mcp.Description("Search file contents. Omitted: content, unless the pattern is a filename glob (* ? [) and not a regex (*.go, file?.txt, and Reports.* stay names; preview.*range and non-glob metacharacters \\ | + ( ) { } ^ $ search content). A non-empty include searches content. Explicit false: names only. Empty results name the scope (contenido or nombres).")),
 		mcp.WithString("file_types", mcp.Description("Comma-separated file extensions (e.g., '.go,.txt')")),
 		mcp.WithString("include", mcp.Description("Glob filter. Comma-separated globs (*.go, *.ts) or brace alternatives ({A.cs,B.cs}, {Test,ObservacionesPedido}/*.razor, *.{go,razor}). Commas inside {} are alternatives, not separators. * does not cross /. ** matches any depth. A pattern with / is relative to path. Invalid globs, unbalanced braces, empty alternatives, and more than 64 expansions return VALIDATION (retryable:false), not an empty search. file_types does not expand braces. When both filters are set, their intersection is used in all search modes.")),
 		mcp.WithBoolean("case_sensitive", mcp.Description("Case sensitive search (default: true)")),
@@ -306,11 +306,12 @@ func registerSearchTools(reg *toolRegistry) {
 			}
 		}
 
-		// Omitted include_content searches content. A glob (* ? [) stays
-		// filename-only: content search would treat * as regex. Explicit false
-		// stays filename-only unless a later guard forces content.
-		if !includeContentSet && !strings.ContainsAny(pattern, "*?[") {
-			includeContent = true
+		// Omitted include_content searches content. A filename glob stays
+		// names-only; a regex (.* in the middle, +, other non-glob
+		// metacharacters) does not. A non-empty include implies content.
+		// Explicit false stays names-only unless a later guard forces content.
+		if !includeContentSet {
+			includeContent = core.SearchContentByDefault(pattern, len(include) > 0)
 		}
 
 		// v4.5.24 false-negative guards:
