@@ -165,3 +165,25 @@ _to_delete/
 # Note: No legacy media files are kept at project root anymore.
 # All Scopweb logos used in documentation live inside docs-website/src/assets/
 # (scopweb.png and scopweb3.png)
+
+# ------------------------------------------------------------
+# Markdown policy (2026-10-23)
+# Only these .md files may ever be tracked in this repository:
+#   README.md, CHANGELOG.md, SECURITY.md
+#   doc/FILESYSTEM-ULTRA-USAGE.md, doc/MCP-PROXY.md
+#   any .md under examples/, scripts/, tests/, cmd/proxy/,
+#   .claude/skills/filesystem-ultra-tools/ and the website
+# Every other .md stays untracked. scripts/check-md-policy.sh fails
+# the CI job if a forbidden .md is ever tracked.
+# ------------------------------------------------------------
+*.md
+!/README.md
+!/CHANGELOG.md
+!/SECURITY.md
+!/doc/FILESYSTEM-ULTRA-USAGE.md
+!/doc/MCP-PROXY.md
+!/examples/**/*.md
+!/scripts/**/*.md
+!/tests/**/*.md
+!/cmd/proxy/**/*.md
+!.claude/skills/filesystem-ultra-tools/**/*.md

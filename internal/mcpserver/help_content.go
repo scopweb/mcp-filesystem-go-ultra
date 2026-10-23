@@ -239,7 +239,7 @@ context_pack
 - focus_paths always outranks query matches. A query is compared to symbol names only when it is a plain identifier; a regex stays a content query.
 - An identifier query also gets a source-file scan, so a definition is not lost when the general search is truncated. source_candidates counts what it added.
 - An analyzer range is never widened by a looser fragment: a doc-comment window next to a definition is folded in and counted, but the definition keeps its own bounds.
-- Doc: doc/context-pack.md
+- Doc: https://filesystem.scopweb.com/tools/context-pack/
 
 workspace
 - Purpose: Experimental real git worktree. begin/status/diff/export/discard. Ultra only. Not a sandbox and not crash-durable. promote and query are not registered.

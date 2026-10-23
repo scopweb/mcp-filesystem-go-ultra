@@ -191,6 +191,9 @@ jobs:
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
+      - name: Markdown policy (no .md outside the allowlist)
+        run: sh scripts/check-md-policy.sh
+
       - name: Run govulncheck (Go stdlib + dependencies)
         run: govulncheck ./...
 

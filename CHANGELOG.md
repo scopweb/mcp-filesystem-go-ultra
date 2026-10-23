@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+### docs(repo): markdown policy — planning docs leave the repository
+
+Internal planning, review and session documents are no longer tracked. `avisos-seguridad.md`,
+`mcp-filesystem-go-ultra-novedades-2026-10-19.md`, `plan-19-10-2026.md`,
+`plan-20-10-2026.md`, `plan-consolidado-19-10-2026.md`, `doc/context-pack.md`,
+`doc/ejecucion-plan-2026-10-19.md`, `doc/inspection-tools.md` and
+`doc/json-query-file-bytes-file-hash-2026-10-20.md` are removed from the repository and from
+its history.
+
+- **Only these `.md` files may be tracked**: `README.md`, `CHANGELOG.md`, `SECURITY.md`,
+  `doc/FILESYSTEM-ULTRA-USAGE.md`, `doc/MCP-PROXY.md`, plus any `.md` under `examples/`,
+  `scripts/`, `tests/`, `cmd/proxy/` and `.claude/skills/filesystem-ultra-tools/`. The website
+  (`docs-website/`) is a separate repository and keeps the published documentation.
+- **Enforced, not just documented**: `.gitignore` ignores every other `.md`,
+  `scripts/check-md-policy.sh` fails the CI job when a forbidden file is tracked, and the
+  check runs on every push.
+- **Public usage docs moved to the website**: the `context_pack`, `json_query`, `file_bytes`
+  and `file_hash` limits now live at `filesystem.scopweb.com/tools/...`, and `README.md`,
+  `CHANGELOG.md`, the agent skill and `help(context_pack)` point there. The JSON examples the
+  test suite used to read from the deleted document are now inline in the test.
+
 ### feat(project_map): cheap structural orientation, plus agent-first llms.txt
 
 An agent's first call used to be `list_directory` + `directory_tree` just to guess the shape of a
@@ -142,7 +163,7 @@ Claude Desktop runs one server process for all its chats; four conversations on 
 - `json_query` uses pinned standard JMESPath v0.4.0, bounded token decoding/evaluation admission, 100-item default pages, CSV/table/text/JSON, and hash-bound continuation arguments. Numeric policy rejects unsafe binary64 integers and overflow.
 - `file_bytes` reports BOM/EOL, invalid sequences and Unicode/invisibles with explicit sampling. Default scan 1 MiB; ceiling controlled by `--max-inspect-scan-bytes` (16 MiB default). Hex offsets are absolute; `end_byte_offset` keeps line-range continuations within their original end.
 - `file_hash` streams original bytes through SHA-256 and directly compares two files, reporting byte/EOF differences and detecting observed concurrent changes.
-- Usage, limits and cancellation semantics: `doc/inspection-tools.md`. Exact write verification and dotnet-builder TRX changes remain separate phases.
+- Usage, limits and cancellation semantics: https://filesystem.scopweb.com/tools/inspection-tools/. Exact write verification and dotnet-builder TRX changes remain separate phases.
 
 **Verification:** document examples, OCC pagination, response caps, CSV, sample boundaries, binary parity, policies, symlinks and profile/experimental contract tests.
 

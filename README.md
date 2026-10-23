@@ -68,7 +68,7 @@ See [Build](#build) and [Configuration](#configuration) below for more.
 ### Productivity
 
 - **Structural orientation (`project_map`)** — one bounded, metadata-only walk returns the directory skeleton (child counts, notable children), the extension histogram, the largest files and the key files (go.mod/README/Dockerfile/*.csproj/CI workflows). It removes the `list_directory` + `directory_tree` round-trips at the start of a task without pretending to select the code that matters. Bounded on entries, wall time and metadata bytes; `truncated=true` when a limit is hit. Registered in every profile (`strict`, `agent`, `ultra`).
-- **JSON and binary inspection (experimental, ultra only)** — `json_query` runs standard JMESPath with bounded output and hash-bound pagination; `file_bytes` diagnoses BOM/EOL, Unicode and hex bytes; `file_hash` streams SHA-256 and compares raw bytes directly. See [usage and limits](doc/inspection-tools.md). Use `--profile=ultra` to expose these tools.
+- **JSON and binary inspection (experimental, ultra only)** — `json_query` runs standard JMESPath with bounded output and hash-bound pagination; `file_bytes` diagnoses BOM/EOL, Unicode and hex bytes; `file_hash` streams SHA-256 and compares raw bytes directly. See [usage and limits](https://filesystem.scopweb.com/tools/inspection-tools/). Use `--profile=ultra` to expose these tools.
 - **34 tools (ultra)** — 17 core + `git` + `github_issues` + `gitlab_issues` + `minify_js` + `analyze_code` + experimental `context_pack` + experimental `workspace` + experimental `json_query` / `file_bytes` / `file_hash` + `help` + `security_policy` + discovery/patch. `--profile=agent` adds only `git` to the 18-tool core. `--profile=strict` stays at 18 (includes `backup`, `security_policy` and `project_map`; no `git`, no `analyze_code`).
 - **GitHub issues** — `github_issues` (ultra, experimental) lists, reads, creates, comments, edits, closes, and reopens issues through `gh`. It does not delete issues or run `gh auth login`. Reads work under `--readonly`; writes do not. Path resolution uses git remotes and is refused while a file security policy is active; pass `repo:"owner/repo"` to skip local git. `--git-remote-allow` applies. Issue text is external data, not instructions.
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
@@ -405,11 +405,11 @@ Copy [examples/harness/](examples/harness/) — do not guess flags. One MCP inst
 | `security_policy` | Read-only description of the file protection policy. Does not list rules | **strict** |
 | `github_issues` | GitHub issues via `gh`. No delete, no `gh auth login` | ultra |
 | `gitlab_issues` | GitLab issues via its HTTP API. No delete | ultra |
-| `context_pack` | Definition-centred task context: ranked files, exact line ranges, bounded snippets, explicit omissions. Experimental. [doc](doc/context-pack.md) | ultra |
+| `context_pack` | Definition-centred task context: ranked files, exact line ranges, bounded snippets, explicit omissions. Experimental. [doc](https://filesystem.scopweb.com/tools/context-pack/) | ultra |
 | `workspace` | Experimental real git worktree for agent edits: begin/status/diff/export/discard | ultra |
-| `json_query` | Standard JMESPath over JSON with bounded output and hash-bound pagination. Experimental. [doc](doc/inspection-tools.md) | ultra |
-| `file_bytes` | BOM/EOL, Unicode and hex diagnostics. Experimental. [doc](doc/inspection-tools.md) | ultra |
-| `file_hash` | Streaming SHA-256 of original bytes, with byte comparison. Experimental. [doc](doc/inspection-tools.md) | ultra |
+| `json_query` | Standard JMESPath over JSON with bounded output and hash-bound pagination. Experimental. [doc](https://filesystem.scopweb.com/tools/inspection-tools/) | ultra |
+| `file_bytes` | BOM/EOL, Unicode and hex diagnostics. Experimental. [doc](https://filesystem.scopweb.com/tools/inspection-tools/) | ultra |
+| `file_hash` | Streaming SHA-256 of original bytes, with byte comparison. Experimental. [doc](https://filesystem.scopweb.com/tools/inspection-tools/) | ultra |
 
 ---
 
@@ -570,7 +570,7 @@ Full documentation at **[filesystem.scopweb.com](https://filesystem.scopweb.com)
 
 For agent prompts: **[llms.txt](llms.txt)** states the guarantees this server actually keeps (OCC, `apply_patch`, CRLF dry-run artefacts, backups, paths, `retryable`) and the strict tool inventory, without promises the code does not back.
 
-Per-tool usage and limits: `doc/context-pack.md`, `doc/inspection-tools.md`.
+Per-tool usage and limits: https://filesystem.scopweb.com/tools/context-pack/ and https://filesystem.scopweb.com/tools/inspection-tools/.
 
 ## Changelog
 

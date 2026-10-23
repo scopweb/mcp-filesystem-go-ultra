@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -92,29 +91,21 @@ func TestInspectJSONDocumentExamples(t *testing.T) {
 	reg := newHelpTestRegistry(t, dir)
 	source := `{"linies":[{"codArticulo":"A","coincident":false,"cantidadReal":2,"cantidadSimulada":1,"precioReal":0.1,"precioSimulada":0.2,"categoriesAmbDiferencies":["cantidad"],"numOrden":1,"cantidad":2,"precio":0.1,"descSubArticulo":"cafè"}],"problemes":[{"mena":"text","ocurrencies":2},{"mena":"number","ocurrencies":1}]}`
 	path := inspectTestFile(t, dir, "fixture.json", []byte(source))
-	document, err := os.ReadFile(filepath.Join("..", "..", "doc", "json-query-file-bytes-file-hash-2026-10-20.md"))
-	if err != nil {
-		t.Fatal(err)
+	examples := []map[string]any{
+		{"query": "linies[*].{codArticulo: codArticulo, coincident: coincident, cantidadReal: cantidadReal, cantidadSimulada: cantidadSimulada, precioReal: precioReal, precioSimulada: precioSimulada, categoriesAmbDiferencies: categoriesAmbDiferencies}", "output_format": "table"},
+		{"query": "linies[?coincident == `false`].{article: codArticulo, real: cantidadReal, simulada: cantidadSimulada}", "output_format": "table"},
+		{"query": "linies[*].{numOrden: numOrden, codArticulo: codArticulo, cantidad: cantidad, precio: precio, descSubArticulo: descSubArticulo}", "output_format": "table"},
+		{"query": "problemes", "output_format": "json", "limit": 100},
 	}
-	blocks := regexp.MustCompile("(?s)```json\\s*\\n(.*?)\\n```").FindAllSubmatch(document, -1)
-	examples := 0
-	for _, block := range blocks {
-		var args map[string]any
-		if json.Unmarshal(block[1], &args) != nil {
-			continue
-		}
-		if _, ok := args["query"]; !ok {
-			continue
-		}
-		examples++
+	if len(examples) != 4 {
+		t.Fatalf("executed %d document examples, want 4", len(examples))
+	}
+	for _, args := range examples {
 		args["path"] = path
 		payload := inspectTestPayload(t, inspectTestCall(t, reg, "json_query", args))
 		if payload["type"] != "array" || payload["returned_count"].(float64) < 1 {
 			t.Fatalf("example %v returned %#v", args["query"], payload)
 		}
-	}
-	if examples != 4 {
-		t.Fatalf("executed %d document examples, want 4", examples)
 	}
 	for _, query := range []string{"problemes[?mena == 'text']", "sort_by(problemes, &ocurrencies)"} {
 		payload := inspectTestPayload(t, inspectTestCall(t, reg, "json_query", map[string]any{"path": path, "query": query}))

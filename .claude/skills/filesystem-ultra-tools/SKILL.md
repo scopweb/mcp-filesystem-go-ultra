@@ -72,7 +72,7 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 
 - `json_query` — experimental, ultra only, read-only. Standard JMESPath (not jq), default 100/max 1000 array items, `json|table|csv|text`. Reuse the arguments from response `continuation` including `expected_hash`; no input `continuation`. `lot.json` already groups problems. Example: `json_query(path:"lot.json", query:"problemes[?mena == 'text']", output_format:"table")`.
 - `file_bytes` — experimental, ultra only, read-only. `mode:encoding|bytes|all`; diagnostic prefix defaults to 1 MiB, dump to 512 bytes. Byte offsets are 0-based; line ranges 1-based. Check `scan_complete` for partial statistics. `end_byte_offset` preserves exclusive range ends in continuations.
-- `file_hash` — experimental, ultra only, read-only. `path` XOR `paths` (max 64); SHA-256 of original bytes. `compare:true` requires two paths and directly compares bytes, reporting the first difference. SHA-256 is not an OCC token. Details and limits: `doc/inspection-tools.md` in this repository.
+- `file_hash` — experimental, ultra only, read-only. `path` XOR `paths` (max 64); SHA-256 of original bytes. `compare:true` requires two paths and directly compares bytes, reporting the first difference. SHA-256 is not an OCC token. Details and limits: https://filesystem.scopweb.com/tools/inspection-tools/
 
 `copy_file`, `project_replace`, `batch_operations`, `analyze_operation`, `wsl`, `git`, `github_issues`, `gitlab_issues`, `minify_js`, `analyze_code`, `server_info`.
 
@@ -94,7 +94,7 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 - For a truncated line dump, reuse the returned byte-offset continuation, including exclusive `end_byte_offset`, so it stays within the selected range. Do not combine byte selectors with line selectors.
 - `file_hash(compare:true)` compares original bytes directly, including BOM/EOL. A first-difference byte of null means EOF. A detected concurrent change fails the whole batch; do not interpret an error as partial equality. SHA-256 hashes are not OCC tokens.
 
-Full limits and evaluator cancellation semantics: `doc/inspection-tools.md` in this repository. These tools inspect/query content; they do not translate or modify JSON values.
+Full limits and evaluator cancellation semantics: https://filesystem.scopweb.com/tools/inspection-tools/. These tools inspect/query content; they do not translate or modify JSON values.
 
 ## git
 
