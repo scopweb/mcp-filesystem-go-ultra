@@ -155,6 +155,7 @@ IMPROVEMENTS-1-6.md
 PROTOCOLO-BLINDADO-v2.md
 TOOL-REFERENCE.md
 docs/
+doc/
 
 # ------------------------------------------------------------
 # Staging area for local files pending manual deletion.
@@ -170,18 +171,16 @@ _to_delete/
 # Markdown policy (2026-10-23)
 # Only these .md files may ever be tracked in this repository:
 #   README.md, CHANGELOG.md, SECURITY.md
-#   doc/FILESYSTEM-ULTRA-USAGE.md, doc/MCP-PROXY.md
 #   any .md under examples/, scripts/, tests/, cmd/proxy/,
 #   .claude/skills/filesystem-ultra-tools/ and the website
-# Every other .md stays untracked. scripts/check-md-policy.sh fails
-# the CI job if a forbidden .md is ever tracked.
+# Every other .md stays untracked. doc/, docs/ and docs-website/
+# are local-only. scripts/check-md-policy.sh fails the CI job if a
+# forbidden .md is ever tracked.
 # ------------------------------------------------------------
 *.md
 !/README.md
 !/CHANGELOG.md
 !/SECURITY.md
-!/doc/FILESYSTEM-ULTRA-USAGE.md
-!/doc/MCP-PROXY.md
 !/examples/**/*.md
 !/scripts/**/*.md
 !/tests/**/*.md
