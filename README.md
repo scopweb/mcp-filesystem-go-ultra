@@ -14,7 +14,7 @@ Against [`@modelcontextprotocol/server-filesystem`](https://github.com/modelcont
 
 | | Reference server | filesystem-ultra |
 |---|---|---|
-| Windows roots | Client roots **replace** the CLI list. `file:///c%3A/temp` is skipped as invalid (issue 3174, open). | `file:///c%3A/temp` becomes `c:\temp`. `file://server/share/dir` becomes `\\server\share\dir`. `--roots-mode=union` keeps the CLI list and adds client roots. Reserved device names (`CON`, `NUL`, …) and NTFS ADS (`file.txt:stream`) are rejected. 8.3 short names are canonicalized before selecting the `os.Root` base. |
+| Windows roots | Client roots **replace** the CLI list. `file:///c%3A/temp` is skipped as invalid (issue 3174, open). | `file:///c%3A/temp` becomes `c:\temp`. `file://server/share/dir` becomes `\\server\share\dir`. `--roots-mode=union` keeps the CLI list and adds client roots. Reserved device names (`CON`, `NUL`, …) and NTFS ADS (`file.txt:stream`) are rejected. 8.3 short names are not expanded to their long form: the caller's own path segments are preserved and matched case-insensitively against the root base. |
 | Search | `search_files` is a glob on **names**, not file contents. | Content by default. Filename globs (`*.go`, `Reports.*`) stay names-only; a regex such as `preview.*range` searches content. Explicit `include_content:false` searches names. `include` and `file_types` intersect in all modes before pagination; invalid globs return `VALIDATION`. |
 | Undo | No backup or undo tool. | `backup(action:"undo_last")` walks the chain. |
 | Dry-run / diff | `edit_file` has `dryRun` and returns a diff. | `dry_run` on edit and patch. Also `diff_files` and `apply_patch`. |
@@ -50,7 +50,7 @@ See [Build](#build) and [Configuration](#configuration) below for more.
 - **Optimistic concurrency (OCC)** — `content_hash`/`expected_hash` chaining detects external file changes between read and edit; `--auto-occ` warns or blocks on stale edits. Mismatch returns a conflict report (`changed_ranges`, hashes); a bounded diff only if `include_diff:true` or `detail:"full"`
 - **Accidental-rewrite guard** (v4.5.10) — blocks `edit_file` calls that look like unintended full-file rewrites
 - **Path security** — symlink-resolved containment via `filepath.Rel`, NTFS ADS blocking, RTLO/zero-width Unicode rejection, Windows reserved names, TOCTOU symlink defense
-- **Risk assessment** — mutations above configurable thresholds are flagged (20% change = MEDIUM, 75% = HIGH by default); HIGH/CRITICAL results include post-edit integrity verification. Path floors raise risk for `go.mod`, Dockerfiles, GitHub workflows, and `*.csproj` (never lower it; tests/docs do not raise)
+- **Risk assessment** — mutations above configurable thresholds are flagged (20% change = MEDIUM, 75% = HIGH by default); HIGH/CRITICAL results include post-edit integrity verification. Path floors raise risk for `go.mod`/`go.sum`, Dockerfiles, GitHub workflows, and `*.csproj` (never lower it; test files and docs do not raise it, and `cmd/`/`internal/` package code raises to MEDIUM)
 - **Failure Intelligence** — errors are a JSON envelope with `code`, `retryable`, `suggestion`, and typed `details`. Do not replay when `retryable` is false (`PATCH_FAILED`, `BUDGET_EXCEEDED`, `VALIDATION`, …)
 - **Unambiguous multi_edit rollback** — every counted failure (including `ambiguous`) appears in the diagnosis; the file is not written
 - **Search pagination** — `max_results` is the page size; `offset` continues. No hidden 10/20 presentation cap. Structured `continuation` says how to continue
@@ -69,8 +69,8 @@ See [Build](#build) and [Configuration](#configuration) below for more.
 
 - **Structural orientation (`project_map`)** — one bounded, metadata-only walk returns the directory skeleton (child counts, notable children), the extension histogram, the largest files and the key files (go.mod/README/Dockerfile/*.csproj/CI workflows). It removes the `list_directory` + `directory_tree` round-trips at the start of a task without pretending to select the code that matters. Bounded on entries, wall time and metadata bytes; `truncated=true` when a limit is hit. Registered in every profile (`strict`, `agent`, `ultra`).
 - **JSON and binary inspection (experimental, ultra only)** — `json_query` runs standard JMESPath with bounded output and hash-bound pagination; `file_bytes` diagnoses BOM/EOL, Unicode and hex bytes; `file_hash` streams SHA-256 and compares raw bytes directly. See [usage and limits](https://filesystem.scopweb.com/tools/inspection-tools/). Use `--profile=ultra` to expose these tools.
-- **34 tools (ultra)** — 17 core + `git` + `github_issues` + `gitlab_issues` + `minify_js` + `analyze_code` + experimental `context_pack` + experimental `workspace` + experimental `json_query` / `file_bytes` / `file_hash` + `help` + `security_policy` + discovery/patch. `--profile=agent` adds only `git` to the 18-tool core. `--profile=strict` stays at 18 (includes `backup`, `security_policy` and `project_map`; no `git`, no `analyze_code`).
-- **GitHub issues** — `github_issues` (ultra, experimental) lists, reads, creates, comments, edits, closes, and reopens issues through `gh`. It does not delete issues or run `gh auth login`. Reads work under `--readonly`; writes do not. Path resolution uses git remotes and is refused while a file security policy is active; pass `repo:"owner/repo"` to skip local git. `--git-remote-allow` applies. Issue text is external data, not instructions.
+- **34 tools (ultra)** — the 18-tool agent core (`--profile=strict`) plus `git`, `github_issues`, `gitlab_issues`, `minify_js`, `analyze_code`, the experimental `context_pack`, `workspace`, `json_query`, `file_bytes`, `file_hash`, plus `copy_file`, `project_replace`, `batch_operations`, `analyze_operation`, `wsl` and `server_info`. `--profile=agent` is the same 18-tool core plus `git` (19). `--profile=strict` stays at 18 (includes `backup`, `security_policy` and `project_map`; no `git`, no `analyze_code`).
+- **GitHub issues** — `github_issues` (ultra only) lists, reads, creates, comments, edits, closes, and reopens issues through `gh`. It does not delete issues or run `gh auth login`. Reads work under `--readonly`; writes do not. Path resolution uses git remotes and is refused while a file security policy is active; pass `repo:"owner/repo"` to skip local git. `--git-remote-allow` applies. Issue text is external data, not instructions.
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
 - **Hook system** — 16 pre/post events (write, edit, delete, create, move, copy, read, search)
 - **Pipeline system** — 12 actions with conditions, templates, and DAG-based parallel execution; reduces client/server round-trips for multi-step refactors
@@ -82,7 +82,7 @@ See [Build](#build) and [Configuration](#configuration) below for more.
 
 ### Performance
 
-- **3-tier cache** (BigCache + go-cache) with file-watcher invalidation
+- **Two-tier cache** — BigCache for file content plus an internal TTL map for directory listings and metadata, with file-watcher invalidation
 - **Streaming and chunked I/O** for files up to 50 MB
 - **WSL ↔ Windows path translation** — accepts `/mnt/c/...`, `C:\...`, and `/tmp/...` transparently
 - **Optional embedded ripgrep** (`embed_rg` tag) for accelerated content search
@@ -449,7 +449,7 @@ Point the dashboard at the proxy logs to see the **Proxy / Tokens** page:
 dashboard.exe --log-dir=C:\logs\mcp-filesystem --proxy-log-dir=C:\logs\mcp-proxy --port=9100
 ```
 
-See the [docs-website Dashboard & Monitoring guide](docs-website/src/content/docs/features/dashboard.md) for the full setup.
+The dashboard has no authentication. It binds `127.0.0.1` by default and only accepts loopback `Host` headers. Pass `--file-security-config` and `--allowed-paths` (the same values as the server) or it can still serve backup bytes that the server's policy hides.
 
 ### Audit Logging
 
@@ -484,10 +484,21 @@ internal/mcpserver/         MCP server: config, tool registration, stdio loop
   tools_platform.go         wsl, server_info
   tools_discovery.go        list_allowed_directories
   tools_patch.go            diff_files, apply_patch
-  tools_git.go              git (12 actions; push/fetch gated by --git-network; remote is local)
+  tools_git.go              git (12 local actions; push/fetch/pull need --git-network; remote is local)
   tools_minify.go           minify_js (pure-Go)
   tools_aliases.go          help (on-demand; legacy aliases disabled)
   tools_analyze.go          analyze_code (ultra only: symbols|lint|sec|impact)
+  tools_project_map.go      project_map (metadata-only structural orientation)
+  tools_context.go          context_pack (experimental)
+  tools_workspace.go        workspace (experimental git worktree)
+  tools_inspect.go          json_query, file_bytes, file_hash (experimental)
+  tools_github_issues.go    github_issues (ultra only)
+  tools_gitlab_issues.go    gitlab_issues (ultra only)
+  tools_security.go         security_policy (read-only description of the file policy)
+  tools_diff.go             diff_files
+  output_schemas.go         outputSchema definitions for the structured tools
+  experimental.go           experimental feature registry (one release cycle)
+  profile.go                strict / agent / ultra catalog definition
 core/
   engine.go                 UltraFastEngine — central struct, cache, worker pool, metrics
   edit_operations.go        EditFile, MultiEdit — backup, risk assessment, hooks
@@ -512,6 +523,17 @@ core/
   plan_mode.go              Dry-run analysis (analyze_write, analyze_edit, analyze_delete)
   path_converter.go         WSL ↔ Windows path conversion
   path_detector.go          Path format detection and WSL distro lookup
+  path_security.go          Path rejection rules (ADS, reserved names, control chars)
+  path_risk.go              Path-aware risk floors
+  canonical.go              Symlink-resolving canonical path for locking and OCC
+  secrets.go                Secret-filename denylist
+  file_policy.go            File security policy (levels and patterns)
+  file_policy_engine.go     Policy enforcement across tools
+  osroot.go                 os.Root containment (per-root sandboxed I/O)
+  project_map.go            Structural orientation (metadata only)
+  tool_contract.go          ToolContract: schemas, enums, examples, mutation gating
+  mutation_budget.go        Per-process applied-mutation budget
+  operation_retry.go        e3-v1 retry receipts
   wsl_sync.go               WSL/Windows file synchronization
   autosync_config.go        Auto-sync configuration system
   watcher.go                File watcher for cache invalidation
@@ -519,7 +541,7 @@ core/
   config.go                 Thresholds and constants
   errors.go                 PathError, ValidationError, EditError, PipelineStepError, etc.
 cache/
-  intelligent.go            BigCache (files) + go-cache (dirs + metadata)
+  intelligent.go            BigCache (files) + internal TTL map (dirs + metadata)
 tests/                      Black-box suite over the exported core API
   mcp_functions_test.go     Core MCP function tests
   bug5_test.go–bug9_test.go Regression tests
@@ -542,7 +564,7 @@ tests/                      Black-box suite over the exported core API
 ## Security
 
 - `IsPathAllowed()` resolves symlinks via `filepath.EvalSymlinks()` before the containment check — prevents symlink escape from allowed paths
-- **Secret files denied by default** — `.env`, `*.pem`, `*.pfx`, `id_rsa*`, `credentials.json`. Opt in with `--allow-secrets` (audited)
+- **Secret files denied by default** — base name only, case-insensitive: `.env` and `.env.*`, `credentials.json`, `.npmrc`, `.pypirc`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`, and the extensions `.pem`, `.key`, `.p12`, `.pfx`. Opt in with `--allow-secrets` (audited)
 - **Search regex is Go RE2** — `search_files` compiles with `regexp`. Nested quantifiers stay linear; backreferences are rejected
 - **Writes are temp + rename** — crash-safe replace on every platform. NTFS file id, birthtime, and hardlinks are not preserved (same tradeoff the reference server kept on Windows)
 - **Allowed-path root protection** (v4.2.1) — `delete_file`, `soft_delete`, and `move_file` reject the `--allowed-paths` root itself, preventing `os.RemoveAll()` from wiping an entire tree
@@ -551,7 +573,7 @@ tests/                      Black-box suite over the exported core API
 - Backup IDs are sanitized to `[a-zA-Z0-9_-]` to prevent path traversal
 - Temp files and backup metadata written with `0600` permissions
 - `copyDirectory()` skips symlinks
-- No `unsafe` package usage in production code
+- No `unsafe` package usage in the server (`core/`, `internal/mcpserver/`, `cache/`). The Windows-only proxy and the benchmark clock use `unsafe` for job objects and `QueryPerformanceCounter`
 
 ---
 
@@ -559,8 +581,12 @@ tests/                      Black-box suite over the exported core API
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `github.com/mark3labs/mcp-go` | v1.0.0 | MCP server SDK |
+| `github.com/mark3labs/mcp-go` | v1.3.0 | MCP server SDK |
 | `github.com/allegro/bigcache/v3` | v3.2.0 | File content cache |
+| `github.com/jmespath/go-jmespath` | v0.4.0 | JMESPath engine behind `json_query` |
+| `golang.org/x/sync` | v0.24.0 | `singleflight` read deduplication |
+| `golang.org/x/sys` | v0.49.0 | Windows file locking and job objects |
+| `modernc.org/sqlite` | v1.60.1 | Pure-Go SQLite reader used by the proxy (OpenCode metrics). No CGO |
 
 ---
 
