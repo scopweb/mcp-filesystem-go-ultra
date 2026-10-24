@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+
+### docs: AGENTS.md + handshake instructions
+
+- Add `AGENTS.md` at the repo root: short, command-first guide for coding agents.
+  Points to `llms.txt` for the real guarantees (OCC, apply_patch, CRLF, paths,
+  retryable). Covers recommended profile, discovery flow (`list_allowed_directories`
+  → `project_map`), boundaries and the portable handshake contract.
+- Handshake (`serverInstructions` in `internal/mcpserver/run.go`): mention
+  `project_map` after the first call and remind agents to pass `content_hash`
+  as `expected_hash`. Still ≤12 lines; subagents that do not inherit the skill
+  now see the orientation step and the OCC rule.
+
+
 ### docs(repo): markdown policy — planning docs leave the repository
 
 Internal planning, review and session documents are no longer tracked. `avisos-seguridad.md`,

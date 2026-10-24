@@ -64,10 +64,10 @@ func DefaultConfiguration() *Configuration {
 // Subagents do not inherit the skill; these lines are the portable contract.
 // Never dump the full catalog here.
 const serverInstructions = `MCP Filesystem Ultra operates on the real host filesystem (C:\, D:\, /mnt/...). Runtime-native tools may target a different sandbox.
-First call list_allowed_directories.
+First call list_allowed_directories, then project_map for orientation.
 Do not use native Read/Edit/Write/Glob for host paths. Prefer these tools over bash cat/head/tail/cut/ls/grep/find/wc/stat. Line census: list_directory output_format=lines. $HOME/mnt is a sandbox path; use the Windows path from list_allowed_directories.
 Host files = read_file, search_files, edit_file, write_file. Native Read/Edit/Write/Grep = error. Do not switch families.
-On failure the envelope has path and retryable. retryable:false means stop; do not retry or use native tools.
+Pass content_hash from read_file as expected_hash on the next mutation. On failure the envelope has path and retryable. retryable:false means stop; do not retry or use native tools.
 Subagent: request a handoff (path + content_hash). Do not assume the parent session's file body.
 help(tool:X) on demand. Do not load the full catalog at startup.`
 
