@@ -76,9 +76,28 @@ func applySearchDetail(sc map[string]any, text string, detail string) (map[strin
 		sc["match_count"] = count
 	}
 	sc["matches"] = paths
-	text = fmt.Sprintf("%d\n%s", count, strings.Join(lines, "\n"))
+	if count == 0 {
+		text = searchEmptyText(scopeOf(sc), sc["truncated"] == true)
+	} else {
+		text = fmt.Sprintf("%d\n%s", count, strings.Join(lines, "\n"))
+	}
 	sc["message"] = searchSummaryMessage(scopeOf(sc), count, len(paths), sc["truncated"] == true)
 	return sc, text
+}
+
+// searchEmptyText names the searched scope so a client that only renders the
+// text block does not read a silent "0". The structured message stays the
+// short summary.
+func searchEmptyText(scope map[string]any, truncated bool) string {
+	kind := searchScopeKind(scope)
+	text := "0 coincidencias en " + kind
+	if truncated {
+		text += " (truncado)"
+	}
+	if kind == "nombres de fichero" {
+		text += " (filename-only search — file contents were NOT searched; pass include_content:true to search inside files)"
+	}
+	return text
 }
 
 func scopeOf(sc map[string]any) map[string]any {

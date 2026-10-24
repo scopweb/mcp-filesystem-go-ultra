@@ -124,10 +124,18 @@ Orientation and discovery
 - `directory_tree` — recursive compact tree (gitignore-aware).
 - `list_directory` — one directory (compact/json/tree/sizes/lines).
 - `search_files` — find by name or content (paginated, capped).
+  - Omitted `include_content` searches **content**; a filename glob stays
+    names-only; explicit `include_content:false` is names-only. An empty
+    result names the scope ("0 coincidencias en contenido" / "0 coincidencias
+    en nombres de fichero"): a names-only zero is not proof the text is absent.
 
 Reading
 - `get_file_info` — metadata for one path or a batch.
 - `read_file` — contents; returns `content_hash` (the OCC token).
+  - Under `--response-mode=structured` the body is **not** in the text block:
+    it is in `structuredContent` (`content` for one file, `files[].content` for
+    a batch). A client that does not render `structuredContent` needs
+    `--response-mode=compat` and a restart to get the body back.
 
 Writing
 - `write_file` — create/overwrite; returns `content_hash` and `backup_id`.

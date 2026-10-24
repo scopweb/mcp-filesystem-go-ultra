@@ -91,6 +91,83 @@ func TestSearchEmpty_StatesScope(t *testing.T) {
 	}
 }
 
+func TestSearchSummary_EmptyNamesScopeInText(t *testing.T) {
+	dir := t.TempDir()
+	reg := newHelpTestRegistry(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("alpha\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	content := callNamed(t, reg, context.Background(), "search_files", map[string]interface{}{
+		"path": dir, "pattern": "ZZZ_NO_MATCH", "include_content": true, "detail": "summary",
+	})
+	if content.IsError {
+		t.Fatal(resultText(t, content))
+	}
+	cm, _ := content.StructuredContent.(map[string]any)
+	if cm["status"] != statusEmpty {
+		t.Fatalf("content empty status: %#v", cm)
+	}
+	text := resultText(t, content)
+	if !strings.Contains(text, "0 coincidencias en contenido") {
+		t.Fatalf("summary text does not name the content scope:\n%s", text)
+	}
+	if asString(cm["message"]) != "0 coincidencias en contenido" {
+		t.Fatalf("structured message changed: %#v", cm["message"])
+	}
+	name := callNamed(t, reg, context.Background(), "search_files", map[string]interface{}{
+		"path": dir, "pattern": "ZZZ_NO_MATCH", "include_content": false, "detail": "summary",
+	})
+	if name.IsError {
+		t.Fatal(resultText(t, name))
+	}
+	nm, _ := name.StructuredContent.(map[string]any)
+	if nm["status"] != statusEmpty {
+		t.Fatalf("filename empty status: %#v", nm)
+	}
+	ntext := resultText(t, name)
+	if !strings.Contains(ntext, "nombres de fichero") {
+		t.Fatalf("summary text does not name the filename scope:\n%s", ntext)
+	}
+	if !strings.Contains(ntext, "include_content:true") {
+		t.Fatalf("summary text lost the include_content hint:\n%s", ntext)
+	}
+	if asString(nm["message"]) != "0 coincidencias en nombres de fichero" {
+		t.Fatalf("structured message changed: %#v", nm["message"])
+	}
+}
+
+func TestSearchSummary_HitsKeepPathOnlyFormat(t *testing.T) {
+	dir := t.TempDir()
+	reg := newHelpTestRegistry(t, dir)
+	p := filepath.Join(dir, "hits.txt")
+	if err := os.WriteFile(p, []byte("HIT-001 token\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	res := callNamed(t, reg, context.Background(), "search_files", map[string]interface{}{
+		"path": dir, "pattern": "HIT-", "include_content": true, "detail": "summary",
+	})
+	if res.IsError {
+		t.Fatal(resultText(t, res))
+	}
+	text := resultText(t, res)
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	if len(lines) != 2 || lines[0] != "1" {
+		t.Fatalf("summary format changed: %q", text)
+	}
+	if !strings.HasSuffix(lines[1], "hits.txt") {
+		t.Fatalf("summary lost the path: %q", text)
+	}
+	if strings.Contains(text, "HIT-001") || strings.Contains(text, "token") {
+		t.Fatalf("summary leaked a snippet: %q", text)
+	}
+	m, _ := res.StructuredContent.(map[string]any)
+	for _, hit := range e5Maps(m["matches"]) {
+		if _, ok := hit["text"]; ok {
+			t.Fatalf("summary match kept a snippet: %#v", hit)
+		}
+	}
+}
+
 func TestListAllowed_MessageIsSummary(t *testing.T) {
 	dir := t.TempDir()
 	reg := newHelpTestRegistry(t, dir)

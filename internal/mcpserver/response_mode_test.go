@@ -53,6 +53,41 @@ func TestReadFile_StructuredModeKeepsBatchBodyOnce(t *testing.T) {
 			t.Fatalf("%#v", fm)
 		}
 	}
+	if !strings.Contains(text, "structuredContent") {
+		t.Fatalf("summary does not say where the body is: %s", text)
+	}
+	if !strings.Contains(text, "--response-mode=compat") {
+		t.Fatalf("summary does not offer the compat fallback: %s", text)
+	}
+}
+
+func TestReadFile_StructuredSummaryPointsToCompatFallback(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(p, []byte("alpha-body\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	reg := newHelpTestRegistry(t, dir)
+	reg.engine.GetConfig().ResponseMode = core.ResponseModeStructured
+	res := callPatchTool(t, reg, "read_file", map[string]any{"path": p})
+	if res.IsError {
+		t.Fatal(resultText(t, res))
+	}
+	text := resultText(t, res)
+	if strings.Contains(text, "alpha-body") {
+		t.Fatalf("text fallback repeated the body:\n%s", text)
+	}
+	if !strings.Contains(text, "structuredContent") {
+		t.Fatalf("summary does not say where the body is: %s", text)
+	}
+	if !strings.Contains(text, "--response-mode=compat") {
+		t.Fatalf("summary does not offer the compat fallback: %s", text)
+	}
+	m, _ := res.StructuredContent.(map[string]any)
+	body, _ := m["content"].(string)
+	if !strings.Contains(body, "alpha-body") {
+		t.Fatalf("body missing from structuredContent: %#v", m)
+	}
 }
 
 func TestReadFile_CompatKeepsTextBody(t *testing.T) {

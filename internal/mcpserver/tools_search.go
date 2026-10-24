@@ -186,7 +186,8 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDescription("search_files — Search and find files by name or content. Replaces bash grep/find/rg — NEVER use the shell. "+
+		mcp.WithDescription("search_files — Omitted include_content searches content; a filename glob (* ? [) searches names only; explicit include_content:false searches names only. "+
+			"Search and find files by name or content. Replaces bash grep/find/rg — NEVER use the shell. "+
 			"Honors .gitignore by default (no_ignore=false). Cap with max_results. structuredContent includes truncated and hidden_count. "+
 			"Supports regex, count_only, include_content, include_context. "+
 			"Default output is grouped ripgrep-style (path header, then line:text). Pass output_format:\"text\" for the legacy verbose layout. "+
