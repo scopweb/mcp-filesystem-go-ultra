@@ -10,6 +10,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -261,6 +262,23 @@ func TestListDirectory_MissingPathAppendsMismatchHint(t *testing.T) {
 	}
 	if text := resultText(t, result); !strings.Contains(text, "FILESYSTEM MISMATCH?") {
 		t.Errorf("list_directory missing-path error must append the hint, got %q", text)
+	}
+}
+
+func TestGetFileInfo_MissingPathEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	reg := newHelpTestRegistry(t, dir)
+	missing := filepath.Join(dir, "CLAUDE.md")
+	res := callNamed(t, reg, context.Background(), "get_file_info", map[string]interface{}{"path": missing})
+	if !res.IsError {
+		t.Fatal("missing path must be isError")
+	}
+	var env pathErrorEnvelope
+	if json.Unmarshal([]byte(resultText(t, res)), &env) != nil {
+		t.Fatalf("want JSON envelope, got %s", resultText(t, res))
+	}
+	if env.Error.Code != errCodeNotFound || env.Error.Path != missing || env.Error.Retryable {
+		t.Fatalf("%+v", env.Error)
 	}
 }
 

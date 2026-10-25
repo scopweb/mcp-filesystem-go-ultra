@@ -123,6 +123,20 @@ func TestFormatToolError_NotFoundUnchangedPrefix(t *testing.T) {
 	}
 }
 
+func TestFormatToolError_ExtractsUnquotedMissingPath(t *testing.T) {
+	raw := formatToolError(errors.New(`file or directory does not exist: C:\MCPs\clone\mcp-go-dotnet-builder\CLAUDE.md`))
+	var env pathErrorEnvelope
+	if json.Unmarshal([]byte(raw), &env) != nil {
+		t.Fatalf("want JSON envelope, got %s", raw)
+	}
+	if env.Error.Code != errCodeNotFound || env.Error.Retryable {
+		t.Fatalf("%+v", env.Error)
+	}
+	if env.Error.Path != `C:\MCPs\clone\mcp-go-dotnet-builder\CLAUDE.md` {
+		t.Fatalf("path=%q", env.Error.Path)
+	}
+}
+
 func TestFormatToolError_NotFoundEnvelope(t *testing.T) {
 	err := &core.PathError{Op: "read", Path: `C:\proj\missing.txt`, Err: fs.ErrNotExist}
 	got := formatToolError(err)

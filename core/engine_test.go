@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -481,10 +482,17 @@ func TestGetFileInfo(t *testing.T) {
 		t.Error("GetFileInfo returned empty string for directory")
 	}
 
-	// Test error for non-existent file
-	_, err = engine.GetFileInfo(ctx, filepath.Join(tempDir, "nonexistent.txt"))
+	missing := filepath.Join(tempDir, "nonexistent.txt")
+	_, err = engine.GetFileInfo(ctx, missing)
 	if err == nil {
-		t.Error("Expected error for non-existent file, got nil")
+		t.Fatal("Expected error for non-existent file, got nil")
+	}
+	var pe *PathError
+	if !errors.As(err, &pe) || pe.Path != missing {
+		t.Fatalf("missing file must carry the path, got %v", err)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing file must unwrap ErrNotExist, got %v", err)
 	}
 }
 

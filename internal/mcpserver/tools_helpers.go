@@ -91,6 +91,11 @@ func formatToolError(err error) string {
 	if errors.Is(err, fs.ErrNotExist) {
 		return pathErrorJSON(errCodeNotFound, err.Error(), path, nil, filesystemMismatchHint)
 	}
+	if path == "" {
+		if extracted := pathAfterDoesNotExist(err.Error()); extracted != "" {
+			return pathErrorJSON(errCodeNotFound, err.Error(), extracted, nil, filesystemMismatchHint)
+		}
+	}
 	if strings.Contains(strings.ToLower(err.Error()), "access denied") {
 		deniedPath := path
 		if deniedPath == "" {
@@ -100,6 +105,30 @@ func formatToolError(err error) string {
 		return marshalPathError(errCodeNotAllowed, msg, deniedPath, nil, suggestionNotAllowed)
 	}
 	return fmt.Sprintf("Error: %v", err)
+}
+
+func pathAfterDoesNotExist(msg string) string {
+	lower := strings.ToLower(msg)
+	markers := []string{
+		"file or directory does not exist: ",
+		"source file does not exist: ",
+		"file does not exist: ",
+		"source does not exist: ",
+		"path does not exist: ",
+		"directory does not exist: ",
+	}
+	for _, marker := range markers {
+		i := strings.LastIndex(lower, marker)
+		if i < 0 {
+			continue
+		}
+		rest := strings.TrimSpace(msg[i+len(marker):])
+		if n := strings.IndexAny(rest, "\r\n"); n >= 0 {
+			rest = strings.TrimSpace(rest[:n])
+		}
+		return strings.Trim(rest, `"'`)
+	}
+	return ""
 }
 
 func quotedPath(s string) string {
