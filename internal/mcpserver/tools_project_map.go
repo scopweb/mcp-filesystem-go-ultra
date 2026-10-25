@@ -186,7 +186,7 @@ func projectMapPolicy(reg *toolRegistry, res core.ProjectMapResult) map[string]a
 	if profile == "" {
 		profile = string(profileUltra)
 	}
-	rootsMode := string(core.RootsReplace)
+	rootsMode := string(core.RootsUnion)
 	if cfg := engine.GetConfig(); cfg != nil && cfg.RootsMode != "" {
 		rootsMode = string(cfg.RootsMode)
 	}

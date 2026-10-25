@@ -10,8 +10,11 @@ import (
 const failClosedMessage = `filesystem-ultra requires at least one allowed path (fail-closed since v4.6.0).
 
 Examples:
+  filesystem-ultra.exe C:\proj
   filesystem-ultra.exe --allowed-paths C:\proj
-  filesystem-ultra.exe C:\proj D:\other
+  filesystem-ultra.exe --allowed-paths-file=.mcp-paths
+
+Or set MCP_ALLOWED_PATHS in the environment or in a .env file.
 
 Labs only (disables the sandbox):
   filesystem-ultra.exe --insecure-open`

@@ -19,12 +19,14 @@ const (
 
 func ParseRootsMode(s string) RootsMode {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case string(RootsUnion):
-		return RootsUnion
+	case string(RootsReplace):
+		return RootsReplace
 	case string(RootsIgnore):
 		return RootsIgnore
 	default:
-		return RootsReplace
+		// Empty and unknown stay union. replace is opt-in: a client that
+		// sends Roots must not wipe the CLI list unless asked.
+		return RootsUnion
 	}
 }
 

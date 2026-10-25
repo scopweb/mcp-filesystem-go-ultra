@@ -69,7 +69,9 @@ Do not use native Read/Edit/Write/Glob for host paths. Prefer these tools over b
 Host files = read_file, search_files, edit_file, write_file. Native Read/Edit/Write/Grep = error. Do not switch families.
 Pass content_hash from read_file as expected_hash on the next mutation. On failure the envelope has path and retryable. retryable:false means stop; do not retry or use native tools.
 Subagent: request a handoff (path + content_hash). Do not assume the parent session's file body.
-help(tool:X) on demand. Do not load the full catalog at startup.`
+help(tool:X) on demand. Do not load the full catalog at startup.
+Minimum config is allowed paths (positional, --allowed-paths, .mcp-paths, or MCP_ALLOWED_PATHS). Other flags are opt-in.
+Client Roots are added to that list. --roots-mode=replace keeps only the client list.`
 
 // serverVersion is the single source of truth for the version reported by
 // --version, the MCP handshake, the help header and the startup logs.
@@ -117,9 +119,12 @@ func Run() {
 		vsCodeAPI        = flag.Bool("vscode-api", true, "Enable VSCode API integration when available")
 		debugMode        = flag.Bool("debug", false, "Enable debug mode")
 		logLevel         = flag.String("log-level", "info", "Stderr log level: debug, info, warn, error. debug is the same as --debug.")
-		allowedPaths     = flag.String("allowed-paths", "", "Comma-separated list of allowed base paths (required unless --insecure-open; alternative: pass paths as positional arguments)")
+		allowedPaths     = flag.String("allowed-paths", "", "Comma-separated allowed roots. Unioned with positional args, --allowed-paths-file / .mcp-paths, and MCP_ALLOWED_PATHS. Required unless one of those sources or --insecure-open is set.")
+		allowedPathsFile = flag.String("allowed-paths-file", "", "File with one allowed root per line (# comments and blank lines ignored). Relative entries resolve against the process cwd. If omitted and .mcp-paths exists in the cwd, that file is used. Missing or unreadable exits 2.")
+		envFile          = flag.String("env-file", "", "MCP_* settings file (KEY=VALUE, optional quotes, # comments). If omitted, .env in the cwd is loaded when present (missing default is not an error). Explicit missing file exits 2. CLI flags override these values.")
+		preset           = flag.String("preset", "", "Optional: minimal (strict+compact+union), agent (agent+compact+union), or full (no change). Fills only flags that were not set explicitly. Does not supply allowed paths.")
 		insecureOpen     = flag.Bool("insecure-open", false, "Disable access control (entire disk). Labs only. Default since v4.6.0 is fail-closed.")
-		rootsMode        = flag.String("roots-mode", "replace", "How MCP client Roots combine with CLI paths: replace (default), union, ignore")
+		rootsMode        = flag.String("roots-mode", "union", "How MCP client Roots combine with CLI paths: union (default, CLI plus client), replace (client list only), ignore (CLI only)")
 		readOnly         = flag.Bool("readonly", false, "Reject mutating tools (READONLY)")
 		mutationBudget   = flag.Int("mutation-budget", 0, "Max applied mutations per process (0=off). Shared by all stdio clients.")
 		allowSecrets     = flag.Bool("allow-secrets", false, "Allow reading secret files (.env, *.pem, keys). Audited.")
@@ -161,9 +166,6 @@ func Run() {
 	)
 	flag.Parse()
 
-	// Configure auto-OCC mode (new point 4).
-	core.SetAutoOCCMode(*autoOCC)
-
 	if *version {
 		fmt.Printf("MCP Filesystem Server Ultra-Fast v%s\n", serverVersion)
 		fmt.Printf("Protocol: MCP 2025-11-25\n")
@@ -173,6 +175,40 @@ func Run() {
 		fmt.Printf("Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 		return
 	}
+
+	// Precedence: explicit CLI > --preset > process env > .env > flag default.
+	// Allowed paths from CLI, the paths file, and MCP_ALLOWED_PATHS are unioned.
+	visited := visitedFlagNames()
+	resolved, cfgErr := loadStartupConfig(startupInput{
+		AllowedPathsFlag: *allowedPaths,
+		Positional:       flag.Args(),
+		PathsFile:        *allowedPathsFile,
+		PathsFileSet:     visited["allowed-paths-file"],
+		EnvFile:          *envFile,
+		EnvFileSet:       visited["env-file"],
+		Preset:           *preset,
+		Profile:          *profileFlag,
+		RootsMode:        *rootsMode,
+		CompactMode:      *compactMode,
+		ReadOnly:         *readOnly,
+		AutoOCC:          *autoOCC,
+		LogLevel:         *logLevel,
+		BackupDir:        *backupDir,
+		Visited:          visited,
+	})
+	if cfgErr != nil {
+		fmt.Fprintln(os.Stderr, cfgErr.Error())
+		os.Exit(2)
+	}
+	*profileFlag = resolved.Profile
+	*rootsMode = resolved.RootsMode
+	*compactMode = resolved.CompactMode
+	*readOnly = resolved.ReadOnly
+	*autoOCC = resolved.AutoOCC
+	*logLevel = resolved.LogLevel
+	*backupDir = resolved.BackupDir
+	config.AllowedPaths = resolved.AllowedPaths
+	core.SetAutoOCCMode(*autoOCC)
 
 	// Parse cache size
 	if size, err := parseSize(*cacheSize); err != nil {
@@ -217,15 +253,6 @@ func Run() {
 		log.Fatalf("Invalid max response size: %v", err)
 	} else {
 		config.MaxResponseSize = size
-	}
-
-	// Parse allowed paths - support both formats:
-	// 1. Single --allowed-paths flag with comma-separated values
-	// 2. Multiple individual path arguments after all flags
-	if *allowedPaths != "" {
-		config.AllowedPaths = sanitizeAllowedPaths(strings.Split(*allowedPaths, ","))
-	} else if additionalArgs := flag.Args(); len(additionalArgs) > 0 {
-		config.AllowedPaths = sanitizeAllowedPaths(additionalArgs)
 	}
 
 	// Fail-closed: refuse to start with an open disk unless --insecure-open.

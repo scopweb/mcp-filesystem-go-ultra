@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -9,6 +10,17 @@ import (
 	"testing"
 	"time"
 )
+
+func envWithoutMCP() []string {
+	out := make([]string, 0, len(os.Environ()))
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(e, "MCP_") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
 
 func TestRequireAllowedPaths_EmptyIsFailClosed(t *testing.T) {
 	if err := requireAllowedPaths(nil, false); err != errFailClosed {
@@ -65,6 +77,8 @@ func TestFailClosed_Binary(t *testing.T) {
 
 	t.Run("no_args_exit_2", func(t *testing.T) {
 		cmd := exec.Command(exe)
+		cmd.Dir = t.TempDir()
+		cmd.Env = envWithoutMCP()
 		out, err := cmd.CombinedOutput()
 		if err == nil {
 			t.Fatalf("expected exit 2, got success. output:\n%s", out)
@@ -96,6 +110,8 @@ func TestFailClosed_Binary(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, exe, "--insecure-open")
+		cmd.Dir = t.TempDir()
+		cmd.Env = envWithoutMCP()
 		if err := cmd.Start(); err != nil {
 			t.Fatalf("start: %v", err)
 		}

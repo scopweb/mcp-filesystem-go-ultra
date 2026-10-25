@@ -6,8 +6,11 @@ import (
 )
 
 func TestParseRootsMode(t *testing.T) {
-	if ParseRootsMode("") != RootsReplace {
-		t.Fatal("default replace")
+	if ParseRootsMode("") != RootsUnion {
+		t.Fatal("default union")
+	}
+	if ParseRootsMode("replace") != RootsReplace {
+		t.Fatal("replace")
 	}
 	if ParseRootsMode("UNION") != RootsUnion {
 		t.Fatal("union")

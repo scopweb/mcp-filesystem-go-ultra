@@ -13,7 +13,7 @@ One MCP instance per workspace:
 | Flag | Why |
 |------|-----|
 | `--profile=strict` | 17-tool agent core (`backup` and `security_policy` included). `--profile=agent` adds `git` (18). Default `ultra` is 30 tools. |
-| `--roots-mode=union` | Client Roots **add** to the CLI allowlist. Default `replace` wipes CLI paths (OpenCode does this). |
+| `--roots-mode=union` | Default. Client Roots **add** to the CLI allowlist. `replace` wipes CLI paths when the client sends Roots. |
 | `--compact-mode` | Short responses (hashes, UNDO ids). |
 
 `--readonly` off unless the role is read-only. `--git-network` only if the agent must `git push`/`fetch`. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`.

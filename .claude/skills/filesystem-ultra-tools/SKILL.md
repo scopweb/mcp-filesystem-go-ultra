@@ -13,6 +13,8 @@ Maintain this repository's `.claude/skills/filesystem-ultra-tools/SKILL.md` as t
 
 ## Recommended server flags
 
+Configuration 0 is paths only: `filesystem-ultra C:\project`, `--allowed-paths-file=.mcp-paths`, or `MCP_ALLOWED_PATHS` in `.env`. Other flags are opt-in and override env. `--preset=minimal` is `--profile=strict --compact-mode` unless those flags are set explicitly; `--preset=agent` is the same with `--profile=agent`. `--roots-mode` defaults to `union`.
+
 `--profile=agent --compact-mode --roots-mode=union` (`--readonly` off) when the agent needs git without the full catalog. `--profile=strict` remains the 18-tool core without git. `--git-network` only if the agent must `git push`/`fetch`/`pull` (`pull` is fast-forward only; honored by ultra and agent, ignored by strict). `--response-mode=structured` is opt-in and keeps file bodies once in structuredContent; default `compat` is unchanged. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 34 tools including `analyze_code`, graduated `github_issues` / `gitlab_issues`, and experimental `context_pack` and `workspace`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
 
 For JSON queries, byte diagnostics or baseline hashes, use `--profile=ultra --compact-mode --roots-mode=union`. `json_query`, `file_bytes` and `file_hash` are absent from both `agent` and `strict`, and work under `--readonly`. After changing the binary/profile, reconnect the client so it refreshes the catalog.

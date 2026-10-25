@@ -9,8 +9,13 @@ listed here, do not assume it.
 - Go MCP server for **safe filesystem editing by agents** on the real host disk
   (`C:\`, `D:\`, `/mnt/...`). Runtime-native `Read`/`Edit`/`Write`/`Grep` tools
   may point at a different sandbox: for host project paths use this server.
-- Recommended launch: `--profile=strict --compact-mode --roots-mode=union`.
+- Recommended launch: `--profile=strict --compact-mode` (or `--preset=minimal`).
   `strict` is the product (18 tools); `ultra` is the lab (34 tools).
+  `--roots-mode` defaults to `union` (CLI paths plus client Roots). `replace` is opt-in.
+- Minimum startup config is allowed paths only: a positional path, `--allowed-paths`,
+  `.mcp-paths` / `--allowed-paths-file`, or `MCP_ALLOWED_PATHS` (environment or `.env`).
+  Those sources are unioned. Other flags are opt-in. An explicit flag wins over
+  `.env` and over `--preset`.
 - Discovery order: `list_allowed_directories` → `project_map` /
   `directory_tree` → `help(tool:"X")` on demand. Do not dump the catalog.
 - Errors are a JSON envelope: `{"error":{"code","message","path","details",
@@ -65,6 +70,8 @@ listed here, do not assume it.
 ### Paths
 - Fail-closed. Only the roots reported by `list_allowed_directories` are
   reachable; anything else fails with `NOT_ALLOWED` (`retryable:false`).
+  Startup without a path (positional, `--allowed-paths`, `.mcp-paths`, or
+  `MCP_ALLOWED_PATHS`) exits 2 unless `--insecure-open`.
 - Use the Windows path exactly as listed (`C:\...`) or the WSL form
   (`/mnt/c/...`). UNC paths are outside the verified surface: stay with the
   roots the server reports.

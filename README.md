@@ -27,18 +27,28 @@ Against [`@modelcontextprotocol/server-filesystem`](https://github.com/modelcont
 
 ## Quick start
 
+Minimum configuration is the allowed paths. Every other flag still works and wins when you set it, but it is optional.
+
 ```bash
-# 1. Build
+# Build
 go build -ldflags="-s -w" -trimpath -o filesystem-ultra ./cmd/filesystem-ultra
 
-# 2. Run (agent-optimized; required: at least one path)
-./filesystem-ultra --profile=strict --compact-mode --roots-mode=union /path/to/project
+# Configuration 0 — paths only
+./filesystem-ultra C:\mi\proyecto
 
-# 3. Tests (core + server)
+# or a paths file (one path per line; # comments and blank lines ignored)
+./filesystem-ultra --allowed-paths-file=.mcp-paths
+
+# or .env in the working directory (loaded only if the file exists)
+# MCP_ALLOWED_PATHS=C:\proyecto,C:\otros
+# MCP_PROFILE=strict
+./filesystem-ultra
+
+# Tests
 go test ./core/ ./internal/mcpserver/ -count=1
 ```
 
-See [Build](#build) and [Configuration](#configuration) below for more.
+`--preset=minimal` is the short form of `--profile=strict --compact-mode --roots-mode=union` when those flags are not set. See [Configuration](#configuration).
 
 ---
 
@@ -58,7 +68,7 @@ See [Build](#build) and [Configuration](#configuration) below for more.
 - **Verifiable stats** — `server_info(action:"stats")` splits MCP calls vs internal ops, applied/rejected/simulated mutations, and process vs historical backups; ops/s is an interval delta; latency is avg/p50/p95
 - **Mutation budget** — `--mutation-budget=N` (default off) caps applied mutations per process; dry-run does not count
 - **Explicit `detail`** — `summary|normal|full` on `directory_tree`, `search_files`, `read_file` (batch), and `help` (catalog). Default `normal`. Compact-mode trims text; `detail` trims structuredContent
-- **Access control** — fail-closed: at least one `--allowed-paths` / positional root is required (also enforced in batch operations). `--insecure-open` is labs-only.
+- **Access control** — fail-closed: at least one allowed path is required (positional, `--allowed-paths`, `.mcp-paths` / `--allowed-paths-file`, or `MCP_ALLOWED_PATHS`). Also enforced in batch operations. `--insecure-open` is labs-only.
 - **Plan mode** — dry-run analysis with diff preview and risk report before applying changes
 - **Structured output** — `outputSchema` + `structuredContent` on read/write/edit/multi_edit plus `search_files`, `list_directory`, `batch_operations`, and `backup`. Status (`applied`/`simulated`/`empty`/`partial`), truncation, and hashes are machine-readable. Errors use a JSON envelope with `retryable` (do not auto-retry when false). Text fallbacks stay byte-identical. Handler-level sweep in CI.
 - **Native tool inputs** — arrays/objects for `paths`, `edits`, `patterns`, `request`/`pipeline`/`rename`; legacy `*_json` strings stay as adapters. Conflicting dual forms and invalid enums are rejected
@@ -128,7 +138,26 @@ go test -fuzz=Fuzz ./tests/security
 
 ## Configuration
 
-### Recommended flags for Claude Code / OpenCode
+### Configuration 0
+
+The server starts with allowed paths and nothing else. Sources are **unioned** (duplicates dropped; the first spelling wins). Scalar settings do not work that way: an explicit flag wins, then `--preset`, then the process environment, then `.env`, then the flag default.
+
+| Source | Notes |
+|--------|--------|
+| Positional args and `--allowed-paths` | Never ignored. Both are kept. `--allowed-paths` is comma-separated. |
+| `--allowed-paths-file` or `.mcp-paths` | One path per line. `#` comments and blank lines are ignored. Relative paths resolve against the process cwd. Auto-detects `.mcp-paths` only when the flag is omitted. A missing or unreadable file exits 2. |
+| `MCP_ALLOWED_PATHS` | Environment or `.env`. Separated by comma or `;`. |
+| None of the above | Fail-closed (exit 2), unless `--insecure-open`. |
+
+`.env` is loaded from the cwd when it exists. A missing default `.env` is not an error. Only `MCP_*` keys are read (`MCP_ALLOWED_PATHS`, `MCP_PROFILE`, `MCP_ROOTS_MODE`, `MCP_COMPACT_MODE`, `MCP_READONLY`, `MCP_AUTO_OCC`, `MCP_LOG_LEVEL`, `MCP_BACKUP_DIR`). Values are not expanded.
+
+```bash
+./filesystem-ultra --preset=minimal C:\mi\proyecto
+```
+
+### Advanced configuration
+
+#### Recommended flags for Claude Code / OpenCode
 
 Keep this trio in the MCP `args` (and leave `--readonly` off so the agent can write):
 
@@ -141,7 +170,7 @@ Keep this trio in the MCP `args` (and leave `--readonly` off so the agent can wr
 | `--profile=strict` | Registers the 18-tool agent core (`list_allowed_directories`, `project_map`, `directory_tree`, `read_file` / `write_file` / `edit_file` / `apply_patch`, `backup` for undo, `security_policy`, …). Omits `git`, `wsl`, `minify_js`, `analyze_code`, `batch_operations`, `copy_file`, `server_info`, … so `tools/list` stays small. `--profile=agent` is that core plus `git`. Default is `ultra` (34 tools) so existing configs do not break. |
 | `--compact-mode` | Short token-efficient responses (hashes, UNDO ids, no emoji walls). |
 | `--response-mode=structured` | Opt-in. Brief text fallback; file bodies stay once in structuredContent. Default `compat` keeps the full text fallback. |
-| `--roots-mode=union` | MCP client Roots are **added** to the CLI allowlist. Default `replace` is wrong for OpenCode: it sends the workspace as Roots and **wipes** every other CLI path, so `list_allowed_directories` only shows one folder. |
+| `--roots-mode=union` | Default. MCP client Roots are **added** to the CLI allowlist. `replace` wipes the CLI list when the client sends Roots (OpenCode and Claude do). |
 
 Do not pass `--git-network` unless the agent must `git push` / `git fetch`. Do not pass `--readonly` unless the session should be read-only.
 
@@ -189,7 +218,7 @@ Linux:
 }
 ```
 
-### OpenCode
+#### OpenCode
 
 OpenCode does **not** read `claude_desktop_config.json`. Put this in the project `opencode.json` / `opencode.jsonc`, or globally in `~/.config/opencode/opencode.json` (Windows: `%USERPROFILE%\.config\opencode\opencode.json`).
 
@@ -249,7 +278,7 @@ Linux:
 
 Quit and restart OpenCode after saving.
 
-**`--roots-mode` for OpenCode.** Default is `replace`: OpenCode sends the current workspace as MCP Roots and **replaces** the entire CLI allowlist with that one folder. A config with many paths will look correct on disk, but `list_allowed_directories` will only show the workspace.
+**`--roots-mode`.** Default is `union`: client Roots are added to the CLI list. `replace` keeps only the client list, so OpenCode or Claude will hide every other path. `ignore` keeps the CLI list only.
 
 | Mode | Effect |
 |------|--------|
@@ -257,15 +286,18 @@ Quit and restart OpenCode after saving.
 | `union` | CLI paths **plus** the workspace. Use this when the allowlist must survive. |
 | `ignore` | CLI list only; client Roots are ignored. |
 
-Allowed paths: positional args after the flags, **or** one `--allowed-paths` with comma-separated values. Do **not** repeat `--allowed-paths=` (Go `flag.String` keeps the last value only; that pattern is for filesystem-ultra-rust / clap). **Required** since v4.6.0 (fail-closed). Omitting them exits 2. Labs only: `--insecure-open` disables the sandbox (entire disk).
+Allowed paths: positional args, **or** one `--allowed-paths` (comma-separated; do **not** repeat the flag — Go `flag.String` keeps the last value only), **or** `--allowed-paths-file` / `.mcp-paths`, **or** `MCP_ALLOWED_PATHS`. Those sources are unioned. At least one path is required since v4.6.0 (fail-closed, exit 2). Labs only: `--insecure-open` disables the sandbox (entire disk).
 
-### Key flags
+#### Key flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--allowed-paths` | (required) | Comma-separated allowed roots; or pass paths as positional args |
+| `--allowed-paths` | (required unless another path source is set) | Comma-separated allowed roots. Unioned with positional args, the paths file, and `MCP_ALLOWED_PATHS` |
+| `--allowed-paths-file` | `.mcp-paths` if that file exists | One root per line. Missing or unreadable exits 2 |
+| `--env-file` | `.env` if that file exists | `MCP_*` settings. Missing default is not an error; an explicit missing file exits 2 |
+| `--preset` | (none) | `minimal`, `agent`, or `full`. Does not override flags you set explicitly |
 | `--insecure-open` | off | Labs only: disable the sandbox (entire disk). Fail-closed by default since v4.6.0. |
-| `--roots-mode` | replace | How MCP client Roots combine with CLI paths: `replace` (client list replaces CLI), `union` (CLI plus client), `ignore` (keep CLI). An empty Roots result does not open the disk. There is no `intersect` mode. |
+| `--roots-mode` | union | How MCP client Roots combine with CLI paths: `union` (default, CLI plus client), `replace` (client list only), `ignore` (keep CLI). An empty Roots result does not open the disk. There is no `intersect` mode. |
 | `--profile` | ultra | `ultra` = all 34 tools; `agent` = 19 (strict + `git`); `strict` = 18-tool core (includes `backup` and `security_policy`) |
 | `--file-security-config` | empty | JSON policy layered on allowed-paths. Invalid file exits 2. Immutable until restart. See below. |
 | `--git-network` | off | Enable `git` push/fetch. Off the critical path; ignored in `strict` |

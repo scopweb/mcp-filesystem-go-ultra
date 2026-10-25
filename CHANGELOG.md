@@ -4,6 +4,32 @@
 
 ## [Unreleased]
 
+### fix: `--roots-mode` defaults to `union`
+
+OpenCode and Claude send the workspace as MCP Roots. The old default `replace` dropped every CLI path, so a paths-only launch showed only the workspace. The default is now `union`: client Roots are added to the CLI list. `--roots-mode=replace` still keeps only the client list. An empty Roots result still does not open the disk.
+
+### feat: configuration 0 (paths only, paths file, .env, preset)
+
+The first launch no longer needs a long flag list. Allowed paths are enough.
+Other flags still exist and still win when set.
+
+- **Path sources are unioned**, in this order: `--allowed-paths`, positional
+  args, `--allowed-paths-file` (or `.mcp-paths` in the cwd when the flag is
+  omitted), then `MCP_ALLOWED_PATHS`. Duplicates are dropped. The first
+  spelling wins. A missing or unreadable paths file exits 2.
+- **`.env` / `MCP_*`**. `--env-file` defaults to `.env` in the cwd when that
+  file exists. A missing default is not an error. Only `MCP_ALLOWED_PATHS`,
+  `MCP_PROFILE`, `MCP_ROOTS_MODE`, `MCP_COMPACT_MODE`, `MCP_READONLY`,
+  `MCP_AUTO_OCC`, `MCP_LOG_LEVEL`, and `MCP_BACKUP_DIR` are read. No `${VAR}`
+  expansion. Process environment wins over the file. An explicit CLI flag
+  wins over both.
+- **`--preset=minimal|agent|full`**. `minimal` fills `strict` + compact +
+  `roots-mode=union` only for flags that were not set. `agent` is the same
+  with profile `agent`. `full` changes nothing. Preset does not supply paths
+  and does not override an explicit flag. It does override `.env` for the
+  three settings it fills.
+- Fail-closed is unchanged when no source yields a path. `--insecure-open`
+  is unchanged. Existing flags keep their defaults.
 
 ### docs: AGENTS.md + handshake instructions
 
