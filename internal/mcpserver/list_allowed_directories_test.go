@@ -122,8 +122,8 @@ func TestListAllowedDirectories_StructuredShape(t *testing.T) {
 	if m["profile"] != "ultra" {
 		t.Errorf("profile=%v want ultra", m["profile"])
 	}
-	if m["roots_mode"] != "replace" {
-		t.Errorf("roots_mode=%v want replace", m["roots_mode"])
+	if m["roots_mode"] != "union" {
+		t.Errorf("roots_mode=%v want union", m["roots_mode"])
 	}
 	if m["readonly"] != false {
 		t.Errorf("readonly=%v want false", m["readonly"])

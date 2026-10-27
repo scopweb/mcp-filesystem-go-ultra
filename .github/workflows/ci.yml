@@ -14,8 +14,8 @@ on:
     branches: [ main ]
 
 env:
-  # Go 1.27.2: required by go.mod.
-  GO_VERSION: '1.27.2'
+  # Go 1.27.3: required by go.mod; includes the GO-2026-6809 fix.
+  GO_VERSION: '1.27.3'
 
 jobs:
   # ============================================================

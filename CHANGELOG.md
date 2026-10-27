@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### fix(ci): Go 1.27.3 and current tool contracts
+
+The `go` directive in `go.mod`, CI (`ci.yml` / `release.yml`), the README and `build-windows.bat` now require **1.27.3+**, including the standard-library fix for **GO-2026-6809**. Add the two dependency-test checksums required by `go mod tidy`.
+
+`TestListAllowedDirectories_StructuredShape` still asserted the old `roots_mode=replace` default and failed after the switch to `union`. The assertion now expects `union`.
+
+Two E6 end-to-end tests still expected 30 ultra tools; they now assert the current inventory of 34.
+
+Windows operations under 8.3 paths such as `RUNNER~1` failed containment when several intermediate directories did not exist. Root lookup now reuses the existing containment resolver to resolve the deepest existing ancestor before matching the allowed base. The Windows regression covers both alias directions, nested creation, preserved suffix case and rejection of outside paths.
+
+### fix(errors): missing path is on the NOT_FOUND envelope
+
+`get_file_info` on a missing path returned `Error: file or directory does not exist: <path>`. The path sat in that prose, so a client could not read `error.path`. The stat error is now a `PathError` that wraps `fs.ErrNotExist`, and `formatToolError` copies an unquoted path after `does not exist:` into the `NOT_FOUND` envelope (`path`, `retryable:false`, `recovery:fix_arguments`).
+
 ### fix: `--roots-mode` defaults to `union`
 
 OpenCode and Claude send the workspace as MCP Roots. The old default `replace` dropped every CLI path, so a paths-only launch showed only the workspace. The default is now `union`: client Roots are added to the CLI list. `--roots-mode=replace` still keeps only the client list. An empty Roots result still does not open the disk.

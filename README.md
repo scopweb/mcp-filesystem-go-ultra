@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra
 
-**v4.8.0** · Go 1.27.2 · MCP 2025-11-25 · stdio · 34 tools ultra / 19 agent / 18 strict
+**v4.8.0** · Go 1.27.3 · MCP 2025-11-25 · stdio · 34 tools ultra / 19 agent / 18 strict
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -113,7 +113,7 @@ build-windows.bat        # default
 build-windows.sh         # Linux/macOS
 ```
 
-Requires Go 1.27.2+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
+Requires Go 1.27.3+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
 
 From a checkout, install the executable package, not the module root (the root has no `main`):
 

@@ -65,6 +65,24 @@ func assertOsRootShortAlias(t *testing.T, allowed, opDir, longDir string) {
 		t.Fatalf("long path content=%q err=%v", body, err)
 	}
 
+	// Missing intermediate directories must still resolve the existing 8.3
+	// ancestor before matching the allowed base (as on Windows CI runners).
+	nested := filepath.Join(opDir, "MissingParent", "MixedCaseChild", "created.txt")
+	if err := engine.WriteFileBytes(context.Background(), nested, []byte("nested")); err != nil {
+		t.Fatalf("write under missing parents: %v", err)
+	}
+	body, err = os.ReadFile(filepath.Join(longDir, "MissingParent", "MixedCaseChild", "created.txt"))
+	if err != nil || string(body) != "nested" {
+		t.Fatalf("nested long path content=%q err=%v", body, err)
+	}
+	_, rel, err = relWithinBases(nested, bases)
+	if err != nil {
+		t.Fatalf("nested relWithinBases: %v", err)
+	}
+	if rel != filepath.Join("MissingParent", "MixedCaseChild", "created.txt") {
+		t.Fatalf("nested relative path=%q", rel)
+	}
+
 	outside := filepath.Join(t.TempDir(), "out.txt")
 	if err := os.WriteFile(outside, []byte("no"), 0o644); err != nil {
 		t.Fatal(err)

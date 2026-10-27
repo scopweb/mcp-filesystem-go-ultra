@@ -293,22 +293,9 @@ func relWithinBases(path string, bases []string) (base, rel string, err error) {
 }
 
 func canonicalOpPath(path string) (string, error) {
-	if path == "" {
-		abs, err := filepath.Abs(path)
-		if err != nil {
-			return "", err
-		}
-		return filepath.Clean(abs), nil
-	}
-	cleaned := CanonicalPath(path)
-	if cleaned == "" {
-		abs, err := filepath.Abs(path)
-		if err != nil {
-			return "", err
-		}
-		return filepath.Clean(abs), nil
-	}
-	return cleaned, nil
+	// Resolve the deepest existing ancestor even when several suffix components
+	// are missing, so Windows 8.3 aliases match the resolved allowed bases.
+	return resolveContainmentPath(NormalizePath(path))
 }
 
 func unfollowedSymlinkLeaf(path string) (string, bool) {

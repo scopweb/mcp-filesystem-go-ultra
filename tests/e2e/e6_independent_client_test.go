@@ -20,8 +20,8 @@ func TestE2E_E6_IndependentJSONRPCClient(t *testing.T) {
 	listed := c.rpc(t, "tools/list", map[string]any{})
 	result, _ := listed["result"].(map[string]any)
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 30 {
-		t.Fatalf("tools/list count=%d", len(tools))
+	if len(tools) != 34 {
+		t.Fatalf("tools/list count=%d want 34 (ultra profile)", len(tools))
 	}
 
 	wpath := filepath.Join(dir, "w.txt")
