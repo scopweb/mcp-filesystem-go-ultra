@@ -37,6 +37,14 @@ func containsPath(got, path string) bool {
 	if strings.Contains(got, path) {
 		return true
 	}
+	// Displayed roots are resolved paths; Windows temp directories may use
+	// an 8.3 alias (RUNNER~1) for the same directory.
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+		if strings.Contains(got, path) {
+			return true
+		}
+	}
 	if runtime.GOOS == "windows" {
 		return strings.Contains(strings.ToLower(got), strings.ToLower(path))
 	}
