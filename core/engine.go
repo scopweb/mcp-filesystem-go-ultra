@@ -1926,6 +1926,7 @@ func SecureRandomSuffix() string {
 
 // GetCurrentBackupID returns the current backup ID in the undo chain for a file
 func (e *UltraFastEngine) GetCurrentBackupID(path string) string {
+	path = CanonicalOCCKey(path)
 	e.backupChainMu.RLock()
 	defer e.backupChainMu.RUnlock()
 	return e.backupChain[path]
@@ -1933,6 +1934,7 @@ func (e *UltraFastEngine) GetCurrentBackupID(path string) string {
 
 // SetCurrentBackupID updates the current backup ID in the undo chain for a file
 func (e *UltraFastEngine) SetCurrentBackupID(path, backupID string) {
+	path = CanonicalOCCKey(path)
 	e.backupChainMu.Lock()
 	defer e.backupChainMu.Unlock()
 	e.backupChain[path] = backupID
@@ -1940,6 +1942,7 @@ func (e *UltraFastEngine) SetCurrentBackupID(path, backupID string) {
 
 // ClearBackupID removes the backup chain entry for a file
 func (e *UltraFastEngine) ClearBackupID(path string) {
+	path = CanonicalOCCKey(path)
 	e.backupChainMu.Lock()
 	defer e.backupChainMu.Unlock()
 	delete(e.backupChain, path)

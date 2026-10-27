@@ -71,7 +71,8 @@ Pass content_hash from read_file as expected_hash on the next mutation. On failu
 Subagent: request a handoff (path + content_hash). Do not assume the parent session's file body.
 help(tool:X) on demand. Do not load the full catalog at startup.
 Minimum config is allowed paths (positional, --allowed-paths, .mcp-paths, or MCP_ALLOWED_PATHS). Other flags are opt-in.
-Client Roots are added to that list. --roots-mode=replace keeps only the client list.`
+Client Roots are added to that list. --roots-mode=replace keeps only the client list.
+Undo cursors use canonical path identity; Windows case variants and 8.3 aliases share the undo chain.`
 
 // serverVersion is the single source of truth for the version reported by
 // --version, the MCP handshake, the help header and the startup logs.

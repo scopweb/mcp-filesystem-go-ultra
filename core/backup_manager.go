@@ -483,7 +483,7 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 		return nil, "", err
 	}
 	for _, file := range info.Files {
-		if specificFile != "" && filepath.Clean(file.OriginalPath) != filepath.Clean(specificFile) {
+		if specificFile != "" && CanonicalOCCKey(file.OriginalPath) != CanonicalOCCKey(specificFile) {
 			continue
 		}
 		if err := bm.authorizeOriginal(file.OriginalPath, OpRestore); err != nil {
@@ -501,9 +501,9 @@ func (bm *BackupManager) RestoreBackup(backupID string, specificFile string, cre
 
 	// Si se especificó un archivo, restaurar solo ese
 	if specificFile != "" {
-		normalizedSpecific := filepath.Clean(specificFile)
+		normalizedSpecific := CanonicalOCCKey(specificFile)
 		for _, file := range info.Files {
-			if filepath.Clean(file.OriginalPath) == normalizedSpecific {
+			if CanonicalOCCKey(file.OriginalPath) == normalizedSpecific {
 				if createBackup {
 					// Crear backup del estado actual antes de restaurar
 					id, err := bm.CreateBackup(file.OriginalPath, "pre_restore")
@@ -596,10 +596,10 @@ func (bm *BackupManager) ReadBackupBytes(backupID string, filePath string) ([]by
 		}
 		return nil, err
 	}
-	normalizedFilePath := filepath.Clean(filePath)
+	normalizedFilePath := CanonicalOCCKey(filePath)
 	var backupFile *BackupMetadata
 	for i := range info.Files {
-		if filepath.Clean(info.Files[i].OriginalPath) == normalizedFilePath {
+		if CanonicalOCCKey(info.Files[i].OriginalPath) == normalizedFilePath {
 			backupFile = &info.Files[i]
 			break
 		}
@@ -624,10 +624,10 @@ func (bm *BackupManager) CompareWithBackup(backupID string, filePath string) (st
 	if err != nil {
 		return "", err
 	}
-	normalizedFilePath := filepath.Clean(filePath)
+	normalizedFilePath := CanonicalOCCKey(filePath)
 	original := filePath
 	for i := range info.Files {
-		if filepath.Clean(info.Files[i].OriginalPath) == normalizedFilePath {
+		if CanonicalOCCKey(info.Files[i].OriginalPath) == normalizedFilePath {
 			original = info.Files[i].OriginalPath
 			break
 		}

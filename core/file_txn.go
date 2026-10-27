@@ -178,16 +178,12 @@ func (t *FileTxn) Commit(ctx context.Context, newBytes []byte, dryRun bool, back
 		return "", fmt.Errorf("write conflict: %s changed since snapshot", path)
 	}
 	if t.snap.Exists && !t.skipBackup && t.engine.backupManager != nil {
-		t.engine.backupChainMu.RLock()
-		prev := t.engine.backupChain[path]
-		t.engine.backupChainMu.RUnlock()
+		prev := t.engine.GetCurrentBackupID(path)
 		backupID, err = t.engine.backupManager.CreateBackupFromBytes(path, t.snap.Bytes, t.snap.Mode, backupOp, backupNote, prev)
 		if err != nil {
 			return "", fmt.Errorf("could not create backup: %w", err)
 		}
-		t.engine.backupChainMu.Lock()
-		t.engine.backupChain[path] = backupID
-		t.engine.backupChainMu.Unlock()
+		t.engine.SetCurrentBackupID(path, backupID)
 	}
 	mode := t.snap.Mode
 	if mode == 0 {

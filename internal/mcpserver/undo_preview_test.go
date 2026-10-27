@@ -9,7 +9,11 @@ import (
 )
 
 func TestUndoLast_PreviewAndSingleStep(t *testing.T) {
-	dir := t.TempDir()
+	testUndoLastPreviewAndSingleStep(t, t.TempDir())
+}
+
+func testUndoLastPreviewAndSingleStep(t *testing.T, dir string) {
+	t.Helper()
 	reg := newHelpTestRegistry(t, dir)
 	path := filepath.Join(dir, "undo.txt")
 	original := "alpha\r\nbeta\r\n"

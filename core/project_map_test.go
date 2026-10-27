@@ -151,6 +151,25 @@ func TestProjectMap_TruncatesOnMaxEntries(t *testing.T) {
 }
 
 func TestProjectMap_TruncatesOnMaxTime(t *testing.T) {
+	// An expired deadline exercises the time limit without relying on clock
+	// resolution or the scheduler advancing during a one-file walk.
+	w := &projectMapWalk{
+		opts:     ProjectMapOpts{MaxEntries: 1},
+		deadline: time.Unix(1, 0),
+	}
+	node := w.walkDir(context.Background(), t.TempDir(), 0)
+	if !w.truncated {
+		t.Fatal("expected truncated=true")
+	}
+	if w.entries != 0 || len(node.children) != 0 {
+		t.Fatalf("expired walk visited entries: %d, children: %d", w.entries, len(node.children))
+	}
+	if len(w.warnings) != 1 || w.warnings[0] != "time limit reached" {
+		t.Fatalf("warnings=%v, want time limit reached", w.warnings)
+	}
+}
+
+func TestProjectMap_EchoesSubMillisecondTimeLimit(t *testing.T) {
 	dir := t.TempDir()
 	writeTree(t, dir, map[string]string{"a.txt": "x"})
 	engine := projectMapEngine(t, dir)
@@ -158,9 +177,6 @@ func TestProjectMap_TruncatesOnMaxTime(t *testing.T) {
 	res, err := engine.ProjectMap(context.Background(), dir, ProjectMapOpts{MaxTime: time.Nanosecond})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !res.Truncated {
-		t.Fatal("expected truncated=true")
 	}
 	if res.SummaryScope != ProjectMapSummaryScope {
 		t.Fatalf("summary_scope=%q", res.SummaryScope)

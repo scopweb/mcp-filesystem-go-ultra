@@ -176,31 +176,49 @@ func (c *IntelligentCache) lookupFresh(path string, kind lookupClass) ([]byte, b
 	if kind == lookupDemand {
 		c.updateAccessStats()
 	}
+	// Observe bytes and metadata under the same lock as publication. Otherwise
+	// a reader can see a half-published entry and invalidate a fresh fill.
+	c.mu.RLock()
+	cached, hit, _, _ := c.freshFileLocked(path)
+	c.mu.RUnlock()
+	if hit {
+		c.recordLookup(kind, true, false)
+		return cached, true
+	}
+
+	// A fill may have completed since the miss. Recheck under the write lock
+	// before discarding anything, keeping successful lookups concurrent.
+	c.mu.Lock()
+	cached, hit, discard, stale := c.freshFileLocked(path)
+	if !hit {
+		if discard {
+			c.invalidateFileLocked(path)
+		} else {
+			c.dropResidentLocked(path)
+		}
+	}
+	c.mu.Unlock()
+	c.recordLookup(kind, hit, stale)
+	return cached, hit
+}
+
+// freshFileLocked requires c.mu held for reading or writing. discard indicates
+// an incomplete or outdated entry; a completely cold miss must not invalidate
+// the generation of an in-flight disk read.
+func (c *IntelligentCache) freshFileLocked(path string) (data []byte, hit, discard, stale bool) {
 	cached, hasBytes := c.fileBytes(path)
 	meta, hasMeta := c.fileMeta(path)
 	if !hasBytes || !hasMeta {
-		if hasBytes || hasMeta {
-			c.InvalidateFile(path)
-		} else {
-			c.dropResident(path)
-		}
-		c.recordLookup(kind, false, false)
-		return nil, false
+		return nil, false, hasBytes || hasMeta, false
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		c.InvalidateFile(path)
-		c.recordLookup(kind, false, false)
-		return nil, false
+		return nil, false, true, false
 	}
-	live := MetaFromInfo(info)
-	if !meta.sameVersion(live) || int64(len(cached)) != meta.Size {
-		c.InvalidateFile(path)
-		c.recordLookup(kind, false, true)
-		return nil, false
+	if !meta.sameVersion(MetaFromInfo(info)) || int64(len(cached)) != meta.Size {
+		return nil, false, true, true
 	}
-	c.recordLookup(kind, true, false)
-	return cached, true
+	return cached, true, false, false
 }
 
 func (c *IntelligentCache) recordLookup(kind lookupClass, hit, stale bool) {
@@ -323,18 +341,21 @@ func (c *IntelligentCache) SetMetadata(key string, value interface{}) {
 
 func (c *IntelligentCache) InvalidateFile(path string) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.invalidateFileLocked(path)
+}
+
+func (c *IntelligentCache) invalidateFileLocked(path string) {
 	c.pathGen[path]++
 	if n, ok := c.fileBytesLen[path]; ok {
 		c.residentBytes -= n
 		delete(c.fileBytesLen, path)
 	}
-	c.mu.Unlock()
 	_ = c.fileCache.Delete(path)
 	c.metaCache.Delete(fileStatKey(path))
 }
 
-func (c *IntelligentCache) dropResident(path string) {
-	c.mu.Lock()
+func (c *IntelligentCache) dropResidentLocked(path string) {
 	if n, ok := c.fileBytesLen[path]; ok {
 		c.residentBytes -= n
 		delete(c.fileBytesLen, path)
@@ -342,7 +363,6 @@ func (c *IntelligentCache) dropResident(path string) {
 		c.stats.Evictions++
 		c.stats.mu.Unlock()
 	}
-	c.mu.Unlock()
 }
 
 // InvalidateDirectory removes a directory listing from cache

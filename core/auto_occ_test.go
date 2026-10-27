@@ -1,6 +1,7 @@
 package core
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ func TestCheckAutoOCC(t *testing.T) {
 	defer SetAutoOCCMode("warn") // restore default for other tests
 	SetAutoOCCMode("warn")
 
-	p := "/auto-occ/test-a"
+	p := filepath.Join(t.TempDir(), "test-a")
 
 	// No known hash yet → never signals.
 	if sig := CheckAutoOCC(p, "aaaaaaaa"); sig.Status != FeedbackOK {
@@ -44,7 +45,7 @@ func TestCheckAutoOCC(t *testing.T) {
 func TestCheckAutoOCC_ModeBlockAndOff(t *testing.T) {
 	defer SetAutoOCCMode("warn")
 
-	p := "/auto-occ/test-b"
+	p := filepath.Join(t.TempDir(), "test-b")
 	RecordReadHash(p, "11111111")
 
 	SetAutoOCCMode("block")
@@ -61,7 +62,7 @@ func TestCheckAutoOCC_ModeBlockAndOff(t *testing.T) {
 func TestSetAutoOCCMode_FallbackToWarn(t *testing.T) {
 	defer SetAutoOCCMode("warn")
 	SetAutoOCCMode("nonsense")
-	p := "/auto-occ/test-c"
+	p := filepath.Join(t.TempDir(), "test-c")
 	RecordReadHash(p, "deadbeef")
 	// Fallback is "warn" → an external change signals but does not block.
 	sig := CheckAutoOCC(p, "feedface")
@@ -76,7 +77,7 @@ func TestCheckAutoOCC_BlockDegradesToWarnForOldBaseline(t *testing.T) {
 	defer SetAutoOCCMode("warn")
 	SetAutoOCCMode("block")
 
-	p := "/auto-occ/test-d"
+	p := filepath.Join(t.TempDir(), "test-d")
 	RecordReadHash(p, "11111111")
 
 	// Fresh baseline → blocks.
@@ -116,7 +117,7 @@ func TestCheckAutoOCC_InterleavedConversationsDoNotBlockEachOther(t *testing.T) 
 	defer SetAutoOCCMode("warn")
 	SetAutoOCCMode("block")
 
-	p := "/auto-occ/test-e"
+	p := filepath.Join(t.TempDir(), "test-e")
 	key := CanonicalOCCKey(p)
 
 	// Conversation A read the file a while ago.

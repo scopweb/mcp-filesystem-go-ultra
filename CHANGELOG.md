@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### fix: concurrent cache publication and Windows undo identity
+
+Fresh-cache lookups now observe file bytes and their capture metadata under the publication lock. Misses are rechecked before invalidation, and invalidation holds the same lock through deletion, so a concurrent reader cannot discard a half-published or newer entry. This fixes duplicate disk reads reproduced by the concurrent range/read tests on Linux with the race detector.
+
+Undo cursors and backup snapshot matching now use canonical path identity. Windows 8.3 aliases and case variants share the same edit/patch/undo chain. A Windows regression covers the original short-path cursor failure, preview without mutation and two successive restores.
+
+Auto-OCC tests use unique temporary paths instead of fixed process-wide keys. The project-map time-limit test starts with an expired deadline instead of assuming a one-file walk advances the clock by a nanosecond; a separate integration test checks the sub-millisecond budget echo.
+
 ### fix(ci): Go 1.27.3 and current tool contracts
 
 The `go` directive in `go.mod`, CI (`ci.yml` / `release.yml`), the README and `build-windows.bat` now require **1.27.3+**, including the standard-library fix for **GO-2026-6809**. Add the two dependency-test checksums required by `go mod tidy`.

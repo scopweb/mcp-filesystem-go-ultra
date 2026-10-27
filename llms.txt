@@ -62,6 +62,8 @@ listed here, do not assume it.
 - Mutating operations that create a backup report `UNDO:<id>` and
   `chain:<parent>`; `backup(action:"undo_last")` walks the chain (add
   `file_path` to step through one file at a time).
+- Undo cursors and snapshot selection use canonical path identity. Windows
+  case variants and 8.3 aliases of the same path share the undo chain.
 - Restoring a specific snapshot needs the **full** backup id and
   `backup(action:"restore", backup_id:"...")`.
 - Not every mutation creates a backup: it depends on `create_backup` and the
