@@ -145,6 +145,14 @@ Reading
     it is in `structuredContent` (`content` for one file, `files[].content` for
     a batch). A client that does not render `structuredContent` needs
     `--response-mode=compat` and a restart to get the body back.
+  - Truncated batches retain `files[].continuation`, also in `detail:summary`.
+    Top-level `continuation` has `kind:batch` and zero-based `file_indexes`
+    pointing into `files[]`; instructions live only in each file entry.
+    `start_line` / `max_lines` advance to the next chunk. `reread` contains
+    range arguments to recover width-cut lines; `earlier` contains range
+    arguments for lines omitted by a capped tail. Add the entry path when
+    calling `read_file` with either recovery object. Completed explicit
+    selections have no continuation. Hashes still cover the whole file.
 
 Writing
 - `write_file` — create/overwrite; returns `content_hash` and `backup_id`.

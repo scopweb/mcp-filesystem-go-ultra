@@ -570,6 +570,9 @@ func registerCoreTools(reg *toolRegistry) {
 					entry["content_hash"] = snap.Hash
 					entry["truncated"] = proj.Truncated
 					entry["total_lines"] = proj.TotalLines
+					if cont := readContinuation(proj); cont != nil {
+						entry["continuation"] = cont
+					}
 					if proj.StartLine > 0 {
 						entry["start_line"] = proj.StartLine
 					}

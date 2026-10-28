@@ -121,13 +121,43 @@ func readStructuredMeta(path, content, hash string, proj readProjection, files [
 	if len(files) > 0 {
 		m["files"] = files
 	}
-	if cont := readContinuation(proj); cont != nil {
+	if len(files) > 0 {
+		var indexes []int
+		for i, f := range files {
+			if f["continuation"] != nil {
+				indexes = append(indexes, i)
+			}
+		}
+		if len(indexes) > 0 {
+			m["continuation"] = map[string]any{"kind": "batch", "file_indexes": indexes}
+		}
+	} else if cont := readContinuation(proj); cont != nil {
 		m["continuation"] = cont
 	}
 	return m
 }
 
 func readContinuation(proj readProjection) map[string]any {
+	cont := readContinuationBase(proj)
+	if cont == nil {
+		return nil
+	}
+	// Recovery ranges are separate from the forward cursor: width cuts need
+	// the displayed lines again, while capped tails omitted earlier lines.
+	if strings.Contains(proj.Cut, cutLineWidth) && proj.EndLine >= proj.StartLine && proj.StartLine > 0 {
+		cont["reread"] = map[string]any{
+			"mode": "all", "start_line": proj.StartLine, "end_line": proj.EndLine, "max_line_length": 0,
+		}
+	}
+	if strings.Contains(proj.Cut, cutServerMaxLines) && proj.ContinueAt == 0 && proj.StartLine > 1 {
+		cont["earlier"] = map[string]any{
+			"mode": "all", "start_line": 1, "end_line": proj.StartLine - 1, "max_line_length": 0,
+		}
+	}
+	return cont
+}
+
+func readContinuationBase(proj readProjection) map[string]any {
 	if !proj.Truncated {
 		return nil
 	}
@@ -169,7 +199,7 @@ func readContinuation(proj readProjection) map[string]any {
 	}
 	if lineWidth {
 		return map[string]any{
-			"kind": cutLineWidth,
+			"kind": proj.Cut,
 			"hint": "lines were cut to max_line_length; pass max_line_length:0 for exact text. Do not use the cut body as edit_file old_text.",
 		}
 	}

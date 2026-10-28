@@ -113,6 +113,11 @@ func applyBatchReadDetail(files []map[string]any, combined string, detail string
 	out := make([]map[string]any, 0, len(files))
 	for i, f := range files {
 		item := map[string]any{"path": f["path"]}
+		for _, key := range []string{"truncated", "start_line", "end_line", "total_lines", "continuation"} {
+			if value, ok := f[key]; ok {
+				item[key] = value
+			}
+		}
 		if h, ok := f["content_hash"]; ok {
 			item["content_hash"] = h
 		}

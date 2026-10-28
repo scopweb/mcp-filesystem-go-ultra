@@ -22,7 +22,7 @@ var readFileOutputSchema = json.RawMessage(`{
     "end_line": {"type": "integer", "description": "Last line returned (1-based, inclusive, clamped to file length)"},
     "total_lines": {"type": "integer", "description": "Total lines in the full file"},
     "files": {"type": "array", "description": "Per-file results for batch reads (paths). Item errors are listed here; status=partial when mixed.", "items": {"type": "object"}},
-    "continuation": {"type": "object", "description": "Present only when truncated. auto-cap includes start_line and max_lines for the next chunk. line-width uses kind=line_width and does not invent a next line range. Not a suggestion to continue a completed explicit range."},
+    "continuation": {"type": "object", "description": "Present only when truncated. Single-file and files[].continuation: start_line/max_lines advance to the next chunk; reread contains read_file range arguments to recover width-cut lines; earlier contains range arguments for lines omitted by a capped tail. Add the entry path to those arguments. Batch top-level: kind=batch, file_indexes lists zero-based positions in files[] with continuation, including detail=summary. Completed explicit selections have no continuation."},
     "presentation": {"type": "string", "description": "structured when --response-mode=structured. Batch bodies then live only in files[].content; top-level content and the text fallback are a summary. Absent in compat mode."}
   },
   "required": ["content"]

@@ -68,6 +68,7 @@ First call list_allowed_directories, then project_map for orientation.
 Do not use native Read/Edit/Write/Glob for host paths. Prefer these tools over bash cat/head/tail/cut/ls/grep/find/wc/stat. Line census: list_directory output_format=lines. $HOME/mnt is a sandbox path; use the Windows path from list_allowed_directories.
 Host files = read_file, search_files, edit_file, write_file. Native Read/Edit/Write/Grep = error. Do not switch families.
 Pass content_hash from read_file as expected_hash on the next mutation. On failure the envelope has path and retryable. retryable:false means stop; do not retry or use native tools.
+Truncated batch reads: continuation.file_indexes points into files[].continuation; reread/earlier are recovery range arguments (add the file path).
 Subagent: request a handoff (path + content_hash). Do not assume the parent session's file body.
 help(tool:X) on demand. Do not load the full catalog at startup.
 Minimum config is allowed paths (positional, --allowed-paths, .mcp-paths, or MCP_ALLOWED_PATHS). Other flags are opt-in.
