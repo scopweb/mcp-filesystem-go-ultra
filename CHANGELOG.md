@@ -4,6 +4,69 @@
 
 ## [Unreleased]
 
+### feat(response): one body, two channels — and a real `--response-mode=structured`
+
+The payload of a tool call carried the same information twice: the text
+fallback block and `structuredContent`. Three changes remove the redundancy
+without touching the OCC, path-security or backup guarantees.
+
+- **Directory listings print the path once.** `list_directory` repeated the
+  absolute path on every entry line; a 26-entry listing spent more bytes on
+  the path than on the entries. The path is now a header line, and the
+  structured payload keeps it in `path`.
+- **`--response-mode=structured` now covers every tool that has a body.** It
+  already kept `read_file` bodies once; `search_files`, `list_directory` /
+  `directory_tree` and `project_map` still sent the body twice. They now
+  follow the same rule: the text block becomes a one-line summary that says
+  where the body is, and the body stays once, in `structuredContent`. The
+  `message` field keeps the invariant "message == text content block" in
+  every mode, and `presentation` marks the payload as `structured`.
+- **`git status` is legible without parsing porcelain.** The text block keeps
+  the porcelain listing — the changed files are not duplicated — while
+  `structuredContent` adds `branch`, `upstream`, `ahead`, `behind`,
+  `staged`, `unstaged`, `untracked`, `conflicts`, `file_count` and a
+  `summary` line. `output:"full"` keeps the complete porcelain v2 body and
+  prepends a readable summary line.
+
+Measured over a fixed fixture (`tests/noise`), same calls and same arguments:
+
+| server flags | wire payload |
+|---|---|
+| default (compat) | 31 156 B |
+| `--compact-mode` | 31 316 B |
+| `--response-mode=structured` | 22 645 B (-27 %) |
+| `--compact-mode --response-mode=structured` | 22 079 B (-29 %) |
+
+Before this change the same scenario cost 33 377 B in compat mode; the
+listing fix alone removes 3 226 B of it. `tests/noise` keeps the numbers
+under a budget so the duplication cannot grow back unnoticed.
+
+Nothing needed to act is dropped: `content_hash`, `error` (with `retryable`),
+`continuation`, `truncated` and `backup_id` / `parent_backup_id` stay in
+`structuredContent` in every mode.
+
+### docs(skill): the agent skill matches the server again
+
+`.claude/skills/filesystem-ultra-tools/SKILL.md` is the canonical catalog and
+had drifted from the code:
+
+- the recommended launch was `--profile=agent`; the product profile is
+  `--profile=strict --compact-mode` (`--preset=minimal`), and
+  `--profile=agent` is the variant that adds `git`,
+- the ultra-only list was missing `context_pack` and `workspace`,
+- the discovery order now reads `list_allowed_directories` → `project_map` →
+  the specific tool the task needs, and says explicitly that the full
+  `help()` catalog at startup is noise,
+- the git section now says that the one-line status summary needs
+  `--compact-mode`, and documents the new `structuredContent` payload,
+- a new "Response size" section explains the two channels, what
+  `--response-mode=structured` changes, and that listings print the path
+  once.
+
+`llms.txt`, `AGENTS.md` and the handshake (`serverInstructions`) carry the same
+rules; the handshake stays at 12 lines. The external installed copy of the
+skill was resynchronized from the repository source — `ripgrep-reference.md`
+was already identical.
 ### fix: concurrent cache publication and Windows undo identity
 
 Fresh-cache lookups now observe file bytes and their capture metadata under the publication lock. Misses are rechecked before invalidation, and invalidation holds the same lock through deletion, so a concurrent reader cannot discard a half-published or newer entry. This fixes duplicate disk reads reproduced by the concurrent range/read tests on Linux with the race detector.

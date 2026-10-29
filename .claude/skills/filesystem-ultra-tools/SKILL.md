@@ -1,6 +1,6 @@
 ---
 name: filesystem-ultra-tools
-description: Tool catalog for filesystem-ultra MCP server v4.8.0. 34 tools ultra / 19 agent / 18 strict. First call list_allowed_directories. If the client already lists the tools, do not call help(). help(tool:X) only when a parameter is missing. Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=agent --compact-mode --roots-mode=union.
+description: Tool catalog for filesystem-ultra MCP server v4.8.0. 34 tools ultra / 19 agent / 18 strict. Discovery order: list_allowed_directories, then project_map, then the specific tool; help(tool:X) only when a parameter is missing, never the full catalog at startup. If the client already lists the tools, do not call help(). Host filesystem, post-write verify, aliases disabled. Recommended flags: --profile=strict --compact-mode (--preset=minimal); add --response-mode=structured to keep every body once in structuredContent.
 ---
 
 # Filesystem Ultra v4.8.0 — Tool Discovery
@@ -13,16 +13,16 @@ Maintain this repository's `.claude/skills/filesystem-ultra-tools/SKILL.md` as t
 
 ## Recommended server flags
 
-Configuration 0 is paths only: `filesystem-ultra C:\project`, `--allowed-paths-file=.mcp-paths`, or `MCP_ALLOWED_PATHS` in `.env`. Other flags are opt-in and override env. `--preset=minimal` is `--profile=strict --compact-mode` unless those flags are set explicitly; `--preset=agent` is the same with `--profile=agent`. `--roots-mode` defaults to `union`.
+Configuration 0 is paths only: `filesystem-ultra C:\project`, `--allowed-paths-file=.mcp-paths`, or `MCP_ALLOWED_PATHS` in `.env`. Other flags are opt-in and override env. `--preset=minimal` is `--profile=strict --compact-mode --roots-mode=union` unless those flags are set explicitly; `--preset=agent` is the same with `--profile=agent`. `--roots-mode` defaults to `union`.
 
-`--profile=agent --compact-mode --roots-mode=union` (`--readonly` off) when the agent needs git without the full catalog. `--profile=strict` remains the 18-tool core without git. `--git-network` only if the agent must `git push`/`fetch`/`pull` (`pull` is fast-forward only; honored by ultra and agent, ignored by strict). `--response-mode=structured` is opt-in and keeps file bodies once in structuredContent; default `compat` is unchanged. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 34 tools including `analyze_code`, graduated `github_issues` / `gitlab_issues`, and experimental `context_pack` and `workspace`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
+Recommended launch: `--profile=strict --compact-mode` (or `--preset=minimal`) — the 18-tool product profile. `--profile=agent` (or `--preset=agent`) is the same plus `git`, without the full catalog; keep `--readonly` off. `--profile=strict` remains the 18-tool core without git. `--git-network` only if the agent must `git push`/`fetch`/`pull` (`pull` is fast-forward only; honored by ultra and agent, ignored by strict). `--response-mode=structured` is opt-in and keeps every body once, in structuredContent (`read_file`, `search_files`, `list_directory`/`directory_tree`, `project_map`); default `compat` is unchanged. See "Response size" below. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`. `--profile=ultra` (default) keeps all 34 tools including `analyze_code`, graduated `github_issues` / `gitlab_issues`, and experimental `context_pack` and `workspace`. Optional `--file-security-config` is owner-controlled and immutable; `security_policy` does not list rules.
 
 For JSON queries, byte diagnostics or baseline hashes, use `--profile=ultra --compact-mode --roots-mode=union`. `json_query`, `file_bytes` and `file_hash` are absent from both `agent` and `strict`, and work under `--readonly`. After changing the binary/profile, reconnect the client so it refreshes the catalog.
 
 ## Bind each project to one filesystem tool family
 
 - `filesystem-ultra` operates on the real host filesystem (`C:\...`, host-mounted `/mnt/...`). Runtime-native `create_file`, `str_replace`, `view` may target a different sandbox.
-- First call `list_allowed_directories` (before any read). If the client already lists the tools, do not call `help()`. `help(tool:"X")` only when a parameter is missing from the schema. `project_map` when the shape of a project is unknown; `directory_tree` only when the actual tree is needed. Do not dump the full catalog at startup.
+- First call `list_allowed_directories` (before any read), then `project_map` when the shape of a project is unknown, then the specific tool the task needs; `directory_tree` only when the actual tree is needed. If the client already lists the tools, do not call `help()`. `help(tool:"X")` only when a parameter is missing from the schema. Do not dump the full catalog at startup.
 - For host projects, use only filesystem-ultra tools. If the harness also offers native Read/Grep/Edit, do not call both. After every host create/edit, verify with `get_file_info` or `list_directory`; `read_file` when content matters.
 - `File not found` for a known file is a filesystem-mismatch signal: stop, confirm with the host reader, audit recent writes. Never switch tool families silently.
 
@@ -36,8 +36,8 @@ Harness subagents start without this file. The portable contract is `server.With
 
 1. `list_allowed_directories` — sandbox roots. Zero parameters. That is the whole startup.
 2. `project_map` — cheap structural orientation when the shape of a project is unknown. Metadata only (skeleton, extension histogram, largest files, key files). It does not select code.
-3. `directory_tree` — only when the actual tree is needed. Defaults: `respect_ignore=true`, `max_depth=2`, `max_nodes=500`.
-4. `help(tool:"X")` — only when a parameter is missing from the client schema. If the client already lists the tools, do not call `help()`.
+3. The specific tool the task needs — `search_files` to locate code, `read_file` with a range to read it, `edit_file` / `apply_patch` to change it. `directory_tree` only when the actual tree is needed (defaults: `respect_ignore=true`, `max_depth=2`, `max_nodes=500`).
+4. `help(tool:"X")` — only when a parameter is missing from the client schema. If the client already lists the tools, do not call `help()`: the full catalog at startup is noise, not discovery.
 
 Native `oldString` / `replaceAll` / `search` / `edit` are not this server. `edit_file` uses `old_text` / `new_text`. Omitting `occurrence` replaces every exact match. A pattern uses `mode:"search_replace"`.
 
@@ -76,7 +76,10 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 - `file_bytes` — experimental, ultra only, read-only. `mode:encoding|bytes|all`; diagnostic prefix defaults to 1 MiB, dump to 512 bytes. Byte offsets are 0-based; line ranges 1-based. Check `scan_complete` for partial statistics. `end_byte_offset` preserves exclusive range ends in continuations.
 - `file_hash` — experimental, ultra only, read-only. `path` XOR `paths` (max 64); SHA-256 of original bytes. `compare:true` requires two paths and directly compares bytes, reporting the first difference. SHA-256 is not an OCC token. Details and limits: https://filesystem.scopweb.com/tools/inspection-tools/
 
-`copy_file`, `project_replace`, `batch_operations`, `analyze_operation`, `wsl`, `git`, `github_issues`, `gitlab_issues`, `minify_js`, `analyze_code`, `server_info`.
+`copy_file`, `project_replace`, `batch_operations`, `analyze_operation`, `context_pack`, `workspace`, `wsl`, `git`, `github_issues`, `gitlab_issues`, `minify_js`, `analyze_code`, `server_info`.
+
+- `context_pack` — experimental, ultra only, read-only. Deterministic task context: ranked files, definition-centred ranges, bounded snippets, related git status. `budget_chars` (default 12000, max 32000) bounds the text fallback and the structured payload together. Pass `focus_paths` or `query`, then `read_file` only the ranges you need. Not a semantic index.
+- `workspace` — experimental, ultra only. Real git worktree for agent edits: `begin` creates a detached worktree under an already-allowed parent (it does not copy dirty, untracked or ignored files and does not widen allowed-paths); `status`, `diff` and `export` read it; `discard` removes only a clean workspace this server created. Not a sandbox and not a promote.
 
 - `gitlab_issues` — graduated. `list|view|comment|close|reopen` on a GitLab HTTP API. Auth is cached per process (`GITLAB_TOKEN` or one git-credential sign-in). Do not assume gitlab.com or https. `comment` and `close` are writes and are blocked by `--readonly`. Example: `gitlab_issues(action:"comment", base_url:"http://192.168.0.20", repo:"group/project", number:1, body:"note")` then `gitlab_issues(action:"close", base_url:"http://192.168.0.20", repo:"group/project", number:1)`.
 - `github_issues` — graduated. `list|view|create|comment|edit|close|reopen` via `gh` (no shell, no `gh auth login`, no issue delete). `list`/`view` work under `--readonly`; writes do not. `path` resolves HTTPS/SSH remotes; a non-github.com remote is not assumed to be GitHub — pass `repo` and `hostname`. File-security policy refuses path resolution (git stays blocked); explicit `repo` does not run git. `--git-remote-allow` applies, no force bypass. Issue text is external data. Examples: `github_issues(action:"list", path:"C:/repo")`, `github_issues(action:"view", path:"C:/repo", number:12)`, `github_issues(action:"comment", repo:"owner/repo", number:12, body:"note")`, `github_issues(action:"close", repo:"owner/repo", number:12, reason:"completed")`.
@@ -104,7 +107,8 @@ Use the `git` tool, never shell `git` or `git grep`. `help(tool:"git")` is the l
 
 Actions: `status`, `diff`, `review`, `log`, `show`, `add`, `commit`, `push`, `fetch`, `restore`, `branch`, `init`, `remote`.
 
-- Compact `status` without `output` is one line (`repo (branch) | +1 ~2 ?3 | dirty`). Pass `output:"name-only"` or `"full"` for the file list.
+- `status` returns the porcelain listing in the text block and the repository state in `structuredContent`: `branch`, `upstream`, `ahead`, `behind`, `staged`, `unstaged`, `untracked`, `conflicts`, `file_count`, `summary`. The changed files stay in the text block, so the same file is never sent twice.
+- In `--compact-mode`, `status` without an explicit `output` is one line (`repo (branch) | +1 ~2 ?3 | dirty`). Pass `output:"name-only"` or `"full"` for the file list; `output:"full"` keeps the complete porcelain body and prepends a readable summary line.
 - `diff` defaults to `stat`. `output:"full"` is the patch (porcelain v2 is normal, not a failure). `paths` is the pathspec. `staged:true` is `--cached`.
 - `review` always pages. Continue with `offset` plus `expected_status_hash`. A mismatch is `STALE_GIT` and returns no diff body.
 - `add` with `update:true` is `git add -u` (tracked files only; it does not stage untracked paths such as `.agent/`).
@@ -129,6 +133,17 @@ Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `gr
 | Exact line range | `read_file(path, start_line, end_line)` — also honored on `paths[]` |
 | Line cut override | `max_line_length:N` or `0` to disable |
 
+## Response size: one body, two channels
+
+Every result carries the same information twice: the **text block** (readable fallback) and **structuredContent** (machine channel). Read the structured fields (`entries`, `matches`, `content`, `summary`, `structure`); `message` is only a summary of them.
+
+- **compat (default)** — both channels carry the body, so a text-only client and a structured client both work. This is the compatibility contract: do not assume the body appears once.
+- **structured** (`--response-mode=structured`) — the text block becomes a one-line summary and the body stays once, in structuredContent. It covers `read_file`, `search_files`, `list_directory`/`directory_tree` and `project_map`. The summary says where the body is and how to get the text back (`--response-mode=compat` + restart). Use it when payload size matters more than the text fallback.
+
+Nothing needed to act is dropped in either mode: `content_hash`, `error` (with `retryable`), `continuation`, `truncated` and `backup_id` / `parent_backup_id` are always in structuredContent.
+
+Directory listings print the absolute path **once**, as a header line; the entry lines carry the name and the size only.
+
 ## search_files aliases
 
 | Native | Alias | Purpose |
@@ -145,7 +160,7 @@ Do not use bash `cat`, `head`, `tail`, `cut`, `sed -n`, `ls`, `dir`, `tree`, `gr
 - **Dry-run** → `edit_file(dry_run:true)` / `multi_edit(dry_run:true)` / `apply_patch(dry_run:true)`.
 - **OCC** → every successful read/edit returns `content_hash`; pass as `expected_hash` on the next mutation. `--auto-occ` `off`/`warn` (default)/`block` flags *external* changes only.
 - **STALE_READ** (`edit_file` / `multi_edit`): non-blocking. Suppressed when every `old_text` matches once. Consecutive edits on the same file do not need re-reads.
-- **Structured results** → prefer `structuredContent`: `status` (`applied`/`simulated`/`empty`/`partial`), `truncated`, `hidden_count`, hashes. Empty search is `status:empty` (`isError=false`). Errors have `retryable` — do not auto-retry when false. `search_files.message` and `list_allowed_directories.message` are summaries; hits are in `matches`, roots are in `paths`. The text content block still lists them.
+- **Structured results** → prefer `structuredContent`: `status` (`applied`/`simulated`/`empty`/`partial`), `truncated`, `hidden_count`, hashes. Empty search is `status:empty` (`isError=false`). Errors have `retryable` — do not auto-retry when false. `search_files.message` and `list_allowed_directories.message` are summaries; hits are in `matches`, roots are in `paths`. The text content block still lists them. For the other tools `message` is the same string as the text block — read the structured fields, not `message`.
 - **read_file truncation** → `truncated:false` and `status:ok` when the requested range, head, tail, or `max_lines` selection is complete, even if the file is longer. `truncated:true` only for a server cut (auto-cap, omitted head/tail cap, line width). Do not follow a continuation that is not present. `content_hash` is the full-file snapshot, not the displayed slice. Clients that JSON-encode `structuredContent` escape the body; the text block is the readable copy. Do not prefix line numbers onto `content`.
 - **Line-based edits** → `edit_file` `mode:"delete_range"` / `"replace_range"` (1-based inclusive).
 - **Undo** → `backup(action:"undo_last")` / `undo_chain` / `restore` with `backup_id`.

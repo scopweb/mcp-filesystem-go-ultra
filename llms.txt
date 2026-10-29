@@ -16,13 +16,17 @@ listed here, do not assume it.
   `.mcp-paths` / `--allowed-paths-file`, or `MCP_ALLOWED_PATHS` (environment or `.env`).
   Those sources are unioned. Other flags are opt-in. An explicit flag wins over
   `.env` and over `--preset`.
-- Discovery order: `list_allowed_directories` → `project_map` /
-  `directory_tree` → `help(tool:"X")` on demand. Do not dump the catalog.
+- Discovery order: `list_allowed_directories` → `project_map` → the
+  specific tool the task needs → `help(tool:"X")` only when a parameter is
+  missing. `directory_tree` only when the actual tree is needed. Do not
+  dump the catalog at startup.
 - Errors are a JSON envelope: `{"error":{"code","message","path","details",
   "suggestion","retryable","recovery"}}`. **Read `retryable` first.**
 - Success payloads of the schema-declared tools carry `structuredContent`
   (status, truncated, hashes, coverage). Prefer those fields over scraping
-  the text block.
+  the text block. `message` is only a summary of them: for `search_files`
+  and `list_allowed_directories` it is a short summary; for the rest it
+  repeats the text block.
 
 ## 2. Golden rules
 
@@ -107,6 +111,11 @@ listed here, do not assume it.
 6. After every mutation, verify: `get_file_info` / `list_directory` for
    existence and size, `read_file` when content matters, `git diff --stat`
    plus the real diff when the environment allows it.
+7. For large payloads, start the server with `--response-mode=structured`:
+   the body stays **once**, in `structuredContent`, and the text block
+   becomes a one-line summary that says where the body is. `compat`
+   (default) keeps the body in both channels — that is the compatibility
+   contract, not a bug.
 
 ## 4. Known caveats
 
@@ -118,6 +127,10 @@ listed here, do not assume it.
   a file another conversation read.
 - `diff_format` and `tolerant_whitespace` only exist on the tools that
   declare them (`edit_file`, `multi_edit`).
+- In `compat` mode the text block and `structuredContent` carry the same
+  body. `--response-mode=structured` keeps it once (see §3).
+- Directory listings print the absolute path once, as a header line; the
+  entry lines carry the name and the size only.
 - `project_map` never follows symlinks and never reveals paths hidden by the
   file-security policy; its counters describe **visited** entries only
   (`summary_scope: "visited_entries"`), not the whole repository. It honours
@@ -173,6 +186,14 @@ Other profiles add `git` (agent), and `analyze_code`, `analyze_operation`,
 `context_pack`, `workspace`, `json_query`, `file_bytes`, `file_hash`,
 `minify_js`, `batch_operations`, `project_replace`, `github_issues`,
 `gitlab_issues`, `wsl`, `server_info`, `copy_file` (ultra).
+
+- `git` — `status` returns the porcelain listing in the text block and the
+  repository state in `structuredContent`: `branch`, `upstream`, `ahead`,
+  `behind`, `staged`, `unstaged`, `untracked`, `conflicts`, `file_count`,
+  `summary`. The changed files stay in the text block, so the same file is
+  never sent twice. In `--compact-mode` the text block is the one-line
+  summary unless `output` is passed explicitly; `output:"full"` keeps the
+  complete porcelain body and prepends a readable summary line.
 
 Parameters are discovered with `help(tool:"X")`; enums, examples and the
 output contract come from there.
