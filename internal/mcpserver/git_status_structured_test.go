@@ -13,6 +13,55 @@ import (
 	"testing"
 )
 
+func TestGitStatus_TruncationPreservesCounters(t *testing.T) {
+	dir, engine := setupRepoWithFile(t)
+	defer engine.Close()
+	for _, name := range []string{"aaa.txt", "bbb.txt", "zzz.txt"} {
+		if err := os.WriteFile(dir+"/"+name, []byte("hi\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, compact := range []bool{false, true} {
+		engine.GetConfig().CompactMode = compact
+		for _, output := range []string{"name-only", "full"} {
+			for _, limit := range []float64{1, 100} {
+				res, err := gitStatus(context.Background(), engine, dir, map[string]interface{}{
+					"action": "status", "output": output, "max_lines": limit,
+				})
+				if err != nil || res.IsError {
+					t.Fatalf("status failed: %v %#v", err, res)
+				}
+				m := res.StructuredContent.(map[string]any)
+				truncated := limit == 1
+				if m["truncated"] != truncated || m["untracked"] != 3 || m["file_count"] != 3 {
+					t.Fatalf("output=%s limit=%v compact=%v: %#v", output, limit, compact, m)
+				}
+				text := mcpText(t, res)
+				if strings.Contains(text, "[TRUNCADO:") != truncated || strings.Contains(text, "zzz.txt") == truncated {
+					t.Fatalf("bound not respected: %s", text)
+				}
+				if truncated && m["continuation"] == nil {
+					t.Fatalf("missing recovery hint: %#v", m)
+				}
+			}
+		}
+	}
+}
+
+func TestGitStatus_AllUnmergedCodesCountAsConflicts(t *testing.T) {
+	for _, code := range []string{"DD", "AU", "UD", "UA", "DU", "AA", "UU", " M", "A ", "??"} {
+		t.Run(code, func(t *testing.T) {
+			m := gitStatusPayload("repo", "## main\n"+code+" file.txt\n")
+			want := 1
+			if code == " M" || code == "A " || code == "??" {
+				want = 0
+			}
+			if m["conflicts"] != want || m["file_count"] != 1 {
+				t.Fatalf("wrong conflict count for %q: %#v", code, m)
+			}
+		})
+	}
+}
 func TestGitStatus_StructuredPayload(t *testing.T) {
 	dir, engine := setupRepoWithFile(t)
 	defer engine.Close()

@@ -281,6 +281,71 @@ var modes = []struct {
 	{"compact+structured", []string{"--compact-mode", "--response-mode=structured"}, 25000},
 }
 
+// Compare actionable data using identical paths, arguments and file snapshots.
+// A smaller response is not sufficient: removing the data must fail this test.
+func TestResponseNoise_ModeParity(t *testing.T) {
+	exe := buildServer(t)
+	dir := fixtureDir(t, "p")
+	for _, compact := range []bool{false, true} {
+		flags := []string{"--profile=ultra", "--roots-mode=union"}
+		if compact {
+			flags = append(flags, "--compact-mode")
+		}
+		compat := startRaw(t, exe, append(append([]string{}, flags...), dir))
+		structured := startRaw(t, exe, append(append([]string{}, flags...), "--response-mode=structured", dir))
+		for _, tc := range []struct {
+			tool string
+			args map[string]any
+		}{
+			{"list_directory", map[string]any{"path": dir, "output_format": "lines", "max_nodes": 1}},
+			{"read_file", map[string]any{"path": filepath.Join(dir, "big.txt")}},
+			{"search_files", map[string]any{"path": dir, "pattern": "alpha", "include_content": true, "max_results": 1}},
+		} {
+			var baseline string
+			for i, client := range []*rawClient{compat, structured} {
+				_, env := client.rpc(t, "tools/call", map[string]any{"name": tc.tool, "arguments": tc.args})
+				res, _ := env["result"].(map[string]any)
+				if env["error"] != nil || res == nil || res["isError"] == true {
+					t.Fatalf("%s failed: %#v", tc.tool, env)
+				}
+				sc, _ := res["structuredContent"].(map[string]any)
+				if sc == nil {
+					t.Fatalf("%s missing structured data", tc.tool)
+				}
+				switch tc.tool {
+				case "list_directory":
+					rows, _ := sc["entries"].([]any)
+					if len(rows) != 1 {
+						t.Fatalf("census lost: %#v", sc)
+					}
+					row := rows[0].(map[string]any)
+					if row["lines"] != float64(60) || row["path"] == nil {
+						t.Fatalf("census row lost: %#v", row)
+					}
+				case "read_file":
+					if sc["content_hash"] == nil || !strings.Contains(fmt.Sprint(sc["content"]), "alpha line 60") {
+						t.Fatalf("read body/hash lost: %#v", sc)
+					}
+				case "search_files":
+					if sc["truncated"] != true || sc["continuation"] == nil {
+						t.Fatalf("search recovery lost: %#v", sc)
+					}
+				}
+				delete(sc, "message")
+				delete(sc, "presentation")
+				b, err := json.Marshal(sc)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if i == 0 {
+					baseline = string(b)
+				} else if string(b) != baseline {
+					t.Fatalf("%s compact=%v data changed across modes:\ncompat=%s\nstructured=%s", tc.tool, compact, baseline, b)
+				}
+			}
+		}
+	}
+}
 func TestResponseNoiseBudget(t *testing.T) {
 	exe := buildServer(t)
 

@@ -43,7 +43,7 @@ func registerGitTools(reg *toolRegistry) {
 		mcp.WithString("path", mcp.Description("Working directory or file path (default: auto-detect repo root). If a file path, used as implicit pathspec for diff/log/status.")),
 		mcp.WithArray("paths", mcp.WithStringItems(),
 			mcp.Description("Pathspec: native array of file/dir paths relative to repo root. Limits diff/log/status/add/restore to these paths. Equivalent to 'git <cmd> -- <paths>'. Rejected for commit: use add(paths) first, then commit without paths.")),
-		mcp.WithString("output", mcp.Description("Output format. diff/show: 'stat' (default) | 'name-only' | 'full'. status: 'name-only' | 'full' — in compact mode, status without explicit output returns a one-line summary; pass output explicitly (either value) to get the changed-file listing. status 'full' keeps the complete porcelain body and prepends a readable summary line. log: 'oneline' (default) | 'full'.")),
+		mcp.WithString("output", mcp.Description("Output format. diff/show: 'stat' (default) | 'name-only' | 'full'. status: 'name-only' | 'full' — in compact mode, status without explicit output returns a one-line summary; pass output explicitly (either value) to get the changed-file listing. status 'full' prepends a readable summary to porcelain v2; max_lines bounds the listing and truncated reports omissions. log: 'oneline' (default) | 'full'.")),
 		mcp.WithNumber("max_lines", mcp.Description("Max output lines before truncation with hint footer (default: 200)")),
 		mcp.WithNumber("limit", mcp.Description("log: max commits to return (default: 10)")),
 		mcp.WithString("rev", mcp.Description("Revision or range (e.g. 'HEAD~3', 'abc123..def456', 'main'). diff/log/show.")),
@@ -299,15 +299,20 @@ func gitStatus(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 		if verr != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("git status failed: %v\n%s", verr, v2Output)), nil
 		}
-		// The v2 body is complete but machine-shaped. A readable summary
-		// line in front of it costs one line and loses no information.
+		// Prepend a readable summary, then apply the same output bound
+		// as the v1 listing below.
 		text = gitStatusSummaryLine(repoRoot, v1Output) + "\n" + strings.TrimRight(v2Output, "\n")
 	default:
-		text = truncateOutput(v1Output, maxLines)
+		text = v1Output
 	}
 
+	boundedText := truncateOutput(text, maxLines)
 	payload := gitStatusPayload(repoRoot, v1Output)
-	return mcp.NewToolResultStructured(payload, text), nil
+	payload["truncated"] = boundedText != text
+	if boundedText != text {
+		payload["continuation"] = "Narrow paths or raise max_lines to retrieve the omitted status lines."
+	}
+	return mcp.NewToolResultStructured(payload, boundedText), nil
 }
 
 // gitStatusPathspec appends the pathspec separator and the paths to a git
@@ -345,7 +350,8 @@ func gitStatusPayload(repoRoot, porcelain string) map[string]any {
 		case "!!":
 			continue
 		default:
-			if strings.Contains(code, "U") {
+			switch code {
+			case "DD", "AU", "UD", "UA", "DU", "AA", "UU":
 				conflicts++
 			}
 			if code[0] != ' ' && code[0] != '?' {

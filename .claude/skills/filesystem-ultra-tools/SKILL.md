@@ -7,7 +7,7 @@ description: Tool catalog for filesystem-ultra MCP server v4.8.0. 34 tools ultra
 
 ## Canonical source and deployment
 
-Maintain this repository's `.claude/skills/filesystem-ultra-tools/SKILL.md` as the canonical source. OpenCode discovers the project skill directly. External client copies must be synchronized from this source and checked at release time; do not maintain independent catalogs. Restart the client after changing its configuration or installed skills. Enable one filesystem server per context; keep `ultra` for this repository's advanced development flow.
+Maintain this repository's `.claude/skills/filesystem-ultra-tools/SKILL.md` as the canonical source. OpenCode discovers the project skill directly. External client copies must be synchronized from this source and checked at release time; do not maintain independent catalogs. Copies under `.claude/worktrees/` belong to their own branch snapshots, not to the active skill catalog. Update them by integrating the canonical changes in that branch; never overwrite staged or unrelated work to synchronize a skill. Restart the client after changing its configuration or installed skills. Enable one filesystem server per context; keep `ultra` for this repository's advanced development flow.
 
 `llms.txt` (repository root) is the agent-first companion: the guarantees the server actually keeps (OCC, `apply_patch`, CRLF dry-run artefacts, backups, paths, `retryable`) and the strict inventory, for pasting into a system prompt.
 
@@ -105,10 +105,10 @@ Full limits and evaluator cancellation semantics: https://filesystem.scopweb.com
 
 Use the `git` tool, never shell `git` or `git grep`. `help(tool:"git")` is the live schema. A file security policy blocks git. Path must be inside a repo, or use `init`.
 
-Actions: `status`, `diff`, `review`, `log`, `show`, `add`, `commit`, `push`, `fetch`, `restore`, `branch`, `init`, `remote`.
+Actions: `status`, `diff`, `review`, `log`, `show`, `add`, `commit`, `push`, `fetch`, `pull`, `restore`, `branch`, `init`, `remote`, `stash`.
 
 - `status` returns the porcelain listing in the text block and the repository state in `structuredContent`: `branch`, `upstream`, `ahead`, `behind`, `staged`, `unstaged`, `untracked`, `conflicts`, `file_count`, `summary`. The changed files stay in the text block, so the same file is never sent twice.
-- In `--compact-mode`, `status` without an explicit `output` is one line (`repo (branch) | +1 ~2 ?3 | dirty`). Pass `output:"name-only"` or `"full"` for the file list; `output:"full"` keeps the complete porcelain body and prepends a readable summary line.
+- In `--compact-mode`, `status` without an explicit `output` is one line (`repo (branch) | +1 ~2 ?3 | dirty`). Pass `output:"name-only"` or `"full"` for the file list; `output:"full"` prepends a readable summary to porcelain v2. Both explicit formats honor `max_lines`; `truncated:true` and `continuation` report omitted lines and how to recover them. Counters describe the full requested scope.
 - `diff` defaults to `stat`. `output:"full"` is the patch (porcelain v2 is normal, not a failure). `paths` is the pathspec. `staged:true` is `--cached`.
 - `review` always pages. Continue with `offset` plus `expected_status_hash`. A mismatch is `STALE_GIT` and returns no diff body.
 - `add` with `update:true` is `git add -u` (tracked files only; it does not stage untracked paths such as `.agent/`).
@@ -142,7 +142,7 @@ Every result carries the same information twice: the **text block** (readable fa
 
 Nothing needed to act is dropped in either mode: `content_hash`, `error` (with `retryable`), `continuation`, `truncated` and `backup_id` / `parent_backup_id` are always in structuredContent.
 
-Directory listings print the absolute path **once**, as a header line; the entry lines carry the name and the size only.
+Compact directory listings print the absolute path **once**, as a header line; the entry lines carry the name and the size only. `output_format:"lines"` preserves census rows as `entries[]` with `path` and `lines` (newline count) in both response modes; `entry_count`, `truncated` and recovery hints remain available.
 
 ## search_files aliases
 

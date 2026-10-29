@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+### fix(response): preserve census data and bound Git status
+
+- `list_directory(output_format:"lines")` now carries census rows in
+  `entries[]` (`path`, `lines`) in both response modes. Previously, structured
+  mode replaced the only census body with a summary claiming zero entries.
+  For a file with two newlines, the response now retains `{path, lines:2}`.
+- `git status` honors `max_lines` for both explicit formats, reports
+  `truncated:true` when lines are omitted, and includes a recovery hint.
+  Full-scope counters survive truncation. Conflicts include `AA` and `DD`.
+- Regression tests cover census rows, zero-newline files, single-file input,
+  capped results, both response modes and compact mode; Git tests cover
+  output bounds and all seven unmerged codes. The stdio noise suite now
+  compares actionable read/search/census data with identical inputs across
+  modes, rather than relying on response size alone.
+- Help discovery follows roots → project_map → specific tools. Worktree
+  skill copies are branch snapshots; the active project skill is canonical.
+
+Verification: core tests (cached), server tests, real-stdio noise tests and
+`go build ./...` passed on Windows. No OCC, path-security, backup or strict
+profile inventory changes.
+
 ### feat(response): one body, two channels — and a real `--response-mode=structured`
 
 The payload of a tool call carried the same information twice: the text
@@ -25,21 +46,24 @@ without touching the OCC, path-security or backup guarantees.
   the porcelain listing — the changed files are not duplicated — while
   `structuredContent` adds `branch`, `upstream`, `ahead`, `behind`,
   `staged`, `unstaged`, `untracked`, `conflicts`, `file_count` and a
-  `summary` line. `output:"full"` keeps the complete porcelain v2 body and
-  prepends a readable summary line.
+  `summary` line. `output:"full"` prepends a readable summary to porcelain v2;
+  `max_lines` bounds the result, with explicit truncation/recovery metadata.
 
-Measured over a fixed fixture (`tests/noise`), same calls and same arguments:
+Remeasured on 2026-10-29 over a fixed fixture (`tests/noise`), same calls
+and equivalent inputs (equal-length fixture paths). Percentages below compare
+modes against default compat in the same build, not revisions:
 
 | server flags | wire payload |
 |---|---|
 | default (compat) | 31 156 B |
-| `--compact-mode` | 31 316 B |
+| `--compact-mode` | 29 316 B |
 | `--response-mode=structured` | 22 645 B (-27 %) |
 | `--compact-mode --response-mode=structured` | 22 079 B (-29 %) |
 
-Before this change the same scenario cost 33 377 B in compat mode; the
-listing fix alone removes 3 226 B of it. `tests/noise` keeps the numbers
-under a budget so the duplication cannot grow back unnoticed.
+These fixes leave the original scenario sizes unchanged. `tests/noise`
+keeps the numbers under a budget and separately checks data parity using
+identical paths and arguments. Revision-to-revision savings are not measured
+by this table.
 
 Nothing needed to act is dropped: `content_hash`, `error` (with `retryable`),
 `continuation`, `truncated` and `backup_id` / `parent_backup_id` stay in

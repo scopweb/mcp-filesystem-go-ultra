@@ -145,6 +145,8 @@ Orientation and discovery
   include_policy).
 - `directory_tree` — recursive compact tree (gitignore-aware).
 - `list_directory` — one directory (compact/json/tree/sizes/lines).
+  `lines` keeps census rows in `entries[]` (`path`, `lines` = newline count)
+  in both response modes, with `entry_count` and truncation/recovery metadata.
 - `search_files` — find by name or content (paginated, capped).
   - Omitted `include_content` searches **content**; a filename glob stays
     names-only; explicit `include_content:false` is names-only. An empty
@@ -193,7 +195,9 @@ Other profiles add `git` (agent), and `analyze_code`, `analyze_operation`,
   `summary`. The changed files stay in the text block, so the same file is
   never sent twice. In `--compact-mode` the text block is the one-line
   summary unless `output` is passed explicitly; `output:"full"` keeps the
-  complete porcelain body and prepends a readable summary line.
+  porcelain v2 listing with a readable summary. Both explicit formats honor
+  `max_lines`; `truncated:true` and `continuation` report omitted lines and
+  how to recover them. Counters describe the full requested scope.
 
 Parameters are discovered with `help(tool:"X")`; enums, examples and the
 output contract come from there.

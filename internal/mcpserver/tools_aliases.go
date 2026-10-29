@@ -473,7 +473,7 @@ func renderToolCatalog(reg *toolRegistry, detail string) (string, map[string]any
 func registerHelpTool(reg *toolRegistry) {
 	helpTool := mcp.NewTool("help",
 		mcp.WithTitleAnnotation("Server Help"),
-		mcp.WithDescription("Returns tool catalog or per-tool signature. First call list_allowed_directories. Then directory_tree or help(tool:\"X\") on demand. help() lists registered tools; do not dump the catalog at startup."),
+		mcp.WithDescription("Returns tool catalog or per-tool signature. First call list_allowed_directories. Then project_map for orientation, then the specific tool. Use help(tool:\"X\") only when a parameter is missing. help() lists registered tools; do not dump the catalog at startup."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),

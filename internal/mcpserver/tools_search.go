@@ -80,6 +80,7 @@ func registerSearchTools(reg *toolRegistry) {
 		hiddenCount := 0
 		treeTruncated := false
 		var trEntries []core.TreeEntry
+		var censusEntries []core.LineCountEntry
 		switch outputFormat {
 		case "json":
 			listing, err = engine.ListDirectoryJSON(ctx, path)
@@ -107,6 +108,7 @@ func registerSearchTools(reg *toolRegistry) {
 			})
 			listing, err = census.Text, censusErr
 			treeTruncated = census.Truncated
+			censusEntries = census.Entries
 		default: // "" / "compact" / "text" — current behaviour
 			listing, err = engine.ListDirectoryContent(ctx, path)
 		}
@@ -129,6 +131,12 @@ func registerSearchTools(reg *toolRegistry) {
 				if p, ents, tr, ok := parseListJSON(raw); ok {
 					jsonPath, entries, truncated = p, ents, truncated || tr
 				}
+			}
+		}
+		if format == "lines" {
+			entries = make([]map[string]any, 0, len(censusEntries))
+			for _, entry := range censusEntries {
+				entries = append(entries, map[string]any{"path": entry.Path, "lines": entry.Lines})
 			}
 		}
 		isTree := outputFormat == "tree" || request.Params.Name == "directory_tree"

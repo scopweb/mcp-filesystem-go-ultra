@@ -108,6 +108,64 @@ func TestReadFile_CompatKeepsTextBody(t *testing.T) {
 // once, in structuredContent. compat keeps the historical text fallback.
 // -----------------------------------------------------------------------------
 
+func TestLineCensus_ResponseModesPreserveRows(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{"alpha.txt": "one\ntwo\n", "beta.txt": "no newline"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, mode := range []string{core.ResponseModeCompat, core.ResponseModeStructured} {
+		for _, compact := range []bool{false, true} {
+			reg := newHelpTestRegistry(t, dir)
+			reg.engine.GetConfig().ResponseMode = mode
+			reg.engine.GetConfig().CompactMode = compact
+			for _, tc := range []struct {
+				path      string
+				limit     float64
+				count     int
+				truncated bool
+			}{
+				{dir, 20, 2, false},
+				{dir, 1, 1, true},
+				{filepath.Join(dir, "alpha.txt"), 20, 1, false},
+			} {
+				res := callPatchTool(t, reg, "list_directory", map[string]any{
+					"path": tc.path, "output_format": "lines", "max_nodes": tc.limit,
+				})
+				if res.IsError {
+					t.Fatal(resultText(t, res))
+				}
+				m := res.StructuredContent.(map[string]any)
+				rows, _ := m["entries"].([]map[string]any)
+				if len(rows) != tc.count || m["entry_count"] != tc.count || m["truncated"] != tc.truncated {
+					t.Fatalf("mode=%s compact=%v: census metadata lost: %#v", mode, compact, m)
+				}
+				if m["status"] == "empty" || (tc.truncated && m["continuation"] == nil) {
+					t.Fatalf("invalid census state: %#v", m)
+				}
+				for _, row := range rows {
+					p, _ := row["path"].(string)
+					want := 0
+					switch filepath.Base(p) {
+					case "alpha.txt":
+						want = 2
+					case "beta.txt":
+					default:
+						t.Fatalf("unexpected census path: %#v", row)
+					}
+					if row["lines"] != want {
+						t.Fatalf("newline count lost: %#v", row)
+					}
+				}
+				text := resultText(t, res)
+				if strings.Contains(text, "2 "+core.NormalizePath(filepath.Join(dir, "alpha.txt"))) != (mode == core.ResponseModeCompat) {
+					t.Fatalf("mode=%s: wrong census fallback: %s", mode, text)
+				}
+			}
+		}
+	}
+}
 func TestListDirectory_StructuredModeKeepsListingOnce(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"alpha.txt", "beta.txt"} {

@@ -114,7 +114,7 @@ var listDirectoryOutputSchema = json.RawMessage(`{
     "truncated": {"type": "boolean"},
     "hidden_count": {"type": "integer", "description": "Entries skipped by gitignore/exclude (tree). Explicit on directory_tree."},
     "format": {"type": "string", "description": "compact | json | tree | sizes | lines"},
-    "entries": {"type": "array", "description": "Directory entries {name, type, size, modified} when available", "items": {"type": "object"}},
+    "entries": {"type": "array", "description": "Directory entries {name, type, size, modified} when available; output_format=lines returns census rows {path, lines} (newline counts)", "items": {"type": "object"}},
     "entry_count": {"type": "integer"},
     "continuation": {"type": "string"},
     "message": {"type": "string", "description": "Human-readable listing, identical to the text content block"},

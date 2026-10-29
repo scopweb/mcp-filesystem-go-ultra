@@ -24,11 +24,18 @@ type LineCountOpts struct {
 	RespectIgnore bool
 }
 
+// LineCountEntry preserves a census row for structured clients.
+type LineCountEntry struct {
+	Path  string
+	Lines int
+}
+
 // LineCensus is a wc -l substitute: newline counts, sorted by path.
 type LineCensus struct {
 	Text      string
 	Truncated bool
 	Counted   int
+	Entries   []LineCountEntry
 }
 
 // ListLineCounts walks path and counts newlines per text file.
@@ -137,20 +144,22 @@ func (e *UltraFastEngine) ListLineCounts(ctx context.Context, path string, opts 
 		if nerr != nil {
 			return LineCensus{}, nerr
 		}
-		return LineCensus{Text: fmt.Sprintf("%d %s\n", n, path), Counted: 1}, nil
+		return LineCensus{Text: fmt.Sprintf("%d %s\n", n, path), Counted: 1, Entries: []LineCountEntry{{Path: path, Lines: n}}}, nil
 	}
 	if err := walk(path, 1); err != nil {
 		return LineCensus{}, err
 	}
 	sort.Slice(hits, func(i, j int) bool { return hits[i].path < hits[j].path })
 	var b strings.Builder
+	entries := make([]LineCountEntry, 0, len(hits))
 	for _, h := range hits {
 		fmt.Fprintf(&b, "%d %s\n", h.lines, h.path)
+		entries = append(entries, LineCountEntry{Path: h.path, Lines: h.lines})
 	}
 	if truncated {
 		b.WriteString("truncated. Narrow include or raise max_nodes. Do not find/wc.\n")
 	}
-	return LineCensus{Text: b.String(), Truncated: truncated, Counted: len(hits)}, nil
+	return LineCensus{Text: b.String(), Truncated: truncated, Counted: len(hits), Entries: entries}, nil
 }
 
 func matchExclude(name, full string, exclude []string) bool {
