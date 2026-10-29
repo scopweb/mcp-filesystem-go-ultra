@@ -64,7 +64,7 @@ func DefaultConfiguration() *Configuration {
 // Subagents do not inherit the skill; these lines are the portable contract.
 // Never dump the full catalog here.
 const serverInstructions = `MCP Filesystem Ultra operates on the real host filesystem (C:\, D:\, /mnt/...). Runtime-native tools may target a different sandbox.
-First call list_allowed_directories, then project_map for orientation.
+First call list_allowed_directories, then project_map for orientation, then the specific tool the task needs.
 Do not use native Read/Edit/Write/Glob for host paths. Prefer these tools over bash cat/head/tail/cut/ls/grep/find/wc/stat. Line census: list_directory output_format=lines. $HOME/mnt is a sandbox path; use the Windows path from list_allowed_directories.
 Host files = read_file, search_files, edit_file, write_file. Native Read/Edit/Write/Grep = error. Do not switch families.
 Pass content_hash from read_file as expected_hash on the next mutation. On failure the envelope has path and retryable. retryable:false means stop; do not retry or use native tools.
@@ -73,7 +73,8 @@ Subagent: request a handoff (path + content_hash). Do not assume the parent sess
 help(tool:X) on demand. Do not load the full catalog at startup.
 Minimum config is allowed paths (positional, --allowed-paths, .mcp-paths, or MCP_ALLOWED_PATHS). Other flags are opt-in.
 Client Roots are added to that list. --roots-mode=replace keeps only the client list.
-Undo cursors use canonical path identity; Windows case variants and 8.3 aliases share the undo chain.`
+Undo cursors use canonical path identity; Windows case variants and 8.3 aliases share the undo chain.
+Prefer structuredContent (entries, matches, content, content_hash). In compat mode the text block repeats the body; --response-mode=structured keeps it once.`
 
 // serverVersion is the single source of truth for the version reported by
 // --version, the MCP handshake, the help header and the startup logs.

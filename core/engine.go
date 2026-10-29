@@ -1117,21 +1117,25 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 			}
 		}
 
+		// The directory path is printed once, as a header. Repeating it on
+		// every entry line doubled the size of a large listing without
+		// adding any information: the path is also in structuredContent.
+		result.WriteString(fmt.Sprintf("%s\n", path))
+
 		for _, entry := range entries {
 			name := e.annotateName(entry.name, entry.level)
 			if entry.isDir {
-				result.WriteString(fmt.Sprintf("DIR  %s/", name))
+				result.WriteString(fmt.Sprintf("DIR  %s/\n", name))
 			} else if entry.level >= LevelProtected {
-				result.WriteString(fmt.Sprintf("FILE %s", name))
+				result.WriteString(fmt.Sprintf("FILE %s\n", name))
 			} else if info, infoErr := entry.entry.Info(); infoErr == nil {
-				result.WriteString(fmt.Sprintf("FILE %s %s", name, formatSize(info.Size())))
+				result.WriteString(fmt.Sprintf("FILE %s %s\n", name, formatSize(info.Size())))
 			} else {
-				result.WriteString(fmt.Sprintf("FILE %s", name))
+				result.WriteString(fmt.Sprintf("FILE %s\n", name))
 			}
-			result.WriteString(fmt.Sprintf(" | %s\n", path))
 		}
 
-		result.WriteString(fmt.Sprintf("--- | %d dirs, %d files | %s", totalDirs, totalFiles, path))
+		result.WriteString(fmt.Sprintf("--- | %d dirs, %d files", totalDirs, totalFiles))
 	}
 
 	responseText := result.String()

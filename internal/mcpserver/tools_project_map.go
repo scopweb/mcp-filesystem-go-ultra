@@ -120,6 +120,11 @@ func projectMap(ctx context.Context, reg *toolRegistry, args map[string]interfac
 	payload := projectMapPayload(reg, path, result, detail, includePolicy)
 	text := projectMapText(engine, path, result)
 	payload["message"] = text
+	// --response-mode=structured keeps the skeleton once, in
+	// structuredContent.structure/.summary; the text block becomes a brief
+	// summary of the same walk.
+	summary := projectMapSummary(path, result.Summary.VisitedFiles, result.Summary.VisitedDirs, result.Limits.VisitedEntries)
+	payload, text = finishBody(engine, payload, text, summary)
 	return mcp.NewToolResultStructured(payload, text), nil
 }
 

@@ -102,3 +102,123 @@ func TestReadFile_CompatKeepsTextBody(t *testing.T) {
 		t.Fatalf("compat dropped body: %s", resultText(t, res))
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Listing, search and project map: --response-mode=structured keeps the body
+// once, in structuredContent. compat keeps the historical text fallback.
+// -----------------------------------------------------------------------------
+
+func TestListDirectory_StructuredModeKeepsListingOnce(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"alpha.txt", "beta.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("body\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reg := newHelpTestRegistry(t, dir)
+	reg.engine.GetConfig().ResponseMode = core.ResponseModeStructured
+	res := callPatchTool(t, reg, "list_directory", map[string]any{"path": dir})
+	if res.IsError {
+		t.Fatal(resultText(t, res))
+	}
+	text := resultText(t, res)
+	if strings.Contains(text, "alpha.txt") || strings.Contains(text, "beta.txt") {
+		t.Fatalf("text fallback repeated the listing:\n%s", text)
+	}
+	if !strings.Contains(text, "structuredContent") || !strings.Contains(text, "--response-mode=compat") {
+		t.Fatalf("summary does not point at the body and the fallback: %s", text)
+	}
+	m, _ := res.StructuredContent.(map[string]any)
+	if m["presentation"] != core.ResponseModeStructured {
+		t.Fatalf("presentation not marked: %#v", m)
+	}
+	entries, _ := m["entries"].([]map[string]any)
+	if len(entries) != 2 {
+		t.Fatalf("entries lost: %#v", m["entries"])
+	}
+	// The invariant "message == text content block" must hold in every mode.
+	if msg, _ := m["message"].(string); msg != text {
+		t.Fatalf("message != text block:\nmessage: %q\ntext: %q", msg, text)
+	}
+}
+
+func TestListDirectory_CompatKeepsListingText(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "alpha.txt"), []byte("body\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	reg := newHelpTestRegistry(t, dir)
+	res := callPatchTool(t, reg, "list_directory", map[string]any{"path": dir})
+	if res.IsError {
+		t.Fatal(resultText(t, res))
+	}
+	if !strings.Contains(resultText(t, res), "alpha.txt") {
+		t.Fatalf("compat dropped the listing: %s", resultText(t, res))
+	}
+	m, _ := res.StructuredContent.(map[string]any)
+	if msg, _ := m["message"].(string); msg != resultText(t, res) {
+		t.Fatalf("message != text block in compat mode")
+	}
+}
+
+func TestSearchFiles_StructuredModeKeepsHitsOnce(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "alpha.txt"), []byte("needle here\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	reg := newHelpTestRegistry(t, dir)
+	reg.engine.GetConfig().ResponseMode = core.ResponseModeStructured
+	res := callPatchTool(t, reg, "search_files", map[string]any{
+		"path": dir, "pattern": "needle", "include_content": true,
+	})
+	if res.IsError {
+		t.Fatal(resultText(t, res))
+	}
+	text := resultText(t, res)
+	if strings.Contains(text, "needle here") {
+		t.Fatalf("text fallback repeated the hits:\n%s", text)
+	}
+	m, _ := res.StructuredContent.(map[string]any)
+	matches, _ := m["matches"].([]map[string]any)
+	if len(matches) == 0 {
+		t.Fatalf("hits lost: %#v", m)
+	}
+}
+
+// projectMapHasStructure accepts the two shapes the skeleton can take in a
+// structured payload: the typed entries and the plain maps.
+func projectMapHasStructure(v any) bool {
+	switch s := v.(type) {
+	case []core.ProjectMapEntry:
+		return len(s) > 0
+	case []map[string]any:
+		return len(s) > 0
+	case []any:
+		return len(s) > 0
+	}
+	return false
+}
+
+func TestProjectMap_StructuredModeKeepsSkeletonOnce(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "alpha.txt"), []byte("body\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	reg := newHelpTestRegistry(t, dir)
+	reg.engine.GetConfig().ResponseMode = core.ResponseModeStructured
+	res := callPatchTool(t, reg, "project_map", map[string]any{"path": dir})
+	if res.IsError {
+		t.Fatal(resultText(t, res))
+	}
+	text := resultText(t, res)
+	if strings.Contains(text, "alpha.txt") {
+		t.Fatalf("text fallback repeated the skeleton:\n%s", text)
+	}
+	m, _ := res.StructuredContent.(map[string]any)
+	if !projectMapHasStructure(m["structure"]) {
+		t.Fatalf("skeleton lost: %#v", m)
+	}
+}

@@ -143,6 +143,9 @@ func registerSearchTools(reg *toolRegistry) {
 		if engine.IsCompactMode() && detail != detailNormal && len(text) > 2000 {
 			text = text[:2000] + "\n…"
 		}
+		// --response-mode=structured keeps the listing once, in
+		// structuredContent.entries; the text block becomes a brief summary.
+		sc, text = finishBody(engine, sc, text, listingSummary(jsonPath, len(entries), truncated))
 		return mcp.NewToolResultStructured(sc, text), nil
 	})
 	reg.addTool(listDirTool, reg.listDirHandler)
@@ -364,6 +367,10 @@ func registerSearchTools(reg *toolRegistry) {
 		sc := searchStructuredFromOutcome(out, scope, extraTrunc)
 		text := out.Text
 		sc, text = applySearchDetail(sc, text, detail)
+		// --response-mode=structured keeps the hits once, in
+		// structuredContent.matches; the text block becomes a brief summary.
+		msg, _ := sc["message"].(string)
+		sc, text = finishBody(engine, sc, text, searchBodySummary(msg))
 		return mcp.NewToolResultStructured(sc, text), nil
 	})
 	reg.addTool(searchFilesTool, reg.searchFilesHandler)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -20,6 +21,7 @@ func registerGitTools(reg *toolRegistry) {
 	gitActions := []string{"status", "diff", "log", "show", "add", "commit", "restore", "branch", "init", "remote", "review", "stash"}
 	gitDesc := "git — Git operations: status, diff, review, log, show, add, commit, restore, branch, init, remote, stash. " +
 		"stash is local (list/show/push/apply/drop/pop). pull requires --git-network and is fast-forward only. " +
+		"status returns the porcelain listing in the text block and the repository state (branch, upstream, ahead/behind, change counters) in structuredContent. " +
 		"Must be run from within a git repository. Related: analyze_operation, edit_file, help."
 	actionHelp := `git(action:"status")  // or: diff, log, show, add, commit, restore, branch, init, remote, stash`
 	if gitNetwork {
@@ -41,7 +43,7 @@ func registerGitTools(reg *toolRegistry) {
 		mcp.WithString("path", mcp.Description("Working directory or file path (default: auto-detect repo root). If a file path, used as implicit pathspec for diff/log/status.")),
 		mcp.WithArray("paths", mcp.WithStringItems(),
 			mcp.Description("Pathspec: native array of file/dir paths relative to repo root. Limits diff/log/status/add/restore to these paths. Equivalent to 'git <cmd> -- <paths>'. Rejected for commit: use add(paths) first, then commit without paths.")),
-		mcp.WithString("output", mcp.Description("Output format. diff/show: 'stat' (default) | 'name-only' | 'full'. status: 'name-only' | 'full' — in compact mode, status without explicit output returns a one-line summary; pass output explicitly (either value) to get the changed-file listing. log: 'oneline' (default) | 'full'.")),
+		mcp.WithString("output", mcp.Description("Output format. diff/show: 'stat' (default) | 'name-only' | 'full'. status: 'name-only' | 'full' — in compact mode, status without explicit output returns a one-line summary; pass output explicitly (either value) to get the changed-file listing. status 'full' keeps the complete porcelain body and prepends a readable summary line. log: 'oneline' (default) | 'full'.")),
 		mcp.WithNumber("max_lines", mcp.Description("Max output lines before truncation with hint footer (default: 200)")),
 		mcp.WithNumber("limit", mcp.Description("log: max commits to return (default: 10)")),
 		mcp.WithString("rev", mcp.Description("Revision or range (e.g. 'HEAD~3', 'abc123..def456', 'main'). diff/log/show.")),
@@ -276,30 +278,153 @@ func gitStatus(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 		return errRes, nil
 	}
 
-	cmdArgs := []string{"status", "--porcelain=v1", "-b"}
-	if output == "full" {
-		cmdArgs = []string{"status", "--porcelain=v2", "-b"}
-	}
-	if len(paths) > 0 {
-		cmdArgs = append(cmdArgs, "--")
-		for _, p := range paths {
-			cmdArgs = append(cmdArgs, core.NormalizePath(p))
-		}
-	}
+	// The porcelain v1 form is always read: it feeds the structured
+	// payload and the one-line summary, whatever `output` asks for.
+	v1Args := []string{"status", "--porcelain=v1", "-b"}
+	v1Args = append(v1Args, gitStatusPathspec(paths)...)
 
-	gitOutput, werr := execGitCommandCtx(ctx, repoRoot, "git", cmdArgs...)
+	v1Output, werr := execGitCommandCtx(ctx, repoRoot, "git", v1Args...)
 	if werr != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("git status failed: %v\n%s", werr, gitOutput)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("git status failed: %v\n%s", werr, v1Output)), nil
 	}
 
-	if engine.IsCompactMode() && !outputExplicit {
-		return gitStatusCompact(repoRoot, gitOutput)
+	var text string
+	switch {
+	case engine.IsCompactMode() && !outputExplicit:
+		text = gitStatusSummaryLine(repoRoot, v1Output)
+	case output == "full":
+		v2Args := []string{"status", "--porcelain=v2", "-b"}
+		v2Args = append(v2Args, gitStatusPathspec(paths)...)
+		v2Output, verr := execGitCommandCtx(ctx, repoRoot, "git", v2Args...)
+		if verr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("git status failed: %v\n%s", verr, v2Output)), nil
+		}
+		// The v2 body is complete but machine-shaped. A readable summary
+		// line in front of it costs one line and loses no information.
+		text = gitStatusSummaryLine(repoRoot, v1Output) + "\n" + strings.TrimRight(v2Output, "\n")
+	default:
+		text = truncateOutput(v1Output, maxLines)
 	}
-	return mcp.NewToolResultText(truncateOutput(gitOutput, maxLines)), nil
+
+	payload := gitStatusPayload(repoRoot, v1Output)
+	return mcp.NewToolResultStructured(payload, text), nil
+}
+
+// gitStatusPathspec appends the pathspec separator and the paths to a git
+// command, so status/diff/log only report the requested scope.
+func gitStatusPathspec(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := []string{"--"}
+	for _, p := range paths {
+		out = append(out, core.NormalizePath(p))
+	}
+	return out
+}
+
+// gitStatusPayload is the structured view of a git status: branch, upstream,
+// ahead/behind and the change counters. The changed files stay in the text
+// block, in the porcelain listing, so the same file is never sent twice; the
+// payload only adds the state a client would otherwise have to parse out of
+// the porcelain header.
+func gitStatusPayload(repoRoot, porcelain string) map[string]any {
+	branch, upstream, ahead, behind := parseGitBranchLine(porcelain)
+	staged, unstaged, untracked, conflicts, files := 0, 0, 0, 0, 0
+	for _, line := range strings.Split(porcelain, "\n") {
+		if line == "" || strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "# ") {
+			continue
+		}
+		if len(line) < 4 {
+			continue
+		}
+		code := line[:2]
+		switch code {
+		case "??":
+			untracked++
+		case "!!":
+			continue
+		default:
+			if strings.Contains(code, "U") {
+				conflicts++
+			}
+			if code[0] != ' ' && code[0] != '?' {
+				staged++
+			}
+			if code[1] != ' ' && code[1] != '?' {
+				unstaged++
+			}
+		}
+		files++
+	}
+	return map[string]any{
+		"action":     "status",
+		"branch":     branch,
+		"upstream":   upstream,
+		"ahead":      ahead,
+		"behind":     behind,
+		"staged":     staged,
+		"unstaged":   unstaged,
+		"untracked":  untracked,
+		"conflicts":  conflicts,
+		"file_count": files,
+		"truncated":  false,
+		"summary":    gitStatusSummaryLine(repoRoot, porcelain),
+	}
+}
+
+// parseGitBranchLine reads the porcelain v1 branch line
+// ("## main...origin/main [ahead 1, behind 2]") and returns the branch, its
+// upstream and the ahead/behind counters.
+func parseGitBranchLine(porcelain string) (branch, upstream string, ahead, behind int) {
+	for _, line := range strings.Split(porcelain, "\n") {
+		if !strings.HasPrefix(line, "## ") {
+			continue
+		}
+		state := strings.TrimSpace(strings.TrimPrefix(line, "## "))
+		switch {
+		case strings.HasPrefix(state, "No commits yet on "):
+			return strings.TrimPrefix(state, "No commits yet on "), "", 0, 0
+		case strings.HasPrefix(state, "Initial commit on "):
+			return strings.TrimPrefix(state, "Initial commit on "), "", 0, 0
+		}
+		name := state
+		if i := strings.Index(state, "..."); i > 0 {
+			name = state[:i]
+			rest := state[i+3:]
+			if j := strings.Index(rest, " ["); j >= 0 {
+				rest = rest[:j]
+			}
+			upstream = strings.TrimSpace(rest)
+		}
+		if i := strings.Index(state, "["); i >= 0 {
+			inner := state[i+1:]
+			if j := strings.Index(inner, "]"); j >= 0 {
+				inner = inner[:j]
+			}
+			for _, part := range strings.Split(inner, ",") {
+				part = strings.TrimSpace(part)
+				switch {
+				case strings.HasPrefix(part, "ahead "):
+					ahead, _ = strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(part, "ahead ")))
+				case strings.HasPrefix(part, "behind "):
+					behind, _ = strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(part, "behind ")))
+				}
+			}
+		}
+		return strings.TrimSpace(name), upstream, ahead, behind
+	}
+	return "", "", 0, 0
 }
 
 // gitStatusCompact returns a compact one-line status summary
 func gitStatusCompact(repoRoot, output string) (*mcp.CallToolResult, error) {
+	return mcp.NewToolResultText(gitStatusSummaryLine(repoRoot, output)), nil
+}
+
+// gitStatusSummaryLine is the one-line status summary:
+// "repo (branch) | +staged ~unstaged ?untracked | clean|dirty".
+func gitStatusSummaryLine(repoRoot, output string) string {
 	lines := strings.Split(output, "\n")
 
 	currentBranch, upstream := "", ""
@@ -386,8 +511,8 @@ func gitStatusCompact(repoRoot, output string) (*mcp.CallToolResult, error) {
 		status = "dirty"
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf("%s (%s) | +%d ~%d ?%d | %s",
-		repoName, currentBranch, stagedCount, unstagedCount, untrackedCount, status)), nil
+	return fmt.Sprintf("%s (%s) | +%d ~%d ?%d | %s",
+		repoName, currentBranch, stagedCount, unstagedCount, untrackedCount, status)
 }
 
 // diffGuardrailThreshold is the file-count above which output:"full" without

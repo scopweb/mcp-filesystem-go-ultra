@@ -100,7 +100,8 @@ var searchFilesOutputSchema = json.RawMessage(`{
     "matches": {"type": "array", "description": "Structured hits {path, line, text}; context requests also include context (text lines) and aligned context_line_numbers. Empty on filename-only/count_only when not parseable as line hits.", "items": {"type": "object"}},
     "scope": {"type": "object", "description": "Path/pattern/filters actually used"},
     "continuation": {"type": "object", "description": "When truncated: next page of the same path/pattern. next_offset and max_results are integers. hint is the readable instruction. Never means retry the same mutation.", "properties": {"next_offset": {"type": "integer"}, "max_results": {"type": "integer"}, "hint": {"type": "string"}}},
-    "message": {"type": "string", "description": "Brief summary of match_count and scope. Not a copy of matches or of the text content block."}
+    "message": {"type": "string", "description": "Brief summary of match_count and scope. Not a copy of matches or of the text content block."},
+    "presentation": {"type": "string", "description": "structured when the server runs with --response-mode=structured: the hits stay once, in matches, and the text block is a brief summary"}
   },
   "required": ["status", "match_count", "truncated", "hidden_count", "message"]
 }`)
@@ -116,7 +117,8 @@ var listDirectoryOutputSchema = json.RawMessage(`{
     "entries": {"type": "array", "description": "Directory entries {name, type, size, modified} when available", "items": {"type": "object"}},
     "entry_count": {"type": "integer"},
     "continuation": {"type": "string"},
-    "message": {"type": "string", "description": "Human-readable listing, identical to the text content block"}
+    "message": {"type": "string", "description": "Human-readable listing, identical to the text content block"},
+    "presentation": {"type": "string", "description": "structured when the server runs with --response-mode=structured: the listing stays once, in entries, and the text block is a brief summary"}
   },
   "required": ["path", "status", "truncated", "message"]
 }`)
@@ -336,7 +338,8 @@ var projectMapOutputSchema = json.RawMessage(`{
     "structure": {"type": "array", "description": "Pre-order skeleton {path, type, children, notable}. Directories carry a trailing slash. detail=summary: the top level only. detail=normal: directories only (the cheap orientation). detail=full: directories and files.", "items": {"type": "object"}},
     "policy": {"type": "object", "description": "Public policy facts only (profile, roots_mode, auto_occ, readonly, notes). Never policy patterns or protected paths. Absent when include_policy is false."},
     "warnings": {"type": "array", "description": "Non-fatal notes: truncation cause, unreadable directories, clamped depth", "items": {"type": "string"}},
-    "message": {"type": "string", "description": "Brief summary, identical to the text content block"}
+    "message": {"type": "string", "description": "Brief summary, identical to the text content block"},
+    "presentation": {"type": "string", "description": "structured when the server runs with --response-mode=structured: the skeleton stays once, in structure/.summary, and the text block is a brief summary"}
   },
   "required": ["roots", "truncated", "limits", "summary_scope", "summary", "structure", "warnings", "message"]
 }`)
