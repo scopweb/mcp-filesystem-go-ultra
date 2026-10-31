@@ -1,3 +1,7 @@
+// V1 agent. V2 shape: agent-editor.v2.jsonc.example.
+// filesystem-ultra_* is an OpenCode permission allow, not a Claude Code
+// tools wildcard. On --profile=ultra it also allows git and batch_operations;
+// the harness server example is strict, which does not register those tools.
 {
   "$schema": "https://opencode.ai/config.json",
   "agent": {

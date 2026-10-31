@@ -1,0 +1,40 @@
+// OpenCode V2. Servers live under mcp.servers. Do not copy the V1
+// "timeout": 30000 into timeout.execution: that number also capped tool
+// calls. startup and catalog default to 30s; execution defaults to 12h.
+// Leave execution unset so project_replace and large searches are not cut.
+//
+// codemode defaults to true. Tools are then called from execute, for example
+// tools["filesystem-ultra"].read_file({...}). Set codemode to false only when
+// the tools must appear on the native tool list.
+//
+// protocol stays legacy. auto probes server/discover and falls back; ultra
+// answers -32601 immediately. Do not set 2026-07-28.
+//
+// Permissions belong on the subagent, not in this file. A project-wide deny
+// of read/edit would also block the primary agent. See
+// agent-readonly.v2.jsonc.example and agent-editor.v2.jsonc.example.
+// Last matching permission wins. With codemode true, execute must stay
+// allowed or Code Mode cannot reach the server tools.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "timeout": {
+      "startup": 30000,
+      "catalog": 30000
+    },
+    "servers": {
+      "filesystem-ultra": {
+        "type": "local",
+        "command": [
+          "C:\\path\\to\\filesystem-ultra-v4.exe",
+          "--profile", "strict",
+          "--compact-mode",
+          "--roots-mode", "union",
+          "C:\\path\\to\\workspace"
+        ],
+        "codemode": true,
+        "protocol": "legacy"
+      }
+    }
+  }
+}

@@ -1,16 +1,8 @@
 {
-  "_comment": "ajusta matcher a tu Claude Code — hook/permission schema varies by version. Scope this snippet to fs-explorer / fs-editor / fs-reviewer only, not a global deny.",
+  "_comment": "permissions.deny is a settings.json key and applies to the main conversation. disallowedTools is not a settings.json key; it belongs in a subagent frontmatter. Do not move mcp__filesystem-ultra__git or batch_operations here: the agent files already omit them from tools, and a global deny would also limit the main conversation.",
   "permissions": {
     "deny": ["Read", "Write", "Edit", "Glob"]
   },
-  "disallowedTools": [
-    "Read",
-    "Write",
-    "Edit",
-    "Glob",
-    "mcp__filesystem-ultra__git",
-    "mcp__filesystem-ultra__batch_operations"
-  ],
   "hooks": {
     "PreToolUse": [
       {

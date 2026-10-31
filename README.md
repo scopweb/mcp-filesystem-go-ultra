@@ -222,68 +222,74 @@ Linux:
 
 OpenCode does **not** read `claude_desktop_config.json`. Put this in the project `opencode.json` / `opencode.jsonc`, or globally in `~/.config/opencode/opencode.json` (Windows: `%USERPROFILE%\.config\opencode\opencode.json`).
 
-Differences vs Claude: key is `mcp` (not `mcpServers`), `type` is required, `command` is **one array** (binary + flags + paths), and `timeout` defaults to **5s** — too short for `tools/list`. Set `30000`. Recommended: `--profile=strict --compact-mode --roots-mode=union` (`--readonly` off).
+Recommended flags: `--profile=strict --compact-mode --roots-mode=union` (`--readonly` off).
 
-Windows (`opencode.json`):
+**V2** (current): servers live under `mcp.servers`. There is no `enabled` field. Timeouts are separate: `startup` and `catalog` default to 30s; `execution` defaults to 12h. Do not copy a V1 `"timeout": 30000` into `timeout.execution` — that caps `project_replace` and large searches. Code Mode is the default (`codemode: true`). Set `codemode: false` only when the tools must appear on the native list. V2 reloads this file on save. Copy-paste example, including agent permissions: `examples/harness/opencode/`.
 
-```json
+**V1** still loads (`mcp.<name>`, `enabled`, one `timeout`). That default is 5s and the same number also caps tool calls. `examples/harness/opencode/opencode.jsonc.example` keeps a V1 sample at 30000: enough for `tools/list`, too short for a large search. Raise that one number for long calls, or use the V2 file.
+
+Windows (`opencode.jsonc`, V2):
+
+```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "filesystem-ultra": {
-      "type": "local",
-      "command": [
-        "C:\\path\\to\\filesystem-ultra-v4.exe",
-        "--profile", "strict",
-        "--compact-mode",
-        "--cache-size", "200MB",
-        "--parallel-ops", "8",
-        "--log-level", "error",
-        "--log-dir", "C:\\logs\\mcp-filesystem",
-        "--roots-mode", "union",
-        "C:\\your\\project\\"
-      ],
-      "enabled": true,
-      "timeout": 30000
+    "servers": {
+      "filesystem-ultra": {
+        "type": "local",
+        "command": [
+          "C:\\path\\to\\filesystem-ultra-v4.exe",
+          "--profile", "strict",
+          "--compact-mode",
+          "--cache-size", "200MB",
+          "--parallel-ops", "8",
+          "--log-level", "error",
+          "--log-dir", "C:\\logs\\mcp-filesystem",
+          "--roots-mode", "union",
+          "C:\\your\\project\\"
+        ],
+        "codemode": true
+      }
     }
   }
 }
 ```
 
-Linux:
+Linux (V2). Same shape; only the binary, log directory, and workspace change:
 
-```json
+```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "filesystem-ultra": {
-      "type": "local",
-      "command": [
-        "/path/to/filesystem-ultra",
-        "--profile", "strict",
-        "--compact-mode",
-        "--cache-size", "200MB",
-        "--parallel-ops", "8",
-        "--log-level", "error",
-        "--log-dir", "/home/user/.local/share/mcp-filesystem/logs",
-        "--roots-mode", "union",
-        "/home/user/projects/"
-      ],
-      "enabled": true,
-      "timeout": 30000
+    "servers": {
+      "filesystem-ultra": {
+        "type": "local",
+        "command": [
+          "/path/to/filesystem-ultra",
+          "--profile", "strict",
+          "--compact-mode",
+          "--cache-size", "200MB",
+          "--parallel-ops", "8",
+          "--log-level", "error",
+          "--log-dir", "/home/user/.local/share/mcp-filesystem/logs",
+          "--roots-mode", "union",
+          "/home/user/projects/"
+        ],
+        "codemode": true
+      }
     }
   }
 }
 ```
 
-Quit and restart OpenCode after saving.
+`timeout.execution` is omitted on purpose (default 12h). V2 reloads this file on save. A V1 config still needs the old shape; see `examples/harness/opencode/opencode.jsonc.example`.
 
 **`--roots-mode`.** Default is `union`: client Roots are added to the CLI list. `replace` keeps only the client list, so OpenCode or Claude will hide every other path. `ignore` keeps the CLI list only.
 
 | Mode | Effect |
 |------|--------|
-| `replace` (default) | Client Roots replace the CLI list. OpenCode → only the workspace. |
-| `union` | CLI paths **plus** the workspace. Use this when the allowlist must survive. |
+| `replace` | Client Roots replace the CLI list. OpenCode → only the workspace. |
+| `union` (default) | CLI paths **plus** the workspace. Use this when the allowlist must survive. |
 | `ignore` | CLI list only; client Roots are ignored. |
 
 Allowed paths: positional args, **or** one `--allowed-paths` (comma-separated; do **not** repeat the flag — Go `flag.String` keeps the last value only), **or** `--allowed-paths-file` / `.mcp-paths`, **or** `MCP_ALLOWED_PATHS`. Those sources are unioned. At least one path is required since v4.6.0 (fail-closed, exit 2). Labs only: `--insecure-open` disables the sandbox (entire disk).

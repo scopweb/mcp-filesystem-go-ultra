@@ -18,7 +18,7 @@ One MCP instance per workspace:
 
 `--readonly` off unless the role is read-only. `--git-network` only if the agent must `git push`/`fetch`. `--git-remote-allow` is optional (empty = any remote). GitHub+GitLab: `--git-remote-allow=github.com,gitlab.com`.
 
-OpenCode: set MCP `timeout` **≥ 30000**. Default 5s is too short for `tools/list`.
+OpenCode V2: leave `timeout.execution` unset (default 12h). Do not copy the V1 `"timeout": 30000` into it. See `opencode/opencode.v2.jsonc.example`. V1 has one timeout; 30000 covers `tools/list` and cuts long calls.
 
 Linux binary/root placeholders: `/path/to/filesystem-ultra` and `/path/to/workspace` (see `claude-code/mcp.json.example` / `opencode/opencode.jsonc.example` — swap the Windows paths).
 
@@ -32,6 +32,10 @@ Harnesses ship native `Read` / `Edit` / `Write` / `Grep` / `Glob` (and Codex `ap
 | Agent scratch outside the repo | native tools only |
 
 Never mix native Read/Edit with ultra `read_file`/`edit_file` in one subagent.
+
+## Claude Code subagents
+
+`claude-code/.claude/agents/*.md` list each tool as `mcp__filesystem-ultra__<tool>`, matching the server key in `claude-code/mcp.json.example`. A bare name matches nothing. Do not use `mcp__filesystem-ultra__*`: it would give write tools to the read-only agents. `disallowedTools` belongs in a subagent frontmatter, not at the root of `settings.json`. `claude-code/settings-snippet.json` keeps the native-tool deny in `permissions.deny` and does not deny `git` or `batch_operations` globally.
 
 ## Codex vs ultra `apply_patch`
 

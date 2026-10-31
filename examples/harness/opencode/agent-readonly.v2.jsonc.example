@@ -1,0 +1,33 @@
+// V2 read-only subagent. Last matching rule wins, so the allow-list follows
+// the filesystem-ultra_* deny. Do not allow filesystem-ultra_*: that would
+// grant write tools. This wildcard is an OpenCode permission, not the Claude
+// Code tools entry mcp__filesystem-ultra__*.
+//
+// V2 has no list action. codemode defaults to true, so execute is not denied:
+// a deny would remove Code Mode and every tool reached only through it.
+// Nested filesystem-ultra_* rules still apply.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agents": {
+    "fs-readonly": {
+      "description": "Explore host FS via filesystem-ultra reads only. First call list_allowed_directories. Re-read on handoff.",
+      "mode": "subagent",
+      "permissions": [
+        { "action": "read", "resource": "*", "effect": "deny" },
+        { "action": "edit", "resource": "*", "effect": "deny" },
+        { "action": "glob", "resource": "*", "effect": "deny" },
+        { "action": "grep", "resource": "*", "effect": "deny" },
+        { "action": "shell", "resource": "*", "effect": "deny" },
+        { "action": "filesystem-ultra_*", "resource": "*", "effect": "deny" },
+        { "action": "filesystem-ultra_list_allowed_directories", "resource": "*", "effect": "allow" },
+        { "action": "filesystem-ultra_directory_tree", "resource": "*", "effect": "allow" },
+        { "action": "filesystem-ultra_list_directory", "resource": "*", "effect": "allow" },
+        { "action": "filesystem-ultra_search_files", "resource": "*", "effect": "allow" },
+        { "action": "filesystem-ultra_read_file", "resource": "*", "effect": "allow" },
+        { "action": "filesystem-ultra_get_file_info", "resource": "*", "effect": "allow" },
+        { "action": "filesystem-ultra_help", "resource": "*", "effect": "allow" },
+        { "action": "filesystem-ultra_diff_files", "resource": "*", "effect": "allow" }
+      ]
+    }
+  }
+}

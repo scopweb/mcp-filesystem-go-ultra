@@ -1,3 +1,6 @@
+// V1 agent. V2 shape: agent-readonly.v2.jsonc.example.
+// filesystem-ultra_* here is an OpenCode permission (deny, then allow).
+// It is not the Claude Code tools wildcard mcp__filesystem-ultra__*.
 {
   "$schema": "https://opencode.ai/config.json",
   "agent": {

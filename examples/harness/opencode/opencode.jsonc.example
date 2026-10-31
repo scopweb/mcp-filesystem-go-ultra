@@ -1,3 +1,7 @@
+// V1 shape. OpenCode V2 still loads this, but timeout is one number for
+// startup, catalog, and tool calls. 30000 covers tools/list and cuts
+// project_replace and large searches. For V2 use opencode.v2.jsonc.example
+// and do not copy 30000 into timeout.execution.
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {

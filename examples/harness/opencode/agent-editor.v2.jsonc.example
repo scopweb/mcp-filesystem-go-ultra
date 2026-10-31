@@ -1,0 +1,25 @@
+// V2 editor subagent. Last matching rule wins.
+// filesystem-ultra_* is an OpenCode permission allow, not a Claude Code
+// tools wildcard. On --profile=ultra it also allows git and batch_operations.
+// The server example is strict, which does not register those tools. If the
+// server is ultra, replace the wildcard with an explicit list.
+//
+// codemode defaults to true, so execute is not denied. Native read/edit stay
+// denied: host files go through filesystem-ultra only.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agents": {
+    "fs-editor": {
+      "description": "Edit host files via filesystem-ultra only. Native edit/write off. Pass expected_hash. Re-read on handoff.",
+      "mode": "subagent",
+      "permissions": [
+        { "action": "read", "resource": "*", "effect": "deny" },
+        { "action": "edit", "resource": "*", "effect": "deny" },
+        { "action": "glob", "resource": "*", "effect": "deny" },
+        { "action": "grep", "resource": "*", "effect": "deny" },
+        { "action": "shell", "resource": "*", "effect": "deny" },
+        { "action": "filesystem-ultra_*", "resource": "*", "effect": "allow" }
+      ]
+    }
+  }
+}
