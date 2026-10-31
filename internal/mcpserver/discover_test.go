@@ -18,14 +18,14 @@ func TestServerDiscover_MethodNotFoundImmediate(t *testing.T) {
 	s := newFilesystemMCPServer()
 	assertServerDiscoverRejected(t, s)
 
-	resp := s.HandleMessage(context.Background(), []byte("{" +
-		"\"jsonrpc\": \"2.0\"," +
-		"\"id\": 1," +
-		"\"method\": \"initialize\"," +
-		"\"params\": {" +
-		"\"protocolVersion\": \"2025-11-25\"," +
-		"\"capabilities\": {}," +
-		"\"clientInfo\": {\"name\": \"discover-test\", \"version\": \"0.0.0\"}" +
+	resp := s.HandleMessage(context.Background(), []byte("{"+
+		"\"jsonrpc\": \"2.0\","+
+		"\"id\": 1,"+
+		"\"method\": \"initialize\","+
+		"\"params\": {"+
+		"\"protocolVersion\": \"2025-11-25\","+
+		"\"capabilities\": {},"+
+		"\"clientInfo\": {\"name\": \"discover-test\", \"version\": \"0.0.0\"}"+
 		"}}"))
 	if _, ok := resp.(mcp.JSONRPCResponse); !ok {
 		t.Fatalf("initialize: got %T", resp)

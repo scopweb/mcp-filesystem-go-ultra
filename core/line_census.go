@@ -83,6 +83,9 @@ func (e *UltraFastEngine) ListLineCounts(ctx context.Context, path string, opts 
 		if err != nil {
 			return nil
 		}
+		// readdir order is not stable. Sort before the max_nodes cap so the
+		// kept files are the same on Linux and Windows.
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 		for _, entry := range entries {
 			name := entry.Name()
 			if name == "." || name == ".." {
