@@ -371,7 +371,14 @@ const (
 	cutAutoCap        = "auto_cap"
 	cutServerMaxLines = "server_max_lines"
 	cutLineWidth      = "line_width"
+	cutCharSpill      = "char_spill"
 )
+
+// claudeSpillChars is the Claude Code text-result size above which the
+// client saves the body to a file and the agent reads it with the native
+// Read tool. Stay at or under this with the existing continuation. It is
+// not a 40000-character product cap.
+const claudeSpillChars = 50000
 
 type readProjection struct {
 	Text       string
@@ -487,12 +494,12 @@ func projectRead(content, path string, startLine, endLine, maxLines int, mode st
 		if total == 0 {
 			p.StartLine, p.EndLine = startLine, 0
 			p.Text = rangeFooter(path, startLine, 0, 0)
-			return applyLineLimit(p, lineLimit)
+			return clampFormattedSpill(applyLineLimit(p, lineLimit), path)
 		}
 		if startLine > total {
 			p.StartLine, p.EndLine = startLine, total
 			p.Text = rangeFooter(path, startLine, total, total)
-			return applyLineLimit(p, lineLimit)
+			return clampFormattedSpill(applyLineLimit(p, lineLimit), path)
 		}
 		if endLine > total {
 			endLine = total
@@ -503,7 +510,7 @@ func projectRead(content, path string, startLine, endLine, maxLines int, mode st
 		body := strings.Join(lines[startLine-1:endLine], "\n")
 		p.StartLine, p.EndLine = startLine, endLine
 		p.Text = body + rangeFooter(path, startLine, endLine, total)
-		return applyLineLimit(p, lineLimit)
+		return clampFormattedSpill(applyLineLimit(p, lineLimit), path)
 	}
 
 	if mode == "head" || mode == "tail" || maxLines > 0 {
@@ -516,7 +523,7 @@ func projectRead(content, path string, startLine, endLine, maxLines int, mode st
 		default:
 			p = projectPrefix(p, path, lines, maxLines, explicitCap)
 		}
-		return applyLineLimit(p, lineLimit)
+		return clampFormattedSpill(applyLineLimit(p, lineLimit), path)
 	}
 
 	if total > autoTruncateLargeFileLines {
@@ -526,7 +533,65 @@ func projectRead(content, path string, startLine, endLine, maxLines int, mode st
 		p.Cut = cutAutoCap
 		p.Text = autoTruncateLargeFile(content, path)
 	}
-	return applyLineLimit(p, lineLimit)
+	return clampFormattedSpill(applyLineLimit(p, lineLimit), path)
+}
+
+func clampFormattedSpill(p readProjection, path string) readProjection {
+	if len(p.Text) <= claudeSpillChars {
+		return p
+	}
+	const reserve = 240
+	budget := claudeSpillChars - reserve
+	if budget < 1 {
+		budget = 1
+	}
+	kept := p.Text
+	if len(kept) > budget {
+		if i := strings.LastIndex(kept[:budget], "\n"); i > 0 {
+			kept = kept[:i]
+		} else {
+			kept = kept[:budget]
+		}
+	}
+	n := 1
+	if kept != "" {
+		n = strings.Count(kept, "\n") + 1
+	}
+	if p.StartLine < 1 {
+		p.StartLine = 1
+	}
+	p.EndLine = p.StartLine + n - 1
+	if p.TotalLines > 0 && p.EndLine > p.TotalLines {
+		p.EndLine = p.TotalLines
+	}
+	if p.EndLine < p.StartLine {
+		p.EndLine = p.StartLine
+	}
+	p.ContinueAt = p.EndLine + 1
+	p.Truncated = true
+	if strings.Contains(p.Cut, cutLineWidth) {
+		p.Cut = cutCharSpill + "+" + cutLineWidth
+	} else {
+		p.Cut = cutCharSpill
+	}
+	footer := fmt.Sprintf(
+		"\n\n[Lines %d-%d of %d total lines in %s — text cut at %d characters. Continue with start_line=%d]",
+		p.StartLine, p.EndLine, p.TotalLines, filepath.Base(path), claudeSpillChars, p.ContinueAt,
+	)
+	p.Text = kept + footer
+	if len(p.Text) > claudeSpillChars {
+		if i := strings.LastIndex(kept, "\n"); i > 0 && p.EndLine > p.StartLine {
+			kept = kept[:i]
+			p.EndLine--
+			p.ContinueAt = p.EndLine + 1
+			footer = fmt.Sprintf(
+				"\n\n[Lines %d-%d of %d total lines in %s — text cut at %d characters. Continue with start_line=%d]",
+				p.StartLine, p.EndLine, p.TotalLines, filepath.Base(path), claudeSpillChars, p.ContinueAt,
+			)
+			p.Text = kept + footer
+		}
+	}
+	return p
 }
 
 func applyLineLimit(p readProjection, lineLimit int) readProjection {

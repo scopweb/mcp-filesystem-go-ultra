@@ -146,8 +146,23 @@ func registerSearchTools(reg *toolRegistry) {
 				listing = treeSummaryText(trEntries)
 			}
 		}
-		sc := listStructured(jsonPath, format, listing, entries, truncated, hiddenCount, isTree)
 		text := listing
+		charSpill := false
+		if len(text) > claudeSpillChars {
+			text, entries, charSpill = shrinkListingSpill(jsonPath, format, text, entries)
+			truncated = true
+		}
+		sc := listStructured(jsonPath, format, text, entries, truncated, hiddenCount, isTree)
+		if charSpill {
+			sc["continuation"] = "Listing text exceeded 50000 characters. Narrow the path or lower max_nodes. Do not raise max_nodes."
+			sc["message"] = text
+			sc["truncated"] = true
+			sc["status"] = statusTruncated
+			if entries != nil {
+				sc["entries"] = entries
+				sc["entry_count"] = len(entries)
+			}
+		}
 		if engine.IsCompactMode() && detail != detailNormal && len(text) > 2000 {
 			text = text[:2000] + "\n…"
 		}
@@ -360,6 +375,7 @@ func registerSearchTools(reg *toolRegistry) {
 		if engineTextIsError(out.Text) {
 			return mcp.NewToolResultError(out.Text), nil
 		}
+		out = shrinkSearchToSpill(out, claudeSpillChars)
 		capped := capSearchOutput(out.Text, engine)
 		extraTrunc := capped != out.Text
 		out.Text = capped
@@ -516,6 +532,118 @@ func parseExcludeArg(v interface{}) []string {
 		return out
 	}
 	return nil
+}
+
+func shrinkSearchToSpill(out core.SearchOutcome, limit int) core.SearchOutcome {
+	if len(out.Text) <= limit || len(out.Matches) == 0 {
+		return out
+	}
+	var body strings.Builder
+	last := ""
+	kept := 0
+	for i, m := range out.Matches {
+		var piece strings.Builder
+		if m.File != last {
+			piece.WriteString(m.File)
+			piece.WriteByte('\n')
+		}
+		fmt.Fprintf(&piece, "  %d:%s\n", m.LineNumber, strings.TrimRight(m.Line, "\r\n"))
+		for _, c := range m.Context {
+			piece.WriteString(c)
+			piece.WriteByte('\n')
+		}
+		if body.Len()+piece.Len()+32 > limit && i > 0 {
+			break
+		}
+		body.WriteString(piece.String())
+		last = m.File
+		kept = i + 1
+	}
+	if kept == 0 {
+		kept = 1
+	}
+	if kept >= len(out.Matches) && len(out.Text) <= limit {
+		return out
+	}
+	if kept > len(out.Matches) {
+		kept = len(out.Matches)
+	}
+	out.Matches = out.Matches[:kept]
+	out.Truncated = true
+	if out.TruncReason == "" {
+		out.TruncReason = "byte_budget"
+	}
+	out.NextOffset = out.Offset + kept
+	out.Text = fmt.Sprintf("%d matches\n%s", kept, body.String())
+	if len(out.Text) > limit {
+		if i := strings.LastIndex(out.Text[:limit], "\n"); i > 0 {
+			out.Text = out.Text[:i]
+		} else {
+			out.Text = out.Text[:limit]
+		}
+		out.Text += "\n[text cut at 50000 characters; continue with the offset in continuation]"
+	}
+	return out
+}
+
+func shrinkListingSpill(path, format, text string, entries []map[string]any) (string, []map[string]any, bool) {
+	if len(text) <= claudeSpillChars {
+		return text, entries, false
+	}
+	if (format == "json" || format == "sizes") && len(entries) > 0 {
+		return shrinkJSONListing(path, entries)
+	}
+	return shrinkPlainListing(text, entries)
+}
+
+func shrinkJSONListing(path string, entries []map[string]any) (string, []map[string]any, bool) {
+	lo, hi := 1, len(entries)
+	best := 0
+	bestText := ""
+	for lo <= hi {
+		mid := (lo + hi) / 2
+		payload := map[string]any{
+			"path": path, "total": len(entries), "truncated": mid < len(entries), "entries": entries[:mid],
+		}
+		b, err := json.Marshal(payload)
+		if err != nil || len(b) > claudeSpillChars {
+			hi = mid - 1
+			continue
+		}
+		best = mid
+		bestText = string(b)
+		lo = mid + 1
+	}
+	if best == 0 || bestText == "" {
+		return "listing text exceeded 50000 characters; narrow the path", nil, true
+	}
+	if best >= len(entries) {
+		return bestText, entries, false
+	}
+	return bestText, entries[:best], true
+}
+
+func shrinkPlainListing(text string, entries []map[string]any) (string, []map[string]any, bool) {
+	budget := claudeSpillChars - 180
+	if budget < 1 {
+		budget = 1
+	}
+	cut := text
+	if len(cut) > budget {
+		if i := strings.LastIndex(cut[:budget], "\n"); i > 0 {
+			cut = cut[:i]
+		} else {
+			cut = cut[:budget]
+		}
+	}
+	keptLines := 1
+	if cut != "" {
+		keptLines = strings.Count(cut, "\n") + 1
+	}
+	if len(entries) > keptLines {
+		entries = entries[:keptLines]
+	}
+	return cut + "\n[truncated: text exceeded 50000 characters; narrow the path]", entries, true
 }
 
 func capSearchOutput(text string, engine *core.UltraFastEngine) string {

@@ -105,7 +105,8 @@ func TestReadFile_BatchContinuationRecovery(t *testing.T) {
 						t.Fatalf("index: %#v", index)
 					}
 					cont := f["continuation"].(map[string]any)
-					if cont["kind"] != tc.kind {
+					spilled := cont["kind"] == cutCharSpill+"+"+cutLineWidth
+					if cont["kind"] != tc.kind && !spilled {
 						t.Fatalf("kind: %v", cont["kind"])
 					}
 					recoverRange := func(recovery map[string]any, first, last int) {
@@ -113,8 +114,15 @@ func TestReadFile_BatchContinuationRecovery(t *testing.T) {
 						request := maps.Clone(recovery)
 						request["path"] = f["path"]
 						recovered := read(request)
-						if recovered["truncated"] != false || recovered["content_hash"] != f["content_hash"] {
-							t.Fatal("recovery cut or hash changed")
+						if recovered["content_hash"] != f["content_hash"] {
+							t.Fatal("recovery hash changed")
+						}
+						if recovered["truncated"] == true {
+							body, _ := recovered["content"].(string)
+							if len(body) > claudeSpillChars {
+								t.Fatalf("recovery still spills: %d", len(body))
+							}
+							return
 						}
 						if asIntMeta(recovered["start_line"]) != first || asIntMeta(recovered["end_line"]) != last {
 							t.Fatalf("recovery range: %#v", recovered)
@@ -129,11 +137,16 @@ func TestReadFile_BatchContinuationRecovery(t *testing.T) {
 						}
 					}
 					if tc.next > 0 {
-						if asIntMeta(cont["start_line"]) != tc.next {
+						start := asIntMeta(cont["start_line"])
+						if spilled {
+							if start <= 1 || start > tc.next {
+								t.Fatalf("spill cursor %d", start)
+							}
+						} else if start != tc.next {
 							t.Fatal("wrong forward cursor")
 						}
-						last := min(320, tc.next+asIntMeta(cont["max_lines"])-1)
-						recoverRange(map[string]any{"start_line": cont["start_line"], "max_lines": cont["max_lines"]}, tc.next, last)
+						last := min(320, start+asIntMeta(cont["max_lines"])-1)
+						recoverRange(map[string]any{"start_line": cont["start_line"], "max_lines": cont["max_lines"]}, start, last)
 					} else if cont["start_line"] != nil {
 						t.Fatal("invented forward cursor")
 					}
