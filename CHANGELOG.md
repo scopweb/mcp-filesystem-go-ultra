@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+### fix(response): recoverable cuts, aggregate budget, listing cursor
+
+- A response cut inside a line no longer advances `start_line`. Continuation
+  carries `byte_offset` on a rune boundary, and the follow-up stays
+  `truncated` until that tail has been read. The budget remains 50000 bytes,
+  not a 40000-character product cap.
+- `read_file` with `paths` stops when the combined text reaches that budget
+  and defers that path and every later path (`batch_resume`). A later small
+  file cannot slip in after the cut. `diff_files` pages with `offset` /
+  `byte_offset` instead of returning an unbounded diff.
+- `list_directory` and `directory_tree` sort by name and, when truncated,
+  return `continuation.offset` rather than only telling the caller to narrow
+  the path.
+- `search_files` continuation hints no longer prefix the raw reason code
+  (`max_results Continue with ...`). A cut page keeps the real match total.
+- Claude Code example: the invalid `hooks` block is gone; `permissions.deny`
+  no longer includes `Read`, because that deny is global and blocks spill-file
+  recovery. `fs-reviewer` does not receive `backup` or `analyze_code`.
+
 ### fix(response): preserve census data and bound Git status
 
 - `list_directory(output_format:"lines")` now carries census rows in

@@ -1151,6 +1151,13 @@ func (e *UltraFastEngine) ListDirectoryContent(ctx context.Context, path string)
 // {"path":..., "total":N, "entries":[{"name","type","size","modified"},...]}
 // Cached under a synthetic key so it doesn't collide with the text listing.
 func (e *UltraFastEngine) ListDirectoryJSON(ctx context.Context, path string) (string, error) {
+	return e.ListDirectoryJSONPage(ctx, path, 0, 0)
+}
+
+// ListDirectoryJSONPage lists a stable name-sorted page. offset is the number
+// of visible entries to skip. limit <= 0 uses MaxListItems. Total is the full
+// visible count; truncated means another page exists.
+func (e *UltraFastEngine) ListDirectoryJSONPage(ctx context.Context, path string, offset, limit int) (string, error) {
 	path = NormalizePath(path)
 
 	if err := e.acquireOperation(ctx, "list"); err != nil {
@@ -1169,6 +1176,9 @@ func (e *UltraFastEngine) ListDirectoryJSON(ctx context.Context, path string) (s
 	dirInfo, statErr := e.statWithinRoot(path)
 
 	cacheKey := path + "::json"
+	if offset > 0 || limit > 0 {
+		cacheKey = fmt.Sprintf("%s::json:%d:%d", path, offset, limit)
+	}
 	if !e.PolicyEnabled() {
 		if cached, cachedMtime, hit := e.cache.GetDirectory(cacheKey); hit {
 			if statErr == nil && !dirInfo.ModTime().After(cachedMtime) {
@@ -1203,11 +1213,19 @@ func (e *UltraFastEngine) ListDirectoryJSON(ctx context.Context, path string) (s
 	}{Path: path, Total: len(entries), Entries: make([]dirEntry, 0, len(entries))}
 
 	maxItems := e.config.MaxListItems
+	if limit > 0 {
+		maxItems = limit
+	}
+	emitted := 0
 	for i, entry := range entries {
-		if maxItems > 0 && i >= maxItems {
+		if offset > 0 && i < offset {
+			continue
+		}
+		if maxItems > 0 && emitted >= maxItems {
 			out.Truncated = true
 			break
 		}
+		emitted++
 		de := dirEntry{Name: entry.name, Type: "file"}
 		if entry.isDir {
 			de.Type = "dir"

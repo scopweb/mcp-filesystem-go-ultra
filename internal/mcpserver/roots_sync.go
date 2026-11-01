@@ -1,8 +1,8 @@
 package mcpserver
 
 import (
-	"log/slog"
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"

@@ -178,6 +178,24 @@ func readContinuationBase(proj readProjection) map[string]any {
 		}
 	}
 	if proj.ContinueAt > 0 {
+		kind := proj.Cut
+		if kind == "" {
+			kind = cutAutoCap
+		}
+		// A cut inside a line must resume that line. Omitting max_lines makes the
+		// next read continue through the file instead of stopping after one line.
+		if proj.ResumeOffset > 0 {
+			hint := "line was cut inside the line. Continue with start_line=" + strconv.Itoa(proj.ContinueAt) + ", byte_offset=" + strconv.Itoa(proj.ResumeOffset) + ". Do not advance start_line; the unread tail is not on the next line."
+			if lineWidth {
+				hint += widthHint
+			}
+			return map[string]any{
+				"kind":        kind,
+				"start_line":  proj.ContinueAt,
+				"byte_offset": proj.ResumeOffset,
+				"hint":        hint,
+			}
+		}
 		chunk := proj.EndLine - proj.StartLine + 1
 		if chunk < 1 {
 			chunk = 1
@@ -185,10 +203,6 @@ func readContinuationBase(proj readProjection) map[string]any {
 		hint := "use start_line=" + strconv.Itoa(proj.ContinueAt) + ", max_lines=" + strconv.Itoa(chunk) + " to read the next chunk; do not re-read the whole file"
 		if lineWidth {
 			hint += widthHint
-		}
-		kind := proj.Cut
-		if kind == "" {
-			kind = cutAutoCap
 		}
 		return map[string]any{
 			"kind":       kind,

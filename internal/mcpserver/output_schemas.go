@@ -116,7 +116,7 @@ var listDirectoryOutputSchema = json.RawMessage(`{
     "format": {"type": "string", "description": "compact | json | tree | sizes | lines"},
     "entries": {"type": "array", "description": "Directory entries {name, type, size, modified} when available; output_format=lines returns census rows {path, lines} (newline counts)", "items": {"type": "object"}},
     "entry_count": {"type": "integer"},
-    "continuation": {"type": "string"},
+    "continuation": {"type": "object", "description": "When truncated: offset is the next sorted index. hint says how to continue. Do not raise max_nodes to recover a cut page."},
     "message": {"type": "string", "description": "Human-readable listing, identical to the text content block"},
     "presentation": {"type": "string", "description": "structured when the server runs with --response-mode=structured: the listing stays once, in entries, and the text block is a brief summary"}
   },

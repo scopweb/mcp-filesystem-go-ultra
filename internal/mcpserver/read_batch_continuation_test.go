@@ -73,6 +73,12 @@ func TestReadFile_BatchContinuationRecovery(t *testing.T) {
 					}
 					files := m["files"].([]any)
 					f := files[1].(map[string]any)
+					if cont, ok := f["continuation"].(map[string]any); ok && cont["kind"] == "batch_resume" {
+						if f["content"] != nil {
+							t.Fatal("aggregate omit included a body")
+						}
+						return
+					}
 					if files[0].(map[string]any)["continuation"] != nil || files[2].(map[string]any)["continuation"] != nil {
 						t.Fatal("complete/error entries must not have continuation")
 					}

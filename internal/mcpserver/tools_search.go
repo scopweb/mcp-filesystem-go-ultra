@@ -35,6 +35,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithString("exclude", mcp.Description("JSON array or comma-separated globs to skip in tree")),
 		mcp.WithBoolean("respect_ignore", mcp.Description("Honor .gitignore/.cursorignore/.fsultraignore in tree (default: true)")),
 		mcp.WithNumber("max_nodes", mcp.Description("Cap nodes in tree output (default: 500)")),
+		mcp.WithNumber("offset", mcp.Description("0-based index into the sorted listing. Continuation.offset is the next index.")),
 	)
 	reg.listDirHandler = auditWrap(engine, "list_directory", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
@@ -46,6 +47,7 @@ func registerSearchTools(reg *toolRegistry) {
 		maxDepth := 2
 		depthExplicit := false
 		maxNodes := 500
+		offset := 0
 		respectIgnore := true
 		var include []string
 		detail := detailNormal
@@ -65,6 +67,9 @@ func registerSearchTools(reg *toolRegistry) {
 			if mn, ok := args["max_nodes"].(float64); ok && mn > 0 {
 				maxNodes = int(mn)
 			}
+			if off, ok := args["offset"].(float64); ok && off > 0 {
+				offset = int(off)
+			}
 			if ri, ok := args["respect_ignore"].(bool); ok {
 				respectIgnore = ri
 			}
@@ -83,21 +88,25 @@ func registerSearchTools(reg *toolRegistry) {
 		var censusEntries []core.LineCountEntry
 		switch outputFormat {
 		case "json":
-			listing, err = engine.ListDirectoryJSON(ctx, path)
+			listing, err = engine.ListDirectoryJSONPage(ctx, path, offset, 0)
 		case "tree":
 			format := "json"
 			if request.Params.Name == "directory_tree" {
 				format = "compact"
 			}
+			walkNodes := maxNodes
+			if offset > 0 {
+				walkNodes = maxNodes + offset
+			}
 			tr, treeErr := engine.ListDirectoryTreeResult(ctx, core.NormalizePath(path), core.TreeOpts{
-				MaxDepth: maxDepth, MaxNodes: maxNodes, Exclude: exclude, RespectIgnore: respectIgnore, Format: format,
+				MaxDepth: maxDepth, MaxNodes: walkNodes, Exclude: exclude, RespectIgnore: respectIgnore, Format: format,
 			})
 			listing, err = tr.Text, treeErr
 			hiddenCount = tr.HiddenCount
 			treeTruncated = tr.Truncated
 			trEntries = tr.Entries
 		case "sizes":
-			listing, err = engine.ListDirectoryJSON(ctx, path)
+			listing, err = engine.ListDirectoryJSONPage(ctx, path, offset, 0)
 		case "lines":
 			depth := 0
 			if depthExplicit {
@@ -110,7 +119,11 @@ func registerSearchTools(reg *toolRegistry) {
 			treeTruncated = census.Truncated
 			censusEntries = census.Entries
 		default: // "" / "compact" / "text" — current behaviour
-			listing, err = engine.ListDirectoryContent(ctx, path)
+			if offset > 0 {
+				listing, err = engine.ListDirectoryJSONPage(ctx, path, offset, 0)
+			} else {
+				listing, err = engine.ListDirectoryContent(ctx, path)
+			}
 		}
 		if err != nil {
 			return mcp.NewToolResultError(formatToolError(err)), nil
@@ -127,7 +140,12 @@ func registerSearchTools(reg *toolRegistry) {
 				jsonPath, entries, truncated = p, ents, truncated || tr
 			}
 		} else if format == "compact" || format == "text" || format == "" {
-			if raw, jsonErr := engine.ListDirectoryJSON(ctx, path); jsonErr == nil {
+			raw := listing
+			var jsonErr error
+			if offset == 0 {
+				raw, jsonErr = engine.ListDirectoryJSONPage(ctx, path, 0, 0)
+			}
+			if jsonErr == nil {
 				if p, ents, tr, ok := parseListJSON(raw); ok {
 					jsonPath, entries, truncated = p, ents, truncated || tr
 				}
@@ -141,20 +159,37 @@ func registerSearchTools(reg *toolRegistry) {
 		}
 		isTree := outputFormat == "tree" || request.Params.Name == "directory_tree"
 		if isTree && trEntries != nil {
+			if offset > 0 {
+				if offset >= len(trEntries) {
+					trEntries = nil
+				} else {
+					trEntries = trEntries[offset:]
+				}
+			}
+			if len(trEntries) > maxNodes {
+				trEntries = trEntries[:maxNodes]
+				truncated = true
+			}
 			entries = treeEntriesToMaps(trEntries, detail)
 			if detail == detailSummary {
 				listing = treeSummaryText(trEntries)
 			}
 		}
 		text := listing
-		charSpill := false
 		if len(text) > claudeSpillChars {
-			text, entries, charSpill = shrinkListingSpill(jsonPath, format, text, entries)
-			truncated = true
+			var spilled bool
+			text, entries, spilled = shrinkListingSpill(jsonPath, format, text, entries)
+			if spilled {
+				truncated = true
+			}
 		}
 		sc := listStructured(jsonPath, format, text, entries, truncated, hiddenCount, isTree)
-		if charSpill {
-			sc["continuation"] = "Listing text exceeded 50000 characters. Narrow the path or lower max_nodes. Do not raise max_nodes."
+		if truncated {
+			next := offset + len(entries)
+			sc["continuation"] = map[string]any{
+				"offset": next,
+				"hint":   fmt.Sprintf("Continue with the same path and offset:%d. Entries are sorted by name. Do not raise max_nodes to recover a cut page.", next),
+			}
 			sc["message"] = text
 			sc["truncated"] = true
 			sc["status"] = statusTruncated
@@ -188,6 +223,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithString("exclude", mcp.Description("JSON array or comma-separated globs to skip")),
 		mcp.WithBoolean("respect_ignore", mcp.Description("Honor gitignore-style files (default: true)")),
 		mcp.WithNumber("max_nodes", mcp.Description("Cap nodes (default: 500)")),
+		mcp.WithNumber("offset", mcp.Description("0-based index into the sorted preorder. Continuation.offset is the next index.")),
 		mcp.WithString("detail", mcp.Description("summary|normal|full. summary: paths + truncated/hidden_count. full: include sizes. detail shapes structuredContent; compact-mode trims text."), mcp.Enum("summary", "normal", "full")),
 	)
 	reg.addTool(dirTreeTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -574,14 +610,24 @@ func shrinkSearchToSpill(out core.SearchOutcome, limit int) core.SearchOutcome {
 		out.TruncReason = "byte_budget"
 	}
 	out.NextOffset = out.Offset + kept
-	out.Text = fmt.Sprintf("%d matches\n%s", kept, body.String())
+	total := out.MatchCount
+	if total < kept {
+		total = kept
+	}
+	if total > kept {
+		out.Text = fmt.Sprintf("%d matches (showing %d)\n%s", total, kept, body.String())
+	} else {
+		out.Text = fmt.Sprintf("%d matches\n%s", kept, body.String())
+	}
 	if len(out.Text) > limit {
-		if i := strings.LastIndex(out.Text[:limit], "\n"); i > 0 {
+		cut := utf8SafeEnd(out.Text, limit)
+		if i := strings.LastIndex(out.Text[:cut], "\n"); i > 0 {
 			out.Text = out.Text[:i]
+			out.Text += "\n[text cut to stay within 50000 bytes; continue with the offset in continuation]"
 		} else {
-			out.Text = out.Text[:limit]
+			out.Text = out.Text[:cut]
+			out.Text += "\n[line cut to stay within 50000 bytes; read_file that path with start_line and byte_offset. The search offset does not recover the tail of this line.]"
 		}
-		out.Text += "\n[text cut at 50000 characters; continue with the offset in continuation]"
 	}
 	return out
 }
@@ -630,10 +676,11 @@ func shrinkPlainListing(text string, entries []map[string]any) (string, []map[st
 	}
 	cut := text
 	if len(cut) > budget {
-		if i := strings.LastIndex(cut[:budget], "\n"); i > 0 {
+		end := utf8SafeEnd(cut, budget)
+		if i := strings.LastIndex(cut[:end], "\n"); i > 0 {
 			cut = cut[:i]
 		} else {
-			cut = cut[:budget]
+			cut = cut[:end]
 		}
 	}
 	keptLines := 1

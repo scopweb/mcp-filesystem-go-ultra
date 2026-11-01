@@ -1,14 +1,6 @@
 {
-  "_comment": "permissions.deny is a settings.json key and applies to the main conversation. disallowedTools is not a settings.json key; it belongs in a subagent frontmatter. Do not move mcp__filesystem-ultra__git or batch_operations here: the agent files already omit them from tools, and a global deny would also limit the main conversation.",
+  "_comment": "permissions.deny is a settings.json key and applies to the main conversation, not only to subagents. Denying Read also blocks Claude Code's recovery of a tool result that was saved to a file because it exceeded 50000 characters: that recovery uses the native Read tool. Omit Read from this list if the main conversation must open those spill files. disallowedTools is not a settings.json key; it belongs in a subagent frontmatter. Do not move mcp__filesystem-ultra__git or batch_operations here: the agent files already omit them from tools, and a global deny would also limit the main conversation. The incomplete hooks.PreToolUse example was removed: a matcher without a hooks array is invalid and Claude Code drops the settings entry.",
   "permissions": {
-    "deny": ["Read", "Write", "Edit", "Glob"]
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Read|Write|Edit|Glob",
-        "_comment": "ajusta matcher a tu Claude Code"
-      }
-    ]
+    "deny": ["Write", "Edit", "Glob"]
   }
 }

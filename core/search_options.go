@@ -466,9 +466,13 @@ func SearchContinuationHint(offset, pageSize int, reason string) string {
 	if pageSize <= 0 {
 		pageSize = DefaultSearchPage
 	}
-	hint := "search_files(..., offset:" + strconv.Itoa(offset) + ", max_results:" + strconv.Itoa(pageSize) + ")"
-	if reason != "" {
-		return reason + " Continue with " + hint
+	hint := "Continue with search_files(..., offset:" + strconv.Itoa(offset) + ", max_results:" + strconv.Itoa(pageSize) + ")"
+	switch reason {
+	case "", "max_results":
+		return hint
+	case "byte_budget":
+		return "Result cut to stay within 50000 bytes. " + hint
+	default:
+		return strings.TrimSpace(reason) + " " + hint
 	}
-	return "Continue with " + hint
 }

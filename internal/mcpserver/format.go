@@ -381,13 +381,16 @@ const (
 const claudeSpillChars = 50000
 
 type readProjection struct {
-	Text       string
-	Truncated  bool
-	StartLine  int
-	EndLine    int
-	TotalLines int
-	ContinueAt int
-	Cut        string
+	Text         string
+	Truncated    bool
+	StartLine    int
+	EndLine      int
+	TotalLines   int
+	ContinueAt   int
+	Cut          string
+	LineOffset   int    // bytes already skipped at the start of StartLine
+	ResumeOffset int    // byte offset into ContinueAt; 0 means the next line starts at byte 0
+	Err          string // invalid byte_offset; handlers must not treat this as a read
 }
 
 func splitContentLines(content string) []string {
@@ -479,9 +482,22 @@ func readRangeArgs(args map[string]interface{}) (startLine, endLine, maxLines in
 }
 
 func projectRead(content, path string, startLine, endLine, maxLines int, mode string, lineLimit int) readProjection {
+	return projectReadCursor(content, path, startLine, endLine, maxLines, mode, lineLimit, 0, 0)
+}
+
+// projectReadCursor is projectRead with a byte offset into start_line and an
+// optional text budget. maxBytes <= 0 uses claudeSpillChars. lineOffset must
+// be a rune boundary inside that line; an invalid offset sets Err.
+func projectReadCursor(content, path string, startLine, endLine, maxLines int, mode string, lineLimit, lineOffset, maxBytes int) readProjection {
 	lines := splitContentLines(content)
+	if lineOffset > 0 && startLine <= 0 {
+		startLine = 1
+	}
+	if msg := trimLineByteOffset(lines, startLine, lineOffset); msg != "" {
+		return readProjection{Err: msg, TotalLines: len(lines), StartLine: startLine}
+	}
 	total := len(lines)
-	p := readProjection{Text: content, StartLine: 1, EndLine: total, TotalLines: total}
+	p := readProjection{Text: content, StartLine: 1, EndLine: total, TotalLines: total, LineOffset: lineOffset}
 	explicitCap := maxLines > 0
 
 	if startLine > 0 || endLine > 0 {
@@ -494,12 +510,12 @@ func projectRead(content, path string, startLine, endLine, maxLines int, mode st
 		if total == 0 {
 			p.StartLine, p.EndLine = startLine, 0
 			p.Text = rangeFooter(path, startLine, 0, 0)
-			return clampFormattedSpill(applyLineLimit(p, lineLimit), path)
+			return clampFormattedSpillLimit(applyLineLimit(p, lineLimit), path, maxBytes)
 		}
 		if startLine > total {
 			p.StartLine, p.EndLine = startLine, total
 			p.Text = rangeFooter(path, startLine, total, total)
-			return clampFormattedSpill(applyLineLimit(p, lineLimit), path)
+			return clampFormattedSpillLimit(applyLineLimit(p, lineLimit), path, maxBytes)
 		}
 		if endLine > total {
 			endLine = total
@@ -510,7 +526,7 @@ func projectRead(content, path string, startLine, endLine, maxLines int, mode st
 		body := strings.Join(lines[startLine-1:endLine], "\n")
 		p.StartLine, p.EndLine = startLine, endLine
 		p.Text = body + rangeFooter(path, startLine, endLine, total)
-		return clampFormattedSpill(applyLineLimit(p, lineLimit), path)
+		return clampFormattedSpillLimit(applyLineLimit(p, lineLimit), path, maxBytes)
 	}
 
 	if mode == "head" || mode == "tail" || maxLines > 0 {
@@ -523,7 +539,7 @@ func projectRead(content, path string, startLine, endLine, maxLines int, mode st
 		default:
 			p = projectPrefix(p, path, lines, maxLines, explicitCap)
 		}
-		return clampFormattedSpill(applyLineLimit(p, lineLimit), path)
+		return clampFormattedSpillLimit(applyLineLimit(p, lineLimit), path, maxBytes)
 	}
 
 	if total > autoTruncateLargeFileLines {
@@ -533,65 +549,11 @@ func projectRead(content, path string, startLine, endLine, maxLines int, mode st
 		p.Cut = cutAutoCap
 		p.Text = autoTruncateLargeFile(content, path)
 	}
-	return clampFormattedSpill(applyLineLimit(p, lineLimit), path)
+	return clampFormattedSpillLimit(applyLineLimit(p, lineLimit), path, maxBytes)
 }
 
 func clampFormattedSpill(p readProjection, path string) readProjection {
-	if len(p.Text) <= claudeSpillChars {
-		return p
-	}
-	const reserve = 240
-	budget := claudeSpillChars - reserve
-	if budget < 1 {
-		budget = 1
-	}
-	kept := p.Text
-	if len(kept) > budget {
-		if i := strings.LastIndex(kept[:budget], "\n"); i > 0 {
-			kept = kept[:i]
-		} else {
-			kept = kept[:budget]
-		}
-	}
-	n := 1
-	if kept != "" {
-		n = strings.Count(kept, "\n") + 1
-	}
-	if p.StartLine < 1 {
-		p.StartLine = 1
-	}
-	p.EndLine = p.StartLine + n - 1
-	if p.TotalLines > 0 && p.EndLine > p.TotalLines {
-		p.EndLine = p.TotalLines
-	}
-	if p.EndLine < p.StartLine {
-		p.EndLine = p.StartLine
-	}
-	p.ContinueAt = p.EndLine + 1
-	p.Truncated = true
-	if strings.Contains(p.Cut, cutLineWidth) {
-		p.Cut = cutCharSpill + "+" + cutLineWidth
-	} else {
-		p.Cut = cutCharSpill
-	}
-	footer := fmt.Sprintf(
-		"\n\n[Lines %d-%d of %d total lines in %s — text cut at %d characters. Continue with start_line=%d]",
-		p.StartLine, p.EndLine, p.TotalLines, filepath.Base(path), claudeSpillChars, p.ContinueAt,
-	)
-	p.Text = kept + footer
-	if len(p.Text) > claudeSpillChars {
-		if i := strings.LastIndex(kept, "\n"); i > 0 && p.EndLine > p.StartLine {
-			kept = kept[:i]
-			p.EndLine--
-			p.ContinueAt = p.EndLine + 1
-			footer = fmt.Sprintf(
-				"\n\n[Lines %d-%d of %d total lines in %s — text cut at %d characters. Continue with start_line=%d]",
-				p.StartLine, p.EndLine, p.TotalLines, filepath.Base(path), claudeSpillChars, p.ContinueAt,
-			)
-			p.Text = kept + footer
-		}
-	}
-	return p
+	return clampFormattedSpillLimit(p, path, claudeSpillChars)
 }
 
 func applyLineLimit(p readProjection, lineLimit int) readProjection {

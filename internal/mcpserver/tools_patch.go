@@ -35,10 +35,19 @@ func registerPatchTools(reg *toolRegistry) {
 				},
 			})),
 		mcp.WithString("normalize_json", mcp.Description("JSON array adapter for normalize: [{\"pattern\":\"idSub=[0-9]+\",\"replacement\":\"idSub=<ignored>\"}]")),
+		mcp.WithNumber("offset", mcp.Description("1-based line offset into the diff. Use continuation.offset when the diff was cut.")),
+		mcp.WithNumber("byte_offset", mcp.Description("Byte offset into that diff line when a line was cut. Pass it with offset.")),
 	)
 	reg.addTool(diffTool, auditWrap(engine, "diff_files", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args, _ := request.Params.Arguments.(map[string]interface{})
 		against, _ := args["against"].(string)
+		offset, byteOffset := 0, 0
+		if v, ok := args["offset"].(float64); ok {
+			offset = int(v)
+		}
+		if v, ok := args["byte_offset"].(float64); ok {
+			byteOffset = int(v)
+		}
 		pathA, _ := args["path_a"].(string)
 		pathB, _ := args["path_b"].(string)
 		path, _ := args["path"].(string)
@@ -73,9 +82,19 @@ func registerPatchTools(reg *toolRegistry) {
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				return mcp.NewToolResultStructured(map[string]any{
-					"status": statusOK, "path_a": pathA, "against": "backup", "message": cmp,
-				}, cmp), nil
+				bounded, cont, boundErr := boundDiffText(cmp, offset, byteOffset)
+				if boundErr != nil {
+					return mcp.NewToolResultError(boundErr.Error()), nil
+				}
+				payload := map[string]any{
+					"status": statusOK, "path_a": pathA, "against": "backup", "message": bounded,
+				}
+				if cont != nil {
+					payload["truncated"] = true
+					payload["continuation"] = cont
+					payload["status"] = statusTruncated
+				}
+				return mcp.NewToolResultStructured(payload, bounded), nil
 			}
 			backupBytes, err := engine.GetBackupManager().ReadBackupBytes(id, pathA)
 			if err != nil {
@@ -85,7 +104,7 @@ func registerPatchTools(reg *toolRegistry) {
 			if err != nil {
 				return mcp.NewToolResultError(formatToolError(err)), nil
 			}
-			return diffResult(pathA, pathA, filepath.Base(pathA), "backup", string(backupBytes), string(current), rules)
+			return diffResult(pathA, pathA, filepath.Base(pathA), "backup", string(backupBytes), string(current), rules, offset, byteOffset)
 		}
 		if pathB == "" {
 			return mcp.NewToolResultError("path_b is required unless against=backup"), nil
@@ -105,7 +124,7 @@ func registerPatchTools(reg *toolRegistry) {
 		if err != nil {
 			return mcp.NewToolResultError(formatToolError(err)), nil
 		}
-		return diffResult(pathA, pathB, filepath.Base(nameB), "", string(contentA), string(contentB), rules)
+		return diffResult(pathA, pathB, filepath.Base(nameB), "", string(contentA), string(contentB), rules, offset, byteOffset)
 	}))
 
 	patchTool := mcp.NewTool("apply_patch",

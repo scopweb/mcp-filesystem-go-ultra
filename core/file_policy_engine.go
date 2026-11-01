@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // SetFilePolicy installs an immutable policy and pins server-owned
@@ -347,6 +348,7 @@ func (e *UltraFastEngine) visibleDirEntries(dir string, entries []os.DirEntry) [
 			entry: entry,
 		})
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
 	return out
 }
 

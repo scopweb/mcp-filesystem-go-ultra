@@ -47,7 +47,7 @@ func parseNormalizeRules(args map[string]any) ([]core.NormalizeRule, error) {
 	return rules, nil
 }
 
-func diffResult(pathA, pathB, nameB, against string, a, b string, rules []core.NormalizeRule) (*mcp.CallToolResult, error) {
+func diffResult(pathA, pathB, nameB, against string, a, b string, rules []core.NormalizeRule, offset, byteOffset int) (*mcp.CallToolResult, error) {
 	cmp, err := core.CompareTexts(a, b, rules)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -108,5 +108,48 @@ func diffResult(pathA, pathB, nameB, against string, a, b string, rules []core.N
 		payload["matches_b"] = cmp.MatchesB
 		payload["normalized_diff"] = cmp.NormalizedDiff
 	}
-	return mcp.NewToolResultStructured(payload, msg), nil
+	bounded, cont, boundErr := boundDiffText(msg, offset, byteOffset)
+	if boundErr != nil {
+		return mcp.NewToolResultError(boundErr.Error()), nil
+	}
+	payload["message"] = bounded
+	if cont != nil {
+		payload["truncated"] = true
+		payload["continuation"] = cont
+		payload["status"] = statusTruncated
+	}
+	return mcp.NewToolResultStructured(payload, bounded), nil
+}
+
+func boundDiffText(msg string, offset, byteOffset int) (string, map[string]any, error) {
+	lines := splitContentLines(msg)
+	if len(lines) == 0 {
+		return msg, nil, nil
+	}
+	if offset < 1 {
+		offset = 1
+	}
+	if offset > len(lines) {
+		return "", map[string]any{"offset": offset, "hint": "offset is past the diff"}, fmt.Errorf("diff offset %d is past the diff (%d lines)", offset, len(lines))
+	}
+	if byteOffset > 0 {
+		if msg := trimLineByteOffset(lines, offset, byteOffset); msg != "" {
+			return "", nil, fmt.Errorf("%s", msg)
+		}
+	}
+	body := strings.Join(lines[offset-1:], "\n")
+	if len(body) <= claudeSpillChars {
+		return body, nil, nil
+	}
+	proj := clampFormattedSpillLimit(readProjection{
+		Text: body, StartLine: offset, EndLine: len(lines), TotalLines: len(lines), LineOffset: byteOffset,
+	}, "diff", claudeSpillChars)
+	cont := map[string]any{
+		"offset": proj.ContinueAt,
+		"hint":   "Continue with diff_files offset (1-based line). If byte_offset is set, pass it too; do not skip that line.",
+	}
+	if proj.ResumeOffset > 0 {
+		cont["byte_offset"] = proj.ResumeOffset
+	}
+	return proj.Text, cont, nil
 }

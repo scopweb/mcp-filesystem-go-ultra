@@ -35,7 +35,7 @@ Never mix native Read/Edit with ultra `read_file`/`edit_file` in one subagent.
 
 ## Claude Code subagents
 
-`claude-code/.claude/agents/*.md` list each tool as `mcp__filesystem-ultra__<tool>`, matching the server key in `claude-code/mcp.json.example`. A bare name matches nothing. Do not use `mcp__filesystem-ultra__*`: it would give write tools to the read-only agents. `disallowedTools` belongs in a subagent frontmatter, not at the root of `settings.json`. `claude-code/settings-snippet.json` keeps the native-tool deny in `permissions.deny` and does not deny `git` or `batch_operations` globally.
+`claude-code/.claude/agents/*.md` list each tool as `mcp__filesystem-ultra__<tool>`, matching the server key in `claude-code/mcp.json.example`. A bare name matches nothing. Do not use `mcp__filesystem-ultra__*`: it would give write tools to the read-only agents. `disallowedTools` belongs in a subagent frontmatter, not at the root of `settings.json`. `claude-code/settings-snippet.json` keeps the native-tool deny in `permissions.deny` and does not deny `git` or `batch_operations` globally. It does not deny `Read`: that deny is global, and Claude Code recovers a tool result saved after the 50000-character spill with the native Read tool. `fs-reviewer` does not receive `backup` — the tools list cannot restrict it to list/compare — and does not call `analyze_code`.
 
 ## Codex vs ultra `apply_patch`
 

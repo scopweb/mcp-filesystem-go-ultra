@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -120,6 +121,7 @@ func (e *UltraFastEngine) ListDirectoryTreeResult(ctx context.Context, path stri
 		if err != nil {
 			return node, nil
 		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 		node.Children = make([]*treeNode, 0, len(entries))
 		for _, entry := range entries {
 			if ctx.Err() != nil {

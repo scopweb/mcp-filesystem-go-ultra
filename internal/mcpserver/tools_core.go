@@ -486,6 +486,7 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("mode", mcp.Description("all (default) | head | tail. Logs: mode=tail max_lines=40. Replaces bash tail/head."), mcp.Enum("all", "head", "tail")),
 		mcp.WithNumber("start_line", mcp.Description("Starting line number (1-indexed) for range read. Pair with end_line (absolute line number) OR max_lines (line count) — not both.")),
 		mcp.WithNumber("end_line", mcp.Description("Ending line number for range read — an ABSOLUTE line number, not a count of lines. If you know how many lines you want instead of where they end, use max_lines with start_line and omit end_line.")),
+		mcp.WithNumber("byte_offset", mcp.Description("0-based byte offset into start_line when a line was cut. Pass the continuation value. Must be a rune boundary. Do not advance start_line instead.")),
 		mcp.WithString("encoding", mcp.Description("Set to \"base64\" to read file as base64-encoded binary"), mcp.Enum("utf-8", "utf8", "base64")),
 		mcp.WithString("detail", mcp.Description("summary|normal|full. Batch summary omits file bodies (keeps path/hash). detail shapes structuredContent; compact-mode trims text."), mcp.Enum("summary", "normal", "full")),
 	)
@@ -527,8 +528,20 @@ func registerCoreTools(reg *toolRegistry) {
 				return mcp.NewToolResultError("paths array is empty"), nil
 			}
 			startLine, endLine, maxLines, mode, lineLimit, lineLimitSet := readRangeArgs(args)
+			byteOffset := 0
+			if v, ok := args["byte_offset"].(float64); ok {
+				byteOffset = int(v)
+			}
+			if byteOffset > 0 && startLine <= 0 {
+				startLine = 1
+			}
 			if startLine > 0 && endLine == 0 && maxLines > 0 {
 				endLine = startLine + maxLines - 1
+				maxLines = 0
+				mode = "all"
+			}
+			if startLine > 0 && endLine == 0 && byteOffset > 0 {
+				endLine = 1<<30 - 1
 				maxLines = 0
 				mode = "all"
 			}
@@ -540,31 +553,72 @@ func registerCoreTools(reg *toolRegistry) {
 			var results strings.Builder
 			files := make([]map[string]any, 0, len(paths))
 			anyOK, anyFail, anyTrunc := false, false, false
+			remaining := claudeSpillChars
+			deferred := false
 			for i, p := range paths {
 				p = core.NormalizePath(p)
-				snap, err := engine.ReadFileSnapshot(ctx, p)
-				if i > 0 {
-					results.WriteString("\n")
+				if deferred {
+					anyTrunc = true
+					files = append(files, map[string]any{
+						"path": p, "truncated": true, "continuation": batchResumeContinuation(),
+					})
+					continue
 				}
-				results.WriteString(fmt.Sprintf("=== %s ===\n", p))
+				header := fmt.Sprintf("=== %s ===\n", p)
+				if i > 0 {
+					header = "\n" + header
+				}
 				entry := map[string]any{"path": p}
+				snap, err := engine.ReadFileSnapshot(ctx, p)
 				if err != nil {
 					anyFail = true
-					results.WriteString(fmt.Sprintf("ERROR: %v\n", err))
+					errLine := fmt.Sprintf("ERROR: %v\n", err)
+					results.WriteString(header)
+					results.WriteString(errLine)
+					remaining -= len(header) + len(errLine)
 					entry["error"] = err.Error()
+					files = append(files, entry)
+					continue
+				}
+				ll := lineLimit
+				if !lineLimitSet && (mode == "head" || mode == "tail") {
+					ll = defaultHeadTailLineLength
+				}
+				proj := projectReadCursor(string(snap.Bytes), p, startLine, endLine, maxLines, mode, ll, byteOffset, 0)
+				piece := proj.Text
+				if proj.Err != "" {
+					piece = "ERROR: " + proj.Err + "\n"
+				}
+				need := len(header) + len(piece)
+				if piece != "" && !strings.HasSuffix(piece, "\n") {
+					need++
+				}
+				if results.Len() > 0 && need > remaining {
+					deferred = true
+					anyTrunc = true
+					entry["truncated"] = true
+					entry["continuation"] = batchResumeContinuation()
+					files = append(files, entry)
+					continue
+				}
+				results.WriteString(header)
+				remaining -= len(header)
+				if proj.Err != "" {
+					anyFail = true
+					errLine := "ERROR: " + proj.Err + "\n"
+					results.WriteString(errLine)
+					remaining -= len(errLine)
+					entry["error"] = proj.Err
 				} else {
 					anyOK = true
-					ll := lineLimit
-					if !lineLimitSet && (mode == "head" || mode == "tail") {
-						ll = defaultHeadTailLineLength
-					}
-					proj := projectRead(string(snap.Bytes), p, startLine, endLine, maxLines, mode, ll)
 					if proj.Truncated {
 						anyTrunc = true
 					}
 					results.WriteString(proj.Text)
+					remaining -= len(proj.Text)
 					if !strings.HasSuffix(proj.Text, "\n") {
 						results.WriteString("\n")
+						remaining--
 					}
 					entry["content"] = proj.Text
 					entry["content_hash"] = snap.Hash
@@ -605,6 +659,7 @@ func registerCoreTools(reg *toolRegistry) {
 		mode := "all"
 		startLine := 0
 		endLine := 0
+		byteOffset := 0
 		encoding := ""
 		maxLineLength := 0
 		maxLineLengthSet := false
@@ -618,6 +673,9 @@ func registerCoreTools(reg *toolRegistry) {
 			}
 			if sl, ok := args["start_line"].(float64); ok {
 				startLine = int(sl)
+			}
+			if bo, ok := args["byte_offset"].(float64); ok {
+				byteOffset = int(bo)
 			}
 			if el, ok := args["end_line"].(float64); ok {
 				endLine = int(el)
@@ -651,6 +709,9 @@ func registerCoreTools(reg *toolRegistry) {
 			return mcp.NewToolResultStructured(sc, text), nil
 		}
 
+		if byteOffset > 0 && startLine <= 0 {
+			startLine = 1
+		}
 		if startLine > 0 && endLine == 0 {
 			if maxLines > 0 {
 				endLine = startLine + maxLines - 1
@@ -672,7 +733,10 @@ func registerCoreTools(reg *toolRegistry) {
 		if !maxLineLengthSet && (mode == "head" || mode == "tail") {
 			lineLimit = defaultHeadTailLineLength
 		}
-		proj := projectRead(string(snap.Bytes), path, startLine, endLine, maxLines, mode, lineLimit)
+		proj := projectReadCursor(string(snap.Bytes), path, startLine, endLine, maxLines, mode, lineLimit, byteOffset, 0)
+		if proj.Err != "" {
+			return mcp.NewToolResultError(proj.Err), nil
+		}
 		core.SetFileLinesTotal(ctx, proj.TotalLines)
 		if proj.EndLine >= proj.StartLine && proj.StartLine > 0 {
 			core.SetLinesRead(ctx, proj.EndLine-proj.StartLine+1)

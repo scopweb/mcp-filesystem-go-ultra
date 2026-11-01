@@ -88,6 +88,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"mode":            {Type: ParamString},
 		"start_line":      {Type: ParamNumber},
 		"end_line":        {Type: ParamNumber},
+		"byte_offset":     {Type: ParamNumber},
 		"encoding":        {Type: ParamString},
 		"detail":          {Type: ParamString},
 	},
@@ -105,6 +106,8 @@ var toolSchemas = map[string]ToolParamSchema{
 		"against":        {ParamString, false},
 		"normalize":      {ParamArray, false},
 		"normalize_json": {ParamString, false},
+		"offset":         {ParamNumber, false},
+		"byte_offset":    {ParamNumber, false},
 	},
 	"apply_patch": {
 		"path":          {ParamString, true},
@@ -155,6 +158,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"include":        {ParamString, false},
 		"respect_ignore": {ParamBoolean, false},
 		"max_nodes":      {ParamNumber, false},
+		"offset":         {ParamNumber, false},
 		"detail":         {ParamString, false},
 	},
 	"directory_tree": {
@@ -164,6 +168,7 @@ var toolSchemas = map[string]ToolParamSchema{
 		"exclude":        {ParamString, false},
 		"respect_ignore": {ParamBoolean, false},
 		"max_nodes":      {ParamNumber, false},
+		"offset":         {ParamNumber, false},
 		"detail":         {ParamString, false},
 	},
 	"project_map": {
