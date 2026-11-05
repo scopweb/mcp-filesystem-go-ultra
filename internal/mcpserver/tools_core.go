@@ -830,12 +830,27 @@ func registerCoreTools(reg *toolRegistry) {
 				return mcp.NewToolResultError("content_base64 or content with encoding:\"base64\" is required"), nil
 			}
 
-			// Validate base64 before passing to engine (fast fail)
-			if _, decodeErr := base64.StdEncoding.DecodeString(b64Content); decodeErr != nil {
+			// Decode before selecting the write mode; binary append must preserve
+			// exact bytes (no text hooks or EOL conversion).
+			data, decodeErr := base64.StdEncoding.DecodeString(b64Content)
+			if decodeErr != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Invalid base64: %v", decodeErr)), nil
 			}
 
-			_, err := engine.WriteBase64(ctx, path, b64Content)
+			var backupID string
+			if writeMode == "append" {
+				// Hold the existing transaction lock across read and atomic commit.
+				// A failed snapshot must never be treated as an empty file.
+				txnCtx, txn, txnErr := engine.BeginFileTxn(ctx, path, true)
+				if txnErr != nil {
+					return mcp.NewToolResultError(formatToolError(txnErr)), nil
+				}
+				defer txn.Release()
+				combined := append(txn.Snapshot().Bytes, data...)
+				backupID, err = txn.Commit(txnCtx, combined, false, "write_file", "base64 append")
+			} else {
+				err = engine.WriteFileBytes(ctx, path, data)
+			}
 			if err != nil {
 				return mcp.NewToolResultError(formatToolError(err)), nil
 			}
@@ -846,6 +861,12 @@ func registerCoreTools(reg *toolRegistry) {
 				core.RecordWriteHash(core.NormalizePath(path), b64ContentHash)
 			}
 			msg := fmt.Sprintf("WRITTEN %s %s | %dB", diskPrefix(verifiedPath), verifiedPath, bytesWritten)
+			if writeMode == "append" {
+				msg = fmt.Sprintf("APPENDED %s %s | appended %d B, total %d B", diskPrefix(verifiedPath), verifiedPath, len(data), bytesWritten)
+			}
+			if backupID != "" {
+				msg += " | UNDO:" + backupID
+			}
 			if !engine.IsCompactMode() {
 				msg += " base64"
 			}
@@ -853,6 +874,9 @@ func registerCoreTools(reg *toolRegistry) {
 				msg += "\n⚠ " + unverifiedWriteWarning
 			}
 			sc := writeStructured(verifiedPath, bytesWritten, b64ContentHash, verified)
+			if backupID != "" {
+				sc["backup_id"] = backupID
+			}
 			if !verified {
 				sc["feedback"] = unverifiedWriteWarning
 			}
@@ -1905,7 +1929,7 @@ func registerCoreTools(reg *toolRegistry) {
 		if result.Integrity != nil {
 			inv := result.Integrity
 			if inv.Verification == "OK" {
-				msg += fmt.Sprintf("\n✓ integrity:%s|%dL|%dB", inv.Hash[:8], inv.Lines, inv.SizeBytes)
+				msg += fmt.Sprintf("\n✓ integrity:%s|%dL|%dB", inv.Hash[:min(8, len(inv.Hash))], inv.Lines, inv.SizeBytes)
 			} else if inv.Verification == "WARNING" {
 				msg += fmt.Sprintf("\n⚠️ integrity:WARNING | %s", inv.Warning)
 			} else {

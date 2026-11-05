@@ -118,6 +118,20 @@ func multiEditStructured(path string, r *core.MultiEditResult) map[string]any {
 	return markApplied(m)
 }
 
+// recoverMultiEditPresentation is installed only after a committed edit.
+// Keep the applied state and undo receipt if optional response rendering panics.
+func recoverMultiEditPresentation(path string, result *core.MultiEditResult, response **mcp.CallToolResult, responseErr *error) {
+	if recovered := recover(); recovered != nil {
+		msg := fmt.Sprintf("MODIFIED %s | edits committed; response formatting failed: %v. Do not replay the edit.", path, recovered)
+		if result.BackupID != "" {
+			msg += " | UNDO:" + result.BackupID
+		}
+		*response = mcp.NewToolResultStructured(attachMessage(multiEditStructured(path, result), msg), msg)
+		(*response).IsError = true
+		*responseErr = nil
+	}
+}
+
 // registerBatchTools registers multi_edit, batch_operations, backup
 func registerBatchTools(reg *toolRegistry) {
 	engine := reg.engine
@@ -156,7 +170,7 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithBoolean("strict", mcp.Description("Opt-in strict matching: no implicit fallbacks. Default: false.")),
 		mcp.WithNumber("expected_matches", mcp.Description("If set, each old_text must match exactly this many times.")),
 	)
-	reg.addTool(multiEditTool, auditWrap(engine, "multi_edit", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	reg.addTool(multiEditTool, auditWrap(engine, "multi_edit", func(ctx context.Context, request mcp.CallToolRequest) (response *mcp.CallToolResult, responseErr error) {
 		path, err := request.RequireString("path")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
@@ -336,6 +350,8 @@ func registerBatchTools(reg *toolRegistry) {
 			return mcp.NewToolResultStructured(attachMessage(markSimulated(multiEditStructured(path, result), currentHash, predictedHash), msg), msg), nil
 		}
 
+		defer recoverMultiEditPresentation(path, result, &response, &responseErr)
+
 		// Update backup chain for undo step-through
 		if result.BackupID != "" {
 			engine.SetCurrentBackupID(path, result.BackupID)
@@ -464,7 +480,7 @@ func registerBatchTools(reg *toolRegistry) {
 		if result.Integrity != nil {
 			inv := result.Integrity
 			if inv.Verification == "OK" {
-				sb.WriteString(fmt.Sprintf("✓ integrity:%s|%dL|%dB\n", inv.Hash[:8], inv.Lines, inv.SizeBytes))
+				sb.WriteString(fmt.Sprintf("✓ integrity:%s|%dL|%dB\n", inv.Hash[:min(8, len(inv.Hash))], inv.Lines, inv.SizeBytes))
 			} else if inv.Verification == "WARNING" {
 				sb.WriteString(fmt.Sprintf("⚠️ integrity:WARNING | %s\n", inv.Warning))
 			} else {

@@ -1,6 +1,9 @@
 package core
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // AdaptiveWriteBackupCreator is the signature of the function that creates a
 // pre-write safety backup. It is injected so the adaptive logic can be tested
@@ -62,6 +65,7 @@ func ApplyAdaptiveWriteBlock(
 	signal.Status = FeedbackWarn
 	signal.BlockOp = false
 	signal.Downgraded = true
+	signal.Message = "WARNING: " + strings.TrimPrefix(signal.Message, "BLOCKED: ")
 	signal.Suggestion = fmt.Sprintf(
 		"Backup created: %s. To undo: backup(action:\"restore\", backup_id:\"%s\"). %s",
 		backupID, backupID, signal.Suggestion,
