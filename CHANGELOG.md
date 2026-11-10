@@ -15,6 +15,13 @@ When present they are written to the audit log and echoed on the successful
 `strength=inferred` does not force `dry_run`; an applied inferred call
 includes `auth_notice`. See `llms.txt` §6.
 
+### Fixed — rejected calls keep the trace on the audit line
+
+A validation failure returned before the trace was copied, so
+`operations.jsonl` had the ids only inside `args`. The error line now
+carries the same top-level fields as a successful call. The error receipt
+still does not echo them, and nothing is written.
+
 ### Changed — percentage risk needs a line floor
 
 CRITICAL was a percentage only: a 4-line file at 100% got the same

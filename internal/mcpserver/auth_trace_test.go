@@ -337,3 +337,40 @@ func TestAuthTrace_MultiEditDryRun(t *testing.T) {
 	assertTrace(t, m, "inferred", "")
 	assertPayloadConforms(t, parseSchema(t, multiEditOutputSchema), m)
 }
+
+func TestAuthTrace_ValidationErrorStillAuditsTrace(t *testing.T) {
+	dir := t.TempDir()
+	logDir := filepath.Join(dir, "logs")
+	reg := newLoggedRegistry(t, dir, logDir)
+	path := filepath.Join(dir, "nope.txt")
+	res := callPatchTool(t, reg, "write_file", map[string]any{
+		"path":           path,
+		"content":        "x",
+		"strength":       "guessed",
+		"mandate_id":     "m-1",
+		"policy_version": "pol-2026.11",
+		"ticket_id":      "tkt-9",
+		"scope_note":     "worker scope",
+	})
+	if !res.IsError {
+		t.Fatal("bad strength must be rejected")
+	}
+	if m, ok := res.StructuredContent.(map[string]any); ok {
+		if _, present := m["mandate_id"]; present {
+			t.Fatal("error receipt must not echo trace")
+		}
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("rejected write created a file: %v", err)
+	}
+
+	var found *core.AuditEntry
+	for _, e := range readAudit(t, logDir) {
+		if e.Tool == "write_file" && e.Status == "error" && strings.Contains(e.Error, "strength") {
+			found = &e
+		}
+	}
+	if found == nil || found.MandateID != "m-1" || found.TicketID != "tkt-9" || found.PolicyVersion != "pol-2026.11" || found.Strength != "guessed" || found.ScopeNote != "worker scope" {
+		t.Fatalf("validation audit dropped trace: %+v", found)
+	}
+}
