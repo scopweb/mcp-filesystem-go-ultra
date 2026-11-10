@@ -98,6 +98,11 @@ var toolSchemas = map[string]ToolParamSchema{
 		"content_base64": {Type: ParamString},
 		"encoding":       {Type: ParamString},
 		"mode":           {Type: ParamString},
+		"mandate_id":     {Type: ParamString},
+		"policy_version": {Type: ParamString},
+		"strength":       {Type: ParamString},
+		"ticket_id":      {Type: ParamString},
+		"scope_note":     {Type: ParamString},
 	},
 	"diff_files": {
 		"path_a":         {ParamString, false},
@@ -110,14 +115,19 @@ var toolSchemas = map[string]ToolParamSchema{
 		"byte_offset":    {ParamNumber, false},
 	},
 	"apply_patch": {
-		"path":          {ParamString, true},
-		"patch":         {ParamString, true},
-		"dry_run":       {ParamBoolean, false},
-		"expected_hash": {ParamString, false},
-		"detail":        {ParamString, false},
-		"include_diff":  {ParamBoolean, false},
-		"allow_rewrite": {ParamBoolean, false},
-		"create_backup": {ParamBoolean, false},
+		"path":           {ParamString, true},
+		"patch":          {ParamString, true},
+		"dry_run":        {ParamBoolean, false},
+		"expected_hash":  {ParamString, false},
+		"detail":         {ParamString, false},
+		"include_diff":   {ParamBoolean, false},
+		"allow_rewrite":  {ParamBoolean, false},
+		"create_backup":  {ParamBoolean, false},
+		"mandate_id":     {ParamString, false},
+		"policy_version": {ParamString, false},
+		"strength":       {ParamString, false},
+		"ticket_id":      {ParamString, false},
+		"scope_note":     {ParamString, false},
 	},
 	"edit_file": {
 		"path":                {Type: ParamString, Required: true},
@@ -151,6 +161,11 @@ var toolSchemas = map[string]ToolParamSchema{
 		"position":            {Type: ParamString},
 		"strict":              {Type: ParamBoolean},
 		"expected_matches":    {Type: ParamNumber},
+		"mandate_id":          {Type: ParamString},
+		"policy_version":      {Type: ParamString},
+		"strength":            {Type: ParamString},
+		"ticket_id":           {Type: ParamString},
+		"scope_note":          {Type: ParamString},
 	},
 	"list_directory": {
 		"path":           {ParamString, true},
@@ -211,6 +226,11 @@ var toolSchemas = map[string]ToolParamSchema{
 		"diff_format":         {Type: ParamString},
 		"strict":              {Type: ParamBoolean},
 		"expected_matches":    {Type: ParamNumber},
+		"mandate_id":          {Type: ParamString},
+		"policy_version":      {Type: ParamString},
+		"strength":            {Type: ParamString},
+		"ticket_id":           {Type: ParamString},
+		"scope_note":          {Type: ParamString},
 	},
 
 	// ---- FILES (4) ----
@@ -237,12 +257,17 @@ var toolSchemas = map[string]ToolParamSchema{
 
 	// ---- BATCH (1) ----
 	"batch_operations": {
-		"request":       {Type: ParamObject},
-		"request_json":  {Type: ParamString},
-		"pipeline":      {Type: ParamObject},
-		"pipeline_json": {Type: ParamString},
-		"rename":        {Type: ParamObject},
-		"rename_json":   {Type: ParamString},
+		"request":        {Type: ParamObject},
+		"request_json":   {Type: ParamString},
+		"pipeline":       {Type: ParamObject},
+		"pipeline_json":  {Type: ParamString},
+		"rename":         {Type: ParamObject},
+		"rename_json":    {Type: ParamString},
+		"mandate_id":     {Type: ParamString},
+		"policy_version": {Type: ParamString},
+		"strength":       {Type: ParamString},
+		"ticket_id":      {Type: ParamString},
+		"scope_note":     {Type: ParamString},
 	},
 
 	// ---- BACKUP (1) ----
@@ -548,6 +573,7 @@ func ValidateToolParams(toolName string, args map[string]interface{}) []string {
 	}
 
 	errs = append(errs, validateCombinations(toolName, args)...)
+	errs = append(errs, validateAuthArgs(schema, args)...)
 	return errs
 }
 

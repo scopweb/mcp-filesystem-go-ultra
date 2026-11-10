@@ -73,8 +73,18 @@ func TestEditFile_DryRun_PreservesBytesAllModes(t *testing.T) {
 			t.Fatalf("dry_run errored: %s", resultText(t, res))
 		}
 		text := resultText(t, res)
-		if !strings.Contains(text, "(1 lines") {
-			t.Fatalf("risk note must say 1 lines for \"v1\\n\", got:\n%s", text)
+		// A 1-line file is below the percentage-risk scope, so the old
+		// "edit on small file (N lines" note is not emitted. The line count
+		// still has to treat a trailing newline as one line, not two.
+		m, ok := res.StructuredContent.(map[string]any)
+		if !ok {
+			t.Fatalf("structured content %T\n%s", res.StructuredContent, text)
+		}
+		if m["total_lines"] != 1 {
+			t.Fatalf("trailing newline must count as 1 line, total_lines=%v (%T)\n%s", m["total_lines"], m["total_lines"], text)
+		}
+		if !strings.Contains(text, "@@ -1,1 +1,1 @@") {
+			t.Fatalf("dry-run diff must show one line on each side, got:\n%s", text)
 		}
 		if strings.Contains(text, "(2 lines") {
 			t.Fatalf("trailing newline must not count as a line, got:\n%s", text)

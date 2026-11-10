@@ -781,6 +781,7 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("encoding", mcp.Description("Set to \"base64\" when content is base64-encoded"), mcp.Enum("utf-8", "utf8", "base64")),
 		mcp.WithString("mode", mcp.Description("overwrite (default) or append. append does not trigger rewrite-guard."), mcp.Enum("overwrite", "append")),
 	)
+	applyAuthTraceSchema(&writeFileTool)
 	reg.writeFileHandler = auditWrap(engine, "write_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")
 		if err != nil {
@@ -1075,6 +1076,7 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithBoolean("strict", mcp.Description("Opt-in strict matching: no implicit fallbacks (trim/regex/escape). Tolerant match only if tolerant_whitespace:true. Default: false.")),
 		mcp.WithNumber("expected_matches", mcp.Description("If set, old_text must match exactly this many times or the edit is rejected with candidate line numbers.")),
 	)
+	applyAuthTraceSchema(&editFileTool)
 	regexTransform := reg.regexTransform
 	reg.editFileHandler = auditWrap(engine, "edit_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path, err := request.RequireString("path")

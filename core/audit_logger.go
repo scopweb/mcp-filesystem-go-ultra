@@ -182,6 +182,13 @@ type AuditEntry struct {
 	// File integrity verification (for HIGH/CRITICAL edits)
 	IntegrityStatus string `json:"integrity_status,omitempty"` // "OK", "WARNING", "ERROR"
 	IntegrityWarn   string `json:"integrity_warn,omitempty"`   // warning message if verification had issues
+
+	// Caller trace. Optional, omitempty. Does not authorize the operation.
+	MandateID     string `json:"mandate_id,omitempty"`
+	PolicyVersion string `json:"policy_version,omitempty"`
+	Strength      string `json:"strength,omitempty"`
+	TicketID      string `json:"ticket_id,omitempty"`
+	ScopeNote     string `json:"scope_note,omitempty"`
 }
 
 // MetricsSnapshot is the periodic metrics dump written to metrics.json

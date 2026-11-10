@@ -41,10 +41,12 @@ func TestCatalogSerializedBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("strict JSON excluding _meta: %d bytes", len(model))
-	// Baseline (2026-10-19): ultra 70,918 B, strict 43,984 B. Leave about
-	// 16% headroom; inspect growth before deliberately changing these budgets.
-	if len(u) > 80*1024 || len(s) > 50*1024 {
-		t.Fatalf("catalog exceeds byte budget (ultra 80 KiB / strict 50 KiB): ultra=%d strict=%d", len(u), len(s))
+	// Baseline (2026-10-19): ultra 70,918 B, strict 43,984 B.
+	// 2026-11-10: optional auth-trace fields (names and types only; the
+	// meaning is in llms.txt) measured ultra 83,507 B, strict 51,011 B.
+	// Strict stays at 50 KiB. Ultra cap moves to 84 KiB for that addition.
+	if len(u) > 84*1024 || len(s) > 50*1024 {
+		t.Fatalf("catalog exceeds byte budget (ultra 84 KiB / strict 50 KiB): ultra=%d strict=%d", len(u), len(s))
 	}
 }
 

@@ -214,6 +214,7 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithBoolean("strict", mcp.Description("Opt-in strict matching: no implicit fallbacks. Default: false.")),
 		mcp.WithNumber("expected_matches", mcp.Description("If set, each old_text must match exactly this many times.")),
 	)
+	applyAuthTraceSchema(&multiEditTool)
 	reg.addTool(multiEditTool, auditWrap(engine, "multi_edit", func(ctx context.Context, request mcp.CallToolRequest) (response *mcp.CallToolResult, responseErr error) {
 		path, err := request.RequireString("path")
 		if err != nil {
@@ -589,6 +590,7 @@ func registerBatchTools(reg *toolRegistry) {
 		mcp.WithObject("rename", mcp.Description("Native batch rename. Fields: path, mode, find, replace, prefix, suffix, pattern, extension, start_number, padding, recursive, file_pattern, preview, case_sensitive. Legacy adapter: rename_json."), mcp.AdditionalProperties(true)),
 		mcp.WithString("rename_json", mcp.Description("Legacy JSON-string adapter for rename. Prefer the native rename object.")),
 	)
+	applyAuthTraceSchema(&batchOpsTool)
 	reg.addTool(batchOpsTool, auditWrap(engine, "batch_operations", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		pipelineJSON := ""
 		renameJSON := ""

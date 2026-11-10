@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Added — optional orchestrator trace on mutations
+
+`write_file`, `edit_file`, `multi_edit`, `apply_patch` and
+`batch_operations` accept optional `mandate_id`, `policy_version`,
+`strength` (`explicit` or `inferred`), `ticket_id` and `scope_note`.
+When present they are written to the audit log and echoed on the successful
+`structuredContent`. They do not authorize paths, bypass OCC, or change
+`security_policy`. Omitting them is the previous behaviour.
+`strength=inferred` does not force `dry_run`; an applied inferred call
+includes `auth_notice`. See `llms.txt` §6.
+
 ### Changed — percentage risk needs a line floor
 
 CRITICAL was a percentage only: a 4-line file at 100% got the same

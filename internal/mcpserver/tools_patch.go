@@ -145,6 +145,7 @@ func registerPatchTools(reg *toolRegistry) {
 		mcp.WithBoolean("allow_rewrite", mcp.Description("Bypass accidental-rewrite guard")),
 		mcp.WithBoolean("create_backup", mcp.Description("Backup before write (default: true)")),
 	)
+	applyAuthTraceSchema(&patchTool)
 	reg.addTool(patchTool, auditWrap(engine, "apply_patch", handleApplyPatch(engine)),
 		`apply_patch(path:"file.go", patch:"--- a/file.go\n+++ b/file.go\n@@ -1 +1 @@\n-old\n+new\n")`,
 		`apply_patch(path:"file.go", patch:"...", dry_run:true)`,

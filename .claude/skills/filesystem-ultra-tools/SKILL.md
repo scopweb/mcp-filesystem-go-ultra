@@ -202,3 +202,7 @@ Aliases `read_text_file`, `search`, `edit`, `write`, `create_file`, `View`, `Edi
 ## project_replace (ultra)
 
 `path`, `find`, `replace` required. `literal` default true. `file_types` e.g. `.php`. `paths` is an explicit file list (skips the walk). `exclude_paths` globs. `preview` / `create_backup` (default true) / `parallel` / `max_files` (default 1000). Compact default is counters only; `detail:"full"` lists each file. JSON/XML/`.csproj` edits append a non-blocking syntax warning if the file is left ill-formed.
+
+## Orchestrators (dsh-style)
+
+ultra is a file backend, not a ticket orchestrator. Optional trace fields on `write_file`, `edit_file`, `multi_edit`, `apply_patch`, and `batch_operations`: `ticket_id`, `mandate_id`, `policy_version`, `strength` (`explicit`|`inferred`), `scope_note`. Logged and echoed. They do not authorize paths or bypass OCC. `strength:inferred` does not force `dry_run`; prefer it on tools that have it, then verify with OCC + `git diff --stat` + build. Full pattern: `llms.txt` §6.

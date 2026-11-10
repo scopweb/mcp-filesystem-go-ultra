@@ -122,6 +122,9 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 	setEnum("apply_patch", "detail", "full")
 	setEnum("write_file", "mode", "overwrite", "append")
 	setEnum("write_file", "encoding", "utf-8", "utf8", "base64")
+	for _, tool := range []string{"write_file", "edit_file", "multi_edit", "apply_patch", "batch_operations"} {
+		setEnum(tool, "strength", AuthStrengthExplicit, AuthStrengthInferred)
+	}
 	setEnum("edit_file", "mode", "replace", "search_replace", "regex", "delete_range", "replace_range", "insert")
 	setEnum("edit_file", "diff_format", "auto", "full", "summary", "stat", "none")
 	setEnum("edit_file", "position", "after", "before")

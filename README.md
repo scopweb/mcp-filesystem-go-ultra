@@ -406,6 +406,10 @@ For a host project, bind the whole task to the filesystem-ultra family. After ev
 
 Copy [examples/harness/](examples/harness/) — do not guess flags. One MCP instance per workspace: `--profile=strict --roots-mode=union --compact-mode`. OpenCode `timeout` ≥ 30000. One role = one disk family (never mix native Read/Edit with ultra). Codex `*** Begin Patch` is not ultra `apply_patch`. Parent→child handoff: roots, path, `content_hash`, `backup_id`, profile; the child re-reads.
 
+### Orchestrators (dsh-style)
+
+ultra is a file backend, not a ticket orchestrator. Point `--allowed-paths` (or Roots) at one git worktree per ticket, and optionally pass `ticket_id`, `mandate_id`, `policy_version`, `strength` (`explicit` or `inferred`), and `scope_note` on `write_file`, `edit_file`, `multi_edit`, `apply_patch`, and `batch_operations`. Those fields are logged and echoed. They do not authorize paths. Verify with OCC plus `git diff --stat` plus a build. Details: [llms.txt](llms.txt) §6.
+
 ---
 
 ## Available Tools

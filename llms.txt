@@ -208,3 +208,43 @@ Other profiles add `git` (agent), and `analyze_code`, `analyze_operation`,
 
 Parameters are discovered with `help(tool:"X")`; enums, examples and the
 output contract come from there.
+
+## 6. Using as backend for multi-session / multi-ticket agents (dsh-style)
+
+ultra is a file backend, not an orchestrator. It does not model Tickets,
+Subscriptions, Eval, Sources, or policy versioning. An orchestrator owns
+that. The fields below are optional trace metadata. Omitting them is the
+current behaviour. They do not authorize paths, do not bypass OCC, risk
+checks, or `security_policy`, and a Mandate never widens fail-closed roots.
+
+Recommended pattern:
+
+1. The orchestrator prepares one `git worktree` per Ticket.
+2. Point `--allowed-paths` (or client Roots) at that worktree. To keep the
+   base tree visible but not writable, put the base in a read-only root and
+   the worktree in a writable root — or point the worker only at the worktree.
+3. The worker edits only inside that root. On `write_file`, `edit_file`,
+   `multi_edit`, `apply_patch`, and `batch_operations` it may pass:
+   - `ticket_id` (max 128 bytes)
+   - `mandate_id` (max 128 bytes)
+   - `policy_version` (max 128 bytes; echoed, not enforced)
+   - `strength`: `explicit` or `inferred`
+   - `scope_note` (max 256 bytes)
+4. When present, those fields are written to the audit log
+   (`operations.jsonl`, only if `--log-dir` is set) and echoed on the
+   successful `structuredContent`, next to `content_hash`, `backup_id`,
+   and `status`. They are omitted when absent. Invalid `strength`,
+   over-long strings, leading or trailing whitespace, or control characters
+   are `VALIDATION` (`retryable:false`) and nothing is written.
+5. `strength: "inferred"` does not force `dry_run` and does not authorize
+   the write. On `edit_file`, `multi_edit`, and `apply_patch`, prefer
+   `dry_run:true` first. If an inferred call is applied anyway, the receipt
+   includes `auth_notice`. `write_file` has no dry_run.
+   `batch_operations` carries preview/dry_run inside the payload, not as a
+   top-level flag. A dry-run receipt includes the same trace fields.
+6. Verify with OCC (`content_hash` / `expected_hash`) plus
+   `git diff --stat` plus the real diff plus a build. A dry-run preview is
+   not ground truth, especially on CRLF files (the preview can show the whole
+   file as changed). `STALE_READ` is not OCC. The structure checker may
+   mis-count braces in a verbatim C# string ending in `@"X:\"`; the
+   compiler is the judge.

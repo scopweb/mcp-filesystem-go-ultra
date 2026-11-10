@@ -8,7 +8,8 @@ import "encoding/json"
 //
 // KEEP IN SYNC with editStructured / multiEditStructured / writeStructured /
 // readStructured / searchStructured / listStructured / batchStructured /
-// backupStructured. Guarded by output_schema_test.go and output_schema_sweep_test.go.
+// backupStructured / attachAuthTrace. Guarded by output_schema_test.go and
+// output_schema_sweep_test.go.
 
 var readFileOutputSchema = json.RawMessage(`{
   "type": "object",
@@ -38,7 +39,8 @@ var writeFileOutputSchema = json.RawMessage(`{
     "backup_id": {"type": "string", "description": "Present when a safety backup was auto-created (adaptive guard). Full ID for backup(action:'restore') or backup(action:'undo_last')."},
     "feedback": {"type": "string", "description": "Non-blocking warning (truncation/inflation/rewrite heuristics or failed post-write read-back)"},
     "status": {"type": "string", "description": "applied (write_file has no dry_run)"},
-    "message": {"type": "string", "description": "Human-readable summary, identical to the text content block"}
+    "message": {"type": "string", "description": "Human-readable summary, identical to the text content block"},
+    "mandate_id": {"type": "string"}, "policy_version": {"type": "string"}, "strength": {"type": "string"}, "ticket_id": {"type": "string"}, "scope_note": {"type": "string"}, "auth_notice": {"type": "string"}
   },
   "required": ["path", "bytes_written", "verified", "message"]
 }`)
@@ -62,7 +64,8 @@ var editFileOutputSchema = json.RawMessage(`{
     "status": {"type": "string", "description": "applied or simulated (dry_run)"},
     "current_hash": {"type": "string", "description": "Hash of the file before a dry_run (same as on-disk)"},
     "predicted_hash": {"type": "string", "description": "Hash the file would have after applying the dry_run"},
-    "message": {"type": "string", "description": "Human-readable summary incl. diff, identical to the text content block"}
+    "message": {"type": "string", "description": "Human-readable summary incl. diff, identical to the text content block"},
+    "mandate_id": {"type": "string"}, "policy_version": {"type": "string"}, "strength": {"type": "string"}, "ticket_id": {"type": "string"}, "scope_note": {"type": "string"}, "auth_notice": {"type": "string"}
   },
   "required": ["path", "replacements", "lines_added", "lines_removed", "total_lines", "message"]
 }`)
@@ -85,7 +88,8 @@ var multiEditOutputSchema = json.RawMessage(`{
     "status": {"type": "string", "description": "applied or simulated (dry_run)"},
     "current_hash": {"type": "string", "description": "Hash of the file before a dry_run"},
     "predicted_hash": {"type": "string", "description": "Hash the file would have after applying the dry_run"},
-    "message": {"type": "string"}
+    "message": {"type": "string"},
+    "mandate_id": {"type": "string"}, "policy_version": {"type": "string"}, "strength": {"type": "string"}, "ticket_id": {"type": "string"}, "scope_note": {"type": "string"}, "auth_notice": {"type": "string"}
   },
   "required": ["path", "successful_edits", "total_edits", "message"]
 }`)
@@ -136,7 +140,8 @@ var batchOperationsOutputSchema = json.RawMessage(`{
     "backup_id": {"type": "string"},
     "rollback_status": {"type": "string", "description": "complete | partial | failed"},
     "retryable": {"type": "boolean", "description": "False when any write may already have been applied — do not replay blindly"},
-    "message": {"type": "string"}
+    "message": {"type": "string"},
+    "mandate_id": {"type": "string"}, "policy_version": {"type": "string"}, "strength": {"type": "string"}, "ticket_id": {"type": "string"}, "scope_note": {"type": "string"}, "auth_notice": {"type": "string"}
   },
   "required": ["status", "success", "message"]
 }`)
@@ -194,7 +199,8 @@ var applyPatchOutputSchema = json.RawMessage(`{
     "backup_id": {"type": "string"},
     "current_hash": {"type": "string", "description": "On-disk hash before a dry_run"},
     "predicted_hash": {"type": "string", "description": "Hash the file would have after applying the dry_run"},
-    "message": {"type": "string", "description": "Human-readable summary, identical to the text content block"}
+    "message": {"type": "string", "description": "Human-readable summary, identical to the text content block"},
+    "mandate_id": {"type": "string"}, "policy_version": {"type": "string"}, "strength": {"type": "string"}, "ticket_id": {"type": "string"}, "scope_note": {"type": "string"}, "auth_notice": {"type": "string"}
   },
   "required": ["status", "path", "message"]
 }`)

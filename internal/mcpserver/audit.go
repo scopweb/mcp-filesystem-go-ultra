@@ -72,6 +72,8 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 		}
 
 		args, _ := request.Params.Arguments.(map[string]interface{})
+		authTrace := core.ParseAuthTrace(args)
+		authTrace.Apply(entry)
 		if engine.IsReadOnly() {
 			if toolIsMutating(tool, args) {
 				entry.DurationMs = time.Since(start).Milliseconds()
@@ -189,6 +191,9 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 		// Log the audit entry
 		engine.Audit(*entry)
 
+		if err == nil && res != nil && !res.IsError {
+			attachAuthTrace(res, authTrace, core.AuthNotice(tool, dryRun, authTrace.Strength))
+		}
 		return res, err
 	}
 }
