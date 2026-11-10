@@ -242,6 +242,52 @@ func truncateOutput(text string, maxLines int) string {
 		total, maxLines)
 }
 
+// gitOutputWindow applies the optional line window (start_line/end_line) to a
+// git output block and then the max_lines cap, in that order, so both compose:
+// the window selects the range, max_lines bounds the response.
+//
+// It exists so an agent can continue past a cut instead of re-reading: the
+// footer states the window and the exact start_line to ask for next. Without a
+// window the behavior is the plain max_lines truncation.
+func gitOutputWindow(text string, args map[string]interface{}, maxLines int) string {
+	start := parseIntArg(args, "start_line", 0)
+	end := parseIntArg(args, "end_line", 0)
+	if start <= 0 && end <= 0 {
+		return truncateOutput(text, maxLines)
+	}
+	lines := strings.Split(text, "\n")
+	total := len(lines)
+	from := start
+	if from <= 0 {
+		from = 1
+	}
+	to := end
+	if to <= 0 || to > total {
+		to = total
+	}
+	if from > total {
+		return fmt.Sprintf("[no lines in range: start_line=%d is past the last line (%d)]", from, total)
+	}
+	if from > to {
+		return fmt.Sprintf("[invalid range: start_line=%d is past end_line=%d]", from, to)
+	}
+	selected := lines[from-1 : to]
+	shown := selected
+	cut := false
+	if maxLines > 0 && len(selected) > maxLines {
+		shown = selected[:maxLines]
+		cut = true
+	}
+	footer := fmt.Sprintf("[lines %d-%d of %d]", from, from+len(shown)-1, total)
+	if cut {
+		footer += fmt.Sprintf(". Cut at max_lines=%d", maxLines)
+	}
+	if next := from + len(shown); next <= total {
+		footer += fmt.Sprintf(". To continue: start_line=%d", next)
+	}
+	return strings.Join(shown, "\n") + "\n" + footer
+}
+
 // parseIntArg extracts an integer arg with default fallback. JSON numbers arrive as float64.
 func parseIntArg(args map[string]interface{}, key string, def int) int {
 	if v, ok := args[key]; ok {

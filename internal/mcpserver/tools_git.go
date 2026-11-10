@@ -45,6 +45,8 @@ func registerGitTools(reg *toolRegistry) {
 			mcp.Description("Pathspec: native array of file/dir paths relative to repo root. Limits diff/log/status/add/restore to these paths. Equivalent to 'git <cmd> -- <paths>'. Rejected for commit: use add(paths) first, then commit without paths.")),
 		mcp.WithString("output", mcp.Description("Output format. diff/show: 'stat' (default) | 'name-only' | 'full'. status: 'name-only' | 'full' — in compact mode, status without explicit output returns a one-line summary; pass output explicitly (either value) to get the changed-file listing. status 'full' prepends a readable summary to porcelain v2; max_lines bounds the listing and truncated reports omissions. log: 'oneline' (default) | 'full'.")),
 		mcp.WithNumber("max_lines", mcp.Description("Max output lines before truncation with hint footer (default: 200)")),
+		mcp.WithNumber("start_line", mcp.Description("First output line to show (1-based). diff/log/show: the lines before it are skipped, so a truncated output can be continued with start_line=<last shown + 1>.")),
+		mcp.WithNumber("end_line", mcp.Description("Last output line to show (absolute, inclusive). diff/log/show.")),
 		mcp.WithNumber("limit", mcp.Description("log: max commits to return (default: 10)")),
 		mcp.WithString("rev", mcp.Description("Revision or range (e.g. 'HEAD~3', 'abc123..def456', 'main'). diff/log/show.")),
 		mcp.WithString("pickaxe", mcp.Description("log only: git log -S as one argv (\"-S\"+pattern), so a leading '-' is data. Rejects empty, NUL, newline, and more than 512 bytes. Not -G.")),
@@ -610,7 +612,7 @@ func gitDiff(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 
 	// Compact mode of the SERVER caps differently, but the spec's max_lines always wins
 	// for LLM consumers. We apply max_lines unconditionally and prepend the banner if downgraded.
-	final := banner + truncateOutput(output, maxLines)
+	final := banner + gitOutputWindow(output, args, maxLines)
 
 	// Server compact mode still trims further if it's an extreme case (>10k chars).
 	if engine.IsCompactMode() && len(final) > 10000 {
@@ -688,7 +690,7 @@ func gitLog(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 	}
 
 	// Apply max_lines truncation unconditionally; this is the LLM-consumer contract.
-	return mcp.NewToolResultText(truncateOutput(output, maxLines)), nil
+	return mcp.NewToolResultText(gitOutputWindow(output, args, maxLines)), nil
 }
 
 // gitShow displays a commit: stat by default, full/Name-only on demand.
@@ -753,7 +755,7 @@ func gitShow(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 	if strings.TrimSpace(body) == "" {
 		return mcp.NewToolResultText(header), nil
 	}
-	return mcp.NewToolResultText(header + "\n\n" + truncateOutput(body, maxLines)), nil
+	return mcp.NewToolResultText(header + "\n\n" + gitOutputWindow(body, args, maxLines)), nil
 }
 
 // showHeaderMaxLines caps the commit-message header of `git show` so a
