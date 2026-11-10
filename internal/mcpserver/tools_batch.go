@@ -118,18 +118,60 @@ func multiEditStructured(path string, r *core.MultiEditResult) map[string]any {
 	return markApplied(m)
 }
 
+// multiEditCommittedResult builds the error result for a panic that happened
+// after the edits were already written to disk: the applied state and the undo
+// receipt must survive the failure.
+func multiEditCommittedResult(path string, result *core.MultiEditResult, recovered any) *mcp.CallToolResult {
+	msg := fmt.Sprintf("MODIFIED %s | edits committed; response formatting failed: %v. Do not replay the edit.", path, recovered)
+	if result == nil {
+		return mcp.NewToolResultError(msg)
+	}
+	if result.BackupID != "" {
+		msg += " | UNDO:" + result.BackupID
+	}
+	res := mcp.NewToolResultStructured(attachMessage(multiEditStructured(path, result), msg), msg)
+	res.IsError = true
+	return res
+}
+
 // recoverMultiEditPresentation is installed only after a committed edit.
 // Keep the applied state and undo receipt if optional response rendering panics.
 func recoverMultiEditPresentation(path string, result *core.MultiEditResult, response **mcp.CallToolResult, responseErr *error) {
 	if recovered := recover(); recovered != nil {
-		msg := fmt.Sprintf("MODIFIED %s | edits committed; response formatting failed: %v. Do not replay the edit.", path, recovered)
-		if result.BackupID != "" {
-			msg += " | UNDO:" + result.BackupID
-		}
-		*response = mcp.NewToolResultStructured(attachMessage(multiEditStructured(path, result), msg), msg)
-		(*response).IsError = true
+		*response = multiEditCommittedResult(path, result, recovered)
 		*responseErr = nil
 	}
+}
+
+// multi_edit panics must not escape to the SDK recovery middleware: that only
+// reports "panic recovered in multi_edit tool handler", with no path and no
+// hint about the file state. recoverMultiEditPanic is the handler's own
+// deferred function and turns the panic into a structured error.
+//
+// phase says how far the call got, so the message never lies about the disk:
+//
+//	""          nothing ran yet; this call did not touch the file.
+//	"editing"   engine.MultiEdit was running; the file may be half-written.
+//	"preview"   dry run; nothing was written.
+//	"committed" the edits landed; the undo receipt must be preserved.
+func recoverMultiEditPanic(path, phase string, result *core.MultiEditResult, response **mcp.CallToolResult, responseErr *error) {
+	recovered := recover()
+	if recovered == nil {
+		return
+	}
+	if phase == "committed" {
+		*response = multiEditCommittedResult(path, result, recovered)
+		*responseErr = nil
+		return
+	}
+	var msg string
+	if phase == "editing" {
+		msg = fmt.Sprintf("FAILED %s | multi_edit aborted by an internal error while applying the edits: %v. The file may be partially modified: verify it with read_file (and the backup list) before retrying.", path, recovered)
+	} else {
+		msg = fmt.Sprintf("FAILED %s | multi_edit aborted by an internal error before any edit was applied: %v. The file was not modified by this call. Re-read it and retry.", path, recovered)
+	}
+	*response = mcp.NewToolResultError(msg)
+	*responseErr = nil
 }
 
 // registerBatchTools registers multi_edit, batch_operations, backup
@@ -155,10 +197,12 @@ func registerBatchTools(reg *toolRegistry) {
 			mcp.Items(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"old_text": map[string]any{"type": "string"},
-					"new_text": map[string]any{"type": "string"},
-					"old_str":  map[string]any{"type": "string"},
-					"new_str":  map[string]any{"type": "string"},
+					"old_text":   map[string]any{"type": "string"},
+					"new_text":   map[string]any{"type": "string"},
+					"old_str":    map[string]any{"type": "string"},
+					"new_str":    map[string]any{"type": "string"},
+					"old_string": map[string]any{"type": "string"},
+					"new_string": map[string]any{"type": "string"},
 				},
 			})),
 		mcp.WithString("edits_json", mcp.Description("JSON array of edits: [{\"old_text\": \"...\", \"new_text\": \"...\"}, ...]. Also accepts old_str/new_str and old_string/new_string as aliases. Provide edits or edits_json, not conflicting both.")),
@@ -175,6 +219,15 @@ func registerBatchTools(reg *toolRegistry) {
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid path: %v", err)), nil
 		}
+		// A panic in any phase of this handler must stay inside the tool: the
+		// SDK recovery middleware only reports "panic recovered in multi_edit
+		// tool handler". The phase markers below tell the recovery whether the
+		// file was touched before the failure.
+		multiEditPhase := ""
+		var multiEditResult *core.MultiEditResult
+		defer func() {
+			recoverMultiEditPanic(path, multiEditPhase, multiEditResult, &response, &responseErr)
+		}()
 		if denied := enforcePolicy(engine, core.OpWrite, path); denied != nil {
 			return denied, nil
 		}
@@ -267,6 +320,7 @@ func registerBatchTools(reg *toolRegistry) {
 			}
 		}
 		ctx = core.WithExpectedHash(ctx, expectedHash)
+		multiEditPhase = "editing"
 		result, err := engine.MultiEdit(ctx, path, edits, force, dryRun, tolerantWhitespace, expectedHash)
 		if err != nil {
 			var occ *core.OCCMismatchError
@@ -314,6 +368,9 @@ func registerBatchTools(reg *toolRegistry) {
 			return mcp.NewToolResultError(errPlain), nil
 		}
 
+		// A dry run writes nothing: a panic in the preview must say so.
+		multiEditPhase = "preview"
+
 		// Bug #32: dry_run response format for multi_edit.
 		// Must return StructuredContent (parity with edit_file dry_run):
 		// multi_edit declares an outputSchema, and strict MCP clients reject
@@ -350,7 +407,10 @@ func registerBatchTools(reg *toolRegistry) {
 			return mcp.NewToolResultStructured(attachMessage(markSimulated(multiEditStructured(path, result), currentHash, predictedHash), msg), msg), nil
 		}
 
-		defer recoverMultiEditPresentation(path, result, &response, &responseErr)
+		// The edits are on disk from here on: a later panic must keep the undo
+		// receipt instead of claiming the file was never touched.
+		multiEditPhase = "committed"
+		multiEditResult = result
 
 		// Update backup chain for undo step-through
 		if result.BackupID != "" {
@@ -947,7 +1007,7 @@ func registerBatchTools(reg *toolRegistry) {
 
 				for _, file := range info.Files {
 					output.WriteString(fmt.Sprintf("   - %s (size: %d bytes, hash: %s)\n",
-						file.OriginalPath, file.Size, file.Hash[:8]))
+						file.OriginalPath, file.Size, file.Hash[:min(8, len(file.Hash))]))
 				}
 				output.WriteString("\nRun without dry_run:true to execute restore")
 				return backupResult(action, output.String(), nil), nil
@@ -1184,7 +1244,7 @@ func registerBatchTools(reg *toolRegistry) {
 				output.WriteString(fmt.Sprintf("   Original: %s\n", entry.OriginalPath))
 				output.WriteString(fmt.Sprintf("   Size: %s\n", core.FormatSize(entry.Size)))
 				if entry.Hash != "" {
-					output.WriteString(fmt.Sprintf("   Hash: %s\n", entry.Hash[:12]))
+					output.WriteString(fmt.Sprintf("   Hash: %s\n", entry.Hash[:min(12, len(entry.Hash))]))
 				}
 				output.WriteString("\n")
 			}
