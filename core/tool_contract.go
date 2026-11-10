@@ -135,7 +135,7 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 	setEnum("server_info", "action", "help", "stats", "artifact")
 	setEnum("workspace", "action", "begin", "status", "diff", "export", "discard")
 	setEnum("github_issues", "action", "list", "view", "create", "comment", "edit", "close", "reopen")
-	setEnum("gitlab_issues", "action", "list", "view", "create", "comment", "close", "reopen")
+	setEnum("gitlab_issues", "action", "list", "view", "notes", "create", "comment", "close", "reopen")
 	setEnum("gitlab_issues", "state", "opened", "closed", "all")
 	setEnum("github_issues", "state", "open", "closed", "all")
 	setEnum("github_issues", "reason", "completed", "not_planned")
@@ -278,13 +278,14 @@ func applyContractOverlays(cs map[string]*ToolContract) {
 		c.Examples = []string{
 			`gitlab_issues(action:"list", path:"C:/repo")`,
 			`gitlab_issues(action:"view", base_url:"http://192.168.0.20", repo:"group/project", number:1)`,
+			`gitlab_issues(action:"notes", base_url:"http://192.168.0.20", repo:"group/project", number:1)`,
 			`gitlab_issues(action:"comment", base_url:"http://192.168.0.20", repo:"group/project", number:1, body:"note")`,
 			`gitlab_issues(action:"close", base_url:"http://192.168.0.20", repo:"group/project", number:1)`,
 		}
 		c.Mutating = func(args map[string]interface{}) bool {
 			a, _ := args["action"].(string)
 			switch a {
-			case "list", "view", "":
+			case "list", "view", "notes", "":
 				return false
 			default:
 				return true

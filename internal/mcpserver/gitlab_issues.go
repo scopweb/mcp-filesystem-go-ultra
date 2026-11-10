@@ -52,6 +52,7 @@ func clearGitlabAuth() {
 var gitlabActionParams = map[string]map[string]bool{
 	"list":    {"action": true, "path": true, "repo": true, "base_url": true, "state": true, "labels": true, "assignee": true, "limit": true, "page": true},
 	"view":    {"action": true, "path": true, "repo": true, "base_url": true, "number": true, "limit": true, "page": true},
+	"notes":   {"action": true, "path": true, "repo": true, "base_url": true, "number": true, "limit": true, "page": true},
 	"create":  {"action": true, "path": true, "repo": true, "base_url": true, "title": true, "body": true, "labels": true},
 	"comment": {"action": true, "path": true, "repo": true, "base_url": true, "number": true, "body": true},
 	"close":   {"action": true, "path": true, "repo": true, "base_url": true, "number": true},
@@ -65,7 +66,7 @@ func handleGitLabIssues(ctx context.Context, engine *core.UltraFastEngine, args 
 	if !ok {
 		return ghFail(errCodeInvalidParams, fmt.Sprintf("unknown action %q", action),
 			`gitlab_issues(action:"view", base_url:"http://host", repo:"group/project", number:1)`,
-			false, map[string]any{"field": "action", "expected": "list, view, create, comment, close, reopen"})
+			false, map[string]any{"field": "action", "expected": "list, view, notes, create, comment, close, reopen"})
 	}
 	for k := range args {
 		if !allowed[k] {
@@ -85,6 +86,8 @@ func handleGitLabIssues(ctx context.Context, engine *core.UltraFastEngine, args 
 		return gitlabList(ctx, target, args)
 	case "view":
 		return gitlabView(ctx, target, args)
+	case "notes":
+		return gitlabNotes(ctx, target, args)
 	case "create":
 		return gitlabCreate(ctx, target, args)
 	case "comment":
@@ -453,6 +456,83 @@ func gitlabView(ctx context.Context, t glTarget, args map[string]interface{}) *m
 		fmt.Fprintf(&b, "@%v %v\n%v\n", c["author"], c["created_at"], c["body"])
 	}
 	b.WriteString(untrustedEnd + "\n")
+	return mcp.NewToolResultStructured(payload, b.String())
+}
+
+// gitlabNotes lists the comments of an issue on their own. The view action
+// already returns the first page of comments together with the issue; this
+// action exists to page through the discussion without pulling the issue body
+// and its description on every page.
+func gitlabNotes(ctx context.Context, t glTarget, args map[string]interface{}) *mcp.CallToolResult {
+	n, errRes := requiredNumber(args)
+	if errRes != nil {
+		return errRes
+	}
+	limit, errRes := pageLimit(args, 20)
+	if errRes != nil {
+		return errRes
+	}
+	page, errRes := gitlabPage(args)
+	if errRes != nil {
+		return errRes
+	}
+	status, hdr, body, errRes := gitlabCall(ctx, t, http.MethodGet,
+		fmt.Sprintf("/issues/%d/notes?per_page=%d&page=%d&sort=asc&order_by=created_at&activity_filter=only_comments", n, limit, page), nil, false)
+	if errRes != nil {
+		return errRes
+	}
+	if fail := gitlabStatus(status, body, false); fail != nil {
+		return fail
+	}
+	notes := []map[string]any{}
+	if status == http.StatusOK {
+		var raw []map[string]any
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return ghFail(errCodeGLNetwork, "GitLab returned non-JSON notes", "Retry this read.", true, nil)
+		}
+		for _, note := range raw {
+			if sys, _ := note["system"].(bool); sys {
+				continue
+			}
+			bodyText, cut := capText(stringFieldAny(note["body"]), 20000)
+			author := ""
+			if a, ok := note["author"].(map[string]any); ok {
+				author, _ = a["username"].(string)
+			}
+			notes = append(notes, map[string]any{
+				"id": note["id"], "author": author, "body": bodyText, "created_at": note["created_at"], "truncated": cut,
+			})
+		}
+	}
+	next := hdr.Get("X-Next-Page")
+	truncated := next != ""
+	st := statusOK
+	if len(notes) == 0 {
+		st = statusEmpty
+	} else if truncated {
+		st = statusTruncated
+	}
+	payload := map[string]any{
+		"status": st, "action": "notes", "repo": t.Project, "base_url": t.Base,
+		"number": n, "comments": notes, "count": len(notes), "page": page, "limit": limit,
+		"truncated": truncated, "untrusted_content": len(notes) > 0,
+	}
+	if truncated {
+		payload["continuation"] = map[string]any{"page": next, "limit": limit, "hint": "pass page to read the next comment page; do not repeat this page"}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "#%d | %d comments | page %d", n, len(notes), page)
+	if truncated {
+		b.WriteString(" | more")
+	}
+	b.WriteByte('\n')
+	lines := make([]string, 0, len(notes))
+	for _, c := range notes {
+		lines = append(lines, fmt.Sprintf("@%v %v\n%v", c["author"], c["created_at"], c["body"]))
+	}
+	if len(lines) > 0 {
+		b.WriteString(untrustedBanner + "\n" + strings.Join(lines, "\n") + "\n" + untrustedEnd + "\n")
+	}
 	return mcp.NewToolResultStructured(payload, b.String())
 }
 

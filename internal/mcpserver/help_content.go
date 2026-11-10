@@ -193,11 +193,12 @@ apply_patch
 
 git
 - Purpose: Safe Git status, diff, log, show, review, add, commit, push, fetch, pull, restore, branch, init, remote, and stash actions
-- Key params: action, path, paths, output, rev, pickaxe, max_lines, offset, expected_status_hash, delete, prune, remote, stash_action, include_untracked
+- Key params: action, path, paths, output, rev, pickaxe, max_lines, start_line, end_line, offset, expected_status_hash, delete, prune, remote, stash_action, include_untracked
 - pickaxe is log only: one argv, "-S"+pattern, so a pattern starting with "-" is data. Empty, NUL, newline, and more than 512 bytes are rejected. Not -G. rev, name, and remote that start with "-" stay rejected.
 - pull requires --git-network and is fast-forward only. Divergence does not merge. Fetch and integration are reported separately.
 - stash show/apply/drop/pop take rev as a commit OID, not stash@{n}. drop and pop require force:true.
 - review returns a paged file list plus status_hash. Continue with the same hash; a mismatch is STALE_GIT.
+- start_line/end_line select a 1-based line window of the diff/log/show body, applied before max_lines cuts it. The footer states the window and the start_line to continue with, so a cut output is continuable instead of re-read.
 - remote lists effective fetch/push URLs (credentials redacted) without --git-network
 - commit risk is informational (staged file/insertion counts); it does not block the commit
 - push/fetch show the effective destination, not only the remote name
@@ -213,13 +214,14 @@ github_issues
 - Examples: github_issues(action:"list", path:"C:/repo"); github_issues(action:"view", path:"C:/repo", number:12); github_issues(action:"comment", repo:"owner/repo", number:12, body:"note"); github_issues(action:"close", repo:"owner/repo", number:12, reason:"completed")
 
 gitlab_issues
-- Purpose: List, view, create, comment, close, and reopen GitLab issues. Auth is cached per process (GITLAB_TOKEN or one git-credential sign-in). Does not delete issues. Ultra only. Graduated.
+- Purpose: List, view, read comments (notes), create, comment, close, and reopen GitLab issues. Auth is cached per process (GITLAB_TOKEN or one git-credential sign-in). Does not delete issues. Ultra only. Graduated.
 - Key params: action, path, repo, base_url, number, title, body, labels, limit, page
 - create requires title; body and labels are optional. Uses the same authentication and write policy as comment.
 - view paginates user comments (activity_filter=only_comments), oldest first; continuation preserves limit.
+- notes reads only the comments of an issue, paginated, oldest first. It is a read: it works under --readonly and never fetches the issue body.
 - Do not assume gitlab.com or https. SSH remotes are not treated as GitLab; pass base_url.
 - Path resolution is refused while a file security policy is active. Explicit repo+base_url does not run git.
-- Examples: gitlab_issues(action:"view", base_url:"http://192.168.0.20", repo:"group/project", number:1); gitlab_issues(action:"comment", base_url:"http://192.168.0.20", repo:"group/project", number:1, body:"note"); gitlab_issues(action:"close", base_url:"http://192.168.0.20", repo:"group/project", number:1)
+- Examples: gitlab_issues(action:"view", base_url:"http://192.168.0.20", repo:"group/project", number:1); gitlab_issues(action:"notes", base_url:"http://192.168.0.20", repo:"group/project", number:1); gitlab_issues(action:"comment", base_url:"http://192.168.0.20", repo:"group/project", number:1, body:"note"); gitlab_issues(action:"close", base_url:"http://192.168.0.20", repo:"group/project", number:1)
 
 minify_js
 - Purpose: Pure-Go JavaScript minification without Node
