@@ -125,6 +125,8 @@ var toolSchemas = map[string]ToolParamSchema{
 		"new_text":            {Type: ParamString},
 		"old_str":             {Type: ParamString},
 		"new_str":             {Type: ParamString},
+		"old_string":          {Type: ParamString}, // alias for old_text
+		"new_string":          {Type: ParamString}, // alias for new_text
 		"force":               {Type: ParamBoolean},
 		"allow_rewrite":       {Type: ParamBoolean},
 		"mode":                {Type: ParamString},
@@ -215,10 +217,14 @@ var toolSchemas = map[string]ToolParamSchema{
 	"move_file": {
 		"source_path": {ParamString, true},
 		"dest_path":   {ParamString, true},
+		"source":      {ParamString, false}, // alias for source_path
+		"destination": {ParamString, false}, // alias for dest_path
 	},
 	"copy_file": {
 		"source_path": {ParamString, true},
 		"dest_path":   {ParamString, true},
+		"source":      {ParamString, false}, // alias for source_path
+		"destination": {ParamString, false}, // alias for dest_path
 	},
 	"delete_file": {
 		"path":      {ParamString, true},
@@ -330,6 +336,8 @@ var toolSchemas = map[string]ToolParamSchema{
 		"paths":                {ParamArray, false},
 		"output":               {ParamString, false}, // "stat" | "name-only" | "full" (diff); "name-only" | "full" (status); "oneline" | "full" (log); "stat" | "name-only" | "full" (show)
 		"max_lines":            {ParamNumber, false}, // default 200
+		"start_line":           {ParamNumber, false}, // diff/log/show: first output line (1-based)
+		"end_line":             {ParamNumber, false}, // diff/log/show: last output line (inclusive)
 		"limit":                {ParamNumber, false}, // log: default 10
 		"rev":                  {ParamString, false}, // single rev or range; replaces commit_range + source
 		"pickaxe":              {ParamString, false}, // log only: -S pattern, one argv ("-S"+pattern)

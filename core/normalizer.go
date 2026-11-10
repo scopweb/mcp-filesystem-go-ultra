@@ -144,6 +144,30 @@ func builtinRules() []NormalizationRule {
 		{ID: "edit-old_str", Tools: []string{"edit_file"}, Type: RuleParamAlias, From: "old_str", To: "old_text"},
 		{ID: "edit-new_str", Tools: []string{"edit_file"}, Type: RuleParamAlias, From: "new_str", To: "new_text"},
 
+		// edit_file: old_string/new_string → old_text/new_text.
+		// Models reach for the *_string names as often as for old_str, and the
+		// validator rejects unknown parameters, so the alias has to be renamed
+		// before validation — not merely tolerated. multi_edit is not listed
+		// here: its top level takes an array of edits, not a single pair, and
+		// renaming there would report the alias under the wrong name.
+		{ID: "edit-old_string", Tools: []string{"edit_file"}, Type: RuleParamAlias, From: "old_string", To: "old_text"},
+		{ID: "edit-new_string", Tools: []string{"edit_file"}, Type: RuleParamAlias, From: "new_string", To: "new_text"},
+
+		// multi_edit: the same aliases inside each item of the edits array
+		// (native form) and of the edits_json payload (legacy string form).
+		{ID: "multi_edit-item-old_string", Tools: []string{"multi_edit"}, Type: RuleNestedAlias,
+			InPayload: "edits", ArrayPath: "[]", From: "old_string", To: "old_text"},
+		{ID: "multi_edit-item-new_string", Tools: []string{"multi_edit"}, Type: RuleNestedAlias,
+			InPayload: "edits", ArrayPath: "[]", From: "new_string", To: "new_text"},
+		{ID: "multi_edit-json-item-old_string", Tools: []string{"multi_edit"}, Type: RuleNestedAlias,
+			InPayload: "edits_json", ArrayPath: "[]", From: "old_string", To: "old_text"},
+		{ID: "multi_edit-json-item-new_string", Tools: []string{"multi_edit"}, Type: RuleNestedAlias,
+			InPayload: "edits_json", ArrayPath: "[]", From: "new_string", To: "new_text"},
+
+		// copy_file / move_file: source/destination → source_path/dest_path.
+		{ID: "copy-source-alias", Tools: []string{"copy_file", "move_file"}, Type: RuleParamAlias, From: "source", To: "source_path"},
+		{ID: "copy-destination-alias", Tools: []string{"copy_file", "move_file"}, Type: RuleParamAlias, From: "destination", To: "dest_path"},
+
 		// multi_edit: accept edits_json as raw JSON array (not just string)
 		{ID: "multi_edit-edits-coerce", Tools: []string{"multi_edit"}, Type: RuleJSONAcceptBoth, From: "edits_json"},
 
@@ -335,7 +359,7 @@ func applyJSONAcceptBoth(rule NormalizationRule, args map[string]interface{}) *N
 
 // applyNestedAlias renames fields inside array items of a JSON payload parameter
 func applyNestedAlias(rule NormalizationRule, args map[string]interface{}) *NormalizationApplied {
-	payload, modified := parseAndModifyPayload(rule, args, func(item map[string]interface{}, _ int) bool {
+	payload, modified, native := parseAndModifyPayload(rule, args, func(item map[string]interface{}, _ int) bool {
 		fromVal, fromOK := item[rule.From]
 		_, toOK := item[rule.To]
 		if fromOK && !toOK {
@@ -348,12 +372,12 @@ func applyNestedAlias(rule NormalizationRule, args map[string]interface{}) *Norm
 	if !modified {
 		return nil
 	}
-	return reserializePayload(rule, args, payload)
+	return reserializePayload(rule, args, payload, native)
 }
 
 // applyNestedDefault sets default values for missing fields in array items of a JSON payload
 func applyNestedDefault(rule NormalizationRule, args map[string]interface{}) *NormalizationApplied {
-	payload, modified := parseAndModifyPayload(rule, args, func(item map[string]interface{}, index int) bool {
+	payload, modified, native := parseAndModifyPayload(rule, args, func(item map[string]interface{}, index int) bool {
 		existing, exists := item[rule.From]
 		if exists {
 			// If it's a non-empty string, don't overwrite
@@ -372,24 +396,52 @@ func applyNestedDefault(rule NormalizationRule, args map[string]interface{}) *No
 	if !modified {
 		return nil
 	}
-	return reserializePayload(rule, args, payload)
+	return reserializePayload(rule, args, payload, native)
 }
 
-// parseAndModifyPayload parses a JSON payload param, navigates to the array, and applies a modifier
-func parseAndModifyPayload(rule NormalizationRule, args map[string]interface{}, modifier func(item map[string]interface{}, index int) bool) (interface{}, bool) {
-	jsonStr, ok := args[rule.InPayload].(string)
+// parseAndModifyPayload parses a JSON payload param, navigates to the array, and applies a modifier.
+// The payload may be a JSON string (legacy adapters such as pipeline_json) or a
+// native array (the object form of the same parameter, such as edits). A native
+// array is modified in place and keeps its type; a string payload is parsed,
+// modified and re-serialized by reserializePayload.
+func parseAndModifyPayload(rule NormalizationRule, args map[string]interface{}, modifier func(item map[string]interface{}, index int) bool) (interface{}, bool, bool) {
+	raw, ok := args[rule.InPayload]
+	if !ok || raw == nil {
+		return nil, false, false
+	}
+
+	// Native array payload: the items are modified in place.
+	if arr, isArray := raw.([]interface{}); isArray {
+		items := navigateToArray(arr, rule.ArrayPath)
+		if items == nil {
+			return nil, false, true
+		}
+		modified := false
+		for i, item := range items {
+			m, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if modifier(m, i) {
+				modified = true
+			}
+		}
+		return arr, modified, true
+	}
+
+	jsonStr, ok := raw.(string)
 	if !ok || jsonStr == "" {
-		return nil, false
+		return nil, false, false
 	}
 
 	var payload interface{}
 	if err := json.Unmarshal([]byte(jsonStr), &payload); err != nil {
-		return nil, false
+		return nil, false, false
 	}
 
 	items := navigateToArray(payload, rule.ArrayPath)
 	if items == nil {
-		return nil, false
+		return nil, false, false
 	}
 
 	modified := false
@@ -403,11 +455,19 @@ func parseAndModifyPayload(rule NormalizationRule, args map[string]interface{}, 
 		}
 	}
 
-	return payload, modified
+	return payload, modified, false
 }
 
-// reserializePayload re-marshals the modified payload back into the args map
-func reserializePayload(rule NormalizationRule, args map[string]interface{}, payload interface{}) *NormalizationApplied {
+// reserializePayload writes the modified payload back into the args map. A native
+// array payload keeps its type; a string payload is re-marshaled as JSON.
+func reserializePayload(rule NormalizationRule, args map[string]interface{}, payload interface{}, native bool) *NormalizationApplied {
+	if native {
+		args[rule.InPayload] = payload
+		return &NormalizationApplied{
+			RuleID: rule.ID, Type: string(rule.Type),
+			Param: rule.InPayload + "." + rule.From, From: rule.From, To: rule.To,
+		}
+	}
 	newBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil

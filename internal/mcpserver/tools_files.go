@@ -169,6 +169,8 @@ func registerFileTools(reg *toolRegistry) {
 			"Related: copy_file, delete_file, edit_file, batch_operations."),
 		mcp.WithString("source_path", mcp.Required(), mcp.Description("Current path of the file/directory")),
 		mcp.WithString("dest_path", mcp.Required(), mcp.Description("New path for the file/directory")),
+		mcp.WithString("source", mcp.Description("Alias for source_path")),
+		mcp.WithString("destination", mcp.Description("Alias for dest_path")),
 		mcp.WithRawOutputSchema(fileMutationOutputSchema),
 	)
 	reg.addTool(moveFileTool, auditWrap(engine, "move_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -209,6 +211,8 @@ func registerFileTools(reg *toolRegistry) {
 			"Also copies directories recursively. Related: move_file, delete_file, edit_file, batch_operations, backup."),
 		mcp.WithString("source_path", mcp.Required(), mcp.Description("Path of the file/directory to copy")),
 		mcp.WithString("dest_path", mcp.Required(), mcp.Description("Destination path for the copy")),
+		mcp.WithString("source", mcp.Description("Alias for source_path")),
+		mcp.WithString("destination", mcp.Description("Alias for dest_path")),
 		mcp.WithRawOutputSchema(fileMutationOutputSchema),
 	)
 	reg.addTool(copyFileTool, auditWrap(engine, "copy_file", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
