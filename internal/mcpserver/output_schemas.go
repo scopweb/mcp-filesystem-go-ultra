@@ -45,6 +45,16 @@ var writeFileOutputSchema = json.RawMessage(`{
   "required": ["path", "bytes_written", "verified", "message"]
 }`)
 
+var setTraceOutputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "status": {"type": "string"},
+    "message": {"type": "string"},
+    "mandate_id": {"type": "string"}, "policy_version": {"type": "string"}, "strength": {"type": "string"}, "ticket_id": {"type": "string"}, "scope_note": {"type": "string"}
+  },
+  "required": ["status", "message"]
+}`)
+
 var editFileOutputSchema = json.RawMessage(`{
   "type": "object",
   "properties": {

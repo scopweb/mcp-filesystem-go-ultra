@@ -98,6 +98,7 @@ func newLoggedRegistry(t *testing.T, dir, logDir string) *toolRegistry {
 	registerCoreTools(reg)
 	registerBatchTools(reg)
 	registerPatchTools(reg)
+	registerTraceTools(reg)
 	return reg
 }
 
@@ -372,5 +373,104 @@ func TestAuthTrace_ValidationErrorStillAuditsTrace(t *testing.T) {
 	}
 	if found == nil || found.MandateID != "m-1" || found.TicketID != "tkt-9" || found.PolicyVersion != "pol-2026.11" || found.Strength != "guessed" || found.ScopeNote != "worker scope" {
 		t.Fatalf("validation audit dropped trace: %+v", found)
+	}
+}
+
+func TestAuthTrace_SessionSetOverrideAndClear(t *testing.T) {
+	dir := t.TempDir()
+	logDir := filepath.Join(dir, "logs")
+	reg := newLoggedRegistry(t, dir, logDir)
+
+	res := callPatchTool(t, reg, "set_trace", map[string]any{
+		"mandate_id":     "m-sess",
+		"policy_version": "pol-sess",
+		"strength":       "explicit",
+		"ticket_id":      "t-sess",
+		"scope_note":     "session scope",
+	})
+	if res.IsError {
+		t.Fatalf("set_trace: %s", resultText(t, res))
+	}
+	m, _ := res.StructuredContent.(map[string]any)
+	if m["status"] != "set" || m["ticket_id"] != "t-sess" || m["mandate_id"] != "m-sess" {
+		t.Fatalf("set receipt %#v", m)
+	}
+	assertPayloadConforms(t, parseSchema(t, setTraceOutputSchema), m)
+
+	res = callPatchTool(t, reg, "set_trace", map[string]any{"strength": "guessed", "ticket_id": "nope"})
+	if !res.IsError {
+		t.Fatal("bad set_trace must be rejected")
+	}
+
+	plain := filepath.Join(dir, "plain.txt")
+	res = callPatchTool(t, reg, "write_file", map[string]any{"path": plain, "content": "plain"})
+	if res.IsError {
+		t.Fatalf("session write: %s", resultText(t, res))
+	}
+	m, _ = res.StructuredContent.(map[string]any)
+	if m["ticket_id"] != "t-sess" || m["mandate_id"] != "m-sess" || m["strength"] != "explicit" || m["policy_version"] != "pol-sess" || m["scope_note"] != "session scope" {
+		t.Fatalf("session echo %#v", m)
+	}
+	if _, ok := m["auth_notice"]; ok {
+		t.Fatalf("explicit session must not nag: %v", m["auth_notice"])
+	}
+
+	over := filepath.Join(dir, "over.txt")
+	res = callPatchTool(t, reg, "write_file", map[string]any{
+		"path": over, "content": "over", "ticket_id": "t-over", "strength": "inferred",
+	})
+	if res.IsError {
+		t.Fatalf("override write: %s", resultText(t, res))
+	}
+	m, _ = res.StructuredContent.(map[string]any)
+	if m["ticket_id"] != "t-over" || m["strength"] != "inferred" || m["mandate_id"] != "m-sess" {
+		t.Fatalf("override echo %#v", m)
+	}
+	if m["auth_notice"] != core.AuthNoticeInferred {
+		t.Fatalf("auth_notice=%v", m["auth_notice"])
+	}
+
+	res = callPatchTool(t, reg, "set_trace", map[string]any{})
+	if res.IsError {
+		t.Fatalf("clear: %s", resultText(t, res))
+	}
+	m, _ = res.StructuredContent.(map[string]any)
+	if m["status"] != "cleared" {
+		t.Fatalf("clear receipt %#v", m)
+	}
+	if _, ok := m["ticket_id"]; ok {
+		t.Fatal("cleared receipt echoed ticket_id")
+	}
+
+	after := filepath.Join(dir, "after.txt")
+	res = callPatchTool(t, reg, "write_file", map[string]any{"path": after, "content": "after"})
+	if res.IsError {
+		t.Fatalf("after clear: %s", resultText(t, res))
+	}
+	m, _ = res.StructuredContent.(map[string]any)
+	for _, k := range []string{"mandate_id", "policy_version", "strength", "ticket_id", "scope_note", "auth_notice"} {
+		if _, ok := m[k]; ok {
+			t.Errorf("cleared session leaked %s", k)
+		}
+	}
+
+	var sessionOK, overrideOK, clearOK bool
+	for _, e := range readAudit(t, logDir) {
+		if e.Tool != "write_file" || e.Status != "ok" {
+			continue
+		}
+		switch e.TicketID {
+		case "t-sess":
+			sessionOK = e.MandateID == "m-sess" && e.Strength == "explicit"
+		case "t-over":
+			overrideOK = e.MandateID == "m-sess" && e.Strength == "inferred"
+		case "":
+			if strings.HasSuffix(e.Path, "after.txt") {
+				clearOK = e.MandateID == "" && e.Strength == ""
+			}
+		}
+	}
+	if !sessionOK || !overrideOK || !clearOK {
+		t.Fatalf("audit session=%v override=%v clear=%v", sessionOK, overrideOK, clearOK)
 	}
 }

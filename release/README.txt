@@ -37,7 +37,7 @@ On Linux/macOS use an absolute executable path without .exe.
 
 PROFILES
 --------
-strict: 18 tools (recommended); agent: strict plus Git; ultra: 34 tools.
+strict: 18 tools (recommended); agent: strict plus Git; ultra: 35 tools.
 Aliases and the fs super-tool are disabled. Use canonical tool names.
 Start with list_allowed_directories, then project_map, then the specific tool.
 

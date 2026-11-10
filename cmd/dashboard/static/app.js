@@ -66,7 +66,12 @@ function operationRow(op, extended) {
 
   let cols = `
     <td>${formatTime(op.ts)}</td>
-    <td><span class="badge ${toolClass}">${escapeHtml(op.tool || '')}</span>${op.sub_op ? `<span class="sub-op">${escapeHtml(op.sub_op)}</span>` : ''}</td>
+    <td><span class="badge ${toolClass}">${escapeHtml(op.tool || '')}</span>${op.sub_op ? `<span class="sub-op">${escapeHtml(op.sub_op)}</span>` : ''}</td>`;
+  if (extended) {
+    const ticket = op.ticket_id ? `<span class="badge read" title="${escapeHtml(op.mandate_id || '')}">${escapeHtml(op.ticket_id)}</span>` : '';
+    cols += `<td>${ticket}</td>`;
+  }
+  cols += `
     <td class="path" title="${escapeHtml(op.path || '')}">${escapeHtml(shortPath(op.path))}</td>
     <td>${op.status === 'in_progress' ? '—' : formatDuration(op.duration_ms)}</td>`;
 
@@ -88,6 +93,8 @@ function operationRow(op, extended) {
   if (extended) {
     // Build detail content
     let details = [];
+    if (op.ticket_id) details.push(`<span class="detail-label">Ticket:</span> ${escapeHtml(op.ticket_id)}`);
+    if (op.mandate_id) details.push(`<span class="detail-label">Mandate:</span> ${escapeHtml(op.mandate_id)}`);
     if (op.req_id) details.push(`<span class="detail-label">Request:</span> ${escapeHtml(op.req_id)}`);
     if (op.sd_id) details.push(`<span class="detail-label">Trash ID:</span> ${escapeHtml(op.sd_id)}`);
     if (op.status === 'in_progress') details.push('No completion recorded: running or interrupted.');
@@ -125,7 +132,7 @@ function operationRow(op, extended) {
     }
 
     html += `<tr id="${rowId}" class="op-detail-row" style="display:none;">
-      <td colspan="${extended ? 10 : 5}">
+      <td colspan="${extended ? 11 : 5}">
         <div class="op-detail-content">
           <div class="op-detail-meta">${details.join('<span class="detail-sep">|</span>')}</div>
           ${argsHtml}
@@ -202,7 +209,12 @@ async function fetchMetrics() {
 // Operations polling
 async function fetchOperations() {
   try {
-    const res = await fetch('/api/operations?limit=200&_t=' + Date.now());
+    const params = new URLSearchParams({ limit: '200', _t: String(Date.now()) });
+    const ticket = (($('#ops-ticket') || {}).value || '').trim();
+    const mandate = (($('#ops-mandate') || {}).value || '').trim();
+    if (ticket) params.set('ticket', ticket);
+    if (mandate) params.set('mandate', mandate);
+    const res = await fetch('/api/operations?' + params);
     if (!res.ok) throw new Error('operations HTTP ' + res.status);
     const ops = await res.json();
     const source = $('#operations-source');
@@ -213,7 +225,7 @@ async function fetchOperations() {
 
     if (!operationsPaused) {
       const allHtml = ops.map(op => operationRow(op, true)).join('');
-      $('#all-ops').innerHTML = allHtml || '<tr><td colspan="10" class="empty">No operations in the current log</td></tr>';
+      $('#all-ops').innerHTML = allHtml || '<tr><td colspan="11" class="empty">No operations in the current log</td></tr>';
     }
   } catch (e) {
     const source = $('#operations-source');
@@ -839,6 +851,14 @@ function dropUnfinished(reqId) {
   });
 }
 
+function traceFilterMatches(op) {
+  const ticket = (($('#ops-ticket') || {}).value || '').trim();
+  const mandate = (($('#ops-mandate') || {}).value || '').trim();
+  if (ticket && !String(op.ticket_id || '').includes(ticket)) return false;
+  if (mandate && !String(op.mandate_id || '').includes(mandate)) return false;
+  return true;
+}
+
 function connectSSE() {
   const source = new EventSource('/api/operations/live');
   source.onmessage = (event) => {
@@ -858,7 +878,7 @@ function connectSSE() {
       // Prepend to all ops (Operations page) — but not while paused,
       // so the user can study an expanded detail row uninterrupted.
       const allTbody = $('#all-ops');
-      if (allTbody && !operationsPaused) {
+      if (allTbody && !operationsPaused && traceFilterMatches(op)) {
         allTbody.insertAdjacentHTML('afterbegin', operationRow(op, true));
         // Keep max 200 rows
         while (allTbody.children.length > 400) { // 2 rows per op (data + detail)
@@ -927,6 +947,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Operations page — pause/resume toggle. While paused, fetchOperations and SSE
   // stop rewriting #all-ops so the user can inspect an expanded row.
+  let opsFilterTimer = null;
+  const refreshOpsFilter = () => {
+    clearTimeout(opsFilterTimer);
+    opsFilterTimer = setTimeout(fetchOperations, 300);
+  };
+  const opsTicket = $('#ops-ticket');
+  const opsMandate = $('#ops-mandate');
+  if (opsTicket) opsTicket.addEventListener('input', refreshOpsFilter);
+  if (opsMandate) opsMandate.addEventListener('input', refreshOpsFilter);
+
   const pauseBtn = $('#ops-pause-btn');
   if (pauseBtn) {
     pauseBtn.addEventListener('click', () => {

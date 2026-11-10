@@ -76,3 +76,14 @@ func TestAuthNotice_OnlyInferredApply(t *testing.T) {
 		t.Fatal("nil args")
 	}
 }
+
+func TestAuthTrace_OverlayCallWins(t *testing.T) {
+	base := AuthTrace{MandateID: "m", TicketID: "t", Strength: AuthStrengthExplicit}
+	got := base.Overlay(AuthTrace{TicketID: "t2"})
+	if got.TicketID != "t2" || got.MandateID != "m" || got.Strength != AuthStrengthExplicit {
+		t.Fatalf("%+v", got)
+	}
+	if got = base.Overlay(AuthTrace{}); got != base {
+		t.Fatalf("empty overlay changed base: %+v", got)
+	}
+}

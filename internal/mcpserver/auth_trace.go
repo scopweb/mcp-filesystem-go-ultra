@@ -50,3 +50,13 @@ func attachAuthTrace(res *mcp.CallToolResult, trace core.AuthTrace, notice strin
 	put("scope_note", trace.ScopeNote)
 	put("auth_notice", notice)
 }
+
+// effectiveAuthTrace is the session trace with non-empty call fields overlaid.
+// set_trace stores the call as-is, so it must not inherit the previous context.
+func effectiveAuthTrace(engine *core.UltraFastEngine, tool string, args map[string]interface{}) core.AuthTrace {
+	call := core.ParseAuthTrace(args)
+	if tool == "set_trace" || engine == nil {
+		return call
+	}
+	return engine.AuthTrace().Overlay(call)
+}

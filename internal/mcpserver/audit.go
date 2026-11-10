@@ -56,8 +56,8 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 		// Validate parameters against tool schema (after normalization)
 		if args, ok := request.Params.Arguments.(map[string]interface{}); ok {
 			if validationErrs := core.ValidateToolParams(tool, args); len(validationErrs) > 0 {
-				// This return skips the success-path copy. The error line still carries the caller trace.
-				core.ParseAuthTrace(args).Apply(entry)
+				// This return skips the success-path copy. The error line still carries the effective trace.
+				effectiveAuthTrace(engine, tool, args).Apply(entry)
 				entry.DurationMs = time.Since(start).Milliseconds()
 				entry.Status = "error"
 				entry.Error = "parameter validation failed: " + strings.Join(validationErrs, "; ")
@@ -74,7 +74,7 @@ func auditWrap(engine *core.UltraFastEngine, tool string, handler func(context.C
 		}
 
 		args, _ := request.Params.Arguments.(map[string]interface{})
-		authTrace := core.ParseAuthTrace(args)
+		authTrace := effectiveAuthTrace(engine, tool, args)
 		authTrace.Apply(entry)
 		if engine.IsReadOnly() {
 			if toolIsMutating(tool, args) {

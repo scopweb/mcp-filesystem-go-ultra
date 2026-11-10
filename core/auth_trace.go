@@ -68,6 +68,47 @@ func (a AuthTrace) Apply(entry *AuditEntry) {
 	entry.ScopeNote = a.ScopeNote
 }
 
+// Overlay returns a copy of base with every non-empty call field replacing it.
+func (base AuthTrace) Overlay(call AuthTrace) AuthTrace {
+	if call.MandateID != "" {
+		base.MandateID = call.MandateID
+	}
+	if call.PolicyVersion != "" {
+		base.PolicyVersion = call.PolicyVersion
+	}
+	if call.Strength != "" {
+		base.Strength = call.Strength
+	}
+	if call.TicketID != "" {
+		base.TicketID = call.TicketID
+	}
+	if call.ScopeNote != "" {
+		base.ScopeNote = call.ScopeNote
+	}
+	return base
+}
+
+// SetAuthTrace replaces the process-wide trace. The zero value clears it.
+// It does not authorize paths. A process is not a conversation.
+func (e *UltraFastEngine) SetAuthTrace(trace AuthTrace) {
+	if e == nil {
+		return
+	}
+	e.authTraceMu.Lock()
+	e.authTrace = trace
+	e.authTraceMu.Unlock()
+}
+
+// AuthTrace returns the process-wide trace. The zero value means none is set.
+func (e *UltraFastEngine) AuthTrace() AuthTrace {
+	if e == nil {
+		return AuthTrace{}
+	}
+	e.authTraceMu.RLock()
+	defer e.authTraceMu.RUnlock()
+	return e.authTrace
+}
+
 // AuthNotice is receipt advice only. It does not change whether the write runs.
 // A dry-run already followed the inferred-strength recommendation, so it is silent.
 func AuthNotice(tool string, dryRun bool, strength string) string {

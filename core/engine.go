@@ -169,6 +169,11 @@ type UltraFastEngine struct {
 		lastOpAt time.Time
 	}
 
+	// Process-wide orchestrator trace set by set_trace. Not a conversation id
+	// and not an authorization. Mutations overlay a call on this value.
+	authTraceMu sync.RWMutex
+	authTrace   AuthTrace
+
 	// Ripgrep support: detected once at startup for high-performance search
 	ripgrepAvailable bool
 	ripgrepVersion   string

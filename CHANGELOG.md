@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Added — `set_trace` stores orchestrator ids for the process
+
+`set_trace` (ultra only) stores `mandate_id`, `policy_version`, `strength`,
+`ticket_id` and `scope_note` for the rest of the process. A later mutation
+uses a stored field when the call omits it; a field on the call wins.
+An empty call clears the context. It does not persist, authorize paths, or
+bypass OCC. Echo and audit use the effective values. See `llms.txt` §6.
+
 ### Added — optional orchestrator trace on mutations
 
 `write_file`, `edit_file`, `multi_edit`, `apply_patch` and
@@ -20,7 +28,8 @@ includes `auth_notice`. See `llms.txt` §6.
 A validation failure returned before the trace was copied, so
 `operations.jsonl` had the ids only inside `args`. The error line now
 carries the same top-level fields as a successful call. The error receipt
-still does not echo them, and nothing is written.
+still does not echo them, and the target file is not written. `llms.txt` §6
+states the same rule.
 
 ### Changed — percentage risk needs a line floor
 

@@ -95,3 +95,27 @@ func (t *logTail) read(path string) []string {
 	}
 	return lines
 }
+
+// filterAuditLines keeps lines whose top-level ticket_id or mandate_id contains
+// the query. An empty query does not filter. Old lines without the field stay
+// out of a non-empty filter and remain visible when no filter is set.
+func filterAuditLines(lines []string, ticket, mandate string) []string {
+	if ticket == "" && mandate == "" {
+		return lines
+	}
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		var e AuditEntry
+		if json.Unmarshal([]byte(line), &e) != nil {
+			continue
+		}
+		if ticket != "" && !strings.Contains(e.TicketID, ticket) {
+			continue
+		}
+		if mandate != "" && !strings.Contains(e.MandateID, mandate) {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}

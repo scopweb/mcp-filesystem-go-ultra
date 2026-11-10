@@ -108,7 +108,7 @@ read_file
 write_file
 - Purpose: Create or overwrite a file atomically; mode=append concatenates
 - Key params: path, content, content_base64, encoding, mode
-- Optional trace (also edit_file, multi_edit, apply_patch, batch_operations): mandate_id, policy_version, strength (explicit|inferred), ticket_id, scope_note. Logged and echoed. Does not authorize paths, OCC, or security_policy. strength=inferred does not force dry_run; prefer dry_run on tools that have it, then verify with git diff --stat.
+- Optional trace (also edit_file, multi_edit, apply_patch, batch_operations): mandate_id, policy_version, strength (explicit|inferred), ticket_id, scope_note. Logged and echoed. Does not authorize paths, OCC, or security_policy. strength=inferred does not force dry_run; prefer dry_run on tools that have it, then verify with git diff --stat. set_trace (ultra only) stores those fields for the process; an empty call clears them. A call field still wins.
 
 edit_file
 - Purpose: Modify existing files with backup, OCC, risk checks, and diffs

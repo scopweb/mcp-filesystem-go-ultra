@@ -84,11 +84,15 @@
       <div class="section">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
           <h2 style="margin:0">Operation Log (last 200)</h2>
-          <button id="ops-pause-btn" class="btn-detail" style="min-width:120px">Pause refresh</button>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input id="ops-ticket" placeholder="ticket_id" style="width:140px">
+            <input id="ops-mandate" placeholder="mandate_id" style="width:140px">
+            <button id="ops-pause-btn" class="btn-detail" style="min-width:120px">Pause refresh</button>
+          </div>
         </div>
         <table>
           <thead>
-            <tr><th>Time</th><th>Tool</th><th>Path</th><th>Duration</th><th>In</th><th>Out</th><th>File</th><th>Status</th><th>Error</th><th></th></tr>
+            <tr><th>Time</th><th>Tool</th><th>Ticket</th><th>Path</th><th>Duration</th><th>In</th><th>Out</th><th>File</th><th>Status</th><th>Error</th><th></th></tr>
           </thead>
           <tbody id="all-ops"></tbody>
         </table>

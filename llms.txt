@@ -10,7 +10,7 @@ listed here, do not assume it.
   (`C:\`, `D:\`, `/mnt/...`). Runtime-native `Read`/`Edit`/`Write`/`Grep` tools
   may point at a different sandbox: for host project paths use this server.
 - Recommended launch: `--profile=strict --compact-mode` (or `--preset=minimal`).
-  `strict` is the product (18 tools); `ultra` is the lab (34 tools).
+  `strict` is the product (18 tools); `ultra` is the lab (35 tools).
   `--roots-mode` defaults to `union` (CLI paths plus client Roots). `replace` is opt-in.
 - Minimum startup config is allowed paths only: a positional path, `--allowed-paths`,
   `.mcp-paths` / `--allowed-paths-file`, or `MCP_ALLOWED_PATHS` (environment or `.env`).
@@ -224,27 +224,43 @@ Recommended pattern:
    base tree visible but not writable, put the base in a read-only root and
    the worktree in a writable root — or point the worker only at the worktree.
 3. The worker edits only inside that root. On `write_file`, `edit_file`,
-   `multi_edit`, `apply_patch`, and `batch_operations` it may pass:
+   `multi_edit`, and `apply_patch` (present in `--profile=strict`) and on
+   `batch_operations` (ultra only) it may pass:
    - `ticket_id` (max 128 bytes)
    - `mandate_id` (max 128 bytes)
    - `policy_version` (max 128 bytes; echoed, not enforced)
    - `strength`: `explicit` or `inferred`
    - `scope_note` (max 256 bytes)
+   Passing any of these on another tool, including `read_file`, is
+   `VALIDATION` (`unknown parameter`).
 4. When present, those fields are written to the audit log
    (`operations.jsonl`, only if `--log-dir` is set) and echoed on the
    successful `structuredContent`, next to `content_hash`, `backup_id`,
-   and `status`. They are omitted when absent. Invalid `strength`,
-   over-long strings, leading or trailing whitespace, or control characters
-   are `VALIDATION` (`retryable:false`) and nothing is written.
+   and `status`. They are omitted when absent, not returned as null.
+   Invalid `strength`, over-long strings, leading or trailing whitespace,
+   or control characters are `VALIDATION` (`retryable:false`). The target
+   file is not written and the error receipt does not echo the fields.
+   The error audit line still carries them at the top level, including an
+   invalid `strength`. `auth_notice` is receipt-only; it is not an audit field.
 5. `strength: "inferred"` does not force `dry_run` and does not authorize
    the write. On `edit_file`, `multi_edit`, and `apply_patch`, prefer
    `dry_run:true` first. If an inferred call is applied anyway, the receipt
-   includes `auth_notice`. `write_file` has no dry_run.
+   includes `auth_notice`. A dry-run does not. `write_file` has no dry_run;
+   its applied inferred notice says to verify with `git diff --stat`.
    `batch_operations` carries preview/dry_run inside the payload, not as a
-   top-level flag. A dry-run receipt includes the same trace fields.
+   top-level flag, and uses that same verify notice. A dry-run receipt
+   includes the same trace fields.
 6. Verify with OCC (`content_hash` / `expected_hash`) plus
    `git diff --stat` plus the real diff plus a build. A dry-run preview is
    not ground truth, especially on CRLF files (the preview can show the whole
    file as changed). `STALE_READ` is not OCC. The structure checker may
    mis-count braces in a verbatim C# string ending in `@"X:\"`; the
    compiler is the judge.
+7. `set_trace` (ultra only; absent from `--profile=strict`) stores those
+   fields for the rest of the process. A later mutation uses a stored field
+   when the call omits it. A field on the call wins. `set_trace` replaces the
+   stored context; an empty call clears it. It does not persist across restart
+   and it does not authorize anything. A process is not a conversation:
+   several chats can share one process, so a `set_trace` is visible to every
+   chat on that process. Echo and audit use the effective values.
+   `strength=inferred` still does not force `dry_run`.

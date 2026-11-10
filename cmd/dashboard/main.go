@@ -298,6 +298,7 @@ func operationsHandler(logDir string) http.HandlerFunc {
 		}
 
 		lines := auditLines(data, true)
+		lines = filterAuditLines(lines, r.URL.Query().Get("ticket"), r.URL.Query().Get("mandate"))
 
 		// Return last N lines (most recent operations)
 		start := 0

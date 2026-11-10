@@ -104,6 +104,13 @@ var toolSchemas = map[string]ToolParamSchema{
 		"ticket_id":      {Type: ParamString},
 		"scope_note":     {Type: ParamString},
 	},
+	"set_trace": {
+		"mandate_id":     {Type: ParamString},
+		"policy_version": {Type: ParamString},
+		"strength":       {Type: ParamString},
+		"ticket_id":      {Type: ParamString},
+		"scope_note":     {Type: ParamString},
+	},
 	"diff_files": {
 		"path_a":         {ParamString, false},
 		"path_b":         {ParamString, false},

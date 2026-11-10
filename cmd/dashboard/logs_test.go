@@ -138,3 +138,25 @@ func TestProxyStatsUsesClientAndNanoseconds(t *testing.T) {
 		t.Fatalf("client/model key missing: %+v", resp.ByModel)
 	}
 }
+
+func TestFilterAuditLinesByTicketAndMandate(t *testing.T) {
+	lines := []string{
+		`{"tool":"edit_file","status":"ok","ticket_id":"T-1","mandate_id":"M-a"}`,
+		`{"tool":"write_file","status":"ok","ticket_id":"T-12","mandate_id":"M-b"}`,
+		`{"tool":"read_file","status":"ok"}`,
+	}
+	if got := filterAuditLines(lines, "", ""); len(got) != 3 {
+		t.Fatalf("empty filter = %d", len(got))
+	}
+	got := filterAuditLines(lines, "T-1", "")
+	if len(got) != 2 || !strings.Contains(got[0], "T-1") || !strings.Contains(got[1], "T-12") {
+		t.Fatalf("ticket contains: %v", got)
+	}
+	got = filterAuditLines(lines, "T-1", "M-a")
+	if len(got) != 1 || !strings.Contains(got[0], "M-a") {
+		t.Fatalf("ticket+mandate: %v", got)
+	}
+	if got = filterAuditLines(lines, "missing", ""); len(got) != 0 {
+		t.Fatalf("missing ticket leaked: %v", got)
+	}
+}
