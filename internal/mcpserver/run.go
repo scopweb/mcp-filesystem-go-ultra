@@ -70,7 +70,7 @@ Host files = read_file, search_files, edit_file, write_file. Native Read/Edit/Wr
 Pass content_hash from read_file as expected_hash on the next mutation. On failure the envelope has path and retryable. retryable:false means stop; do not retry or use native tools.
 Truncated batch reads: continuation.file_indexes points into files[].continuation; reread/earlier are recovery range arguments (add the file path).
 Subagent: request a handoff (path + content_hash). Do not assume the parent session's file body.
-help(tool:X) on demand. Do not load the full catalog at startup.
+help(tool:X) on demand. Do not load the full catalog at startup. Optional navigation hints are in _meta["filesystem-ultra/related"].
 Minimum config is allowed paths (positional, --allowed-paths, .mcp-paths, or MCP_ALLOWED_PATHS). Other flags are opt-in.
 Client Roots are added to that list. --roots-mode=replace keeps only the client list.
 Undo cursors use canonical path identity; Windows case variants and 8.3 aliases share the undo chain.

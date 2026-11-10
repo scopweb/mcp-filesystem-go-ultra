@@ -90,6 +90,7 @@ func (r *toolRegistry) addTool(tool mcp.Tool, handler toolHandler, examples ...s
 		return
 	}
 	tool = sealOpenWorld(tool)
+	tool = compactToolPresentation(tool)
 	tool = applyExperimentalPolicy(tool)
 	r.server.AddTool(tool, handler)
 	r.handlers[tool.Name] = handler
@@ -1033,6 +1034,8 @@ func registerCoreTools(reg *toolRegistry) {
 		mcp.WithString("new_text", mcp.Description("New text to replace with (default mode)")),
 		mcp.WithString("old_str", mcp.Description("Alias for old_text")),
 		mcp.WithString("new_str", mcp.Description("Alias for new_text")),
+		mcp.WithString("old_string", mcp.Description("Alias for old_text")),
+		mcp.WithString("new_string", mcp.Description("Alias for new_text")),
 		mcp.WithBoolean("force", mcp.Description("Force the operation through the risk-threshold check (CRITICAL risk). A safety backup is always created. Note: force does NOT bypass the accidental-rewrite guard — use allow_rewrite for that. Default: false.")),
 		mcp.WithBoolean("allow_rewrite", mcp.Description("Bypass ONLY the accidental full-file rewrite guard (small old_text + large new_text with file content remaining). Prefer write_file for a real full-file rewrite; set allow_rewrite:true only when you genuinely want edit semantics on a near-total rewrite. A safety backup is created. Default: false.")),
 		mcp.WithString("mode", mcp.Description("Edit mode: \"replace\" (default), \"search_replace\", \"regex\", \"delete_range\" (remove lines start_line..end_line, or start_line+line_count), \"replace_range\" (replace lines start_line..end_line, or start_line+line_count, with new_text), \"insert\" (insert new_text before/after anchor without replacing anything)"), mcp.Enum("replace", "search_replace", "regex", "delete_range", "replace_range", "insert")),

@@ -119,6 +119,10 @@ listed here, do not assume it.
 
 ## 4. Known caveats
 
+- Tool navigation hints live in `_meta["filesystem-ultra/related"]`.
+  Operational guidance stays in descriptions and schemas. Metadata saves
+  model context only when the client excludes it; it remains on the wire.
+
 - Dry-run on CRLF files: whole-file diff artefact (see §2).
 - The structure checker does not understand verbatim C# strings ending in
   `@"X:\"` and may report braces off by one. The compiler is the judge.
@@ -198,6 +202,9 @@ Other profiles add `git` (agent), and `analyze_code`, `analyze_operation`,
   porcelain v2 listing with a readable summary. Both explicit formats honor
   `max_lines`; `truncated:true` and `continuation` report omitted lines and
   how to recover them. Counters describe the full requested scope.
+  `diff`, `log` and `show` also honor `start_line`/`end_line` (1-based,
+  inclusive) on the output body, applied before `max_lines` cuts it; the
+  footer states the window and the `start_line` to continue with.
 
 Parameters are discovered with `help(tool:"X")`; enums, examples and the
 output contract come from there.
