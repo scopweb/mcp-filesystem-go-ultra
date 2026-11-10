@@ -2014,8 +2014,10 @@ func (e *UltraFastEngine) VerifyFileIntegrity(path string, expectedChangePct flo
 		result.Lines++
 	}
 
-	// Basic hash for reference (CRC32 for speed)
-	result.Hash = fmt.Sprintf("%x", crc32.ChecksumIEEE(content))
+	// Basic hash for reference (CRC32 for speed). %08x keeps it 8 hex chars:
+	// %x drops leading zeros, and a CRC32 below 0x10000000 is 7 digits, which
+	// made the [:8] slices in the tool layer panic.
+	result.Hash = fmt.Sprintf("%08x", crc32.ChecksumIEEE(content))
 
 	// Check for suspiciously small file after high-change operation
 	if expectedChangePct > 50 && info.Size() < 100 {

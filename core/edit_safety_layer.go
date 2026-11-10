@@ -338,8 +338,8 @@ func (del *DetailedEditLog) Format() string {
 		sb.WriteString(fmt.Sprintf("  Match Found:    %v\n", del.ValidationResult.MatchFound))
 		sb.WriteString(fmt.Sprintf("  Match Count:    %d\n", del.ValidationResult.MatchCount))
 		sb.WriteString(fmt.Sprintf("  Confidence:     %.0f%%\n", del.ValidationResult.Confidence*100))
-		sb.WriteString(fmt.Sprintf("  File Hash:      %s\n", del.ValidationResult.FileHash[:8]))
-		sb.WriteString(fmt.Sprintf("  Old Text Hash:  %s\n", del.ValidationResult.OldTextHash[:8]))
+		sb.WriteString(fmt.Sprintf("  File Hash:      %s\n", del.ValidationResult.FileHash[:min(8, len(del.ValidationResult.FileHash))]))
+		sb.WriteString(fmt.Sprintf("  Old Text Hash:  %s\n", del.ValidationResult.OldTextHash[:min(8, len(del.ValidationResult.OldTextHash))]))
 
 		diags := del.ValidationResult.Diagnostics
 		sb.WriteString("\n📈 DIAGNOSTICS:\n")
