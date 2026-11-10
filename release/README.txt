@@ -1,69 +1,49 @@
-MCP Filesystem Ultra - Release Notes (v4.5.25)
-=============================================
+MCP Filesystem Ultra - Binary releases
+=====================================
 
-This archive contains pre-built binaries for the MCP Filesystem Server Ultra.
+Choose the archive for your operating system and CPU:
+- Windows: windows-amd64.zip or windows-arm64.zip
+- Linux: linux-amd64.tar.gz or linux-arm64.tar.gz
+- macOS: darwin-amd64.tar.gz or darwin-arm64.tar.gz (Apple Silicon)
+The archive name also includes the release version. Verify checksums.txt.
 
-Server exposes 20 MCP tools: 17 core (read_file, write_file, edit_file,
-list_directory, search_files, get_file_info, move_file, copy_file,
-delete_file, create_directory, batch_operations, backup, analyze_operation,
-wsl, server_info, multi_edit, project_replace) + git + minify_js + help.
+BINARIES
+--------
+- filesystem-ultra-v4       Main server; filesystem-ultra is an identical copy
+- filesystem-ultra-v4-embed_rg  Server with embedded ripgrep
+- mcp-proxy                 Optional stdio logging proxy
+- filesystem-ultra-v4-dashboard  Web dashboard
+Windows names end in .exe. Windows arm64 includes the standard server only;
+install ripgrep separately for accelerated search (Go search remains available).
+Linux arm64 embedded ripgrep uses the upstream GNU/Linux build and needs glibc.
 
-Aliases and the fs super-tool are DISABLED in v4.5.x — use canonical names.
+QUICK START
+-----------
+Minimum configuration is an allowed directory. Recommended product profile:
+  filesystem-ultra-v4 --preset=minimal /absolute/path/to/project
+Windows:
+  filesystem-ultra-v4.exe --preset=minimal C:\path\to\project
 
-RECOMMENDED SETUP FOR CLAUDE DESKTOP / CLAUDE CODE
---------------------------------------------------
-
-1. Use the logging proxy (strongly recommended):
-   - mcp-proxy.exe   (Windows)
-   - mcp-proxy       (Linux)
-
-2. Point the proxy at the main server:
-   filesystem-ultra-v4-embed_rg.exe   (recommended - includes ripgrep)
-   or
-   filesystem-ultra-v4.exe
-
-Example Claude Desktop configuration:
-
+Claude Desktop example (adjust the executable and allowed directory):
 {
   "mcpServers": {
     "filesystem": {
-      "command": "C:\\path\\to\\mcp-proxy.exe",
-      "args": [
-        "--model", "opus-4",
-        "--log-dir", "C:\\temp\\mcp-proxy-logs",
-        "--",
-        "C:\\path\\to\\filesystem-ultra-v4-embed_rg.exe",
-        "--compact-mode",
-        "--log-dir", "C:\\temp\\mcp-ultra-logs",
-        "C:\\your\\allowed\\path"
-      ]
+      "command": "C:\\path\\to\\filesystem-ultra-v4.exe",
+      "args": ["--preset=minimal", "C:\\path\\to\\project"]
     }
   }
 }
+On Linux/macOS use an absolute executable path without .exe.
 
-IMPORTANT BINARIES
-------------------
-- filesystem-ultra-v4-embed_rg.exe   Main server with embedded ripgrep (best performance)
-- filesystem-ultra-v4.exe            Main server (standard)
-- mcp-proxy.exe                      Logging proxy (adds --model and request logging)
-- dashboard.exe                      Web dashboard for logs, metrics, backups and Trash
+PROFILES
+--------
+strict: 18 tools (recommended); agent: strict plus Git; ultra: 34 tools.
+Aliases and the fs super-tool are disabled. Use canonical tool names.
+Start with list_allowed_directories, then project_map, then the specific tool.
 
-NEW IN v4.5.25 (2026-07-04)
----------------------------
-- list_directory: new output_format (compact|json|tree) and max_depth
-- multi_edit: new diff_format (auto|full|summary|stat|none) with aggregate
-  batch diff rendering; dry_run now declared in schema
-- Go bumped to 1.26.4 (GO-2026-5039, GO-2026-5037 CVE fixes)
-
-See https://github.com/scopweb/mcp-filesystem-go-ultra/releases/tag/v4.5.25
-for the complete changelog.
-
-Build information:
-- Compiled with Go 1.26.4
-- Optimized (-ldflags="-s -w" -trimpath)
-- Output from official build scripts
-
-Need help?
-- Open an issue on GitHub
-- Check SECURITY.md for security model and best practices
-- Documentation: https://github.com/scopweb/mcp-filesystem-go-ultra
+BUILD AND DOCUMENTATION
+-----------------------
+The release workflow builds with the Go version pinned in go.mod and stamps
+commit/date metadata. Run the server with --version to identify the release.
+Release history: https://github.com/scopweb/mcp-filesystem-go-ultra/releases
+Documentation: https://github.com/scopweb/mcp-filesystem-go-ultra

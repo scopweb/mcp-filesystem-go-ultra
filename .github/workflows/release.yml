@@ -7,9 +7,9 @@ name: Release
 #   git push origin v4.5.0
 #
 # This workflow will:
-# - Build for Windows and Linux using the project's build scripts
+# - Build for Windows, Linux and macOS using the project's build scripts
 # - Create a **Draft Release** (you must manually publish it)
-# - Attach .zip / .tar.gz packages + individual binaries
+# - Attach platform-specific .zip / .tar.gz packages
 # - Generate SHA256 checksums (checksums.txt)
 #
 # Trigger: Push a tag starting with "v" (e.g. v4.5.0)
@@ -28,6 +28,13 @@ jobs:
   # ============================================================
   build-windows:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch: [amd64, arm64]
+    env:
+      GOARCH: ${{ matrix.goarch }}
+      CGO_ENABLED: '0'
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -42,31 +49,53 @@ jobs:
         shell: bash
         run: bash embed/ripgrep/download.sh
 
-      - name: Build all Windows binaries
+      - name: Build all Windows amd64 binaries
+        if: matrix.goarch == 'amd64'
         run: .\build-windows.bat
+
+      - name: Build Windows arm64 binaries
+        if: matrix.goarch == 'arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bin
+          pkg=github.com/mcp/filesystem-ultra/internal/mcpserver
+          flags="-s -w -X $pkg.BuildCommit=$(git rev-parse --short HEAD) -X $pkg.BuildDate=$(date +%Y-%m-%d)"
+          go build -trimpath -ldflags "$flags" -o bin/filesystem-ultra-v4.exe ./cmd/filesystem-ultra
+          cp bin/filesystem-ultra-v4.exe bin/filesystem-ultra.exe
+          go build -trimpath -ldflags "$flags" -o bin/mcp-proxy.exe ./cmd/proxy
+          go build -trimpath -ldflags "$flags" -o bin/filesystem-ultra-v4-dashboard.exe ./cmd/dashboard
 
       - name: Package Windows release
         run: |
           # Include release instructions. The checkout root is the workspace, not its parent.
           Copy-Item release\README.txt bin\README.txt -Force
           cd bin
-          Compress-Archive -Path * -DestinationPath ..\filesystem-ultra-${{ github.ref_name }}-windows-amd64.zip -Force
+          Compress-Archive -Path * -DestinationPath ..\filesystem-ultra-${{ github.ref_name }}-windows-${{ matrix.goarch }}.zip -Force
         shell: pwsh
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: windows-binaries-${{ github.ref_name }}
+          name: windows-${{ matrix.goarch }}-${{ github.ref_name }}
           path: |
-            bin/
-            filesystem-ultra-${{ github.ref_name }}-windows-amd64.zip
+            filesystem-ultra-${{ github.ref_name }}-windows-${{ matrix.goarch }}.zip
           retention-days: 30
 
   # ============================================================
-  # Build binaries for Linux (and cross-compile Windows if needed)
+  # Build binaries for Linux and macOS (amd64 and arm64)
   # ============================================================
-  build-linux:
+  build-unix:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin]
+        goarch: [amd64, arm64]
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      CGO_ENABLED: '0'
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -80,32 +109,31 @@ jobs:
       - name: Download ripgrep binaries for embed_rg
         run: bash embed/ripgrep/download.sh
 
-      - name: Build all Linux binaries
+      - name: Build target binaries
         run: |
           chmod +x build-windows.sh
           ./build-windows.sh
 
-      - name: Package Linux release
+      - name: Package target release
         run: |
           # Include release instructions. The checkout root is the workspace, not its parent.
           cp release/README.txt bin/README.txt
           cd bin
-          tar -czvf ../filesystem-ultra-${{ github.ref_name }}-linux-amd64.tar.gz .
+          tar -czvf ../filesystem-ultra-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz .
 
-      - name: Upload Linux artifacts
+      - name: Upload target artifacts
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: linux-binaries-${{ github.ref_name }}
+          name: ${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.ref_name }}
           path: |
-            bin/
-            filesystem-ultra-${{ github.ref_name }}-linux-amd64.tar.gz
+            filesystem-ultra-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
           retention-days: 30
 
   # ============================================================
   # Create GitHub Release and attach all binaries
   # ============================================================
   create-release:
-    needs: [build-windows, build-linux]
+    needs: [build-windows, build-unix]
     runs-on: ubuntu-latest
     permissions:
       contents: write   # Required to create releases
@@ -140,14 +168,17 @@ jobs:
 
             This release includes pre-built binaries for:
 
-            - **Windows** (`amd64`)
-            - **Linux** (`amd64`)
+            - **Windows** (`amd64`, `arm64`)
+            - **Linux** (`amd64`, `arm64`)
+            - **macOS** (`amd64`, `arm64`)
 
-            All binaries are built from the official build scripts (`build-windows.bat` / `build-windows.sh`).
+            Windows arm64 uses the standard server (install ripgrep separately for accelerated search).
+            Other targets also include the `embed_rg` variant.
 
             **Recommended downloads:**
-            - `filesystem-ultra-*-windows-amd64.zip`
-            - `filesystem-ultra-*-linux-amd64.tar.gz`
+            - `filesystem-ultra-*-windows-*.zip`
+            - `filesystem-ultra-*-linux-*.tar.gz`
+            - `filesystem-ultra-*-darwin-*.tar.gz`
 
             Each archive contains a `README.txt` with quick start instructions for Claude Desktop.
 
