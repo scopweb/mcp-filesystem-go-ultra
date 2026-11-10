@@ -131,13 +131,6 @@ func (e *UltraFastEngine) AnalyzeEditChange(ctx context.Context, path, oldText, 
 	if err := e.Authorize(OpWrite, path); err != nil {
 		return nil, err
 	}
-	analysis := &ChangeAnalysis{
-		FilePath:      path,
-		OperationType: "edit",
-		RiskFactors:   []string{},
-		Suggestions:   []string{},
-		Metadata:      make(map[string]interface{}),
-	}
 
 	// Check if file exists
 	info, err := e.statWithinRoot(path)
@@ -147,18 +140,56 @@ func (e *UltraFastEngine) AnalyzeEditChange(ctx context.Context, path, oldText, 
 	if err != nil {
 		return nil, err
 	}
-	analysis.FileExists = true
-	analysis.FileSize = info.Size()
 
 	contentBytes, err := e.readWithinRoot(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
-	content := string(contentBytes)
+
+	return e.analyzeEditAgainstContent(path, string(contentBytes), info.Size(), oldText, newText, nil), nil
+}
+
+// analyzeEditAgainstContent builds the change analysis for an edit against
+// content — the file body BEFORE the edit.
+//
+// applied is nil for a pre-flight analysis (plan mode): nothing has run yet,
+// so the analysis reports what an exact match would do. When applied is
+// non-nil the edit has ALREADY run and the analysis must describe what
+// actually happened: the engine's replacement count and match method are
+// authoritative, because a literal substring count cannot see the tolerant,
+// regex or fallback matches that performIntelligentEdit accepts.
+//
+// content MUST be the pre-edit body. Reading the file after the write makes
+// old_text unrecoverable, and the analysis then reports "no matches found"
+// for an edit that was applied.
+func (e *UltraFastEngine) analyzeEditAgainstContent(path, content string, fileSize int64, oldText, newText string, applied *EditResult) *ChangeAnalysis {
+	analysis := &ChangeAnalysis{
+		FilePath:      path,
+		OperationType: "edit",
+		FileExists:    true,
+		FileSize:      fileSize,
+		RiskFactors:   []string{},
+		Suggestions:   []string{},
+		Metadata:      make(map[string]interface{}),
+	}
 
 	// Count occurrences of old text
-	occurrences := strings.Count(content, oldText)
-	if occurrences == 0 {
+	exactOccurrences := strings.Count(content, oldText)
+	occurrences := exactOccurrences
+	executed := applied != nil && applied.ReplacementCount > 0
+	if executed {
+		// The edit already applied: trust the engine's own count. It also
+		// covers tolerant/regex/fallback matches that the literal count above
+		// cannot see.
+		occurrences = applied.ReplacementCount
+	}
+
+	if executed {
+		if applied.MatchMethod != "" && applied.MatchMethod != "exact" {
+			analysis.RiskFactors = append(analysis.RiskFactors,
+				fmt.Sprintf("Matched via %s fallback - no exact literal match", applied.MatchMethod))
+		}
+	} else if occurrences == 0 {
 		// Try fuzzy matching
 		analysis.RiskFactors = append(analysis.RiskFactors, "Exact match not found - may require fuzzy matching")
 		analysis.Suggestions = append(analysis.Suggestions, "Consider using recovery_edit for better matching")
@@ -172,14 +203,26 @@ func (e *UltraFastEngine) AnalyzeEditChange(ctx context.Context, path, oldText, 
 	analysis.LinesAdded = occurrences * newLines
 	analysis.LinesModified = occurrences * max(oldLines, newLines) // Go 1.21+ built-in
 	analysis.CharactersChanged = occurrences * (len(newText) - len(oldText))
+	if executed {
+		// The diff counters of the applied edit are authoritative — reuse them
+		// so the analysis can never disagree with the summary line.
+		analysis.LinesAdded = applied.LinesAdded
+		analysis.LinesRemoved = applied.LinesRemoved
+	}
 
 	// Generate preview
 	if occurrences > 0 {
-		analysis.Preview = fmt.Sprintf("Will replace %d occurrence(s):\n\nOLD:\n%s\n\nNEW:\n%s",
+		replaceVerb, modifyVerb := "Will replace", "Will modify"
+		if executed {
+			replaceVerb, modifyVerb = "Replaced", "Modified"
+		}
+		analysis.Preview = fmt.Sprintf("%s %d occurrence(s):\n\nOLD:\n%s\n\nNEW:\n%s",
+			replaceVerb,
 			occurrences,
 			e.truncateForPreview(oldText, 200),
 			e.truncateForPreview(newText, 200))
-		analysis.Impact = fmt.Sprintf("Will modify %d occurrence(s) affecting %d lines",
+		analysis.Impact = fmt.Sprintf("%s %d occurrence(s) affecting %d lines",
+			modifyVerb,
 			occurrences, analysis.LinesModified)
 	} else {
 		analysis.Preview = "No exact matches found. Edit may fail or require fuzzy matching."
@@ -201,10 +244,13 @@ func (e *UltraFastEngine) AnalyzeEditChange(ctx context.Context, path, oldText, 
 	}
 
 	analysis.Metadata["occurrences"] = occurrences
-	analysis.Metadata["exact_match"] = occurrences > 0
+	analysis.Metadata["exact_match"] = exactOccurrences > 0
+	if executed {
+		analysis.Metadata["match_method"] = applied.MatchMethod
+	}
 
 	analysis.WouldCreateBackup = true
-	analysis.EstimatedTime = e.estimateOperationTime(int(info.Size()))
+	analysis.EstimatedTime = e.estimateOperationTime(int(fileSize))
 
 	// Add suggestions
 	if occurrences > 10 {
@@ -221,7 +267,7 @@ func (e *UltraFastEngine) AnalyzeEditChange(ctx context.Context, path, oldText, 
 		analysis.Suggestions = append(analysis.Suggestions, "Large oldText suggests full file rewrite. For surgical edits, use range read + targeted edit to save tokens.")
 	}
 
-	return analysis, nil
+	return analysis
 }
 
 // AnalyzeDeleteChange analyzes a proposed delete operation without executing it

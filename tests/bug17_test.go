@@ -169,13 +169,14 @@ func TestBug17_GenuineFailureStillReported(t *testing.T) {
 func TestBug17_RiskAssessmentCriticalProceeds(t *testing.T) {
 	engine, tempDir := setupBug16Engine(t)
 
-	// Tiny file where edit rewrites nearly everything → CRITICAL
-	content := "AB"
+	// 50 lines, nearly all replaced. A 2-byte file at 100% is not an
+	// attention signal and would no longer carry a warning.
+	content := strings.Repeat("line-of-text\n", 50)
 	testFile := filepath.Join(tempDir, "critical.txt")
 	os.WriteFile(testFile, []byte(content), 0644)
 
 	edits := []core.MultiEditOperation{
-		{OldText: "AB", NewText: "CD"},
+		{OldText: strings.Repeat("line-of-text\n", 48), NewText: strings.Repeat("replaced-ok\n", 48)},
 	}
 
 	result, err := engine.MultiEdit(context.Background(), testFile, edits, false, false, false, "")

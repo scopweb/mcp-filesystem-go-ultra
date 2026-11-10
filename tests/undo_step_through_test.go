@@ -267,16 +267,15 @@ func TestUndoChain_MultiEditChain(t *testing.T) {
 func TestVerifyIntegrity_HighRisk(t *testing.T) {
 	engine, tempDir := setupUndoEngine(t)
 
-	// HIGH risk: ~75% change (requires >=75% under honest metric:
-	// max(oldLen,newLen)*occurrences / totalBytes)
-	// 300 bytes replaced in a 400 byte file = 75% → HIGH
-	content := strings.Repeat("A", 50) + strings.Repeat("B", 300) + strings.Repeat("C", 50)
+	// HIGH risk: 400 bytes replaced in a 500 byte file = 80%.
+	// The byte floor (≥400) is what makes a one-line buffer HIGH.
+	content := strings.Repeat("A", 50) + strings.Repeat("B", 400) + strings.Repeat("C", 50)
 	testFile := filepath.Join(tempDir, "high_risk_verify.txt")
 	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 300), strings.Repeat("D", 300), false, false, false)
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 400), strings.Repeat("D", 400), false, false, false)
 	if err != nil {
 		t.Fatalf("HIGH risk edit failed: %v", err)
 	}
@@ -304,15 +303,15 @@ func TestVerifyIntegrity_HighRisk(t *testing.T) {
 func TestVerifyIntegrity_CriticalRisk(t *testing.T) {
 	engine, tempDir := setupUndoEngine(t)
 
-	// CRITICAL risk: entire file replaced — file ends up tiny (35 bytes)
-	// This triggers VerifyFileIntegrity's WARNING for suspiciously small file
-	content := "ENTIRE_FILE_CONTENT"
+	// CRITICAL risk: 50-line file replaced by 35 bytes. The line floor is
+	// what makes this CRITICAL; the tiny result is what the integrity check warns on.
+	content := strings.Repeat("line-of-text\n", 50)
 	testFile := filepath.Join(tempDir, "critical_verify.txt")
 	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(context.Background(), testFile, content, "NEW_CONTENT_COMPLETELY_DIFFERENT", false, false, false)
+	result, err := engine.EditFile(context.Background(), testFile, content, strings.Repeat("N", 35), false, false, false)
 	if err != nil {
 		t.Fatalf("CRITICAL risk edit failed: %v", err)
 	}
@@ -358,14 +357,15 @@ func TestVerifyIntegrity_ResultFields(t *testing.T) {
 
 	testFile := filepath.Join(tempDir, "integrity_fields.txt")
 
-	// Create a file and then do a HIGH risk edit (~75% change)
-	// 300 bytes replaced in 400 byte file = 75% → HIGH (meets threshold)
-	content := strings.Repeat("A", 50) + strings.Repeat("B", 300) + strings.Repeat("C", 50)
+	// HIGH risk: 400 bytes replaced in a 500 byte file = 80%.
+	// The byte floor (≥400) is what makes a one-line buffer HIGH;
+	// 300/400 no longer is, because percentage alone is not the signal.
+	content := strings.Repeat("A", 50) + strings.Repeat("B", 400) + strings.Repeat("C", 50)
 	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	result, _ := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 300), strings.Repeat("D", 300), false, false, false)
+	result, _ := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 400), strings.Repeat("D", 400), false, false, false)
 	inv := result.Integrity
 
 	if inv == nil {

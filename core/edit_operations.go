@@ -248,10 +248,11 @@ func (e *UltraFastEngine) EditFile(ctx context.Context, path, oldText, newText s
 		result.EfficiencyHint = "💡 TIP: For a single replacement, consider using search_files(pattern) → read_file(start_line/end_line) → edit_file(old_text, new_text) to save tokens"
 	}
 
-	// Generate full change analysis for AI visibility (Plan Mode style)
-	if analysis, err := e.AnalyzeEditChange(ctx, path, oldText, newText); err == nil {
-		result.Analysis = analysis
-	}
+	// Generate full change analysis for AI visibility (Plan Mode style).
+	// Analyse the PRE-edit snapshot: the file on disk already holds the new
+	// content at this point, so re-reading it would count zero occurrences
+	// and report "no matches found" for an edit that was just applied.
+	result.Analysis = e.analyzeEditAgainstContent(path, string(content), int64(len(content)), oldText, newText, result)
 
 	// Auto-verify file integrity for HIGH/CRITICAL operations
 	if impact.RiskLevel == "high" || impact.RiskLevel == "critical" {
@@ -1603,26 +1604,15 @@ func calculateMultiEditImpact(originalContent, finalContent string, edits []Mult
 		impact.ChangePercentage = (float64(impact.CharactersChanged) / float64(oldLen)) * 100.0
 	}
 
-	// Apply same risk thresholds as CalculateChangeImpact
+	// Same percentage floors as CalculateChangeImpact. Lines touched is the
+	// sum of each edit's own region; a large file still escalates on TotalLines.
 	impact.RiskLevel = "low"
 	impact.IsRisky = false
-
-	if impact.ChangePercentage >= 90.0 {
-		impact.RiskLevel = "critical"
-		impact.IsRisky = true
-		impact.RiskFactors = append(impact.RiskFactors,
-			fmt.Sprintf("Almost complete file rewrite (%.1f%%)", impact.ChangePercentage))
-	} else if impact.ChangePercentage >= thresholds.HighPercentage {
-		impact.RiskLevel = "high"
-		impact.IsRisky = true
-		impact.RiskFactors = append(impact.RiskFactors,
-			fmt.Sprintf("Large portion of file affected (%.1f%%)", impact.ChangePercentage))
-	} else if impact.ChangePercentage >= thresholds.MediumPercentage {
-		impact.RiskLevel = "medium"
-		impact.IsRisky = true
-		impact.RiskFactors = append(impact.RiskFactors,
-			fmt.Sprintf("Significant changes (%.1f%% of file)", impact.ChangePercentage))
+	touched := 0
+	for _, edit := range edits {
+		touched += linesTouched(edit.OldText, edit.NewText, 1)
 	}
+	applyPercentageRisk(impact, touched, thresholds)
 
 	return impact
 }

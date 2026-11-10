@@ -4,6 +4,51 @@
 
 ## [Unreleased]
 
+### Changed — percentage risk needs a line floor
+
+CRITICAL was a percentage only: a 4-line file at 100% got the same
+"almost complete file rewrite" attention signal as a 50-line rewrite, and
+that level also triggered the post-edit integrity warning ("file is only N
+bytes after a 100% change"). The signal is cognitive reinforcement, so it
+now requires an absolute size as well as the ratio.
+
+- CRITICAL (≥90%): file ≥40 lines, or ≥30 lines touched, or ≥2000 bytes.
+- HIGH (≥75%): file ≥20 lines, or ≥15 lines touched, or ≥400 bytes.
+- MEDIUM (≥20%): file ≥10 lines, or ≥10 lines touched, or ≥400 bytes.
+- A 4-line file at 100% stays low. Expanding those 4 lines into 30 or more
+  is still CRITICAL, because the touched region is what deserves a look.
+- The notice and the risk factor name the line count, not only the percentage.
+
+Occurrence-count escalation is unchanged. Nothing is blocked.
+
+### Fixed — `edit_file` change analysis contradicted the applied edit
+
+The verbose `edit_file` response appended a "Change Analysis" block that was
+computed from the file **after** the write: `core/edit_operations.go` committed
+the new content and then called `AnalyzeEditChange`, which re-read the file
+from disk and counted literal occurrences of `old_text`. After a successful
+edit `old_text` is gone, so the count was 0 and the response claimed
+"⚠️ No matches found - operation will have no effect" / "No changes will be
+made with exact matching" while the same message reported "1 replacement(s)"
+and a unified diff showing the edit applied.
+
+The analysis now runs against the pre-edit snapshot and uses the engine's own
+replacement count and match method (`core/plan_mode.go`:
+`analyzeEditAgainstContent`), so it describes what actually happened: exact
+matches report the real occurrence count, and tolerant/regex/fallback matches
+report "Matched via <method> fallback - no exact literal match" instead of
+claiming the operation had no effect. `AnalyzeEditChange` keeps its original
+pre-flight semantics for plan mode, which still reports a genuinely missing
+match. Line counters in the analysis now reuse the applied diff counts, so the
+analysis and the summary line can no longer disagree.
+
+Not caused by CRLF: the engine normalises line endings when matching (the
+default path matches CRLF files with LF `old_text`), and the same contradiction
+appeared on pure-LF files with a guaranteed exact match.
+
+Regression tests: `core/edit_analysis_test.go`,
+`internal/mcpserver/edit_analysis_test.go`.
+
 ### fix(response): recoverable cuts, aggregate budget, listing cursor
 
 - A response cut inside a line no longer advances `start_line`. Continuation

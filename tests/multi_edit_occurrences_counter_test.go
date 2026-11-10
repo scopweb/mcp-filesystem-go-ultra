@@ -77,7 +77,9 @@ func TestIssue21_MultiEditNoticeReplacementsNotZero(t *testing.T) {
 		t.Fatalf("write seed: %v", err)
 	}
 
-	replacement := "ANCHOR_RENAMED_WITH_LONGER_PAYLOAD"
+	// 100 bytes × 4 edits = 400 bytes, which meets the absolute floor.
+	// A 160-byte change on a 1-line file is no longer an attention signal.
+	replacement := strings.Repeat("R", 100)
 	edits := []core.MultiEditOperation{
 		{OldText: "ANCHOR1", NewText: replacement},
 		{OldText: "ANCHOR2", NewText: replacement},

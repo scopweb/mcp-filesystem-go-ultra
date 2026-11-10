@@ -36,6 +36,94 @@ func DefaultRiskThresholds() RiskThresholds {
 	}
 }
 
+// Percentage is only an attention signal when the file or the region this
+// edit touches is large enough that a reader should stop. Any one of file
+// lines, lines touched, or bytes is enough, so a long source file and a
+// large one-line buffer can still escalate. A handful of lines at 100% cannot.
+const (
+	criticalMinLines   = 40
+	criticalMinTouched = 30
+	criticalMinBytes   = 2000
+
+	highMinLines   = 20
+	highMinTouched = 15
+	highMinBytes   = 400
+
+	mediumMinLines   = 10
+	mediumMinTouched = 10
+	mediumMinBytes   = 400
+)
+
+func textLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		n++
+	}
+	return n
+}
+
+func linesTouched(oldText, newText string, occurrences int) int {
+	if occurrences < 1 {
+		return 0
+	}
+	n := textLines(oldText)
+	if m := textLines(newText); m > n {
+		n = m
+	}
+	return n * occurrences
+}
+
+func lineCountWord(n int) string {
+	if n == 1 {
+		return "1 line"
+	}
+	return fmt.Sprintf("%d lines", n)
+}
+
+func percentageScopeAllows(level string, totalLines, touched int, chars int64) bool {
+	switch level {
+	case "critical":
+		return totalLines >= criticalMinLines || touched >= criticalMinTouched || chars >= criticalMinBytes
+	case "high":
+		return totalLines >= highMinLines || touched >= highMinTouched || chars >= highMinBytes
+	case "medium":
+		return totalLines >= mediumMinLines || touched >= mediumMinTouched || chars >= mediumMinBytes
+	default:
+		return false
+	}
+}
+
+// applyPercentageRisk sets the percentage-derived risk level. It does not
+// touch occurrence-count escalation, which is an absolute count already.
+func applyPercentageRisk(impact *ChangeImpact, touched int, thresholds RiskThresholds) {
+	if impact == nil {
+		return
+	}
+	lines := impact.TotalLines
+	chars := impact.CharactersChanged
+	pct := impact.ChangePercentage
+	switch {
+	case pct >= 90.0 && percentageScopeAllows("critical", lines, touched, chars):
+		impact.RiskLevel = "critical"
+		impact.IsRisky = true
+		impact.RiskFactors = append(impact.RiskFactors,
+			fmt.Sprintf("⚠️ Almost complete file rewrite (%.1f%%, %s)", pct, lineCountWord(lines)))
+	case pct >= thresholds.HighPercentage && percentageScopeAllows("high", lines, touched, chars):
+		impact.RiskLevel = "high"
+		impact.IsRisky = true
+		impact.RiskFactors = append(impact.RiskFactors,
+			fmt.Sprintf("⚠️ Large portion of file affected (%.1f%%, %s)", pct, lineCountWord(lines)))
+	case pct >= thresholds.MediumPercentage && percentageScopeAllows("medium", lines, touched, chars):
+		impact.RiskLevel = "medium"
+		impact.IsRisky = true
+		impact.RiskFactors = append(impact.RiskFactors,
+			fmt.Sprintf("⚠️ Significant changes (%.1f%% of file, %s)", pct, lineCountWord(lines)))
+	}
+}
+
 // CalculateChangeImpact analiza el impacto de una operación de edición
 func CalculateChangeImpact(content, oldText, newText string, thresholds RiskThresholds) *ChangeImpact {
 	// Normalize line endings so CRLF files match LF search text (Bug #23)
@@ -85,29 +173,12 @@ func calculateChangeImpactFromStats(totalLines, contentLen, occurrences int, old
 		impact.ChangePercentage = (float64(impact.CharactersChanged) / float64(contentLen)) * 100.0
 	}
 
-	// Determinar nivel de riesgo
+	// Determinar nivel de riesgo. A percentage is a ratio: it is an attention
+	// signal only when the file, or the region this edit touches, is large
+	// enough that a reader should stop. A 4-line file at 100% is not that signal.
 	impact.RiskLevel = "low"
 	impact.IsRisky = false
-
-	// CRITICAL: Cambio del archivo completo
-	if impact.ChangePercentage >= 90.0 {
-		impact.RiskLevel = "critical"
-		impact.IsRisky = true
-		impact.RiskFactors = append(impact.RiskFactors,
-			fmt.Sprintf("⚠️ Almost complete file rewrite (%.1f%%)", impact.ChangePercentage))
-	} else if impact.ChangePercentage >= thresholds.HighPercentage {
-		// HIGH: Más del 50% del archivo
-		impact.RiskLevel = "high"
-		impact.IsRisky = true
-		impact.RiskFactors = append(impact.RiskFactors,
-			fmt.Sprintf("⚠️ Large portion of file affected (%.1f%%)", impact.ChangePercentage))
-	} else if impact.ChangePercentage >= thresholds.MediumPercentage {
-		// MEDIUM: Más del 30% del archivo
-		impact.RiskLevel = "medium"
-		impact.IsRisky = true
-		impact.RiskFactors = append(impact.RiskFactors,
-			fmt.Sprintf("⚠️ Significant changes (%.1f%% of file)", impact.ChangePercentage))
-	}
+	applyPercentageRisk(impact, linesTouched(oldText, newText, impact.Occurrences), thresholds)
 
 	// Validar número de ocurrencias
 	if impact.Occurrences >= thresholds.HighOccurrences {
@@ -386,8 +457,8 @@ func (ci *ChangeImpact) FormatRiskNotice(backupID string, filePath ...string) st
 	if displayPct > 100 {
 		displayPct = 100
 	}
-	notice.WriteString(fmt.Sprintf("\nnote: %s (~%d bytes affected, %d replacements, %.0f%% of file)",
-		magnitude, ci.CharactersChanged, ci.Occurrences, displayPct))
+	notice.WriteString(fmt.Sprintf("\nnote: %s (~%d bytes affected, %s, %d replacements, %.0f%% of file)",
+		magnitude, ci.CharactersChanged, lineCountWord(ci.TotalLines), ci.Occurrences, displayPct))
 
 	if backupID != "" {
 		notice.WriteString(fmt.Sprintf(". backup:%s", backupID))

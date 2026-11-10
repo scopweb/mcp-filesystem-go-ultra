@@ -73,12 +73,13 @@ func TestBug16_ShouldBlockOnlyCritical(t *testing.T) {
 			expectRisk:  "low",
 		},
 		{
-			// Honest metric: CharactersChanged = max(100, 100) * 1 = 100,
-			// content = 500 → 20% = MEDIUM (threshold MediumPercentage=20.0).
+			// 12+ lines so the line floor is met, and ~20% of the bytes.
+			// A 1-line 100-byte buffer is no longer medium: percentage alone
+			// is not the attention signal.
 			name:        "MEDIUM risk - no block",
-			content:     strings.Repeat("A", 200) + strings.Repeat("B", 100) + strings.Repeat("C", 200),
-			oldText:     strings.Repeat("B", 100),
-			newText:     strings.Repeat("D", 100),
+			content:     strings.Repeat("pad-line\n", 12) + strings.Repeat("B", 80) + strings.Repeat("\nend-line", 12),
+			oldText:     strings.Repeat("B", 80),
+			newText:     strings.Repeat("D", 80),
 			expectBlock: false,
 			expectRisk:  "medium",
 		},
@@ -96,10 +97,22 @@ func TestBug16_ShouldBlockOnlyCritical(t *testing.T) {
 			expectRisk:  "high",
 		},
 		{
-			name:        "CRITICAL risk - no block (always warn, never block)",
+			// 10 bytes, 1 line, 100%. Percentage alone is not an attention
+			// signal: CRITICAL needs 40 lines, 30 lines touched, or 2000 bytes.
+			name:        "tiny full replace - not an attention signal",
 			content:     strings.Repeat("A", 10),
 			oldText:     strings.Repeat("A", 10),
 			newText:     strings.Repeat("B", 10),
+			expectBlock: false,
+			expectRisk:  "low",
+		},
+		{
+			// 50 lines, ~96% replaced. Line floor met, so this is still CRITICAL,
+			// and it still must not block.
+			name:        "CRITICAL risk - long rewrite, no block",
+			content:     strings.Repeat("line-of-text\n", 50),
+			oldText:     strings.Repeat("line-of-text\n", 48),
+			newText:     strings.Repeat("replaced-ok\n", 48),
 			expectBlock: false,
 			expectRisk:  "critical",
 		},
@@ -130,16 +143,16 @@ func TestBug16_ShouldBlockOnlyCritical(t *testing.T) {
 func TestBug16_MediumRiskAutoProceeds(t *testing.T) {
 	engine, tempDir := setupBug16Engine(t)
 
-	// Honest metric: CharactersChanged = max(100,100) * 1 = 100,
-	// content = 500 → 20% = MEDIUM (threshold MediumPercentage=20.0).
-	content := strings.Repeat("A", 200) + strings.Repeat("B", 100) + strings.Repeat("C", 200)
+	// 12+ lines and ~20% of the bytes. The line floor is what makes this
+	// medium; a 1-line buffer at the same percentage is not an attention signal.
+	content := strings.Repeat("pad-line\n", 12) + strings.Repeat("B", 80) + strings.Repeat("\nend-line", 12)
 	testFile := filepath.Join(tempDir, "medium_risk.txt")
 	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	// Edit with force=false — should NOT block (Bug #16 fix)
-	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 100), strings.Repeat("D", 100), false, false, false)
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("B", 80), strings.Repeat("D", 80), false, false, false)
 	if err != nil {
 		t.Fatalf("MEDIUM risk edit should NOT block, got error: %v", err)
 	}
@@ -190,14 +203,15 @@ func TestBug16_HighRiskAutoProceeds(t *testing.T) {
 func TestBug16_CriticalRiskProceeds(t *testing.T) {
 	engine, tempDir := setupBug16Engine(t)
 
-	// CRITICAL risk: replace the entire file content
-	content := strings.Repeat("A", 10)
+	// CRITICAL risk: 50 lines, ~96% replaced. A 10-byte file at 100% is not
+	// an attention signal and would no longer carry a warning.
+	content := strings.Repeat("line-of-text\n", 50)
 	testFile := filepath.Join(tempDir, "critical_risk.txt")
 	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), false, false, false)
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("line-of-text\n", 48), strings.Repeat("replaced-ok\n", 48), false, false, false)
 	if err != nil {
 		t.Fatalf("CRITICAL risk edit should proceed (Bug #22), got error: %v", err)
 	}
@@ -258,13 +272,16 @@ func TestBug16_LowRiskNoWarning(t *testing.T) {
 func TestBug16_BackupCreatedForCritical(t *testing.T) {
 	engine, tempDir := setupBug16Engine(t)
 
-	content := strings.Repeat("A", 10)
+	// 50 lines, ~96% replaced: meets the line floor, so this is still CRITICAL.
+	// A 10-byte full replace is no longer an attention signal and must not be
+	// used to assert the warning.
+	content := strings.Repeat("line-of-text\n", 50)
 	testFile := filepath.Join(tempDir, "backup_critical.txt")
 	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("A", 10), strings.Repeat("B", 10), false, false, false)
+	result, err := engine.EditFile(context.Background(), testFile, strings.Repeat("line-of-text\n", 48), strings.Repeat("replaced-ok\n", 48), false, false, false)
 	if err != nil {
 		t.Fatalf("CRITICAL edit should proceed (Bug #22): %v", err)
 	}
