@@ -49,6 +49,90 @@ appeared on pure-LF files with a guaranteed exact match.
 Regression tests: `core/edit_analysis_test.go`,
 `internal/mcpserver/edit_analysis_test.go`.
 
+### Fixed — integrity hash is always 8 hex characters
+
+A CRC32 below 0x10000000 formatted with %x is 7 digits. The tool layer then
+panics on a [:8] slice. The hash is now %08x, and the edit log only slices as
+far as the string goes.
+
+### Fixed — old_string and source aliases are renamed before validation
+
+edit_file accepts old_string/new_string. multi_edit accepts the same names
+inside edits and edits_json. copy_file and move_file accept source and
+destination. The validator rejects unknown parameters, so the alias is renamed
+to the canonical name before validation, not merely tolerated.
+
+### Fixed — multi_edit panics stay inside the tool
+
+A panic during multi_edit no longer surfaces as a bare SDK recovery with no
+path. The handler reports the path and whether the file was untouched,
+previewed, possibly half-written, or already committed with an undo receipt.
+
+### Added — git diff, log and show take a line window
+
+start_line and end_line select a 1-based window of the output body, applied
+before max_lines cuts it. The footer states the window and the start_line to
+continue with, so a cut output is continuable instead of re-read.
+
+### Added — gitlab_issues action notes
+
+action:"notes" reads the comments of an issue without fetching the issue body
+on every page. It is a read and works under --readonly.
+
+### v4.9.0 preparation: dependencies, platform packages, catalog
+
+- Upgrade mcp-go 1.3.0 -> 1.5.0 and modernc SQLite 1.60.1 -> 1.61.1;
+  regenerate go.sum with go mod tidy. SQLite also updates libc, go-humanize
+  and go-strftime through minimal version selection.
+- Release matrix: Windows, Linux and macOS, each amd64/arm64. Upload only
+  platform-named archives so merging cannot overwrite another target's binaries.
+  Windows arm64 ships the standard server; other targets also include embed_rg.
+  Refresh the archive's quick-start guide.
+- Remove repeated tool-name prefixes and host-path examples. Put optional
+  navigation hints in _meta["filesystem-ultra/related"], keeping operational
+  guidance and input/output schemas in place. Preserve unrelated metadata.
+- Measured catalog JSON: strict 49,387 -> 49,184 bytes on the wire, or 47,851
+  bytes when a client omits _meta (3.1% below baseline). Ultra: 80,943 ->
+  80,805 bytes on the wire. These are bytes, not token counts; clients that
+  forward metadata to the model do not gain the projected saving.
+
+Verification: core/server tests and go vet ./... pass. Cross-builds pass for
+Windows arm64 and Linux/macOS amd64/arm64, including embed_rg on Linux/macOS.
+The all-package run printed success for every package but the runner timed out
+following output; a bounded retry reproduced it. Do not report that aggregate
+invocation as a successful exit. GitHub packaging and native macOS/arm64 runtime
+execution have not been exercised here.
+
+Release blocker: serverVersion remains 4.8.0. Existing policy requires graduating
+all ten 4.8.0 experimental entries before a version bump; merely setting 4.9.0
+fails TestExperimental_EntriesWellFormed. Graduation/conformance coverage or an
+explicit policy decision is needed before tagging the release.
+
+### Upstream comparison (2026-11-02)
+
+Reference: server-filesystem 2.1.0 in
+https://github.com/modelcontextprotocol/servers/releases/tag/v2.2.0
+
+- Cross-device move: upstream lib.ts catches EXDEV and copies then removes.
+  Ultra core/osroot.go moveWithinRoot uses os.Rename between roots, with no
+  cross-device fallback. Copy/remove needs an explicit partial-failure,
+  destination-identity and recovery contract before implementation.
+- Directory waits: upstream bounds realpath/readdir waits to 15 seconds and
+  recursive walks to 100,000 entries. Its timeout stops waiting, not the OS call.
+  Ultra project_map has cooperative 2.5-second / 5,000-entry bounds, but
+  readDirWithinRoot uses synchronous ReadDir; a stalled syscall is not interrupted.
+- Roots: upstream retains advertised and resolved paths. Ultra roots_sync.go
+  parses file URIs, refreshes on initialized/list_changed, applies
+  union/replace/ignore, and times out roots/list after two seconds. Upstream's
+  policy is not itself a spec requirement to change Ultra's default.
+- Retargeted symlinks: upstream revalidates the allowed directory's realpath.
+  Ultra caches resolved roots and reauthorizes operation paths; same-root
+  operations use os.Root. Retargeting/cross-root regression coverage is needed
+  before changing path-security semantics.
+- SEP-3398 is merged: March/September spec releases, transition to March 2027.
+  It changes the release process, not the protocol version to advertise.
+  https://github.com/modelcontextprotocol/modelcontextprotocol/pull/3398
+
 ### fix(response): recoverable cuts, aggregate budget, listing cursor
 
 - A response cut inside a line no longer advances `start_line`. Continuation
