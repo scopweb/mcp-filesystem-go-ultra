@@ -219,7 +219,7 @@ func pathInside(parent, child string) bool {
 func gitArgs(hooks string, args ...string) []string {
 	prefix := []string{
 		"-c", "core.hooksPath=" + hooks,
-		"-c", "core.fsmonitor=",
+		"-c", "core.fsmonitor=false",
 		"-c", "advice.detachedHead=false",
 	}
 	return append(prefix, args...)

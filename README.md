@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra
 
-**v4.8.0** · Go 1.27.3 · MCP 2025-11-25 · stdio · 35 tools ultra / 19 agent / 18 strict
+**v4.8.0** · Go 1.27.4 · MCP 2025-11-25 · stdio · 35 tools ultra / 19 agent / 18 strict
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -113,7 +113,7 @@ build-windows.bat        # default
 build-windows.sh         # Linux/macOS
 ```
 
-Requires Go 1.27.3+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
+Requires Go 1.27.4+. No CGO. Tested on Windows 11 and Ubuntu 22.04 (WSL2).
 
 From a checkout, install the executable package, not the module root (the root has no `main`):
 
@@ -167,7 +167,7 @@ Keep this trio in the MCP `args` (and leave `--readonly` off so the agent can wr
 
 | Flag | Why |
 |------|-----|
-| `--profile=strict` | Registers the 18-tool agent core (`list_allowed_directories`, `project_map`, `directory_tree`, `read_file` / `write_file` / `edit_file` / `apply_patch`, `backup` for undo, `security_policy`, …). Omits `git`, `wsl`, `minify_js`, `analyze_code`, `batch_operations`, `copy_file`, `server_info`, … so `tools/list` stays small. `--profile=agent` is that core plus `git`. Default is `ultra` (34 tools) so existing configs do not break. |
+| `--profile=strict` | Registers the 18-tool agent core (`list_allowed_directories`, `project_map`, `directory_tree`, `read_file` / `write_file` / `edit_file` / `apply_patch`, `backup` for undo, `security_policy`, …). Omits `git`, `wsl`, `minify_js`, `analyze_code`, `batch_operations`, `copy_file`, `server_info`, … so `tools/list` stays small. `--profile=agent` is that core plus `git`. Default is `ultra` (35 tools) so existing configs do not break. |
 | `--compact-mode` | Short token-efficient responses (hashes, UNDO ids, no emoji walls). |
 | `--response-mode=structured` | Opt-in. Brief text fallback; file bodies stay once in structuredContent. Default `compat` keeps the full text fallback. |
 | `--roots-mode=union` | Default. MCP client Roots are **added** to the CLI allowlist. `replace` wipes the CLI list when the client sends Roots (OpenCode and Claude do). |

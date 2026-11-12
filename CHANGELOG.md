@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Security — git ignores programs named by the repository
+
+Every git command run through execGitCommand now overrides the settings that make Git execute a program from the repository's own config: core.fsmonitor, core.hooksPath (an empty directory this process owns), diff.external, commit and merge signing, submodule recursion, and core.pager. Command-bearing filter, merge and diff drivers defined in that repository are cleared; drivers from the global config, such as Git LFS, are not. diff, show and log also pass --no-ext-diff and --no-textconv. A caller -c cannot turn those keys back on. This is the class of hole patched in mcp-server-git 2026.11.11 (GHSA-6hqx-gqrx-c5r2). workspace already set hooks and fsmonitor; the general path did not.
+
+### Security — require Go 1.27.4
+
+`go.mod`, CI (`ci.yml` / `release.yml`), the README and `build-windows.bat` now require **1.27.4+**. That release fixes **GO-2026-6859** (CVE-2026-97054) in `net/http` (`MaxBytesReader` / `MaxBytesHandler`). The dashboard and the GitLab HTTP client use `net/http`.
+
 ### Added — `set_trace` stores orchestrator ids for the process
 
 `set_trace` (ultra only) stores `mandate_id`, `policy_version`, `strength`,

@@ -82,16 +82,28 @@ func TestExecGitCommand_ArgvPassthroughNoShell(t *testing.T) {
 	}
 
 	calls := readArgvLog(t, log)
-	if len(calls) != 1 {
-		t.Fatalf("expected exactly 1 subprocess invocation (git), got %d: %v", len(calls), calls)
+	var commit []string
+	for _, argv := range calls {
+		if hasArg(argv, "commit") {
+			commit = argv
+			break
+		}
 	}
-	want := []string{"commit", "-m", message}
-	if strings.Join(calls[0], " ") != strings.Join(want, " ") {
-		t.Errorf("argv mangled in transit:\n got: %q\nwant: %q", calls[0], want)
+	if commit == nil {
+		t.Fatalf("no commit invocation in %d calls: %v", len(calls), calls)
 	}
-	for i, arg := range calls[0] {
-		if arg != want[i] {
-			t.Errorf("argv[%d] = %q, want %q", i, arg, want[i])
+	if !hasArg(commit, message) || !hasArg(commit, "-m") {
+		t.Fatalf("commit message not verbatim: %q", commit)
+	}
+	fs := indexArg(commit, "core.fsmonitor=false")
+	sub := indexArg(commit, "commit")
+	if fs < 0 || sub < 0 || fs > sub {
+		t.Fatalf("fsmonitor override missing or after subcommand: %q", commit)
+	}
+	for _, argv := range calls {
+		joined := strings.ToLower(strings.Join(argv, " "))
+		if strings.Contains(joined, "cmd.exe") || joined == "cmd" {
+			t.Fatalf("shell interpreter invoked: %q", argv)
 		}
 	}
 }

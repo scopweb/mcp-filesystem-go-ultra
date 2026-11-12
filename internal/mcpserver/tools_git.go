@@ -1354,6 +1354,10 @@ func gitPush(ctx context.Context, engine *core.UltraFastEngine, repoRoot string,
 // directly via exec.Command, so the cmd.exe path never fired in
 // practice and only added attack surface.
 //
+// Repository config cannot name a program. runGitCaptured applies the
+// overrides in git_safe.go after any caller -c, and passes the same
+// pairs to Git children through GIT_CONFIG_COUNT.
+//
 // Implementation note: we use cmd.Run() with explicit Stdout/Stderr buffers
 // instead of cmd.CombinedOutput(). CombinedOutput() internally re-assigns
 // cmd.Stdout and cmd.Stderr to its own buffers and requires those fields
@@ -1379,11 +1383,22 @@ func execGitCommand(dir, command string, args ...string) (string, error) {
 }
 
 func execGitCommandCtx(ctx context.Context, dir, command string, args ...string) (string, error) {
+	return runGitCaptured(ctx, dir, command, args, true)
+}
+
+func runGitCaptured(ctx context.Context, dir, command string, args []string, enumerate bool) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	var env []string
+	if isGitBin(command) {
+		args, env = applyGitHardening(ctx, dir, command, args, enumerate)
+	}
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = dir
+	if env != nil {
+		cmd.Env = env
+	}
 	stdout := &cappedBuffer{max: gitCaptureCap}
 	stderr := &cappedBuffer{max: 64 << 10}
 	cmd.Stdout = stdout
