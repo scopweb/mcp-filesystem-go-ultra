@@ -4,6 +4,45 @@
 
 ## [Unreleased]
 
+### Security — reads and moves use the directory that was checked
+
+A read or a move resolved the path string again after the check, so a parent
+swapped for a symlink in that window could carry the operation to a different
+file. A read now opens the final component relative to the parent directory
+handle that was just verified, and a move pins both parents and renames by
+handle (`renameat` / `FILE_RENAME_INFORMATION`). A symlink leaf, or a directory
+that changed during the open, is refused instead of followed. `read_file`
+ranges, the `read_file` resource and `move_file`/`rename_file` take this path
+(GHSA-p9cv-8g75-4xcg, GHSA-7m4x-rv66-mxhh).
+
+### Security — `git credential fill` cannot run a repository program
+
+`gitlab_issues` read the credential with `git credential fill` in the caller's
+repository, where a repo-local `credential.helper` can name any program. The
+fill now runs in a fresh temporary directory, drops `GIT_DIR`, `GIT_WORK_TREE`
+and `GIT_NAMESPACE`, and applies the same config hardening as the other git
+commands.
+
+### Fixed — `structuredContent` stays inside the 50 000 character budget
+
+The text block was capped but the JSON beside it was not, so a client that
+reads `structuredContent` still received the whole body a second time.
+`search_files` now drops hits from the end of the list until the JSON fits and
+keeps the continuation hint; a batch `read_file` drops its duplicated combined
+body and then trims the longest file bodies before removing any. A cut keeps
+`continuation`, so the omitted part is still reachable with `offset` or a
+re-read. The text block is unchanged.
+
+### Fixed — `diff_files` continues with `offset`
+
+The spill footer named `start_line`, which `diff_files` does not accept. The
+footer and the structured hint now name `offset` (1-based line), the parameter
+the tool takes.
+
+### Fixed — compact list_directory pages with max_nodes
+
+The compact listing no longer prints the whole directory and then cuts the text at 50 000 characters without an offset. Text and structuredContent share one page of max_nodes (default 500, also capped by MaxListItems). A truncated page says offset:N. The next page stays in the same compact layout instead of switching to JSON. tree, lines and json are unchanged.
+
 ### Security — git ignores programs named by the repository
 
 Every git command run through execGitCommand now overrides the settings that make Git execute a program from the repository's own config: core.fsmonitor, core.hooksPath (an empty directory this process owns), diff.external, commit and merge signing, submodule recursion, and core.pager. Command-bearing filter, merge and diff drivers defined in that repository are cleared; drivers from the global config, such as Git LFS, are not. diff, show and log also pass --no-ext-diff and --no-textconv. A caller -c cannot turn those keys back on. This is the class of hole patched in mcp-server-git 2026.11.11 (GHSA-6hqx-gqrx-c5r2). workspace already set hooks and fsmonitor; the general path did not.

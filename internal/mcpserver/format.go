@@ -381,16 +381,17 @@ const (
 const claudeSpillChars = 50000
 
 type readProjection struct {
-	Text         string
-	Truncated    bool
-	StartLine    int
-	EndLine      int
-	TotalLines   int
-	ContinueAt   int
-	Cut          string
-	LineOffset   int    // bytes already skipped at the start of StartLine
-	ResumeOffset int    // byte offset into ContinueAt; 0 means the next line starts at byte 0
-	Err          string // invalid byte_offset; handlers must not treat this as a read
+	Text          string
+	Truncated     bool
+	StartLine     int
+	EndLine       int
+	TotalLines    int
+	ContinueAt    int
+	Cut           string
+	LineOffset    int    // bytes already skipped at the start of StartLine
+	ResumeOffset  int    // byte offset into ContinueAt; 0 means the next line starts at byte 0
+	ContinueParam string // footer cursor name; empty means start_line. diff_files uses offset.
+	Err           string // invalid byte_offset; handlers must not treat this as a read
 }
 
 func splitContentLines(content string) []string {

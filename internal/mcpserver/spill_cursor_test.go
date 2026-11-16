@@ -197,10 +197,21 @@ func TestDiffFilesSpillHasOffset(t *testing.T) {
 	if n := len(resultText(t, res)); n > claudeSpillChars {
 		t.Fatalf("diff text %d", n)
 	}
+	text := resultText(t, res)
+	if strings.Contains(text, "start_line=") {
+		t.Fatalf("diff text names start_line, parameter is offset:\n%s", text[len(text)-240:])
+	}
+	if !strings.Contains(text, "offset=") {
+		t.Fatalf("diff text missing offset continuation:\n%s", text[len(text)-240:])
+	}
 	sc := res.StructuredContent.(map[string]any)
 	cont, _ := sc["continuation"].(map[string]any)
 	if cont == nil || cont["offset"] == nil {
 		t.Fatalf("diff continuation: %#v", sc["continuation"])
+	}
+	hint, _ := cont["hint"].(string)
+	if !strings.Contains(hint, "offset") {
+		t.Fatalf("structured hint: %s", hint)
 	}
 }
 

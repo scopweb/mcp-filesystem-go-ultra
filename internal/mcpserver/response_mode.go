@@ -58,6 +58,9 @@ func batchReadSummary(files []map[string]any, truncated bool) string {
 
 func presentRead(engine *core.UltraFastEngine, payload map[string]any, fullText, summary string, batch, ok bool) *mcp.CallToolResult {
 	payload, text := finishRead(engine, payload, fullText, summary, batch)
+	// Batch only. Drop a duplicated combined body, then cap the JSON.
+	// The text block is unchanged. A one-line structured summary is kept.
+	payload = fitReadStructured(payload, claudeSpillChars)
 	return structuredOrError(ok, payload, text)
 }
 

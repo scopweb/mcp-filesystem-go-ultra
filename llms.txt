@@ -133,6 +133,10 @@ listed here, do not assume it.
   declare them (`edit_file`, `multi_edit`).
 - In `compat` mode the text block and `structuredContent` carry the same
   body. `--response-mode=structured` keeps it once (see §3).
+  `search_files` and a `read_file` batch also keep the JSON of
+  `structuredContent` at or under 50000 bytes. A cut keeps `continuation`.
+  The already-capped text block is not rewritten to make that fit.
+- `diff_files` continues with `offset` (1-based line), not `start_line`.
 - Directory listings print the absolute path once, as a header line; the
   entry lines carry the name and the size only.
 - `project_map` never follows symlinks and never reveals paths hidden by the

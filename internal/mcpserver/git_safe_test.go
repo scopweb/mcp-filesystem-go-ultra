@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHardenGitArgv_CallerCannotReenableFsmonitor(t *testing.T) {
@@ -101,6 +103,26 @@ func TestExecGitCommand_RepoConfigCannotRunPrograms(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("repository config executed a program (marker %v)", err)
+	}
+}
+
+func TestGitCredentialFill_DoesNotRunRepoHelper(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "ran.txt")
+	exe := buildMarkerExe(t, marker)
+	mustGit(t, dir, "init", "-q")
+	mustGit(t, dir, "config", "credential.helper", exe)
+	mustGit(t, dir, "config", "core.fsmonitor", exe)
+	t.Setenv("GIT_DIR", dir)
+	t.Setenv("GIT_WORK_TREE", dir)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, _, _ = gitCredentialFill(ctx, "http://gitlab.example")
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("credential fill ran a repository program (marker %v)", err)
 	}
 }
 

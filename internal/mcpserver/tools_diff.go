@@ -143,6 +143,7 @@ func boundDiffText(msg string, offset, byteOffset int) (string, map[string]any, 
 	}
 	proj := clampFormattedSpillLimit(readProjection{
 		Text: body, StartLine: offset, EndLine: len(lines), TotalLines: len(lines), LineOffset: byteOffset,
+		ContinueParam: "offset",
 	}, "diff", claudeSpillChars)
 	cont := map[string]any{
 		"offset": proj.ContinueAt,

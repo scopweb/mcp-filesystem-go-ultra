@@ -174,6 +174,22 @@ func insertAt(args []string, at int, extra []string) []string {
 	return append(out, args[at:]...)
 }
 
+// stripGitRepoEnv drops variables that would select a repository, so a
+// command run in a neutral directory cannot still load that repo's config.
+func stripGitRepoEnv(env []string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, e := range env {
+		if strings.HasPrefix(e, "GIT_DIR=") || strings.HasPrefix(e, "GIT_WORK_TREE=") || strings.HasPrefix(e, "GIT_NAMESPACE=") {
+			continue
+		}
+		if strings.HasPrefix(e, "GIT_TERMINAL_PROMPT=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return append(out, "GIT_TERMINAL_PROMPT=0")
+}
+
 func gitSafeEnviron(pairs [][2]string) []string {
 	env := os.Environ()
 	count := 0

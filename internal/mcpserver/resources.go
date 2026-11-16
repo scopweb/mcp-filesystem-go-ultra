@@ -64,17 +64,22 @@ func readFileResource(ctx context.Context, engine *core.UltraFastEngine, uri str
 	if err = engine.Authorize(core.OpRead, resolved); err != nil {
 		return nil, err
 	}
-	info, err := os.Lstat(resolved)
+	// Open relative to the checked parent. os.Open(resolved) would follow a
+	// directory swapped for a symlink after ResolveAndAuthorize
+	// (GHSA-p9cv-8g75-4xcg).
+	f, err := engine.OpenForRead(resolved)
 	if err != nil {
 		return nil, err
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("security: refusing to read symlink resource %s", path)
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
 	}
 	if info.IsDir() {
 		return nil, fmt.Errorf("path is a directory: %s", path)
 	}
-	data, err := readFileLimited(ctx, resolved, core.VeryLargeFileThreshold)
+	data, err := readOpenLimited(ctx, f, core.VeryLargeFileThreshold)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +124,10 @@ func readFileLimited(ctx context.Context, path string, limit int64) ([]byte, err
 		return nil, err
 	}
 	defer f.Close()
+	return readOpenLimited(ctx, f, limit)
+}
+
+func readOpenLimited(ctx context.Context, f *os.File, limit int64) ([]byte, error) {
 	buf := make([]byte, 0, 4096)
 	tmp := make([]byte, 32*1024)
 	var n int64

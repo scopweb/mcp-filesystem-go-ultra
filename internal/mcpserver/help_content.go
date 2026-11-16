@@ -120,7 +120,7 @@ multi_edit
 
 list_directory
 - Purpose: List directory contents
-- Key params: path, output_format (compact|json|tree), max_depth
+- Key params: path, output_format (compact|json|tree|lines), max_nodes (compact page size, default 500), offset
 
 search_files
 - Purpose: Search by filename or content. Honors .gitignore by default (no_ignore=false). truncated + hidden_count in structured output.

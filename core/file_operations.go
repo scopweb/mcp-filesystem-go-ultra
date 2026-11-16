@@ -914,8 +914,9 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 	}
 	path = resolved
 
-	// Check if file exists
-	info, err := os.Stat(path)
+	// Check if file exists. Stat through the same root the later open uses,
+	// not a path the kernel resolves again.
+	info, err := e.statWithinRoot(path)
 	if os.IsNotExist(err) {
 		return "", fmt.Errorf("file does not exist: %s", path)
 	}
@@ -944,8 +945,9 @@ func (e *UltraFastEngine) ReadFileRange(ctx context.Context, path string, startL
 		return extractLineRangeFromBytes(content, displayPath, startLine, endLine)
 	}
 
-	// Open file for efficient line-by-line reading
-	file, err := os.Open(path)
+	// Open relative to the checked directory. os.Open by name would follow a
+	// parent swapped for a symlink after ResolveAndAuthorize.
+	file, err := e.openWithinRoot(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}

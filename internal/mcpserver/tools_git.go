@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -1386,7 +1387,18 @@ func execGitCommandCtx(ctx context.Context, dir, command string, args ...string)
 	return runGitCaptured(ctx, dir, command, args, true)
 }
 
+// execGitStdin runs git through the same hardened runner as execGitCommand,
+// with stdin and without a repository selected via cwd or GIT_DIR. Used by
+// git credential fill so a repo-local credential.helper cannot run.
+func execGitStdin(ctx context.Context, dir, stdin string, args ...string) (string, error) {
+	return runGitCapturedIO(ctx, dir, "git", args, true, strings.NewReader(stdin), true)
+}
+
 func runGitCaptured(ctx context.Context, dir, command string, args []string, enumerate bool) (string, error) {
+	return runGitCapturedIO(ctx, dir, command, args, enumerate, nil, false)
+}
+
+func runGitCapturedIO(ctx context.Context, dir, command string, args []string, enumerate bool, stdin io.Reader, dropRepoEnv bool) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1394,10 +1406,16 @@ func runGitCaptured(ctx context.Context, dir, command string, args []string, enu
 	if isGitBin(command) {
 		args, env = applyGitHardening(ctx, dir, command, args, enumerate)
 	}
+	if dropRepoEnv && env != nil {
+		env = stripGitRepoEnv(env)
+	}
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = dir
 	if env != nil {
 		cmd.Env = env
+	}
+	if stdin != nil {
+		cmd.Stdin = stdin
 	}
 	stdout := &cappedBuffer{max: gitCaptureCap}
 	stderr := &cappedBuffer{max: 64 << 10}

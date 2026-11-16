@@ -34,7 +34,7 @@ func registerSearchTools(reg *toolRegistry) {
 		mcp.WithNumber("max_depth", mcp.Description("Recursion depth for output_format:'tree' (default: 2)")),
 		mcp.WithString("exclude", mcp.Description("JSON array or comma-separated globs to skip in tree")),
 		mcp.WithBoolean("respect_ignore", mcp.Description("Honor .gitignore/.cursorignore/.fsultraignore in tree (default: true)")),
-		mcp.WithNumber("max_nodes", mcp.Description("Cap nodes in tree output (default: 500)")),
+		mcp.WithNumber("max_nodes", mcp.Description("Page size for the compact listing, and the node cap for tree and lines (default: 500). Compact text uses the same page as structuredContent; continue with offset.")),
 		mcp.WithNumber("offset", mcp.Description("0-based index into the sorted listing. Continuation.offset is the next index.")),
 	)
 	reg.listDirHandler = auditWrap(engine, "list_directory", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -118,12 +118,8 @@ func registerSearchTools(reg *toolRegistry) {
 			listing, err = census.Text, censusErr
 			treeTruncated = census.Truncated
 			censusEntries = census.Entries
-		default: // "" / "compact" / "text" — current behaviour
-			if offset > 0 {
-				listing, err = engine.ListDirectoryJSONPage(ctx, path, offset, 0)
-			} else {
-				listing, err = engine.ListDirectoryContent(ctx, path)
-			}
+		default: // "" / "compact" / "text" — one page, same limit as structuredContent
+			listing, err = engine.ListDirectoryJSONPage(ctx, path, offset, compactPageLimit(engine, maxNodes))
 		}
 		if err != nil {
 			return mcp.NewToolResultError(formatToolError(err)), nil
@@ -140,15 +136,12 @@ func registerSearchTools(reg *toolRegistry) {
 				jsonPath, entries, truncated = p, ents, truncated || tr
 			}
 		} else if format == "compact" || format == "text" || format == "" {
-			raw := listing
-			var jsonErr error
-			if offset == 0 {
-				raw, jsonErr = engine.ListDirectoryJSONPage(ctx, path, 0, 0)
-			}
-			if jsonErr == nil {
-				if p, ents, tr, ok := parseListJSON(raw); ok {
-					jsonPath, entries, truncated = p, ents, truncated || tr
-				}
+			if p, ents, total, tr, ok := parseListPage(listing); ok {
+				var pageText string
+				pageText, ents, tr = fitCompactListing(engine.IsCompactMode(), p, ents, total, offset, tr)
+				stripListingProtection(ents)
+				listing = pageText
+				jsonPath, entries, truncated = p, ents, tr
 			}
 		}
 		if format == "lines" {
@@ -176,7 +169,9 @@ func registerSearchTools(reg *toolRegistry) {
 			}
 		}
 		text := listing
-		if len(text) > claudeSpillChars {
+		// A fitted compact page already carries the offset footer. Shrinking
+		// it again would replace that footer with "narrow the path".
+		if len(text) > claudeSpillChars && !strings.Contains(text, "continue with offset:") {
 			var spilled bool
 			text, entries, spilled = shrinkListingSpill(jsonPath, format, text, entries)
 			if spilled {
@@ -431,6 +426,9 @@ func registerSearchTools(reg *toolRegistry) {
 		// structuredContent.matches; the text block becomes a brief summary.
 		msg, _ := sc["message"].(string)
 		sc, text = finishBody(engine, sc, text, searchBodySummary(msg))
+		// Text is already within claudeSpillChars. structuredContent repeats
+		// the hits and its JSON can still spill; cut matches, keep the hint.
+		sc = fitSearchStructured(sc, claudeSpillChars)
 		return mcp.NewToolResultStructured(sc, text), nil
 	})
 	reg.addTool(searchFilesTool, reg.searchFilesHandler)

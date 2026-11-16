@@ -136,9 +136,17 @@ func (e *UltraFastEngine) openWithinRoot(path string) (*os.File, error) {
 		return nil, err
 	}
 	if open {
-		return os.Open(path)
+		// No allowlist root to pin to. Open the final component relative to
+		// the parent that was just checked (GHSA-p9cv-8g75-4xcg).
+		return openReadAnchored(path)
 	}
 	return root.Open(rel)
+}
+
+// OpenForRead opens path for reading. Allowlisted paths use os.Root. Paths
+// os.Root does not cover are opened relative to the checked parent directory.
+func (e *UltraFastEngine) OpenForRead(path string) (*os.File, error) {
+	return e.openWithinRoot(path)
 }
 
 func (e *UltraFastEngine) readWithinRoot(path string) ([]byte, error) {
@@ -147,7 +155,7 @@ func (e *UltraFastEngine) readWithinRoot(path string) ([]byte, error) {
 		return nil, err
 	}
 	if open {
-		return os.ReadFile(path)
+		return readAnchored(path)
 	}
 	return root.ReadFile(rel)
 }
@@ -208,7 +216,10 @@ func (e *UltraFastEngine) moveWithinRoot(src, dst string, createParent bool) err
 				return fmt.Errorf("failed to create destination directory: %w", err)
 			}
 		}
-		if err := os.Rename(src, dst); err != nil {
+		// Different roots (or no root) cannot share one os.Root.Rename.
+		// Pin both parents so the source is not a path the kernel resolves
+		// after the check (GHSA-7m4x-rv66-mxhh).
+		if err := renameAnchored(src, dst); err != nil {
 			return fmt.Errorf("failed to move: %w", err)
 		}
 		return nil

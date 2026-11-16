@@ -10,7 +10,6 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -929,9 +928,15 @@ func gitCredentialFill(ctx context.Context, base string) (string, string, error)
 	b.WriteString("\n")
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "credential", "fill")
-	cmd.Stdin = strings.NewReader(b.String())
-	out, err := cmd.Output()
+	// A fresh directory, not the caller's repo. execGitStdin also drops
+	// GIT_DIR so a repo-local credential.helper is not inherited, and applies
+	// the same config hardening as execGitCommand.
+	dir, err := os.MkdirTemp("", "fsultra-gitcred-")
+	if err != nil {
+		return "", "", err
+	}
+	defer os.RemoveAll(dir)
+	out, err := execGitStdin(ctx, dir, b.String(), "credential", "fill")
 	if err != nil {
 		return "", "", err
 	}

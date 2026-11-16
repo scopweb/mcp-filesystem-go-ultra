@@ -187,15 +187,19 @@ func boundedSpillFooter(p readProjection, path string, spilled bool) string {
 		}
 		return ""
 	}
+	param := p.ContinueParam
+	if param == "" {
+		param = "start_line"
+	}
 	if p.ResumeOffset > 0 {
 		return fmt.Sprintf(
-			"\n\n[Lines %d-%d of %d total lines in %s - line %d cut at byte %d to stay within %d bytes. Continue with start_line=%d, byte_offset=%d]",
-			p.StartLine, p.EndLine, p.TotalLines, base, p.ContinueAt, p.ResumeOffset, claudeSpillChars, p.ContinueAt, p.ResumeOffset,
+			"\n\n[Lines %d-%d of %d total lines in %s - line %d cut at byte %d to stay within %d bytes. Continue with %s=%d, byte_offset=%d]",
+			p.StartLine, p.EndLine, p.TotalLines, base, p.ContinueAt, p.ResumeOffset, claudeSpillChars, param, p.ContinueAt, p.ResumeOffset,
 		)
 	}
 	return fmt.Sprintf(
-		"\n\n[Lines %d-%d of %d total lines in %s - text cut to stay within %d bytes. Continue with start_line=%d]",
-		p.StartLine, p.EndLine, p.TotalLines, base, claudeSpillChars, p.ContinueAt,
+		"\n\n[Lines %d-%d of %d total lines in %s - text cut to stay within %d bytes. Continue with %s=%d]",
+		p.StartLine, p.EndLine, p.TotalLines, base, claudeSpillChars, param, p.ContinueAt,
 	)
 }
 
