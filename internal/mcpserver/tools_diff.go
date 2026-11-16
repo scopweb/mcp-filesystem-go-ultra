@@ -118,10 +118,19 @@ func diffResult(pathA, pathB, nameB, against string, a, b string, rules []core.N
 		payload["continuation"] = cont
 		payload["status"] = statusTruncated
 	}
-	return mcp.NewToolResultStructured(payload, bounded), nil
+	payload, text := fitDiffStructured(payload, msg, offset, byteOffset, claudeSpillChars)
+	return mcp.NewToolResultStructured(payload, text), nil
 }
 
 func boundDiffText(msg string, offset, byteOffset int) (string, map[string]any, error) {
+	return boundDiffTextLimit(msg, offset, byteOffset, claudeSpillChars)
+}
+
+// boundDiffTextLimit is boundDiffText with an explicit byte budget for the
+// text. A smaller budget cuts the diff earlier, with the same cursor: the
+// continuation names the next line, so the rest of the diff is still
+// reachable with diff_files offset.
+func boundDiffTextLimit(msg string, offset, byteOffset, limit int) (string, map[string]any, error) {
 	lines := splitContentLines(msg)
 	if len(lines) == 0 {
 		return msg, nil, nil
@@ -138,13 +147,16 @@ func boundDiffText(msg string, offset, byteOffset int) (string, map[string]any, 
 		}
 	}
 	body := strings.Join(lines[offset-1:], "\n")
-	if len(body) <= claudeSpillChars {
+	if limit <= 0 {
+		limit = claudeSpillChars
+	}
+	if len(body) <= limit {
 		return body, nil, nil
 	}
 	proj := clampFormattedSpillLimit(readProjection{
 		Text: body, StartLine: offset, EndLine: len(lines), TotalLines: len(lines), LineOffset: byteOffset,
-		ContinueParam: "offset",
-	}, "diff", claudeSpillChars)
+		ContinueParam: "offset", Limit: limit,
+	}, "diff", limit)
 	cont := map[string]any{
 		"offset": proj.ContinueAt,
 		"hint":   "Continue with diff_files offset (1-based line). If byte_offset is set, pass it too; do not skip that line.",

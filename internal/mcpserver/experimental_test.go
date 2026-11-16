@@ -30,6 +30,73 @@ func TestExperimental_EntriesWellFormed(t *testing.T) {
 	}
 }
 
+// TestGraduated_NotInExperimentalRegistry keeps the two registries disjoint:
+// a graduated feature must not sit in experimentalFeatures again.
+func TestGraduated_NotInExperimentalRegistry(t *testing.T) {
+	for key := range graduatedFeatures {
+		if _, ok := experimentalFeatures[key]; ok {
+			t.Errorf("feature %q is graduated and experimental at the same time", key)
+		}
+	}
+}
+
+// TestGraduated_ToolEntriesAreRegistered ensures the graduated tool-level
+// keys (keys without ':') still name a registered tool — a typo would hide a
+// graduation from the checks below.
+func TestGraduated_ToolEntriesAreRegistered(t *testing.T) {
+	reg := newHelpTestRegistry(t, t.TempDir())
+	for key := range graduatedFeatures {
+		if strings.Contains(key, ":") {
+			continue // mode-level entries are informational
+		}
+		if _, ok := reg.handlers[key]; !ok {
+			t.Errorf("graduated feature %q does not match any registered tool", key)
+		}
+	}
+}
+
+// TestGraduated_NoExperimentalPrefix verifies that a graduated tool lost the
+// [EXPERIMENTAL ...] description prefix. The prefix promises graduation in
+// the next release cycle; keeping it after graduation would be a lie.
+func TestGraduated_NoExperimentalPrefix(t *testing.T) {
+	reg := newHelpTestRegistry(t, t.TempDir())
+	tools := reg.server.ListTools()
+	for key := range graduatedFeatures {
+		if strings.Contains(key, ":") {
+			continue // mode-level entries are informational
+		}
+		st, ok := tools[key]
+		if !ok {
+			continue // profile without this tool; registration is checked above
+		}
+		if strings.Contains(st.Tool.Description, "[EXPERIMENTAL") {
+			t.Errorf("graduated tool %q still carries the experimental prefix: %q", key, st.Tool.Description)
+		}
+	}
+}
+
+// TestGraduated_PendingSchemaToolsDeclareNoSchema keeps the "a schema is
+// earned by the conformance sweep" rule alive for the graduated cohort. A
+// graduated tool listed in pendingSchema must declare NO outputSchema yet:
+// adding one is a separate change that also adds the sweep case and drops the
+// key from pendingSchema.
+func TestGraduated_PendingSchemaToolsDeclareNoSchema(t *testing.T) {
+	reg := newHelpTestRegistry(t, t.TempDir())
+	tools := reg.server.ListTools()
+	for key := range pendingSchema {
+		if _, experimental := experimentalFeatures[key]; experimental {
+			t.Errorf("feature %q is still experimental; it cannot be in pendingSchema", key)
+		}
+		st, ok := tools[key]
+		if !ok {
+			continue // profile without this tool
+		}
+		if st.Tool.RawOutputSchema != nil || st.Tool.OutputSchema.Type != "" {
+			t.Errorf("tool %q is in pendingSchema and must not declare an outputSchema yet", key)
+		}
+	}
+}
+
 // TestExperimental_ToolEntriesAreRegistered ensures tool-level entries (keys
 // without ':') name a tool that is actually registered — a typo in the map
 // would silently disable enforcement for that feature.

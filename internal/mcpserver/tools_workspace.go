@@ -11,7 +11,7 @@ func registerWorkspaceTools(reg *toolRegistry) {
 	engine := reg.engine
 	tool := mcp.NewTool("workspace",
 		mcp.WithTitleAnnotation("Workspace"),
-		mcp.WithDescription("workspace — Experimental real git worktree for agent edits. "+
+		mcp.WithDescription("workspace — Real git worktree for agent edits. "+
 			"begin creates a detached worktree at an already-allowed local dest; it does not copy dirty, untracked, or ignored files and does not widen allowed-paths. "+
 			"status, diff, and export read that worktree. discard removes only a clean workspace this server created. "+
 			"Not a sandbox, not crash-durable, and not a promote. Compilers see dest_path. Ultra only."),

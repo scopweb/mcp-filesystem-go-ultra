@@ -391,7 +391,7 @@ func TestInspectAuthorizationReadonlyAndCancellation(t *testing.T) {
 	}
 }
 
-func TestInspectRegistrationProfilesAndExperimental(t *testing.T) {
+func TestInspectRegistrationProfilesAndGraduated(t *testing.T) {
 	dir := t.TempDir()
 	reg := newHelpTestRegistry(t, dir)
 	for _, profile := range []toolProfile{profileStrict, profileAgent, profileUltra} {
@@ -404,8 +404,13 @@ func TestInspectRegistrationProfilesAndExperimental(t *testing.T) {
 				t.Fatalf("profile %s has %s=%v", profile, name, ok)
 			}
 			if ok {
-				if !strings.Contains(tool.Tool.Description, "[EXPERIMENTAL") || tool.Tool.RawOutputSchema != nil || tool.Tool.OutputSchema.Type != "" {
-					t.Fatalf("experimental contract: %+v", tool.Tool)
+				// Graduated in v4.9.0: no [EXPERIMENTAL] prefix, and still no
+				// outputSchema until the conformance sweep covers the tool.
+				if strings.Contains(tool.Tool.Description, "[EXPERIMENTAL") {
+					t.Fatalf("graduated tool still marked experimental: %+v", tool.Tool)
+				}
+				if tool.Tool.RawOutputSchema != nil || tool.Tool.OutputSchema.Type != "" {
+					t.Fatalf("graduated tool must not declare an outputSchema yet: %+v", tool.Tool)
 				}
 				if tool.Tool.Annotations.ReadOnlyHint == nil || !*tool.Tool.Annotations.ReadOnlyHint {
 					t.Fatal("not readonly")

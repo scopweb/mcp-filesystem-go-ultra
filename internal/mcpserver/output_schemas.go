@@ -179,7 +179,7 @@ var listAllowedDirectoriesOutputSchema = json.RawMessage(`{
 var diffFilesOutputSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "status": {"type": "string", "description": "ok | identical | equivalent"},
+    "status": {"type": "string", "description": "ok | identical | equivalent | truncated"},
     "path_a": {"type": "string"},
     "path_b": {"type": "string"},
     "identical": {"type": "boolean"},
@@ -192,6 +192,8 @@ var diffFilesOutputSchema = json.RawMessage(`{
     "matches_a": {"type": "integer", "description": "Normalize matches on the left side"},
     "matches_b": {"type": "integer", "description": "Normalize matches on the right side"},
     "normalized_diff": {"type": "boolean", "description": "True when message is a diff of rewritten text, not a patch for the original files"},
+    "truncated": {"type": "boolean", "description": "True when the diff was cut to stay inside the response budget"},
+    "continuation": {"type": "object", "description": "When truncated: offset is the next diff line (1-based). Pass it back as diff_files offset. byte_offset resumes inside a cut line."},
     "message": {"type": "string", "description": "Unified diff, identical notice, or normalized comparison. Identical to the text content block"}
   },
   "required": ["status", "message"]

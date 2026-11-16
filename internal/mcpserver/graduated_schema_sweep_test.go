@@ -175,16 +175,20 @@ func TestGraduatedSchema_JSONValid(t *testing.T) {
 	}
 }
 
-func TestContextPack_ExperimentalHasNoSchema(t *testing.T) {
+// TestContextPack_GraduatedHasNoSchema checks the graduated state of
+// context_pack (v4.9.0): the [EXPERIMENTAL] prefix is gone, and the tool
+// still declares no outputSchema because the conformance sweep does not
+// cover it yet (see pendingSchema in experimental.go).
+func TestContextPack_GraduatedHasNoSchema(t *testing.T) {
 	reg := newHelpTestRegistry(t, t.TempDir())
 	st, ok := reg.server.ListTools()["context_pack"]
 	if !ok {
 		t.Fatal("context_pack not registered")
 	}
 	if st.Tool.RawOutputSchema != nil || st.Tool.OutputSchema.Type != "" {
-		t.Fatal("experimental context_pack must not declare an outputSchema")
+		t.Fatal("context_pack must not declare an outputSchema until the sweep covers it")
 	}
-	if !strings.Contains(st.Tool.Description, "[EXPERIMENTAL since v4.8.0") {
-		t.Fatalf("description=%s", st.Tool.Description)
+	if strings.Contains(st.Tool.Description, "[EXPERIMENTAL") {
+		t.Fatalf("graduated tool still marked experimental: %s", st.Tool.Description)
 	}
 }

@@ -233,7 +233,7 @@ analyze_code
 - Key params: action (symbols|lint|sec|impact), path, query, max_findings
 
 context_pack
-- Purpose: Deterministic task context: ranked files, the definition that answers the query, its exact line range, a bounded snippet, and an explicit account of what was left out. Experimental. Not an embedding index. Ultra only.
+- Purpose: Deterministic task context: ranked files, the definition that answers the query, its exact line range, a bounded snippet, and an explicit account of what was left out. Graduated in v4.9.0. Not an embedding index. Ultra only.
 - Key params: path, query, focus_paths, budget_chars, max_files, include_git
 - budget_chars counts Unicode code points of the TEXT fallback (header, per-file blocks, coverage notes, truncation marker). The text never exceeds it. The structured payload is a projection of the same selection, so it never keeps a body the budget removed. text_chars, structured_chars and content_chars are reported.
 - Progressive reduction: snippet -> signature (signature + locator) -> locator (path, range, symbol) -> omitted and counted. The envelope is reserved before any body is admitted.
@@ -246,7 +246,7 @@ context_pack
 - Doc: https://filesystem.scopweb.com/tools/context-pack/
 
 workspace
-- Purpose: Experimental real git worktree. begin/status/diff/export/discard. Ultra only. Not a sandbox and not crash-durable. promote and query are not registered.
+- Purpose: Real git worktree. begin/status/diff/export/discard. Graduated in v4.9.0. Ultra only. Not a sandbox and not crash-durable. promote and query are not registered.
 - begin requires a clean tracked HEAD, a new dest outside the repo, and a parent that is already allowed. It does not widen allowed-paths and does not copy untracked or ignored files.
 - discard refuses pending changes and never falls back to a recursive delete.
 - export is complete or an error. A truncated diff page is review-only.

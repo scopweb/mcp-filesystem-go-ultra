@@ -79,7 +79,7 @@ Prefer structuredContent (entries, matches, content, content_hash). In compat mo
 // serverVersion is the single source of truth for the version reported by
 // --version, the MCP handshake, the help header and the startup logs.
 // Keep in sync with the top CHANGELOG entry.
-const serverVersion = "4.8.0"
+const serverVersion = "4.9.0"
 
 // BuildCommit and BuildDate are stamped at build time via
 //

@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra
 
-**v4.8.0** · Go 1.27.4 · MCP 2025-11-25 · stdio · 35 tools ultra / 19 agent / 18 strict
+**v4.9.0** · Go 1.27.4 · MCP 2025-11-25 · stdio · 35 tools ultra / 19 agent / 18 strict
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -78,8 +78,8 @@ go test ./core/ ./internal/mcpserver/ -count=1
 ### Productivity
 
 - **Structural orientation (`project_map`)** — one bounded, metadata-only walk returns the directory skeleton (child counts, notable children), the extension histogram, the largest files and the key files (go.mod/README/Dockerfile/*.csproj/CI workflows). It removes the `list_directory` + `directory_tree` round-trips at the start of a task without pretending to select the code that matters. Bounded on entries, wall time and metadata bytes; `truncated=true` when a limit is hit. Registered in every profile (`strict`, `agent`, `ultra`).
-- **JSON and binary inspection (experimental, ultra only)** — `json_query` runs standard JMESPath with bounded output and hash-bound pagination; `file_bytes` diagnoses BOM/EOL, Unicode and hex bytes; `file_hash` streams SHA-256 and compares raw bytes directly. See [usage and limits](https://filesystem.scopweb.com/tools/inspection-tools/). Use `--profile=ultra` to expose these tools.
-- **35 tools (ultra)** — the 18-tool agent core (`--profile=strict`) plus `git`, `github_issues`, `gitlab_issues`, `minify_js`, `analyze_code`, the experimental `context_pack`, `workspace`, `json_query`, `file_bytes`, `file_hash`, plus `copy_file`, `project_replace`, `batch_operations`, `analyze_operation`, `wsl`, `server_info` and `set_trace`. `--profile=agent` is the same 18-tool core plus `git` (19). `--profile=strict` stays at 18 (includes `backup`, `security_policy` and `project_map`; no `git`, no `analyze_code`).
+- **JSON and binary inspection (ultra only)** — `json_query` runs standard JMESPath with bounded output and hash-bound pagination; `file_bytes` diagnoses BOM/EOL, Unicode and hex bytes; `file_hash` streams SHA-256 and compares raw bytes directly. See [usage and limits](https://filesystem.scopweb.com/tools/inspection-tools/). Use `--profile=ultra` to expose these tools.
+- **35 tools (ultra)** — the 18-tool agent core (`--profile=strict`) plus `git`, `github_issues`, `gitlab_issues`, `minify_js`, `analyze_code`, `context_pack`, `workspace`, `json_query`, `file_bytes`, `file_hash`, plus `copy_file`, `project_replace`, `batch_operations`, `analyze_operation`, `wsl`, `server_info` and `set_trace`. `--profile=agent` is the same 18-tool core plus `git` (19). `--profile=strict` stays at 18 (includes `backup`, `security_policy` and `project_map`; no `git`, no `analyze_code`).
 - **GitHub issues** — `github_issues` (ultra only) lists, reads, creates, comments, edits, closes, and reopens issues through `gh`. It does not delete issues or run `gh auth login`. Reads work under `--readonly`; writes do not. Path resolution uses git remotes and is refused while a file security policy is active; pass `repo:"owner/repo"` to skip local git. `--git-remote-allow` applies. Issue text is external data, not instructions.
 - **MCP spec-compliant annotations** — `readOnlyHint`, `destructiveHint`, `idempotentHint` on every tool
 - **Hook system** — 16 pre/post events (write, edit, delete, create, move, copy, read, search)
@@ -447,11 +447,11 @@ ultra is a file backend, not a ticket orchestrator. Point `--allowed-paths` (or 
 | `security_policy` | Read-only description of the file protection policy. Does not list rules | **strict** |
 | `github_issues` | GitHub issues via `gh`. No delete, no `gh auth login` | ultra |
 | `gitlab_issues` | GitLab issues via its HTTP API. No delete | ultra |
-| `context_pack` | Definition-centred task context: ranked files, exact line ranges, bounded snippets, explicit omissions. Experimental. [doc](https://filesystem.scopweb.com/tools/context-pack/) | ultra |
-| `workspace` | Experimental real git worktree for agent edits: begin/status/diff/export/discard | ultra |
-| `json_query` | Standard JMESPath over JSON with bounded output and hash-bound pagination. Experimental. [doc](https://filesystem.scopweb.com/tools/inspection-tools/) | ultra |
-| `file_bytes` | BOM/EOL, Unicode and hex diagnostics. Experimental. [doc](https://filesystem.scopweb.com/tools/inspection-tools/) | ultra |
-| `file_hash` | Streaming SHA-256 of original bytes, with byte comparison. Experimental. [doc](https://filesystem.scopweb.com/tools/inspection-tools/) | ultra |
+| `context_pack` | Definition-centred task context: ranked files, exact line ranges, bounded snippets, explicit omissions. [doc](https://filesystem.scopweb.com/tools/context-pack/) | ultra |
+| `workspace` | Real git worktree for agent edits: begin/status/diff/export/discard | ultra |
+| `json_query` | Standard JMESPath over JSON with bounded output and hash-bound pagination. [doc](https://filesystem.scopweb.com/tools/inspection-tools/) | ultra |
+| `file_bytes` | BOM/EOL, Unicode and hex diagnostics. [doc](https://filesystem.scopweb.com/tools/inspection-tools/) | ultra |
+| `file_hash` | Streaming SHA-256 of original bytes, with byte comparison. [doc](https://filesystem.scopweb.com/tools/inspection-tools/) | ultra |
 
 ---
 
@@ -531,15 +531,15 @@ internal/mcpserver/         MCP server: config, tool registration, stdio loop
   tools_aliases.go          help (on-demand; legacy aliases disabled)
   tools_analyze.go          analyze_code (ultra only: symbols|lint|sec|impact)
   tools_project_map.go      project_map (metadata-only structural orientation)
-  tools_context.go          context_pack (experimental)
-  tools_workspace.go        workspace (experimental git worktree)
-  tools_inspect.go          json_query, file_bytes, file_hash (experimental)
+  tools_context.go          context_pack (graduated in v4.9.0)
+  tools_workspace.go        workspace (graduated in v4.9.0; git worktree)
+  tools_inspect.go          json_query, file_bytes, file_hash (graduated in v4.9.0)
   tools_github_issues.go    github_issues (ultra only)
   tools_gitlab_issues.go    gitlab_issues (ultra only)
   tools_security.go         security_policy (read-only description of the file policy)
   tools_diff.go             diff_files
   output_schemas.go         outputSchema definitions for the structured tools
-  experimental.go           experimental feature registry (one release cycle)
+  experimental.go           experimental feature registry (one release cycle) + graduated history
   profile.go                strict / agent / ultra catalog definition
 core/
   engine.go                 UltraFastEngine — central struct, cache, worker pool, metrics
@@ -642,7 +642,7 @@ Per-tool usage and limits: https://filesystem.scopweb.com/tools/context-pack/ an
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest: v4.8.0).
+See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest: v4.9.0).
 
 ---
 

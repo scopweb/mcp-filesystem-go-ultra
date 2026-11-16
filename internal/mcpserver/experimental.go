@@ -19,6 +19,10 @@ package mcpserver
 // Enforcement: toolRegistry.addTool (tools_core.go) consults
 // applyExperimentalPolicy for every registered tool. Guarded by
 // experimental_test.go.
+//
+// graduatedFeatures is the history side of the policy: it records the cohorts
+// that left the tier, so a test can check that a graduated tool really lost
+// its [EXPERIMENTAL] prefix and did not quietly re-enter the registry.
 
 import (
 	"fmt"
@@ -36,17 +40,41 @@ import (
 //
 // v4.6.1 graduated the v4.6.0 cohort: list_allowed_directories, directory_tree,
 // diff_files, apply_patch, native edits/batch, strict match, and e3-v1 retries.
-var experimentalFeatures = map[string]string{
-	"json_query":                    "4.8.0",
-	"file_bytes":                    "4.8.0",
-	"file_hash":                     "4.8.0",
-	"context_pack":                  "4.8.0",
-	"workspace":                     "4.8.0",
-	"read_file:structured-response": "4.8.0",
-	"diff_files:normalize":          "4.8.0",
-	"analyze_code:symbol-ranges":    "4.8.0",
-	"git:pull":                      "4.8.0",
-	"git:stash":                     "4.8.0",
+// v4.9.0 graduated the v4.8.0 cohort (see graduatedFeatures below).
+var experimentalFeatures = map[string]string{}
+
+// graduatedFeatures records the cohorts that left the experimental tier, and
+// the release that graduated them. It is the machine-checkable history of the
+// stability policy: a key here must NOT be back in experimentalFeatures, and
+// its tool must NOT carry the [EXPERIMENTAL] description prefix.
+//
+// A graduated tool may declare an outputSchema only once the handler-level
+// conformance sweep (output_schema_sweep_test.go) covers it. The keys listed
+// in pendingSchema are graduated but still schema-less on purpose: the schema
+// is earned in a follow-up, not guessed here.
+var graduatedFeatures = map[string]string{
+	// v4.9.0 — the v4.8.0 cohort.
+	"json_query":                    "4.9.0",
+	"file_bytes":                    "4.9.0",
+	"file_hash":                     "4.9.0",
+	"context_pack":                  "4.9.0",
+	"workspace":                     "4.9.0",
+	"read_file:structured-response": "4.9.0",
+	"diff_files:normalize":          "4.9.0",
+	"analyze_code:symbol-ranges":    "4.9.0",
+	"git:pull":                      "4.9.0",
+	"git:stash":                     "4.9.0",
+}
+
+// pendingSchema lists the graduated tools that still declare NO outputSchema
+// because the conformance sweep does not cover them yet. A key leaves this
+// list in the same commit that adds the schema and its sweep case.
+var pendingSchema = map[string]bool{
+	"json_query":   true,
+	"file_bytes":   true,
+	"file_hash":    true,
+	"context_pack": true,
+	"workspace":    true,
 }
 
 // isExperimental reports whether featureKey is currently experimental and

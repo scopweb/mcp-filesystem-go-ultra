@@ -94,7 +94,8 @@ func registerPatchTools(reg *toolRegistry) {
 					payload["continuation"] = cont
 					payload["status"] = statusTruncated
 				}
-				return mcp.NewToolResultStructured(payload, bounded), nil
+				payload, text := fitDiffStructured(payload, cmp, offset, byteOffset, claudeSpillChars)
+				return mcp.NewToolResultStructured(payload, text), nil
 			}
 			backupBytes, err := engine.GetBackupManager().ReadBackupBytes(id, pathA)
 			if err != nil {

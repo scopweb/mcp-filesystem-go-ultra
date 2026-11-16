@@ -2,7 +2,32 @@
 
 > **Note for humans**: This file grew to ~4700 lines. For changes before v4.6 see `git log --oneline`. Only recent releases are summarized here.
 
-## [Unreleased]
+## [Unreleased / 4.9.0]
+
+### Changed — the v4.8.0 experimental cohort graduates
+
+The stability policy ships a new tool or tool mode as experimental for
+exactly one release cycle; the description prefix even promised "graduates
+next release cycle". v4.9.0 is that cycle, so the whole v4.8.0 cohort leaves
+the experimental tier: `json_query`, `file_bytes`, `file_hash`, `context_pack`
+and `workspace`, plus the modes `read_file:structured-response`,
+`diff_files:normalize`, `analyze_code:symbol-ranges`, `git:pull` and
+`git:stash`.
+
+Nothing changes in behaviour, in the parameters, in the output or in the
+security rules. The only visible change is that the five tools no longer
+carry the `[EXPERIMENTAL since v4.8.0 — API may change; graduates next
+release cycle]` prefix in their description. `experimentalFeatures` is empty
+again, and the cohort is recorded in `graduatedFeatures` so the history stays
+machine-checkable: `TestGraduated_*` checks that a graduated tool does not
+carry the prefix, is not back in the experimental registry, and does not
+declare an `outputSchema` before the handler-level conformance sweep covers
+it. Those five tools keep declaring no schema on purpose — the schema is
+earned by the sweep in a follow-up, not guessed here (`pendingSchema`).
+
+The stale guardrail stays: `TestExperimental_EntriesWellFormed` still fails
+when an entry is older than `serverVersion`, so the next cohort has to
+graduate at the next bump.
 
 ### Security — reads and moves use the directory that was checked
 
@@ -23,7 +48,7 @@ fill now runs in a fresh temporary directory, drops `GIT_DIR`, `GIT_WORK_TREE`
 and `GIT_NAMESPACE`, and applies the same config hardening as the other git
 commands.
 
-### Fixed — `structuredContent` stays inside the 50 000 character budget
+### Fixed — `structuredContent` stays inside the 50 000 character budget for search_files, batch read_file, diff_files and list_directory
 
 The text block was capped but the JSON beside it was not, so a client that
 reads `structuredContent` still received the whole body a second time.
@@ -32,6 +57,26 @@ keeps the continuation hint; a batch `read_file` drops its duplicated combined
 body and then trims the longest file bodies before removing any. A cut keeps
 `continuation`, so the omitted part is still reachable with `offset` or a
 re-read. The text block is unchanged.
+
+`diff_files` and `list_directory` are inside the budget too, and they keep the
+same two contracts they had before:
+
+- `diff_files` cuts the diff earlier, so `message` stays byte-identical to the
+  text content block, and the cursor keeps naming the next diff line
+  (`continuation.offset`, plus `byte_offset` for a line cut in half). The
+  diff_files `outputSchema` now declares `truncated` and `continuation`: a cut
+  payload carried those keys without declaring them, so it did not conform to
+  its own schema.
+- `list_directory` asks the engine for a smaller page when the JSON of a full
+  page would not fit. The text block and `structuredContent.entries` describe
+  the same page, and `continuation.offset` points at the next one. The last
+  resort (a single entry too big for the page) cuts the text and drops the
+  entries, and the cursor points back at the start of that page.
+
+The catalog grew by the two new `diff_files` schema fields (+318 B on every
+profile that ships `diff_files`), so the strict catalog budget moves from
+50 KiB to 51 KiB: measured ultra 84,443 B, strict 51,434 B. The graduation of
+the v4.8.0 cohort removed the `[EXPERIMENTAL]` prefixes (-386 B on ultra).
 
 ### Fixed — `diff_files` continues with `offset`
 
@@ -177,10 +222,11 @@ following output; a bounded retry reproduced it. Do not report that aggregate
 invocation as a successful exit. GitHub packaging and native macOS/arm64 runtime
 execution have not been exercised here.
 
-Release blocker: serverVersion remains 4.8.0. Existing policy requires graduating
-all ten 4.8.0 experimental entries before a version bump; merely setting 4.9.0
-fails TestExperimental_EntriesWellFormed. Graduation/conformance coverage or an
-explicit policy decision is needed before tagging the release.
+Release blocker (resolved in this release): serverVersion remained 4.8.0. The
+existing policy requires graduating all ten 4.8.0 experimental entries before a
+version bump; merely setting 4.9.0 fails TestExperimental_EntriesWellFormed.
+The cohort is now graduated (see "the v4.8.0 experimental cohort graduates"
+above) and the bump to 4.9.0 is prepared in the same change set.
 
 ### Upstream comparison (2026-11-02)
 

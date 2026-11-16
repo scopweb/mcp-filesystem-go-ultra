@@ -12,6 +12,19 @@ import (
 )
 
 // registerSearchTools registers list_directory, search_files, analyze_operation
+// jsonPageLimit keeps the JSON listing on the engine's own cap (limit 0)
+// while the page still fits it, so the shared directory cache entry is used.
+// A smaller page is only requested when the structured budget needs it.
+func jsonPageLimit(engine *core.UltraFastEngine, limit int) int {
+	if engine == nil {
+		return limit
+	}
+	if cap := engine.GetMaxListItems(); cap > 0 && limit >= cap {
+		return 0
+	}
+	return limit
+}
+
 func registerSearchTools(reg *toolRegistry) {
 	engine := reg.engine
 
@@ -81,124 +94,212 @@ func registerSearchTools(reg *toolRegistry) {
 			outputFormat = "tree"
 		}
 
-		var listing string
-		hiddenCount := 0
-		treeTruncated := false
-		var trEntries []core.TreeEntry
-		var censusEntries []core.LineCountEntry
-		switch outputFormat {
-		case "json":
-			listing, err = engine.ListDirectoryJSONPage(ctx, path, offset, 0)
-		case "tree":
-			format := "json"
-			if request.Params.Name == "directory_tree" {
-				format = "compact"
-			}
-			walkNodes := maxNodes
-			if offset > 0 {
-				walkNodes = maxNodes + offset
-			}
-			tr, treeErr := engine.ListDirectoryTreeResult(ctx, core.NormalizePath(path), core.TreeOpts{
-				MaxDepth: maxDepth, MaxNodes: walkNodes, Exclude: exclude, RespectIgnore: respectIgnore, Format: format,
-			})
-			listing, err = tr.Text, treeErr
-			hiddenCount = tr.HiddenCount
-			treeTruncated = tr.Truncated
-			trEntries = tr.Entries
-		case "sizes":
-			listing, err = engine.ListDirectoryJSONPage(ctx, path, offset, 0)
-		case "lines":
-			depth := 0
-			if depthExplicit {
-				depth = maxDepth
-			}
-			census, censusErr := engine.ListLineCounts(ctx, path, core.LineCountOpts{
-				MaxDepth: depth, MaxNodes: maxNodes, Include: include, Exclude: exclude, RespectIgnore: respectIgnore,
-			})
-			listing, err = census.Text, censusErr
-			treeTruncated = census.Truncated
-			censusEntries = census.Entries
-		default: // "" / "compact" / "text" — one page, same limit as structuredContent
-			listing, err = engine.ListDirectoryJSONPage(ctx, path, offset, compactPageLimit(engine, maxNodes))
-		}
-		if err != nil {
-			return mcp.NewToolResultError(formatToolError(err)), nil
-		}
 		format := outputFormat
 		if format == "" {
 			format = "compact"
 		}
-		truncated := contentWasTruncated(listing) || treeTruncated
-		var entries []map[string]any
-		jsonPath := path
-		if format == "json" || format == "sizes" {
-			if p, ents, tr, ok := parseListJSON(listing); ok {
-				jsonPath, entries, truncated = p, ents, truncated || tr
-			}
-		} else if format == "compact" || format == "text" || format == "" {
-			if p, ents, total, tr, ok := parseListPage(listing); ok {
-				var pageText string
-				pageText, ents, tr = fitCompactListing(engine.IsCompactMode(), p, ents, total, offset, tr)
-				stripListingProtection(ents)
-				listing = pageText
-				jsonPath, entries, truncated = p, ents, tr
-			}
-		}
-		if format == "lines" {
-			entries = make([]map[string]any, 0, len(censusEntries))
-			for _, entry := range censusEntries {
-				entries = append(entries, map[string]any{"path": entry.Path, "lines": entry.Lines})
-			}
-		}
 		isTree := outputFormat == "tree" || request.Params.Name == "directory_tree"
-		if isTree && trEntries != nil {
-			if offset > 0 {
-				if offset >= len(trEntries) {
-					trEntries = nil
-				} else {
-					trEntries = trEntries[offset:]
+
+		// One listing page: the text the client reads and the structured
+		// entries of the SAME page. fetchPage takes the page size, so the
+		// structured budget can ask for a smaller page when the JSON of a
+		// full page would not fit.
+		type listPage struct {
+			listing   string
+			entries   []map[string]any
+			jsonPath  string
+			truncated bool
+			hidden    int
+		}
+
+		pageLimit := maxNodes
+		switch outputFormat {
+		case "json", "sizes":
+			// The JSON listing honours the engine cap, not max_nodes.
+			pageLimit = engine.GetMaxListItems()
+			if pageLimit <= 0 {
+				pageLimit = core.MaxListItems
+			}
+		case "tree", "lines":
+			pageLimit = maxNodes
+		default:
+			pageLimit = compactPageLimit(engine, maxNodes)
+		}
+
+		fetchPage := func(limit int) (listPage, error) {
+			p := listPage{}
+			var listing string
+			var pageErr error
+			hiddenCount := 0
+			treeTruncated := false
+			var trEntries []core.TreeEntry
+			var censusEntries []core.LineCountEntry
+			switch outputFormat {
+			case "json":
+				listing, pageErr = engine.ListDirectoryJSONPage(ctx, path, offset, jsonPageLimit(engine, limit))
+			case "tree":
+				treeFormat := "json"
+				if request.Params.Name == "directory_tree" {
+					treeFormat = "compact"
+				}
+				walkNodes := limit
+				if offset > 0 {
+					walkNodes = limit + offset
+				}
+				tr, treeErr := engine.ListDirectoryTreeResult(ctx, core.NormalizePath(path), core.TreeOpts{
+					MaxDepth: maxDepth, MaxNodes: walkNodes, Exclude: exclude, RespectIgnore: respectIgnore, Format: treeFormat,
+				})
+				listing, pageErr = tr.Text, treeErr
+				hiddenCount = tr.HiddenCount
+				treeTruncated = tr.Truncated
+				trEntries = tr.Entries
+			case "sizes":
+				listing, pageErr = engine.ListDirectoryJSONPage(ctx, path, offset, jsonPageLimit(engine, limit))
+			case "lines":
+				depth := 0
+				if depthExplicit {
+					depth = maxDepth
+				}
+				census, censusErr := engine.ListLineCounts(ctx, path, core.LineCountOpts{
+					MaxDepth: depth, MaxNodes: limit, Include: include, Exclude: exclude, RespectIgnore: respectIgnore,
+				})
+				listing, pageErr = census.Text, censusErr
+				treeTruncated = census.Truncated
+				censusEntries = census.Entries
+			default: // "" / "compact" / "text" — one page, same limit as structuredContent
+				listing, pageErr = engine.ListDirectoryJSONPage(ctx, path, offset, limit)
+			}
+			if pageErr != nil {
+				return p, pageErr
+			}
+			truncated := contentWasTruncated(listing) || treeTruncated
+			var entries []map[string]any
+			jsonPath := path
+			if format == "json" || format == "sizes" {
+				if pth, ents, tr, ok := parseListJSON(listing); ok {
+					jsonPath, entries, truncated = pth, ents, truncated || tr
+				}
+			} else if format == "compact" || format == "text" {
+				if pth, ents, total, tr, ok := parseListPage(listing); ok {
+					var pageText string
+					pageText, ents, tr = fitCompactListing(engine.IsCompactMode(), pth, ents, total, offset, tr)
+					stripListingProtection(ents)
+					listing = pageText
+					jsonPath, entries, truncated = pth, ents, tr
 				}
 			}
-			if len(trEntries) > maxNodes {
-				trEntries = trEntries[:maxNodes]
-				truncated = true
+			if format == "lines" {
+				entries = make([]map[string]any, 0, len(censusEntries))
+				for _, entry := range censusEntries {
+					entries = append(entries, map[string]any{"path": entry.Path, "lines": entry.Lines})
+				}
 			}
-			entries = treeEntriesToMaps(trEntries, detail)
-			if detail == detailSummary {
-				listing = treeSummaryText(trEntries)
+			if isTree && trEntries != nil {
+				if offset > 0 {
+					if offset >= len(trEntries) {
+						trEntries = nil
+					} else {
+						trEntries = trEntries[offset:]
+					}
+				}
+				if len(trEntries) > maxNodes {
+					trEntries = trEntries[:maxNodes]
+					truncated = true
+				}
+				entries = treeEntriesToMaps(trEntries, detail)
+				if detail == detailSummary {
+					listing = treeSummaryText(trEntries)
+				}
+			}
+			p.listing = listing
+			p.entries = entries
+			p.jsonPath = jsonPath
+			p.truncated = truncated
+			p.hidden = hiddenCount
+			return p, nil
+		}
+
+		assemble := func(p listPage) (map[string]any, string) {
+			text := p.listing
+			entries := p.entries
+			truncated := p.truncated
+			// A fitted compact page already carries the offset footer. Shrinking
+			// it again would replace that footer with "narrow the path".
+			if len(text) > claudeSpillChars && !strings.Contains(text, "continue with offset:") {
+				var spilled bool
+				text, entries, spilled = shrinkListingSpill(p.jsonPath, format, text, entries)
+				if spilled {
+					truncated = true
+				}
+			}
+			sc := listStructured(p.jsonPath, format, text, entries, truncated, p.hidden, isTree)
+			if truncated {
+				next := offset + len(entries)
+				sc["continuation"] = map[string]any{
+					"offset": next,
+					"hint":   fmt.Sprintf("Continue with the same path and offset:%d. Entries are sorted by name. Do not raise max_nodes to recover a cut page.", next),
+				}
+				sc["message"] = text
+				sc["truncated"] = true
+				sc["status"] = statusTruncated
+				if entries != nil {
+					sc["entries"] = entries
+					sc["entry_count"] = len(entries)
+				}
+			}
+			if engine.IsCompactMode() && detail != detailNormal && len(text) > 2000 {
+				text = text[:2000] + "\n…"
+			}
+			return sc, text
+		}
+
+		page, pageErr := fetchPage(pageLimit)
+		if pageErr != nil {
+			return mcp.NewToolResultError(formatToolError(pageErr)), nil
+		}
+		sc, text := assemble(page)
+		// The text block is capped, but the JSON beside it repeats the page.
+		// When the JSON would spill, ask for a smaller page: the text and the
+		// entries stay on the SAME page, and the continuation keeps the cursor.
+		for attempts := 0; structuredJSONSize(sc) > claudeSpillChars && pageLimit > 1; attempts++ {
+			nextLimit := pageLimit / 2
+			if nextLimit < 1 {
+				nextLimit = 1
+			}
+			if nextLimit >= pageLimit {
+				break
+			}
+			candidate, candErr := fetchPage(nextLimit)
+			if candErr != nil {
+				break
+			}
+			candidateSC, candidateText := assemble(candidate)
+			if structuredJSONSize(candidateSC) >= structuredJSONSize(sc) {
+				break
+			}
+			pageLimit = nextLimit
+			page, sc, text = candidate, candidateSC, candidateText
+			if pageLimit == 1 {
+				break
 			}
 		}
-		text := listing
-		// A fitted compact page already carries the offset footer. Shrinking
-		// it again would replace that footer with "narrow the path".
-		if len(text) > claudeSpillChars && !strings.Contains(text, "continue with offset:") {
-			var spilled bool
-			text, entries, spilled = shrinkListingSpill(jsonPath, format, text, entries)
-			if spilled {
-				truncated = true
-			}
+		// Last resort: one entry can still be huge. Cut the listing text and
+		// drop the entries so the payload fits; the cursor points back at this
+		// page because the entries it would have shown are not here.
+		if structuredJSONSize(sc) > claudeSpillChars {
+			sc, text = cutListingToBudget(sc, text, offset, claudeSpillChars)
 		}
-		sc := listStructured(jsonPath, format, text, entries, truncated, hiddenCount, isTree)
-		if truncated {
-			next := offset + len(entries)
-			sc["continuation"] = map[string]any{
-				"offset": next,
-				"hint":   fmt.Sprintf("Continue with the same path and offset:%d. Entries are sorted by name. Do not raise max_nodes to recover a cut page.", next),
-			}
-			sc["message"] = text
-			sc["truncated"] = true
-			sc["status"] = statusTruncated
-			if entries != nil {
-				sc["entries"] = entries
-				sc["entry_count"] = len(entries)
-			}
+		entryCount := len(page.entries)
+		truncatedFlag := page.truncated
+		if v, ok := sc["entry_count"].(int); ok {
+			entryCount = v
 		}
-		if engine.IsCompactMode() && detail != detailNormal && len(text) > 2000 {
-			text = text[:2000] + "\n…"
+		if v, ok := sc["truncated"].(bool); ok {
+			truncatedFlag = v
 		}
 		// --response-mode=structured keeps the listing once, in
 		// structuredContent.entries; the text block becomes a brief summary.
-		sc, text = finishBody(engine, sc, text, listingSummary(jsonPath, len(entries), truncated))
+		sc, text = finishBody(engine, sc, text, listingSummary(page.jsonPath, entryCount, truncatedFlag))
 		return mcp.NewToolResultStructured(sc, text), nil
 	})
 	reg.addTool(listDirTool, reg.listDirHandler)

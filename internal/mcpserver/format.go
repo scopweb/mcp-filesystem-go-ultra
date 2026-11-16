@@ -391,6 +391,7 @@ type readProjection struct {
 	LineOffset    int    // bytes already skipped at the start of StartLine
 	ResumeOffset  int    // byte offset into ContinueAt; 0 means the next line starts at byte 0
 	ContinueParam string // footer cursor name; empty means start_line. diff_files uses offset.
+	Limit         int    // byte budget of this projection; 0 means claudeSpillChars
 	Err           string // invalid byte_offset; handlers must not treat this as a read
 }
 

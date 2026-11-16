@@ -45,8 +45,13 @@ func TestCatalogSerializedBudget(t *testing.T) {
 	// 2026-11-10: optional auth-trace fields (names and types only; the
 	// meaning is in llms.txt) measured ultra 83,507 B, strict 51,011 B.
 	// Strict stays at 50 KiB. Ultra cap moves to 84 KiB for that addition.
-	if len(u) > 84*1024 || len(s) > 50*1024 {
-		t.Fatalf("catalog exceeds byte budget (ultra 84 KiB / strict 50 KiB): ultra=%d strict=%d", len(u), len(s))
+	// 2026-11-16 (v4.9.0): the diff_files schema declares truncated and
+	// continuation, which a cut diff needs to conform to its own schema
+	// (+318 B on every profile that ships diff_files). The graduation of the
+	// v4.8.0 cohort removed the [EXPERIMENTAL] prefixes (-386 B on ultra).
+	// Measured: ultra 84,443 B, strict 51,434 B. Strict cap moves to 51 KiB.
+	if len(u) > 84*1024 || len(s) > 51*1024 {
+		t.Fatalf("catalog exceeds byte budget (ultra 84 KiB / strict 51 KiB): ultra=%d strict=%d", len(u), len(s))
 	}
 }
 

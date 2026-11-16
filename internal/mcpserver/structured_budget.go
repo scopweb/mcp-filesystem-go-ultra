@@ -165,6 +165,101 @@ func markBatchCut(sc map[string]any) {
 	}
 }
 
+// fitDiffStructured keeps a diff payload's structuredContent within limit.
+// The diff body lives in "message", which is byte-identical to the text
+// content block, so the cut is applied to the TEXT as well: the payload
+// never disagrees with the text the client reads. The continuation keeps the
+// line cursor, so the rest of the diff is still reachable with diff_files
+// offset.
+func fitDiffStructured(payload map[string]any, msg string, offset, byteOffset, limit int) (map[string]any, string) {
+	if payload == nil || limit <= 0 {
+		return payload, ""
+	}
+	text, _ := payload["message"].(string)
+	if structuredJSONSize(payload) <= limit {
+		return payload, text
+	}
+	budget := len(text)
+	for i := 0; i < 12 && budget > 0; i++ {
+		bounded, cont, err := boundDiffTextLimit(msg, offset, byteOffset, budget)
+		if err != nil {
+			return payload, text
+		}
+		candidate := make(map[string]any, len(payload))
+		for k, v := range payload {
+			candidate[k] = v
+		}
+		candidate["message"] = bounded
+		if cont != nil {
+			candidate["truncated"] = true
+			candidate["continuation"] = cont
+			candidate["status"] = statusTruncated
+		} else {
+			delete(candidate, "truncated")
+			delete(candidate, "continuation")
+			if candidate["status"] == statusTruncated {
+				candidate["status"] = statusOK
+			}
+		}
+		size := structuredJSONSize(candidate)
+		if size <= limit {
+			return candidate, bounded
+		}
+		if len(bounded) == 0 {
+			break
+		}
+		// Every escape costs more than one byte in the JSON, so the text has
+		// to shrink by at least the overflow, measured in JSON bytes.
+		factor := float64(size) / float64(len(bounded))
+		remove := float64(size-limit)/factor + 64
+		next := int(float64(budget) - remove)
+		if next < 1 {
+			next = 1
+		}
+		if next >= budget {
+			next = budget / 2
+		}
+		if next < 1 {
+			break
+		}
+		budget = next
+	}
+	return payload, text
+}
+
+// cutListingToBudget is the last resort for a listing whose structured
+// payload still does not fit: the entries are dropped (they are the part
+// that repeats the text) and the text is cut until the JSON fits. The cursor
+// points back at the start of this page, because the entries of this page
+// are not in the response: the client re-reads the page with a smaller
+// max_nodes instead of skipping over unseen entries.
+func cutListingToBudget(sc map[string]any, text string, offset, limit int) (map[string]any, string) {
+	if sc == nil || limit <= 0 {
+		return sc, text
+	}
+	if structuredJSONSize(sc) <= limit {
+		return sc, text
+	}
+	delete(sc, "entries")
+	delete(sc, "entry_count")
+	cut := text
+	for i := 0; i < 24 && cut != "" && structuredJSONSize(sc) > limit; i++ {
+		cut = cut[:utf8SafeEnd(cut, len(cut)*3/4)]
+		sc["message"] = cut
+	}
+	if structuredJSONSize(sc) > limit {
+		cut = "listing cut to stay within the response budget"
+		sc["message"] = cut
+	}
+	sc["truncated"] = true
+	sc["status"] = statusTruncated
+	sc["continuation"] = map[string]any{
+		"offset": offset,
+		"hint":   "The listing page was cut to fit the response budget and its entries are not in this page. Re-read the same path with a smaller max_nodes.",
+	}
+	return sc, cut
+}
+
 func filesHaveContent(files []map[string]any) bool {
 	for _, f := range files {
 		if _, ok := f["content"]; ok {

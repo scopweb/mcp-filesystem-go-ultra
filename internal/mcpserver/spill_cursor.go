@@ -181,6 +181,10 @@ func assignSpillCursor(p readProjection, kept string, midLine bool) readProjecti
 
 func boundedSpillFooter(p readProjection, path string, spilled bool) string {
 	base := filepath.Base(path)
+	limit := p.Limit
+	if limit <= 0 {
+		limit = claudeSpillChars
+	}
 	if !spilled {
 		if p.EndLine > 0 || p.TotalLines > 0 {
 			return fmt.Sprintf("\n\n[Lines %d-%d of %d total lines in %s]", p.StartLine, p.EndLine, p.TotalLines, base)
@@ -194,12 +198,12 @@ func boundedSpillFooter(p readProjection, path string, spilled bool) string {
 	if p.ResumeOffset > 0 {
 		return fmt.Sprintf(
 			"\n\n[Lines %d-%d of %d total lines in %s - line %d cut at byte %d to stay within %d bytes. Continue with %s=%d, byte_offset=%d]",
-			p.StartLine, p.EndLine, p.TotalLines, base, p.ContinueAt, p.ResumeOffset, claudeSpillChars, param, p.ContinueAt, p.ResumeOffset,
+			p.StartLine, p.EndLine, p.TotalLines, base, p.ContinueAt, p.ResumeOffset, limit, param, p.ContinueAt, p.ResumeOffset,
 		)
 	}
 	return fmt.Sprintf(
 		"\n\n[Lines %d-%d of %d total lines in %s - text cut to stay within %d bytes. Continue with %s=%d]",
-		p.StartLine, p.EndLine, p.TotalLines, base, claudeSpillChars, param, p.ContinueAt,
+		p.StartLine, p.EndLine, p.TotalLines, base, limit, param, p.ContinueAt,
 	)
 }
 

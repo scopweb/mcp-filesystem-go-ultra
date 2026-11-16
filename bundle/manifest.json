@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "filesystem-ultra",
   "display_name": "MCP Filesystem Ultra",
-  "version": "4.8.0",
+  "version": "4.9.0",
   "description": "Safe local filesystem for AI agents. MCP 2025-11-25, stdio, Windows binary.",
   "long_description": "Backups with step-through undo, optimistic concurrency, and a fail-closed allowlist. This bundle is Windows-only. It does not implement MCP 2026-07-28 (Tasks, stateless Streamable HTTP). The canonical name is filesystem-ultra (github.com/scopweb/mcp-filesystem-go-ultra), not mcp-filesystem-server-ultra.",
   "author": {
