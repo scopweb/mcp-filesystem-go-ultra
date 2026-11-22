@@ -2,7 +2,73 @@
 
 > **Note for humans**: This file grew to ~4700 lines. For changes before v4.6 see `git log --oneline`. Only recent releases are summarized here.
 
-## [Unreleased / 4.9.0]
+## [Unreleased]
+
+### Dependencies — mark3labs/mcp-go v1.6.0
+
+`go.mod` moves from `github.com/mark3labs/mcp-go v1.5.0` to `v1.6.0` (released
+19-nov-2026, "Host validation, configurable reconnects, and protocol
+reliability"). The upgrade brings the client's cross-origin redirect fix
+([GO-2026-6911](https://pkg.go.dev/vuln/GO-2026-6911)), `WithAllowedHosts`
+(DNS-rebinding protection on binds that are not loopback), the rejection of
+duplicate in-flight request ids, and the configurable reconnect backoff. The
+server is stdio and calls none of the affected HTTP symbols; `cmd/proxy` is the
+client that does.
+
+`GO-2026-6911` may still be listed by `govulncheck` until vuln.go.dev declares
+the fixed version: the fix is in the v1.6.0 code, the advisory entry has not
+caught up. The go-sdk oficial stays a prerelease (`v1.9.0-pre.1`), so there is
+no migration.
+
+### Security — the git hardening now matches mcp-server-git v2.5.0 (2026-11-18)
+
+`mcp-server-git` v2.5.0 fixed six advisories in the git server (plus one in
+`server-filesystem`). Ultra's git hardening now covers the same ground:
+
+- **Automatic maintenance cannot start** (GHSA-h2g3-rwxm-xfm3). A merge, or any
+  other command that ends in `git maintenance run --auto`, started git's
+  automatic maintenance, whose cruft repacks run each command the repository's
+  `gc.recentObjectsHook` names. `maintenance.auto=false` stops the launch and
+  `gc.auto=0` is the backstop for the gc task alone.
+- **Lazy fetching is off** (GHSA-87qg-cmw8-jc5m). A repository that declares a
+  promisor remote makes git fetch any object it is missing, by itself, on a
+  read-only command; the fetch runs a transport program the repository's own
+  configuration names (`remote.<name>.uploadpack`, `core.sshCommand`, an
+  `ext::` URL), and no override can pin it by name. `GIT_NO_LAZY_FETCH=1` turns
+  the fetch off, so a missing object is an error. Git honors it from 2.45.1
+  (and from the maintenance releases 2.39.4, 2.40.2, 2.41.1, 2.42.2, 2.43.4 and
+  2.44.1); a repository with a promisor remote is refused on an older git.
+- **The index is checked whole** (GHSA-r2q8-f657-4r56). Git reads each index
+  entry's file at the working tree joined with the entry, and checks the entry
+  only when it writes one (`git add`), never when it reads the index — so an
+  index written by hand can name `../outside/secret`. An entry with an empty,
+  `.`, `..` or `.git` component (and, on Windows, a drive or stream path, or a
+  component whose trailing dots and spaces are dropped) is now refused. The
+  untracked cache, which lists directories by name from the same index, is off
+  (`core.untrackedCache=false`).
+- **Submodules** (GHSA-8wv7-r664-7594). `diff.submodule=short` stops `git diff`
+  from running a nested diff inside each changed submodule without the
+  `--no-ext-diff` / `--no-textconv` flags, where the submodule's own
+  `diff.external` and textconv drivers would run, and the unstaged diff passes
+  `--ignore-submodules=dirty`, which does not look inside a submodule at all.
+  The drivers of each checked-out submodule are emptied as well, since they are
+  read under the submodule's own configuration; a repository with a checked-out
+  submodule is refused on a git older than 2.33, whose nested git would not
+  inherit the configuration overrides.
+- **Drivers are enumerated with their scope**, so a linked worktree's
+  `config.worktree` is covered like `.git/config`, and the scopes the user
+  wrote (`system`, `global`, as with Git LFS) are still left alone. The drivers
+  are read again for every git command, so a driver that appears after a write
+  is emptied in the next command (GHSA-9vjp-x34c-xg6v).
+- A driver with an **empty name** (`[filter ""]`, read back as `filter..clean`)
+  was already covered and stays covered (GHSA-pm7p-vphh-2cg7).
+
+The advisories are the official ones from `modelcontextprotocol/servers`; the
+implementation is independent, and the tests forge the situations the official
+suite forges (an index written by hand, an empty-named driver, a linked
+worktree, a submodule with its own driver).
+
+## [4.9.0] - 2026-11-22
 
 ### Changed — the v4.8.0 experimental cohort graduates
 

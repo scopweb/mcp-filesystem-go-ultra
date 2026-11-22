@@ -105,6 +105,15 @@ func registerGitTools(reg *toolRegistry) {
 			return notAllowedResult(engine, repoRoot), nil
 		}
 
+		// Repository-level safety, as mcp-server-git v2.5.0 runs when it
+		// opens a repository: refuse an index that names a path outside
+		// the working tree, a promisor remote on a git too old to honor
+		// GIT_NO_LAZY_FETCH, and a checked-out submodule on a git older
+		// than 2.33.
+		if err := gitRepoSafetyCheck(ctx, repoRoot); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
 		if _, hasPaths := args["paths"]; !hasPaths {
 			switch action {
 			case "status", "diff", "log":
