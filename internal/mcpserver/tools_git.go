@@ -21,7 +21,8 @@ func registerGitTools(reg *toolRegistry) {
 
 	gitActions := []string{"status", "diff", "log", "show", "add", "commit", "restore", "branch", "init", "remote", "review", "stash"}
 	gitDesc := "git — Git operations: status, diff, review, log, show, add, commit, restore, branch, init, remote, stash. " +
-		"stash is local (list/show/push/apply/drop/pop). pull requires --git-network and is fast-forward only. " +
+		"push/fetch/pull are absent unless the server was started with --git-network (pull is --ff-only). " +
+		"stash is local only. " +
 		"status returns the porcelain listing in the text block and the repository state (branch, upstream, ahead/behind, change counters) in structuredContent. " +
 		"Must be run from within a git repository. Related: analyze_operation, edit_file, help."
 	actionHelp := `git(action:"status")  // or: diff, log, show, add, commit, restore, branch, init, remote, stash`
@@ -835,18 +836,33 @@ func gitAdd(ctx context.Context, engine *core.UltraFastEngine, repoRoot string, 
 	hookCtx.Event = core.HookPostWrite
 	engine.GetHookManager().ExecuteHooks(ctx, core.HookPostWrite, hookCtx)
 
-	if engine.IsCompactMode() {
-		statusOut, _ := execGitCommandCtx(ctx, repoRoot, "git", "status", "--porcelain")
-		lines := strings.Split(statusOut, "\n")
-		staged := 0
-		for _, line := range lines {
-			if len(line) > 0 && line[0] != '?' && line[0] != ' ' {
-				staged++
+	// git add is silent on success. Always report how many files are now staged
+	// so the agent sees the effect without a follow-up status.
+	statusOut, _ := execGitCommandCtx(ctx, repoRoot, "git", "status", "--porcelain")
+	staged := 0
+	var stagedNames []string
+	for _, line := range strings.Split(statusOut, "\n") {
+		if len(line) > 1 && line[0] != '?' && line[0] != ' ' {
+			staged++
+			if len(stagedNames) < 8 {
+				stagedNames = append(stagedNames, strings.TrimSpace(line[3:]))
 			}
 		}
+	}
+	if engine.IsCompactMode() {
 		return mcp.NewToolResultText(fmt.Sprintf("OK: staged %d file(s)", staged)), nil
 	}
-	return mcp.NewToolResultText("Staged changes:\n" + output), nil
+	msg := fmt.Sprintf("Staged %d file(s)", staged)
+	if len(stagedNames) > 0 {
+		msg += ": " + strings.Join(stagedNames, ", ")
+		if staged > len(stagedNames) {
+			msg += fmt.Sprintf(" (+%d more)", staged-len(stagedNames))
+		}
+	}
+	if output != "" {
+		msg += "\n" + output
+	}
+	return mcp.NewToolResultText(msg), nil
 }
 
 // gitCommit commits staged changes
@@ -935,41 +951,41 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 	return mcp.NewToolResultText(summary), nil
 }
 
-// parseShortStat parses "N files changed, M insertions(+), D deletions(-)" from git diff --shortstat
+// parseShortStat parses "N files changed, M insertions(+), D deletions(-)" from git diff --shortstat.
+// Returns zeros on empty or unparseable input. Handles singular/plural and optional deletion part.
 func parseShortStat(shortstat string) (files, insertions, deletions int) {
-	// More robust parsing using Field sequences and contains checks
-	var insStr, delStr string
-	var fileCount int
+	shortstat = strings.TrimSpace(shortstat)
+	if shortstat == "" {
+		return 0, 0, 0
+	}
 
 	fields := strings.Fields(shortstat)
 	for i := 0; i < len(fields)-1; i++ {
 		p := fields[i]
 		next := fields[i+1]
 		if p == "file," || p == "files," {
-			fmt.Sscanf(next, "%d", &fileCount)
+			fmt.Sscanf(next, "%d", &files)
 		}
-		if next == "insertion(+)" {
-			fmt.Sscanf(p, "%d", &insStr)
+		if next == "insertion(+)" || next == "insertions(+)" {
+			fmt.Sscanf(p, "%d", &insertions)
 		}
 		if strings.HasPrefix(next, "deletion") {
-			fmt.Sscanf(p, "%d", &delStr)
+			fmt.Sscanf(p, "%d", &deletions)
 		}
 	}
 
-	// Fallback simple split if parsing failed
-	if fileCount == 0 {
+	// Fallback if the field walk missed the file count (rare format variations)
+	if files == 0 {
 		parts := strings.Split(shortstat, ",")
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
 			if strings.Contains(part, "file") {
-				var n int
-				fmt.Sscanf(part, "%d", &n)
-				fileCount = n
+				fmt.Sscanf(part, "%d", &files)
+				break
 			}
 		}
 	}
-
-	return fileCount, insertions, deletions
+	return files, insertions, deletions
 }
 
 // gitRestore restores files from index or a specific commit.
