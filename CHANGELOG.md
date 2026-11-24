@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [4.9.1] - 2026-11-24
+
 ### feat(catalog): read_file points at context_pack, in the profiles where it exists
 
 `read_file` is 56,5 % of the whole spend (35.647 calls, 22-oct → 24-nov) and `context_pack` — the
