@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -23,7 +24,7 @@ func registerGitTools(reg *toolRegistry) {
 	gitDesc := "git — Git operations: status, diff, review, log, show, add, commit, restore, branch, init, remote, stash. " +
 		"push/fetch/pull are absent unless the server was started with --git-network (pull is --ff-only). " +
 		"stash is local only. " +
-		"status returns the porcelain listing in the text block and the repository state (branch, upstream, ahead/behind, change counters) in structuredContent. " +
+		"status returns the porcelain listing in the text block and, in structuredContent, the repository state (branch, upstream, ahead/behind, change counters) and the changed files (path + porcelain code, e.g. \" M\" modified, \"??\" untracked). " +
 		"Must be run from within a git repository. Related: analyze_operation, edit_file, help."
 	actionHelp := `git(action:"status")  // or: diff, log, show, add, commit, restore, branch, init, remote, stash`
 	if gitNetwork {
@@ -320,7 +321,7 @@ func gitStatus(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 	}
 
 	boundedText := truncateOutput(text, maxLines)
-	payload := gitStatusPayload(repoRoot, v1Output)
+	payload := gitStatusPayloadLimit(repoRoot, v1Output, maxLines)
 	payload["truncated"] = boundedText != text
 	if boundedText != text {
 		payload["continuation"] = "Narrow paths or raise max_lines to retrieve the omitted status lines."
@@ -342,13 +343,30 @@ func gitStatusPathspec(paths []string) []string {
 }
 
 // gitStatusPayload is the structured view of a git status: branch, upstream,
-// ahead/behind and the change counters. The changed files stay in the text
-// block, in the porcelain listing, so the same file is never sent twice; the
-// payload only adds the state a client would otherwise have to parse out of
-// the porcelain header.
+// ahead/behind, the change counters and the changed files.
+//
+// The file list is part of the payload because a client that renders
+// structuredContent (and ignores the text block) otherwise sees only the
+// counters and cannot learn WHICH files changed — the porcelain listing in the
+// text block is invisible to it. The counters still describe the whole
+// requested scope, even when the list itself is bounded.
+//
+// Each entry carries the path and the porcelain v1 code of its line (" M"
+// modified in the worktree, "M " modified and staged, "??" untracked, "A "
+// added, "D " deleted, "R " renamed, "UU" conflicted). The code is kept
+// instead of a normalized word because it is the shortest form that tells
+// the index state and the worktree state apart.
 func gitStatusPayload(repoRoot, porcelain string) map[string]any {
+	return gitStatusPayloadLimit(repoRoot, porcelain, 0)
+}
+
+// gitStatusPayloadLimit is gitStatusPayload with a bound on the number of
+// files in the payload (0 = no bound). The omitted files are reported in
+// files_omitted.
+func gitStatusPayloadLimit(repoRoot, porcelain string, maxFiles int) map[string]any {
 	branch, upstream, ahead, behind := parseGitBranchLine(porcelain)
 	staged, unstaged, untracked, conflicts, files := 0, 0, 0, 0, 0
+	entries := make([]map[string]any, 0, 16)
 	for _, line := range strings.Split(porcelain, "\n") {
 		if line == "" || strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "# ") {
 			continue
@@ -357,11 +375,12 @@ func gitStatusPayload(repoRoot, porcelain string) map[string]any {
 			continue
 		}
 		code := line[:2]
+		if code == "!!" {
+			continue
+		}
 		switch code {
 		case "??":
 			untracked++
-		case "!!":
-			continue
 		default:
 			switch code {
 			case "DD", "AU", "UD", "UA", "DU", "AA", "UU":
@@ -375,8 +394,14 @@ func gitStatusPayload(repoRoot, porcelain string) map[string]any {
 			}
 		}
 		files++
+		if maxFiles <= 0 || len(entries) < maxFiles {
+			entries = append(entries, map[string]any{
+				"path": gitStatusPath(line),
+				"code": code,
+			})
+		}
 	}
-	return map[string]any{
+	payload := map[string]any{
 		"action":     "status",
 		"branch":     branch,
 		"upstream":   upstream,
@@ -387,9 +412,24 @@ func gitStatusPayload(repoRoot, porcelain string) map[string]any {
 		"untracked":  untracked,
 		"conflicts":  conflicts,
 		"file_count": files,
+		"files":      entries,
 		"truncated":  false,
 		"summary":    gitStatusSummaryLine(repoRoot, porcelain),
 	}
+	if omitted := files - len(entries); omitted > 0 {
+		payload["files_omitted"] = omitted
+	}
+	return payload
+}
+
+// gitStatusPath returns the path of a porcelain v1 line. A rename is written
+// as "old -> new"; the new name is the one the agent cares about.
+func gitStatusPath(line string) string {
+	path := line[3:]
+	if i := strings.Index(path, " -> "); i >= 0 {
+		path = path[i+4:]
+	}
+	return path
 }
 
 // parseGitBranchLine reads the porcelain v1 branch line
@@ -951,41 +991,41 @@ func gitCommit(ctx context.Context, engine *core.UltraFastEngine, repoRoot strin
 	return mcp.NewToolResultText(summary), nil
 }
 
+// The three counters of a `git diff --shortstat` line are matched by pattern,
+// not by field position: git writes " 3 files changed, 93 insertions(+), 18
+// deletions(-)", so the insertions token carries the comma that separates it
+// from the deletions part and the files token is followed by "changed,". A
+// positional parse therefore sees the insertions count only when the line has
+// no deletions part at all, and reported "+0 -18" for every mixed change.
+var (
+	shortStatFilesRe = regexp.MustCompile(`(\d+)\s+files?\s+changed`)
+	shortStatInsRe   = regexp.MustCompile(`(\d+)\s+insertions?\(\+\)`)
+	shortStatDelRe   = regexp.MustCompile(`(\d+)\s+deletions?\(-\)`)
+)
+
 // parseShortStat parses "N files changed, M insertions(+), D deletions(-)" from git diff --shortstat.
-// Returns zeros on empty or unparseable input. Handles singular/plural and optional deletion part.
+// Returns zeros on empty or unparseable input. Handles singular/plural and optional parts.
 func parseShortStat(shortstat string) (files, insertions, deletions int) {
 	shortstat = strings.TrimSpace(shortstat)
 	if shortstat == "" {
 		return 0, 0, 0
 	}
+	return shortStatCount(shortStatFilesRe, shortstat),
+		shortStatCount(shortStatInsRe, shortstat),
+		shortStatCount(shortStatDelRe, shortstat)
+}
 
-	fields := strings.Fields(shortstat)
-	for i := 0; i < len(fields)-1; i++ {
-		p := fields[i]
-		next := fields[i+1]
-		if p == "file," || p == "files," {
-			fmt.Sscanf(next, "%d", &files)
-		}
-		if next == "insertion(+)" || next == "insertions(+)" {
-			fmt.Sscanf(p, "%d", &insertions)
-		}
-		if strings.HasPrefix(next, "deletion") {
-			fmt.Sscanf(p, "%d", &deletions)
-		}
+// shortStatCount returns the first captured number of re in s, or 0.
+func shortStatCount(re *regexp.Regexp, s string) int {
+	m := re.FindStringSubmatch(s)
+	if len(m) < 2 {
+		return 0
 	}
-
-	// Fallback if the field walk missed the file count (rare format variations)
-	if files == 0 {
-		parts := strings.Split(shortstat, ",")
-		for _, part := range parts {
-			part = strings.TrimSpace(part)
-			if strings.Contains(part, "file") {
-				fmt.Sscanf(part, "%d", &files)
-				break
-			}
-		}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0
 	}
-	return files, insertions, deletions
+	return n
 }
 
 // gitRestore restores files from index or a specific commit.

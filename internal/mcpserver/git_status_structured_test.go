@@ -1,10 +1,10 @@
 package mcpserver
 
 // The git status result carries the state of the repository in
-// structuredContent (branch, upstream, ahead/behind and the change
-// counters) so a client does not have to parse the porcelain header. The
-// changed files stay in the text block, in the porcelain listing, so the same
-// file is never sent twice.
+// structuredContent (branch, upstream, ahead/behind, the change counters and
+// the changed files) so a client does not have to parse the porcelain header.
+// The changed files are in the porcelain listing of the text block as well, so
+// a client that reads only the text block sees them too.
 
 import (
 	"context"
@@ -94,9 +94,14 @@ func TestGitStatus_StructuredPayload(t *testing.T) {
 	if s, _ := m["summary"].(string); !strings.Contains(s, "?1") {
 		t.Fatalf("summary: %#v", m)
 	}
-	// The file list stays in the text block: it must not be duplicated.
-	if _, duplicated := m["files"]; duplicated {
-		t.Fatalf("files duplicated in structuredContent: %#v", m)
+	// The file list is in the payload too: a client that renders only
+	// structuredContent must still learn which files changed.
+	files, _ := m["files"].([]map[string]any)
+	if len(files) != 1 {
+		t.Fatalf("files missing from structuredContent: %#v", m)
+	}
+	if files[0]["path"] != "dirty.txt" || files[0]["code"] != "??" {
+		t.Fatalf("wrong file entry: %#v", files[0])
 	}
 	if !strings.Contains(mcpText(t, res), "dirty.txt") {
 		t.Fatalf("changed file missing from the text block: %s", mcpText(t, res))

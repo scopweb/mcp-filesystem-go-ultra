@@ -4,6 +4,47 @@
 
 ## [Unreleased]
 
+### fix(git): the commit summary counts the insertions, and `status` carries the file list
+
+Two defects in the `git` tool, both reported against v4.9.0.
+
+This release also carries `c30755f` (23-nov): the `add` action lists the staged files
+("so the agent sees the effect without a `status` afterwards"), the tool description says that
+`push`/`fetch`/`pull` are absent unless `--git-network` was passed, and `parseShortStat` was
+rewritten. That rewrite was **incomplete**: it still reported `+0` insertions whenever the
+commit also had deletions (the shortstat line writes the insertions token as `insertions(+),`,
+with the comma that separates it from the deletions part). The fix below completes it.
+
+**The commit summary always said `+0`.** Git writes the shortstat line as
+` 1 file changed, 93 insertions(+), 18 deletions(-)`: the insertions token
+carries the comma that separates it from the deletions part. The parser
+compared that token by position and by exact text, so it never matched when a
+deletions part followed — every mixed change was reported as `+0 -18`, and the
+risk level (`MEDIUM` above 800 staged insertions) was computed over a number
+that was always zero. The three counters are now matched by pattern, so the
+singular/plural form, the trailing comma and a missing part are all handled;
+`files` keeps counting the files the same way it did.
+
+**`git status` showed only the counters to a client that renders
+`structuredContent`.** The changed files were in the porcelain listing of the
+text block and nowhere else, so a client that displays the payload instead of
+the text — the reason `diff output:"name-only"` worked as a workaround, since
+`diff` returns text only — saw the counters and no file names, and could not
+tell a modified file from an untracked one. The payload now carries `files`
+(`path` and the porcelain code of the line, e.g. `" M"` modified, `"??"`
+untracked) alongside the counters, bounded by the same `max_lines` as the text
+block, with the omitted ones reported in `files_omitted`. The counters still
+describe the whole requested scope, and the porcelain listing stays in the
+text block for clients that read it. The entry carries the porcelain code
+instead of a normalized word because it is the shortest form that tells the
+index state and the worktree state apart, and the response-noise budget
+(`tests/noise`) has no room for a third field per file.
+
+**Verification:** `TestParseShortStat_Counts` (the five real shortstat lines
+from the report) · `TestGitCommit_SummaryCountsInsertionsAndDeletions` ·
+`TestGitStatus_PayloadCarriesChangedFiles` ·
+`TestGitStatus_PayloadFileListIsBounded` · the existing git status suite.
+
 ### Dependencies — mark3labs/mcp-go v1.6.0
 
 `go.mod` moves from `github.com/mark3labs/mcp-go v1.5.0` to `v1.6.0` (released

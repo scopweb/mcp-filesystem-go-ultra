@@ -202,12 +202,16 @@ Other profiles add `git` (agent), and `analyze_code`, `analyze_operation`,
 - `git` — `status` returns the porcelain listing in the text block and the
   repository state in `structuredContent`: `branch`, `upstream`, `ahead`,
   `behind`, `staged`, `unstaged`, `untracked`, `conflicts`, `file_count`,
-  `summary`. The changed files stay in the text block, so the same file is
-  never sent twice. In `--compact-mode` the text block is the one-line
-  summary unless `output` is passed explicitly; `output:"full"` keeps the
-  porcelain v2 listing with a readable summary. Both explicit formats honor
-  `max_lines`; `truncated:true` and `continuation` report omitted lines and
-  how to recover them. Counters describe the full requested scope.
+  `summary`, plus `files` (the changed paths, each with its porcelain code:
+  `" M"` modified in the worktree, `"M "` modified and staged, `"??"`
+  untracked, `"A "` added, `"D "` deleted, `"R "` renamed, `"UU"` conflicted).
+  The file list is in both channels on purpose: a client that renders only
+  `structuredContent` still learns which files changed. In `--compact-mode`
+  the text block is the one-line summary unless `output` is passed
+  explicitly; `output:"full"` keeps the porcelain v2 listing with a readable
+  summary. Both explicit formats honor `max_lines`; `truncated:true` and
+  `continuation` report omitted lines and how to recover them. Counters
+  describe the full requested scope.
   `diff`, `log` and `show` also honor `start_line`/`end_line` (1-based,
   inclusive) on the output body, applied before `max_lines` cuts it; the
   footer states the window and the `start_line` to continue with.
