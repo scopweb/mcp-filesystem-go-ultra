@@ -117,6 +117,9 @@ tokenizer measurement. Reproduce the table with:
 go test ./internal/mcpserver/ -run TestCatalogSerializedBudget -v
 ```
 
+The measured value is the `tools` array of `tools/list`; a real handshake adds the JSON-RPC
+envelope around it (about 35 B: 84.674 B for ultra in the v4.9.1 binary).
+
 The same test fails when the catalog grows past **84 KiB (ultra)** or **51 KiB (strict)**, so a
 new tool cannot reach the default profile without an explicit decision about this budget.
 
