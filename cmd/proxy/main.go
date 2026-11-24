@@ -74,6 +74,7 @@ type config struct {
 	opencodeDB         string
 	opencodeToolPrefix string
 	logDir             string
+	logKeep            int
 	callTimeout        time.Duration
 	idleTimeout        time.Duration
 	reapStale          bool
@@ -87,6 +88,7 @@ func main() {
 	opencodeDB := flag.String("opencode-db", "", "OpenCode sqlite database. Empty uses the default user database when it exists.")
 	opencodePrefix := flag.String("opencode-tool-prefix", "", "OpenCode MCP server name used to match tool ids, e.g. filesystem-ultra")
 	logDir := flag.String("log-dir", "", "Directory for proxy logs (required)")
+	logKeep := flag.Int("log-keep", 10, "Rotated log files to keep (each one up to 10 MB). The weekly measurement only sees what the log still holds: with 3 files the window was one month, and every 'tool never used' claim was a claim about that window.")
 	timeout := flag.Duration("timeout", 0, "Kill child after this duration of inactivity with pending requests (0 = no idle kill)")
 	callTimeout := flag.Duration("call-timeout", 60*time.Second, "Per tools/call timeout; return an MCP error if the child does not respond (0 = wait forever)")
 	reapStale := flag.Bool("reap-stale", true, "On start, terminate old-hash and orphaned instances of the same logical server")
@@ -94,7 +96,7 @@ func main() {
 
 	args := flag.Args()
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: mcp-proxy [--client NAME] [--model NAME] [--opencode-db PATH] [--opencode-tool-prefix NAME] [--log-dir DIR] [--timeout DURATION] [--call-timeout DURATION] [--reap-stale=false] -- <command> [args...]")
+		fmt.Fprintln(os.Stderr, "Usage: mcp-proxy [--client NAME] [--model NAME] [--opencode-db PATH] [--opencode-tool-prefix NAME] [--log-dir DIR] [--log-keep N] [--timeout DURATION] [--call-timeout DURATION] [--reap-stale=false] -- <command> [args...]")
 		fmt.Fprintln(os.Stderr, "  The target MCP server command follows after --")
 		os.Exit(1)
 	}
@@ -122,6 +124,7 @@ func main() {
 		opencodeDB:         dbPath,
 		opencodeToolPrefix: *opencodePrefix,
 		logDir:             *logDir,
+		logKeep:            *logKeep,
 		callTimeout:        *callTimeout,
 		idleTimeout:        *timeout,
 		reapStale:          *reapStale,
@@ -140,7 +143,7 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 		reapStaleChildren(cfg.target[0])
 	}
 
-	logger, err := newProxyLogger(cfg.logDir)
+	logger, err := newProxyLogger(cfg.logDir, cfg.logKeep)
 	if err != nil {
 		fmt.Fprintf(errOut, "Failed to init logger: %v\n", err)
 		return 1
@@ -527,10 +530,14 @@ type proxyLogger struct {
 	file    *os.File
 	logDir  string
 	logPath string
+	keep    int
 	written int64
 }
 
-func newProxyLogger(logDir string) (*proxyLogger, error) {
+func newProxyLogger(logDir string, keep int) (*proxyLogger, error) {
+	if keep <= 0 {
+		keep = 10
+	}
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return nil, err
 	}
@@ -544,7 +551,7 @@ func newProxyLogger(logDir string) (*proxyLogger, error) {
 	if info != nil {
 		written = info.Size()
 	}
-	return &proxyLogger{file: f, logDir: logDir, logPath: logPath, written: written}, nil
+	return &proxyLogger{file: f, logDir: logDir, logPath: logPath, keep: keep, written: written}, nil
 }
 
 func (l *proxyLogger) Log(entry ProxyLogEntry) {
@@ -576,8 +583,8 @@ func (l *proxyLogger) rotate() {
 
 	pattern := filepath.Join(l.logDir, "proxy-*.jsonl")
 	matches, _ := filepath.Glob(pattern)
-	if len(matches) > 3 {
-		for i := 0; i < len(matches)-3; i++ {
+	if len(matches) > l.keep {
+		for i := 0; i < len(matches)-l.keep; i++ {
 			os.Remove(matches[i])
 		}
 	}

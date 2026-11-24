@@ -6,6 +6,18 @@
 
 ## [4.9.1] - 2026-11-24
 
+### feat(proxy): `--log-keep` widens the window the weekly measurement can see
+
+The proxy rotated its log at 10 MB and kept the last 3 files, so only about a month of traffic
+survived. Everything the weekly report concluded about "tools never used" was a conclusion about
+that window: the usage before it left no trace, and the usage that does not go through the proxy
+(a remote Claude Desktop session, a manual client) leaves no trace at all.
+
+`--log-keep N` (default 10, about three months at the current rate) keeps N rotated files. The
+window is the measurement, and a measurement that silently expires is worse than no measurement.
+
+**Verification:** `TestProxyLoggerKeepsRotatedFiles` · `TestProxyLoggerDefaultKeep`.
+
 ### feat(catalog): read_file points at context_pack, in the profiles where it exists
 
 `read_file` is 56,5 % of the whole spend (35.647 calls, 22-oct → 24-nov) and `context_pack` — the
