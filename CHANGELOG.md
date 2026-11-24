@@ -4,6 +4,30 @@
 
 ## [Unreleased]
 
+### feat(security): the server checks the git-lfs in PATH and warns when it is too old
+
+Git LFS < 3.8.1 has four High advisories published on 2026-11-20:
+[GHSA-x72p-hmqp-46hw](https://github.com/advisories/GHSA-x72p-hmqp-46hw) (command
+through `.lfsconfig`), [GHSA-xrgv-7vx6-5vx6](https://github.com/advisories/GHSA-xrgv-7vx6-5vx6)
+(submodule config with an embedded LF),
+[GHSA-w3f2-pr6x-wwjc](https://github.com/advisories/GHSA-w3f2-pr6x-wwjc) (SSH URL) and
+[GHSA-x7xj-4j4f-88xr](https://github.com/advisories/GHSA-x7xj-4j4f-88xr) (Cookie forwarded
+after a redirect).
+
+The exposure is real here by design: the git hardening of this release empties the drivers of
+scope `.git/config` and `config.worktree`, and deliberately leaves the ones the user wrote
+(`system`, `global`, "as with Git LFS") alone. So the machine's `git-lfs` binary runs on
+`pull`, on `restore` and on the checkout of a branch — including in a repository the agent has
+just cloned.
+
+The server cannot patch that binary, but it can say so: when the `git` tool is registered, the
+startup probes `git lfs version` in the background and logs a warning naming the four
+advisories when the version is older than 3.8.1. The probe never blocks the startup, and a
+machine without `git-lfs` is not warned about (there is no driver to run).
+
+**Verification:** `TestParseGitLFSVersion` · `TestVersionOlder` · `TestGitLFSVersionProbe` ·
+`TestWarnIfGitLFSVulnerableLogs`.
+
 ### fix(git): the commit summary counts the insertions, and `status` carries the file list
 
 Two defects in the `git` tool, both reported against v4.9.0.

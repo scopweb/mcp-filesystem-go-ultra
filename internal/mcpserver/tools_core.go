@@ -163,6 +163,13 @@ func registerToolsOpts(s *server.MCPServer, engine *core.UltraFastEngine, opts r
 	registerHelpTool(reg)
 	registerSecurityTools(reg)
 
+	// The git tool runs the user's git (and, on a checkout, the user's
+	// git-lfs), so the version of git-lfs on this machine is part of the
+	// tool's security surface. The probe is asynchronous and only warns.
+	if _, ok := s.ListTools()["git"]; ok {
+		warnIfGitLFSVulnerable()
+	}
+
 	slog.Info("tools registered", "count", len(s.ListTools()), "version", serverVersion, "profile", opts.Profile)
 	return nil
 }
