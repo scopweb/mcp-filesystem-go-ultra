@@ -24,6 +24,9 @@ mcp-filesystem-ultra
 mcp-filesystem-ultra.exe
 filesystem-ultra.exe
 filesystem-ultra.exe___
+# Extensionless root binary (go build -o filesystem-ultra). Anchored to the
+# repo root so it does not match doc/MCP-PROXY.md or cmd/filesystem-ultra/.
+/filesystem-ultra
 
 # ------------------------------------------------------------
 # Go toolchain & modules
