@@ -47,6 +47,8 @@ type ProxyLogEntry struct {
 	Client      string    `json:"client,omitempty"`
 	Tool        string    `json:"tool"`
 	Path        string    `json:"path,omitempty"`
+	ArgKeys     []string  `json:"arg_keys,omitempty"`
+	Profile     string    `json:"profile,omitempty"`
 	BytesIn     int64     `json:"bytes_in"`
 	BytesOut    int64     `json:"bytes_out"`
 	TokensIn    int64     `json:"tokens_in"`
@@ -286,6 +288,8 @@ func runProxy(cfg config, clientIn io.Reader, clientOut io.Writer, errOut io.Wri
 						TokensIn:  int64(len(argsBytes)) / 4,
 						TokenUnit: "bytes/4",
 						RequestID: extractID(msg.ID),
+						ArgKeys:   argumentKeys(params.Arguments),
+						Profile:   targetProfile(cfg.target),
 					}
 					if p, ok := params.Arguments["path"].(string); ok {
 						entry.Path = p

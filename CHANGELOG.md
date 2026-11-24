@@ -4,6 +4,30 @@
 
 ## [Unreleased]
 
+### feat(proxy): the log records the profile of the server and the names of the arguments
+
+The weekly measurement could not answer two of its own questions, because the proxy log did not
+carry the data: `proxy.jsonl` had the tool name and the path, and nothing else. So a `read_file`
+call that cost 30k tokens was indistinguishable from a bounded range, a batch of files or an
+unbounded read of a big file; and the spend could not be attributed to a profile, even though the
+catalog of the ultra profile is paid in every ultra session and the tools that only exist in
+ultra (`context_pack`, `json_query`, `gitlab_issues`) can only be read against those sessions.
+
+Two additive fields close both gaps:
+
+- **`profile`** — the tool profile of the wrapped server, read from `--profile` in its command
+  line. For `filesystem-ultra` without the flag it is the documented default (`ultra`); for
+  servers that have no profiles it is absent.
+- **`arg_keys`** — the sorted **names** of the arguments of the call, never their values. A
+  value can carry a path, a token or a secret; the names are enough to tell a bounded read
+  (`start_line`/`end_line`) from an unbounded one, and a single file (`path`) from a batch
+  (`paths`).
+
+Both fields are optional and absent from the old lines, so the dashboard and the analysis
+scripts keep working with the logs already on disk.
+
+**Verification:** `TestArgumentKeys` · `TestTargetProfile`.
+
 ### feat(security): the server checks the git-lfs in PATH and warns when it is too old
 
 Git LFS < 3.8.1 has four High advisories published on 2026-11-20:

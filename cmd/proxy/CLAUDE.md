@@ -94,6 +94,8 @@ Tokens are approximated as `bytes / 4` — not exact, but good enough for relati
   "client": "Claude Desktop/0.9.2",
   "tool": "edit_file",
   "path": "/project/src/main.go",
+  "arg_keys": ["expected_hash", "new_text", "old_text", "path"],
+  "profile": "ultra",
   "bytes_in": 1234,
   "bytes_out": 5678,
   "tokens_in": 308,
@@ -113,6 +115,8 @@ Tokens are approximated as `bytes / 4` — not exact, but good enough for relati
 | `client` | string | From `--client` when set, otherwise auto-detected from `initialize` clientInfo (e.g. `Claude Desktop/0.9.2`). Older logs without this field appear as `Unknown client`. |
 | `tool` | string | MCP tool name (e.g., `read_file`, `edit_file`) |
 | `path` | string | Extracted from tool arguments `path` field |
+| `arg_keys` | array | Sorted NAMES of the arguments of the call, never their values. A value can carry a path, a token or a secret; the names are enough to tell a bounded read (`start_line`/`end_line`) from an unbounded one, and a single file (`path`) from a batch (`paths`). Absent when the call has no arguments. |
+| `profile` | string | Tool profile of the wrapped server, read from `--profile` in its command line. For `filesystem-ultra` without the flag it is the documented default (`ultra`). Empty for servers that have no profiles. It is what makes the spend attributable: the catalog of the ultra profile is paid in every ultra session. |
 | `bytes_in` | int | Serialized argument size |
 | `bytes_out` | int | Response line size |
 | `tokens_in` | int | Estimated: `bytes_in / 4` |
