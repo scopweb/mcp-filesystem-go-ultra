@@ -25,6 +25,7 @@ mcp-proxy --model "sonnet-4" --log-dir C:\logs\mcp-proxy -- C:\path\to\filesyste
 | `--client` | No | Client/UI label (e.g. `OpenCode`, `Claude Code`, `Codex`, `Claude Desktop`). Overrides auto-detected `clientInfo` for logs only. |
 | `--model` | No | Model name tag for logs (e.g., `opus-4`, `sonnet-4`) |
 | `--log-dir` | Yes | Directory where `proxy.jsonl` is written |
+| `--log-keep` | No | Rotated log files to keep (default 10, each up to 10 MB). The log is the measurement window: with 3 files it was one month, and "this tool is never used" was a claim about that month. |
 | `--call-timeout` | No | Per-call timeout (default 60s). MCP `isError` if the child is silent. |
 | `--timeout` | No | Idle kill of the child while requests are pending (default 0 = off). |
 | `--reap-stale` | No | Kill old-hash / orphaned logical-server processes on start (default true). |
@@ -129,7 +130,13 @@ Tokens are approximated as `bytes / 4` — not exact, but good enough for relati
 
 ### Rotation
 
-Log rotates at 10 MB. Rotated files: `proxy-YYYYMMDD-HHMMSS.jsonl`. Keeps last 3 rotated files.
+Log rotates at 10 MB. Rotated files: `proxy-YYYYMMDD-HHMMSS.jsonl`. Keeps the last `--log-keep`
+rotated files (default 10, about three months at the current rate).
+
+**The log is the measurement window.** Anything older than the retained files is gone, and traffic
+that does not go through this proxy (a remote session, a manual client) never reaches it. So a
+"this tool is never used" conclusion has to name the window and the sources; see the `--log-keep`
+row above for why the default moved from 3 to 10.
 
 ## Integration with Dashboard
 

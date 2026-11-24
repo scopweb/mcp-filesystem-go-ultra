@@ -511,6 +511,10 @@ go build -ldflags="-s -w" -trimpath -o mcp-proxy.exe ./cmd/proxy/
 # "args": ["--model", "sonnet-4", "--log-dir", "C:\\logs\\mcp-proxy", "--", "filesystem-ultra-v4.exe", ...]
 ```
 
+The proxy log is the measurement window of any usage analysis: it rotates at 10 MB and keeps
+`--log-keep` files (default 10, about three months). Raise it if you analyze usage over a longer
+period, and read the server's own audit log (`--log-dir`) as a second, independent source.
+
 Point the dashboard at the proxy logs to see the **Proxy / Tokens** page:
 
 ```bash
