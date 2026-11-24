@@ -10,19 +10,30 @@ import (
 
 // Budget the serialized catalog, not estimated tokens. This catches accidental
 // schema/instruction duplication before a client pays for every new session.
+//
+// The three profiles are measured and logged, because the published cost of
+// the catalog is part of the contract with the clients: README quotes these
+// numbers, and a change in the catalog has to be a decision, not a surprise.
 func TestCatalogSerializedBudget(t *testing.T) {
 	reg := newHelpTestRegistry(t, t.TempDir())
-	var ultra, strict []mcp.Tool
+	var ultra, agent, strict []mcp.Tool
 	for name, registered := range reg.server.ListTools() {
 		ultra = append(ultra, registered.Tool)
+		if profileAgent.allows(name) {
+			agent = append(agent, registered.Tool)
+		}
 		if profileStrict.allows(name) {
 			strict = append(strict, registered.Tool)
 		}
 	}
-	for _, tools := range [][]mcp.Tool{ultra, strict} {
+	for _, tools := range [][]mcp.Tool{ultra, agent, strict} {
 		sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 	}
 	u, err := json.Marshal(ultra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := json.Marshal(agent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +41,14 @@ func TestCatalogSerializedBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("catalog JSON bytes: ultra=%d (%d tools), strict=%d (%d tools), duplicated=%d, removed=%.1f%%", len(u), len(ultra), len(s), len(strict), len(u)+len(s), 100*float64(len(s))/float64(len(u)+len(s)))
+	// The token column is the bytes/4 estimate used by the proxy and by the
+	// research baseline. It is an estimate, not a tokenizer measurement, and
+	// the README says so where it quotes these numbers.
+	t.Logf("catalog JSON bytes: ultra=%d (%d tools, ~%d tok), agent=%d (%d tools, ~%d tok), strict=%d (%d tools, ~%d tok), duplicated=%d, removed=%.1f%%",
+		len(u), len(ultra), len(u)/4,
+		len(a), len(agent), len(a)/4,
+		len(s), len(strict), len(s)/4,
+		len(u)+len(s), 100*float64(len(s))/float64(len(u)+len(s)))
 	// Report a projection without metadata separately from wire size. This is
 	// a client-dependent byte measure, not a tokenizer measurement.
 	for i := range strict {

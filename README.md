@@ -97,6 +97,29 @@ go test ./core/ ./internal/mcpserver/ -count=1
 - **WSL ↔ Windows path translation** — accepts `/mnt/c/...`, `C:\...`, and `/tmp/...` transparently
 - **Optional embedded ripgrep** (`embed_rg` tag) for accelerated content search
 
+### Catalog cost
+
+The catalog is paid in **every session**: the client asks for `tools/list` once, and the schemas
+and descriptions of the tools it never calls cost exactly as much as the ones it does. These are
+the measured numbers of this release — the serialized JSON array of `tools/list`, from
+`TestCatalogSerializedBudget`:
+
+| Profile | Tools | Bytes | Tokens (≈ bytes/4) |
+|---|---|---|---|
+| `--profile=ultra` (default) | 35 | 84.547 | 21.136 |
+| `--profile=agent` | 19 | 56.099 | 14.024 |
+| `--profile=strict` | 18 | 51.434 | 12.858 |
+
+The token column is the bytes/4 estimate that the proxy and the research baseline use, not a
+tokenizer measurement. Reproduce the table with:
+
+```bash
+go test ./internal/mcpserver/ -run TestCatalogSerializedBudget -v
+```
+
+The same test fails when the catalog grows past **84 KiB (ultra)** or **51 KiB (strict)**, so a
+new tool cannot reach the default profile without an explicit decision about this budget.
+
 ---
 
 ## Build
@@ -414,7 +437,7 @@ ultra is a file backend, not a ticket orchestrator. Point `--allowed-paths` (or 
 
 ## Available Tools
 
-34 in `--profile=ultra` (default). `--profile=agent` is the 18-tool core plus `git`. `--profile=strict` is those 18, marked **strict**. `server_info` is not read-only: `artifact/write` can overwrite a file.
+35 in `--profile=ultra` (default). `--profile=agent` is the 18-tool core plus `git`. `--profile=strict` is those 18, marked **strict**. `server_info` is not read-only: `artifact/write` can overwrite a file.
 
 | Tool | Purpose | When to use |
 |------|---------|-------------|

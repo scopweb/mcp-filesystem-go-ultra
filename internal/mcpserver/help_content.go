@@ -660,7 +660,7 @@ Repeated edits on a broken file make recovery harder.
 Available topics:
 - overview  - Quick start guide
 - workflow  - The 4-step efficient workflow
-- tools     - Complete list of tools (29 ultra / 18 agent / 17 strict)
+- tools     - Complete list of tools (35 ultra / 19 agent / 18 strict)
 - read      - Reading files efficiently
 - write     - Writing and creating files
 - edit      - Editing files (most important!)
