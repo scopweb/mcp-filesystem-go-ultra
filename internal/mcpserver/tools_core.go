@@ -484,6 +484,7 @@ func registerCoreTools(reg *toolRegistry) {
 			"Logs: mode=\"tail\" max_lines=40 (each line auto-cut to 300 chars; max_line_length:0 disables). "+
 			"Range: start_line/end_line (absolute, inclusive) OR start_line/max_lines (count). "+
 			"max_lines without start_line/end_line and mode omitted/all: first N consecutive lines. Binary: encoding=\"base64\". Batch: paths JSON array (same range and the 300-line cap apply to every file; leer fichero). "+
+			"Multi-file task? "+contextPackHint(reg.profile)+
 			"To MODIFY files use edit_file."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),

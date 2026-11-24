@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+### feat(catalog): read_file points at context_pack, in the profiles where it exists
+
+`read_file` is 56,5 % of the whole spend (35.647 calls, 22-oct → 24-nov) and `context_pack` — the
+tool designed for exactly that — had been called **twice** in a month. The measurement of
+2026-11-24 answered the question the previous week had left open: the sessions that run the
+ultra profile are 48,9 % of the sessions and carry **76,9 % of the tokens**, so `context_pack` IS
+available where the money is spent. For the same file, `context_pack` returns 3.495 B where
+`read_file` returns 31.553 B.
+
+So the description of `read_file` now points at `context_pack` for a task that spans several
+files — **but only in the profiles where `context_pack` is registered**. In `strict` and in
+`agent` the tool does not exist, and a description that names a tool the client cannot call is a
+lie that costs a call to discover.
+
+This is a hypothesis with a measurement attached, not a certainty: the metric to watch is the
+number of `context_pack` calls and the tokens of `read_file` in the ultra sessions.
+
+**Verification:** `TestContextPackHintOnlyWhereTheToolExists` ·
+`TestReadFileDescriptionNamesContextPackOnlyInUltra`.
+
 ### feat(proxy): the log records the profile of the server and the names of the arguments
 
 The weekly measurement could not answer two of its own questions, because the proxy log did not

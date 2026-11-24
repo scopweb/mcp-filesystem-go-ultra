@@ -106,9 +106,9 @@ the measured numbers of this release — the serialized JSON array of `tools/lis
 
 | Profile | Tools | Bytes | Tokens (≈ bytes/4) |
 |---|---|---|---|
-| `--profile=ultra` (default) | 35 | 84.547 | 21.136 |
-| `--profile=agent` | 19 | 56.099 | 14.024 |
-| `--profile=strict` | 18 | 51.434 | 12.858 |
+| `--profile=ultra` (default) | 35 | 84.709 | 21.177 |
+| `--profile=agent` | 19 | 56.116 | 14.029 |
+| `--profile=strict` | 18 | 51.451 | 12.862 |
 
 The token column is the bytes/4 estimate that the proxy and the research baseline use, not a
 tokenizer measurement. Reproduce the table with:

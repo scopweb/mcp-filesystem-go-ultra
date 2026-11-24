@@ -11,24 +11,23 @@ import (
 // Budget the serialized catalog, not estimated tokens. This catches accidental
 // schema/instruction duplication before a client pays for every new session.
 //
-// The three profiles are measured and logged, because the published cost of
-// the catalog is part of the contract with the clients: README quotes these
-// numbers, and a change in the catalog has to be a decision, not a surprise.
+// Each profile is measured on its OWN registry, because the descriptions are
+// not the same in the three profiles: a tool that only exists in ultra can
+// carry a different text (read_file points at context_pack in ultra only), and
+// slicing one ultra registry to build the strict catalog would measure the
+// strict catalog with ultra descriptions. The README quotes these numbers, and
+// a change in the catalog has to be a decision, not a surprise.
 func TestCatalogSerializedBudget(t *testing.T) {
-	reg := newHelpTestRegistry(t, t.TempDir())
-	var ultra, agent, strict []mcp.Tool
-	for name, registered := range reg.server.ListTools() {
-		ultra = append(ultra, registered.Tool)
-		if profileAgent.allows(name) {
-			agent = append(agent, registered.Tool)
+	catalogOf := func(profile toolProfile) []mcp.Tool {
+		reg := newProfileRegistry(t, t.TempDir(), registerOpts{Profile: profile})
+		var tools []mcp.Tool
+		for _, registered := range reg.server.ListTools() {
+			tools = append(tools, registered.Tool)
 		}
-		if profileStrict.allows(name) {
-			strict = append(strict, registered.Tool)
-		}
-	}
-	for _, tools := range [][]mcp.Tool{ultra, agent, strict} {
 		sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
+		return tools
 	}
+	ultra, agent, strict := catalogOf(profileUltra), catalogOf(profileAgent), catalogOf(profileStrict)
 	u, err := json.Marshal(ultra)
 	if err != nil {
 		t.Fatal(err)
@@ -51,10 +50,12 @@ func TestCatalogSerializedBudget(t *testing.T) {
 		len(u)+len(s), 100*float64(len(s))/float64(len(u)+len(s)))
 	// Report a projection without metadata separately from wire size. This is
 	// a client-dependent byte measure, not a tokenizer measurement.
-	for i := range strict {
-		strict[i].Meta = nil
+	strictNoMeta := make([]mcp.Tool, len(strict))
+	copy(strictNoMeta, strict)
+	for i := range strictNoMeta {
+		strictNoMeta[i].Meta = nil
 	}
-	model, err := json.Marshal(strict)
+	model, err := json.Marshal(strictNoMeta)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +69,9 @@ func TestCatalogSerializedBudget(t *testing.T) {
 	// (+318 B on every profile that ships diff_files). The graduation of the
 	// v4.8.0 cohort removed the [EXPERIMENTAL] prefixes (-386 B on ultra).
 	// Measured: ultra 84,443 B, strict 51,434 B. Strict cap moves to 51 KiB.
+	// 2026-11-24 (v4.9.1): each profile is measured on its own registry, so
+	// the numbers are the ones the client really receives (the strict and
+	// agent catalogs no longer carry the ultra-only descriptions).
 	if len(u) > 84*1024 || len(s) > 51*1024 {
 		t.Fatalf("catalog exceeds byte budget (ultra 84 KiB / strict 51 KiB): ultra=%d strict=%d", len(u), len(s))
 	}
