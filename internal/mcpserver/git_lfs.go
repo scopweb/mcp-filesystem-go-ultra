@@ -139,6 +139,14 @@ func (e *lfsProbeError) Error() string { return e.msg }
 // server must be ready for the client, and `git lfs version` costs a process
 // spawn that the operator's machine may be slow to answer.
 func warnIfGitLFSVulnerable() {
+	warnIfGitLFSVulnerableWith(slog.Default())
+}
+
+// warnIfGitLFSVulnerableWith is warnIfGitLFSVulnerable with an explicit
+// logger. The logger is a parameter so the test can read the probe's output
+// without swapping the process-wide logger, which would be a data race with
+// the goroutine that writes into it.
+func warnIfGitLFSVulnerableWith(logger *slog.Logger) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -149,19 +157,19 @@ func warnIfGitLFSVulnerable() {
 			// nothing to warn about. Any other failure is worth a line: the
 			// operator cannot tell "checked and fine" from "not checked".
 			if errors.Is(err, exec.ErrNotFound) {
-				slog.Debug("git-lfs is not installed: no LFS driver can run")
+				logger.Debug("git-lfs is not installed: no LFS driver can run")
 				return
 			}
-			slog.Warn("could not read the version of git-lfs: the LFS drivers of scope system/global may be older than "+
+			logger.Warn("could not read the version of git-lfs: the LFS drivers of scope system/global may be older than "+
 				minGitLFSVersion+" ("+strings.Join(gitLFSAdvisories, ", ")+")",
 				"error", err)
 			return
 		}
 		if !versionOlder(v, minGitLFSVersion) {
-			slog.Info("git-lfs version checked", "version", v, "minimum", minGitLFSVersion)
+			logger.Info("git-lfs version checked", "version", v, "minimum", minGitLFSVersion)
 			return
 		}
-		slog.Warn("git-lfs in PATH is older than "+minGitLFSVersion+
+		logger.Warn("git-lfs in PATH is older than "+minGitLFSVersion+
 			": the LFS drivers of scope system/global run on pull, restore and branch checkout. "+
 			"Upgrade git-lfs ("+strings.Join(gitLFSAdvisories, ", ")+")",
 			"version", v, "minimum", minGitLFSVersion)

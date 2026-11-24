@@ -25,22 +25,45 @@ func TestGitLFSVersionProbe(t *testing.T) {
 	}
 }
 
+// channelHandler is a slog handler that sends every message to a channel.
+//
+// The probe logs from its own goroutine and the test has to read that output
+// to know when the probe finished. A shared buffer would be a data race (the
+// race detector on Linux rejects it), and swapping the process-wide logger
+// would be another: the test passes its own logger instead, and a channel
+// carries the messages between the two goroutines.
+type channelHandler struct {
+	ch chan string
+}
+
+func (h *channelHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *channelHandler) Handle(_ context.Context, r slog.Record) error {
+	select {
+	case h.ch <- r.Message:
+	default:
+	}
+	return nil
+}
+
+func (h *channelHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+
+func (h *channelHandler) WithGroup(string) slog.Handler { return h }
+
 // The warning path must be reachable: the probe has to log something in every
 // case, so the operator can tell "checked and fine" from "not checked".
 func TestWarnIfGitLFSVulnerableLogs(t *testing.T) {
-	var buf strings.Builder
-	old := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	defer slog.SetDefault(old)
+	ch := make(chan string, 8)
+	logger := slog.New(&channelHandler{ch: ch})
 
-	warnIfGitLFSVulnerable()
+	warnIfGitLFSVulnerableWith(logger)
 
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(buf.String(), "git-lfs") {
-			return
+	select {
+	case msg := <-ch:
+		if !strings.Contains(msg, "git-lfs") {
+			t.Fatalf("the probe logged %q, expected a git-lfs message", msg)
 		}
-		time.Sleep(50 * time.Millisecond)
+	case <-time.After(20 * time.Second):
+		t.Fatal("the probe logged nothing")
 	}
-	t.Fatalf("the probe logged nothing:\n%s", buf.String())
 }
