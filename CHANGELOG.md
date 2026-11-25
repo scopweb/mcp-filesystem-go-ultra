@@ -4,6 +4,44 @@
 
 ## [Unreleased]
 
+## [4.9.2] - 2026-11-25
+
+### fix(catalog): the `read_file` hint must not leave a dangling question
+
+The description of `read_file` started with `Multi-file task? ` and then came the sentence that
+names `context_pack`. But that sentence only exists in the **ultra** profile: in `agent` and in
+`strict` `context_pack` is not registered, so the client received a question with no answer —
+17 wasted bytes per profile and a description that reads as truncated.
+
+The whole phrase now travels with its answer: the prefix only stays in the profiles where the
+tool actually exists.
+
+| Profile | Bytes of the `tools` array | Tokens (o200k) |
+|---|---|---|
+| ultra | 84.664 | 19.188 |
+| agent | 56.054 | 12.662 |
+| strict | 51.419 | 11.546 |
+
+**Verification:** `TestContextPackHintHasNoDanglingPrefix` ·
+`TestReadFileDescriptionNamesContextPackOnlyInUltra`.
+
+### docs: the catalog cost, as the client receives it
+
+The README table claimed to be the `tools/list` array, but the numbers came from the registry
+(which keeps a few fields the wire form drops) and the token column was a `bytes/4` estimate
+presented as a measurement.
+
+Now it publishes the exact bytes of the array a client receives over a real handshake, the
+tokens counted with `tiktoken`'s `o200k_base` — the tokenizer the weekly report uses — and the
+`bytes/4` estimate, labelled as an estimate.
+
+### The tool catalog is untouched
+
+The four tools with no visible use in the measured window (`github_issues`, `minify_js`,
+`set_trace`, `wsl`) **stay in the ultra profile**. The premise "never used" was an artifact of
+the one-month window of the proxy log, not a fact. It is re-evaluated with ~3 months of log
+(`--log-keep 10`, since v4.9.1).
+
 ## [4.9.1] - 2026-11-24
 
 ### feat(proxy): `--log-keep` widens the window the weekly measurement can see
