@@ -12,7 +12,10 @@ package mcpserver
 //
 // The hint is per profile on purpose: in `strict` and in `agent` context_pack
 // does not exist, and a description that names a tool the client cannot call
-// is a lie that costs a call to discover.
+// is a lie that costs a call to discover. So the WHOLE sentence goes, not
+// only its second half: a "Multi-file task? " left without an answer reads
+// like a truncated description and costs 17 bytes in the two profiles that
+// cannot use it.
 //
 // It is a hypothesis with a measurement attached, not a certainty: the metric
 // to watch is the number of context_pack calls and the tokens of read_file in
@@ -21,5 +24,5 @@ func contextPackHint(profile toolProfile) string {
 	if !profile.allows("context_pack") {
 		return ""
 	}
-	return "context_pack returns the ranked files, the exact line ranges and the bounded snippets of a task in one call (cheaper than reading file by file). "
+	return "Multi-file task? context_pack returns the ranked files, the exact line ranges and the bounded snippets of a task in one call (cheaper than reading file by file). "
 }

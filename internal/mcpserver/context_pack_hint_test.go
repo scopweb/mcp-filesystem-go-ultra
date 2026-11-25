@@ -19,8 +19,19 @@ func TestContextPackHintOnlyWhereTheToolExists(t *testing.T) {
 	}
 }
 
+// The whole sentence goes, not only the half that names the tool: a
+// "Multi-file task? " with no answer reads like a truncated description.
+func TestContextPackHintHasNoDanglingPrefix(t *testing.T) {
+	for _, profile := range []toolProfile{profileAgent, profileStrict} {
+		h := contextPackHint(profile)
+		if strings.Contains(h, "Multi-file") {
+			t.Fatalf("%s: dangling prefix left in the hint: %q", profile, h)
+		}
+	}
+}
+
 // The description of read_file must name context_pack only in the profile
-// that registers it.
+// that registers it, and must not leave the question without an answer.
 func TestReadFileDescriptionNamesContextPackOnlyInUltra(t *testing.T) {
 	for _, tc := range []struct {
 		profile toolProfile
@@ -40,6 +51,10 @@ func TestReadFileDescriptionNamesContextPackOnlyInUltra(t *testing.T) {
 			has := strings.Contains(tool.Tool.Description, "context_pack")
 			if has != tc.want {
 				t.Fatalf("read_file description mentions context_pack: %v, want %v", has, tc.want)
+			}
+			dangling := strings.Contains(tool.Tool.Description, "Multi-file task?")
+			if dangling != tc.want {
+				t.Fatalf("read_file description leaves the question dangling: %v, want %v", dangling, tc.want)
 			}
 		})
 	}
