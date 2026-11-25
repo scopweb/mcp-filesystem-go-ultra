@@ -1,6 +1,6 @@
 # MCP Filesystem Server Ultra
 
-**v4.9.0** · Go 1.27.4 · MCP 2025-11-25 · stdio · 35 tools ultra / 19 agent / 18 strict
+**v4.9.1** · Go 1.27.4 · MCP 2025-11-25 · stdio · 35 tools ultra / 19 agent / 18 strict
 
 A [Model Context Protocol](https://modelcontextprotocol.io) filesystem server written in Go, designed for **safe file editing by AI agents**: automatic backups with step-through undo, optimistic concurrency to detect external file changes, an accidental-rewrite guard, strict path security, and risk assessment on every mutation. Built for Claude Desktop, Claude Code, and OpenCode, with support for large files, WSL/Windows interoperability, and token-efficient responses.
 
@@ -101,24 +101,29 @@ go test ./core/ ./internal/mcpserver/ -count=1
 
 The catalog is paid in **every session**: the client asks for `tools/list` once, and the schemas
 and descriptions of the tools it never calls cost exactly as much as the ones it does. These are
-the measured numbers of this release — the serialized JSON array of `tools/list`, from
-`TestCatalogSerializedBudget`:
+the measured numbers of this release — the exact JSON array of `tools/list` that a client
+receives over a real handshake:
 
-| Profile | Tools | Bytes | Tokens (≈ bytes/4) |
-|---|---|---|---|
-| `--profile=ultra` (default) | 35 | 84.709 | 21.177 |
-| `--profile=agent` | 19 | 56.116 | 14.029 |
-| `--profile=strict` | 18 | 51.451 | 12.862 |
+| Profile | Tools | Bytes | Tokens (o200k) | Tokens (≈ bytes/4) |
+|---|---|---|---|---|
+| `--profile=ultra` (default) | 35 | 84.664 | 19.188 | 21.166 |
+| `--profile=agent` | 19 | 56.054 | 12.662 | 14.014 |
+| `--profile=strict` | 18 | 51.419 | 11.546 | 12.855 |
 
-The token column is the bytes/4 estimate that the proxy and the research baseline use, not a
-tokenizer measurement. Reproduce the table with:
+- **Bytes** is the serialized `tools` array of the `tools/list` response.
+- **Tokens (o200k)** is the same array counted with `tiktoken`'s `o200k_base`, the tokenizer the
+  weekly report uses, so the numbers are comparable with the ones published by other MCP servers.
+- **Tokens (≈ bytes/4)** is the estimate the proxy and the research baseline use; it is an
+  estimate, not a measurement, and it over-counts by about 10 % against `o200k`.
+
+The budget test measures the same catalog from the registry, where the JSON is a little larger
+(84.709 / 56.099 / 51.434 B), because the registry keeps a few fields that the wire form drops.
+That test is the guardrail; the table above is what the client receives. Reproduce the guardrail
+with:
 
 ```bash
 go test ./internal/mcpserver/ -run TestCatalogSerializedBudget -v
 ```
-
-The measured value is the `tools` array of `tools/list`; a real handshake adds the JSON-RPC
-envelope around it (about 35 B: 84.674 B for ultra in the v4.9.1 binary).
 
 The same test fails when the catalog grows past **84 KiB (ultra)** or **51 KiB (strict)**, so a
 new tool cannot reach the default profile without an explicit decision about this budget.
@@ -672,7 +677,7 @@ Per-tool usage and limits: https://filesystem.scopweb.com/tools/context-pack/ an
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest: v4.9.0).
+See [CHANGELOG.md](CHANGELOG.md) for the full version history (latest: v4.9.1).
 
 ---
 
