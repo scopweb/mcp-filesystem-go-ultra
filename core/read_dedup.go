@@ -20,18 +20,27 @@ var diskReadCount atomic.Int64
 // readFileBytesDeduped returns file content from cache or disk, deduplicating
 // concurrent loads for the same path via singleflight.
 func (e *UltraFastEngine) readFileBytesDeduped(ctx context.Context, path string) ([]byte, error) {
-	if cached, hit := e.cache.PeekFileFresh(path); hit {
-		return cached, nil
+	data, _, err := e.readFileBytesDedupedMeta(ctx, path)
+	return data, err
+}
+
+// readFileBytesDedupedMeta returns the file content together with the
+// metadata it was cached with. The metadata carries the OCC content hash, so
+// the caller does not have to hash the file again on the next cache hit.
+func (e *UltraFastEngine) readFileBytesDedupedMeta(ctx context.Context, path string) ([]byte, cache.FileStatMeta, error) {
+	if cached, meta, hit := e.cache.PeekFileFreshWithMeta(path); hit {
+		return cached, meta, nil
 	}
 
 	type readResult struct {
 		data []byte
+		meta cache.FileStatMeta
 		err  error
 	}
 
 	v, err, shared := readFlight.Do(path, func() (interface{}, error) {
-		if cached, hit := e.cache.PeekFileFresh(path); hit {
-			return readResult{data: cached}, nil
+		if cached, meta, hit := e.cache.PeekFileFreshWithMeta(path); hit {
+			return readResult{data: cached, meta: meta}, nil
 		}
 
 		if err := ctx.Err(); err != nil {
@@ -45,21 +54,32 @@ func (e *UltraFastEngine) readFileBytesDeduped(ctx context.Context, path string)
 		if readErr != nil {
 			return nil, &PathError{Op: "read", Path: path, Err: readErr}
 		}
+		// The OCC token is computed once per content version and memoized
+		// with the file's metadata: a later read of the same bytes reuses
+		// it instead of hashing the whole file again. Files larger than the
+		// cache entry limit are never served from the byte cache, and this
+		// is where they still save the hash.
+		if hash, ok := e.cache.PeekFileHashFor(path, meta); ok {
+			meta.Hash = hash
+		} else {
+			meta.Hash = contentHashFNVBytes(data)
+		}
+		e.cache.SetFileHash(path, meta)
 		if stable {
 			e.cache.SetFileIfGeneration(path, data, meta, gen)
 		}
 		e.cache.TrackAccess(path)
-		return readResult{data: data}, nil
+		return readResult{data: data, meta: meta}, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, cache.FileStatMeta{}, err
 	}
 	if shared {
 		e.cache.RecordCoalescedRead()
 	}
 
 	result := v.(readResult)
-	return result.data, result.err
+	return result.data, result.meta, result.err
 }
 
 // forgetReadFlight drops any in-flight dedup state for path so invalidation

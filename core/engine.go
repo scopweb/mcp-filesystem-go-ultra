@@ -665,6 +665,73 @@ func (e *UltraFastEngine) ReadFileContent(ctx context.Context, path string) (str
 	return string(snap.Bytes), nil
 }
 
+// IsPathAllowedResolved checks a path that the caller has ALREADY resolved
+// (via resolveContainmentPath): the same security rules and the same
+// allowlist containment test as IsPathAllowed, but without walking the
+// filesystem again.
+//
+// Both the original name and the resolved target are checked for the secret
+// denylist and for dangerous path patterns: a link NAMED ".env" that points
+// at an ordinary file stays denied, and a link named "config.txt" that points
+// AT ".env" is denied too. Containment is decided on the resolved target,
+// which is the path the open will actually use.
+func (e *UltraFastEngine) IsPathAllowedResolved(original, resolved string) bool {
+	for _, p := range []string{original, resolved} {
+		if p == "" {
+			return false
+		}
+		if err := validatePathSecurity(p); err != nil {
+			slog.Debug("Path rejected by security check", "path", p, "reason", err.Error())
+			return false
+		}
+		if IsSecretPath(p) && !e.config.AllowSecrets {
+			slog.Debug("Path rejected as secret", "path", p)
+			return false
+		}
+	}
+
+	empty, bases := e.allowedBases()
+	if empty {
+		return true
+	}
+
+	targetAbs, err := filepath.Abs(resolved)
+	if err != nil {
+		return false
+	}
+
+	// On Windows, compare case-insensitively
+	norm := func(p string) string {
+		p = filepath.Clean(p)
+		if os.PathSeparator == '\\' { // Windows
+			return strings.ToLower(p)
+		}
+		return p
+	}
+
+	targetAbs = norm(targetAbs)
+
+	for _, baseAbs := range bases {
+		// Quick equality check
+		if targetAbs == baseAbs {
+			return true
+		}
+
+		// Safe containment check using filepath.Rel; ensures boundary-aware prefix
+		rel, err := filepath.Rel(baseAbs, targetAbs)
+		if err == nil {
+			if rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+				return true
+			}
+		}
+	}
+
+	if e.config.DebugMode {
+		slog.Debug("Access denied", "path", original)
+	}
+	return false
+}
+
 // ReadFileSnapshot returns file bytes and hash from one authorized read.
 func (e *UltraFastEngine) ReadFileSnapshot(ctx context.Context, path string) (FileSnapshot, error) {
 	if err := ctx.Err(); err != nil {
@@ -683,18 +750,25 @@ func (e *UltraFastEngine) ReadFileSnapshot(ctx context.Context, path string) (Fi
 	if err := e.Authorize(OpRead, path); err != nil {
 		return FileSnapshot{}, err
 	}
-	if !e.IsPathAllowed(path) {
+
+	// Resolve the path ONCE. The resolved target is both what the allowlist
+	// is checked against and what the read opens, so the open cannot land
+	// somewhere else than the path that was verified. The previous sequence
+	// resolved the same path four times (allowlist check, TOCTOU resolve,
+	// a second allowlist check that resolved again, and the canonical path
+	// of the snapshot); on Windows every resolution is a per-component
+	// filesystem walk, and it was the largest fixed cost of a read.
+	resolved, err := resolveContainmentPath(path)
+	if err != nil {
+		return FileSnapshot{}, &PathError{Op: "read_file", Path: path, Err: err}
+	}
+	if err := e.Authorize(OpRead, resolved); err != nil {
+		return FileSnapshot{}, err
+	}
+	if !e.IsPathAllowedResolved(path, resolved) {
 		return FileSnapshot{}, e.AccessDeniedError("read", path)
 	}
-
-	if resolved, err := e.ResolveAndAuthorize("read", path); err != nil {
-		return FileSnapshot{}, err
-	} else {
-		path = resolved
-	}
-	if err := e.Authorize(OpRead, path); err != nil {
-		return FileSnapshot{}, err
-	}
+	path = resolved
 
 	workingDir, _ := os.Getwd()
 	hookCtx := &HookContext{
@@ -709,20 +783,20 @@ func (e *UltraFastEngine) ReadFileSnapshot(ctx context.Context, path string) (Fi
 		return FileSnapshot{}, fmt.Errorf("pre-read hook denied operation: %w", err)
 	}
 
-	if cached, hit := e.cache.GetFileFresh(path); hit {
+	if cached, meta, hit := e.cache.GetFileFreshWithMeta(path); hit {
 		if e.config.DebugMode {
 			slog.Debug("Cache hit", "path", path)
 		}
 		e.cache.TrackAccess(path)
 		SetCacheHit(ctx, true)
-		return snapshotFromBytes(path, cached), nil
+		return snapshotFromResolvedBytes(path, cached, meta.Hash), nil
 	}
 
 	if err := ctx.Err(); err != nil {
 		return FileSnapshot{}, &ContextError{Op: "read_file", Details: "operation cancelled before disk read"}
 	}
 
-	content, err := e.readFileBytesDeduped(ctx, path)
+	content, meta, err := e.readFileBytesDedupedMeta(ctx, path)
 	if err != nil {
 		return FileSnapshot{}, err
 	}
@@ -733,19 +807,25 @@ func (e *UltraFastEngine) ReadFileSnapshot(ctx context.Context, path string) (Fi
 	hookCtx.Metadata = map[string]interface{}{"bytes": len(content)}
 	_, _ = e.hookManager.ExecuteHooks(ctx, HookPostRead, hookCtx)
 
-	return snapshotFromBytes(path, content), nil
+	return snapshotFromResolvedBytes(path, content, meta.Hash), nil
 }
 
-func snapshotFromBytes(path string, raw []byte) FileSnapshot {
+// snapshotFromResolvedBytes builds the snapshot for a path that has already
+// been resolved. hash is the memoized OCC token when the caller has one;
+// an empty hash is computed from the bytes.
+func snapshotFromResolvedBytes(path string, raw []byte, hash string) FileSnapshot {
 	mode := os.FileMode(0644)
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode()
 	}
+	if hash == "" {
+		hash = contentHashFNVBytes(raw)
+	}
 	return FileSnapshot{
 		Path:   path,
-		Canon:  CanonicalPath(path),
+		Canon:  path,
 		Bytes:  raw,
-		Hash:   contentHashFNV(string(raw)),
+		Hash:   hash,
 		Mode:   mode,
 		Exists: true,
 	}

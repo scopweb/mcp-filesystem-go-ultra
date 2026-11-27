@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"sync"
@@ -20,6 +21,12 @@ type FileStatMeta struct {
 	Size     int64
 	Identity FileIdentity
 	HasID    bool
+	// Hash is the OCC content hash of the bytes stored with this entry.
+	// It is a memo, not part of the freshness verdict: freshness is
+	// size + mtime + identity, and an empty Hash means "not computed".
+	// Storing it lets a cache hit return the OCC token without hashing
+	// the whole file again.
+	Hash string
 }
 
 type FileGen struct {
@@ -123,6 +130,24 @@ func ReadFileStableOpen(path string, open func(string) (*os.File, error)) (conte
 	return last, lastMeta, false, nil
 }
 
+// readAllSized reads f to EOF, pre-sizing the buffer from the known file
+// size. A negative size falls back to the growth strategy of io.ReadAll.
+func readAllSized(f *os.File, size int64) ([]byte, error) {
+	if size < 0 {
+		return io.ReadAll(f)
+	}
+	var buf bytes.Buffer
+	if size > 0 {
+		// One extra byte so the final Read that reports EOF does not have
+		// to grow the buffer.
+		buf.Grow(int(size) + 1)
+	}
+	if _, err := buf.ReadFrom(f); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func readFileCaptureOnce(path string, open func(string) (*os.File, error)) ([]byte, FileStatMeta, bool, error) {
 	f, err := open(path)
 	if err != nil {
@@ -139,7 +164,10 @@ func readFileCaptureOnce(path string, open func(string) (*os.File, error)) ([]by
 
 	runCaptureMutate(path)
 
-	content, err := io.ReadAll(f)
+	// Read into a buffer sized from the stat. io.ReadAll starts at 512
+	// bytes and doubles, so reading a 5 MB file copied ~11 MB of garbage
+	// before the content was even used.
+	content, err := readAllSized(f, before.Size)
 	if err != nil {
 		return nil, FileStatMeta{}, false, err
 	}

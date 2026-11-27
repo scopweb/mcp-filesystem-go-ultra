@@ -96,6 +96,29 @@ go test ./core/ ./internal/mcpserver/ -count=1
 - **Streaming and chunked I/O** for files up to 50 MB
 - **WSL ↔ Windows path translation** — accepts `/mnt/c/...`, `C:\...`, and `/tmp/...` transparently
 - **Optional embedded ripgrep** (`embed_rg` tag) for accelerated content search
+- **Single path resolution per read** — the read path resolves the path once and authorizes the
+  result, instead of four `EvalSymlinks` round-trips per read
+- **Hash memoized with the bytes** — the optimistic-concurrency token comes from the cache
+  entry, not from re-hashing the file on every read
+
+#### Read path
+
+`read_file` was the slowest tool in the catalog, and the cost was not in the disk: the same path
+was resolved four times and the content was re-hashed on every read. Both are fixed. The
+numbers below are measured with the benchmarks in `core/read_perf_test.go` and
+`internal/mcpserver/read_handler_perf_test.go` (Windows, i7-14700KF):
+
+| Measurement | Before | After |
+|---|---|---|
+| Engine read, 2 KB, warm | 2.19 ms | 0.52 ms |
+| Engine read, 2 KB, cold | 2.80 ms | 1.10 ms |
+| Engine read, 5 MB, warm | 10.31 ms | 2.19 ms |
+| Engine read, 5 MB, cold | 15.63 ms | 1.95 ms |
+| `read_file` over MCP (stdio), 2 KB | 2.08 ms | 1.03 ms |
+| `read_file` over MCP (stdio), 5 MB | 21.63 ms | 14.57 ms |
+
+The size of the answer on the wire does not change: a 5 MB file still returns ~100 KB in total.
+The file itself is never sent.
 
 ### Catalog cost
 

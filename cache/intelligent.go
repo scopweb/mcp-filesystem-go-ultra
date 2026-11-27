@@ -20,6 +20,10 @@ type IntelligentCache struct {
 	// Metadata cache (file info, stats, etc.)
 	metaCache *ttlMap
 
+	// Memoized content hashes for files whose bytes do not fit the byte
+	// cache (bigcache refuses entries above its entry-size limit).
+	hashMemo *ttlMap
+
 	// Cache statistics
 	stats *CacheStats
 
@@ -74,6 +78,11 @@ type CacheStats struct {
 
 const DefaultFileTTL = 3 * time.Minute
 
+// hashMemoTTL is how long a memoized content hash survives. The memo
+// validates itself against the file's size + mtime, so a modified file
+// invalidates it immediately; the TTL only bounds the memory.
+const hashMemoTTL = 10 * time.Minute
+
 func NewIntelligentCache(maxSize int64) (*IntelligentCache, error) {
 	return NewIntelligentCacheTTL(maxSize, DefaultFileTTL)
 }
@@ -117,6 +126,7 @@ func NewIntelligentCacheTTL(maxSize int64, fileTTL time.Duration) (*IntelligentC
 	}
 	cache.dirCache = newTTLMap(3*time.Minute, time.Minute, cache.onDirEvicted)
 	cache.metaCache = newTTLMap(10*time.Minute, time.Minute, cache.onMetaEvicted)
+	cache.hashMemo = newTTLMap(hashMemoTTL, time.Minute, cache.onMetaEvicted)
 
 	cache.prefetchWG.Add(1)
 	go cache.prefetchWorker()
@@ -164,6 +174,20 @@ func (c *IntelligentCache) PeekFileFresh(path string) ([]byte, bool) {
 	return c.lookupFresh(path, lookupInternal)
 }
 
+// GetFileFreshWithMeta serves cached bytes together with the metadata they
+// were stored with. The metadata carries the memoized content hash, so a
+// caller that needs the OCC token does not have to hash the whole file again
+// on every cache hit.
+func (c *IntelligentCache) GetFileFreshWithMeta(path string) ([]byte, FileStatMeta, bool) {
+	return c.lookupFreshWithMeta(path, lookupDemand)
+}
+
+// PeekFileFreshWithMeta is GetFileFreshWithMeta for internal lookups
+// (prefetch, singleflight peers) that must not move the demand counters.
+func (c *IntelligentCache) PeekFileFreshWithMeta(path string) ([]byte, FileStatMeta, bool) {
+	return c.lookupFreshWithMeta(path, lookupInternal)
+}
+
 type lookupClass int
 
 const (
@@ -173,23 +197,30 @@ const (
 )
 
 func (c *IntelligentCache) lookupFresh(path string, kind lookupClass) ([]byte, bool) {
+	data, _, hit := c.lookupFreshWithMeta(path, kind)
+	return data, hit
+}
+
+// lookupFreshWithMeta is lookupFresh plus the stored metadata, so a caller
+// can reuse the memoized content hash instead of hashing the bytes again.
+func (c *IntelligentCache) lookupFreshWithMeta(path string, kind lookupClass) ([]byte, FileStatMeta, bool) {
 	if kind == lookupDemand {
 		c.updateAccessStats()
 	}
 	// Observe bytes and metadata under the same lock as publication. Otherwise
 	// a reader can see a half-published entry and invalidate a fresh fill.
 	c.mu.RLock()
-	cached, hit, _, _ := c.freshFileLocked(path)
+	cached, meta, hit, _, _ := c.freshFileLocked(path)
 	c.mu.RUnlock()
 	if hit {
 		c.recordLookup(kind, true, false)
-		return cached, true
+		return cached, meta, true
 	}
 
 	// A fill may have completed since the miss. Recheck under the write lock
 	// before discarding anything, keeping successful lookups concurrent.
 	c.mu.Lock()
-	cached, hit, discard, stale := c.freshFileLocked(path)
+	cached, meta, hit, discard, stale := c.freshFileLocked(path)
 	if !hit {
 		if discard {
 			c.invalidateFileLocked(path)
@@ -199,26 +230,26 @@ func (c *IntelligentCache) lookupFresh(path string, kind lookupClass) ([]byte, b
 	}
 	c.mu.Unlock()
 	c.recordLookup(kind, hit, stale)
-	return cached, hit
+	return cached, meta, hit
 }
 
 // freshFileLocked requires c.mu held for reading or writing. discard indicates
 // an incomplete or outdated entry; a completely cold miss must not invalidate
 // the generation of an in-flight disk read.
-func (c *IntelligentCache) freshFileLocked(path string) (data []byte, hit, discard, stale bool) {
+func (c *IntelligentCache) freshFileLocked(path string) (data []byte, meta FileStatMeta, hit, discard, stale bool) {
 	cached, hasBytes := c.fileBytes(path)
 	meta, hasMeta := c.fileMeta(path)
 	if !hasBytes || !hasMeta {
-		return nil, false, hasBytes || hasMeta, false
+		return nil, FileStatMeta{}, false, hasBytes || hasMeta, false
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, false, true, false
+		return nil, FileStatMeta{}, false, true, false
 	}
 	if !meta.sameVersion(MetaFromInfo(info)) || int64(len(cached)) != meta.Size {
-		return nil, false, true, true
+		return nil, FileStatMeta{}, false, true, true
 	}
-	return cached, true, false, false
+	return cached, meta, true, false, false
 }
 
 func (c *IntelligentCache) recordLookup(kind lookupClass, hit, stale bool) {
@@ -275,6 +306,55 @@ func (c *IntelligentCache) SetFileIfGeneration(path string, content []byte, meta
 	c.residentBytes += n
 	c.metaCache.Set(fileStatKey(path), meta, c.fileTTL)
 	return true
+}
+
+// SetFileHash memoizes the OCC content hash of a file. The memo lives in its
+// own map because the byte cache discards entries it cannot serve (files
+// larger than the entry limit), and the hash is still worth keeping for
+// those. The memo validates itself against size + mtime, so a modified file
+// invalidates it on its own.
+func (c *IntelligentCache) SetFileHash(path string, meta FileStatMeta) {
+	c.hashMemo.Set(path, meta, hashMemoTTL)
+}
+
+// PeekFileHash returns the memoized content hash for path when it still
+// matches the file on disk (size + mtime + identity).
+func (c *IntelligentCache) PeekFileHash(path string) (FileStatMeta, bool) {
+	item, ok := c.hashMemo.Get(path)
+	if !ok {
+		return FileStatMeta{}, false
+	}
+	meta, ok := item.(FileStatMeta)
+	if !ok || !meta.Valid || meta.Hash == "" {
+		return FileStatMeta{}, false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return FileStatMeta{}, false
+	}
+	if !meta.sameVersion(MetaFromInfo(info)) {
+		return FileStatMeta{}, false
+	}
+	return meta, true
+}
+
+// PeekFileHashFor returns the memoized content hash for path when the memo
+// still matches the given capture metadata — the state of the file as it was
+// just read. Comparing against the read's own metadata (instead of a fresh
+// stat) ties the hash to exactly the bytes that were read.
+func (c *IntelligentCache) PeekFileHashFor(path string, current FileStatMeta) (string, bool) {
+	item, ok := c.hashMemo.Get(path)
+	if !ok {
+		return "", false
+	}
+	memo, ok := item.(FileStatMeta)
+	if !ok || !memo.Valid || memo.Hash == "" {
+		return "", false
+	}
+	if !memo.sameVersion(current) {
+		return "", false
+	}
+	return memo.Hash, true
 }
 
 // dirCacheEntry pairs a directory listing with the directory's mtime at cache time.
@@ -487,6 +567,7 @@ func (c *IntelligentCache) Flush() {
 	c.fileCache.Reset()
 	c.dirCache.Flush()
 	c.metaCache.Flush()
+	c.hashMemo.Flush()
 	c.residentBytes = 0
 	c.fileBytesLen = make(map[string]int64)
 	c.globalGen++

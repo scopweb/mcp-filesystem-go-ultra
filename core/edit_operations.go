@@ -27,6 +27,15 @@ func contentHashFNV(s string) string {
 	return fmt.Sprintf("%08x", h.Sum32())
 }
 
+// contentHashFNVBytes is contentHashFNV over a byte slice, without the
+// string conversion. Hashing a 5 MB file through string(raw) copies the whole
+// file first, which cost more than the hash itself.
+func contentHashFNVBytes(b []byte) string {
+	h := fnv.New32a()
+	h.Write(b)
+	return fmt.Sprintf("%08x", h.Sum32())
+}
+
 // countOccurrencesTolerant returns how many literal occurrences of needle are
 // present in haystack. With tolerantWhitespace=true, tab/4-space runs and
 // CRLF/LF are normalized before the count, matching the tolerant matcher the

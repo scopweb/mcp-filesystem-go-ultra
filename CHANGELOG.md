@@ -41,6 +41,54 @@ audited way to reach a credential file.
 `TestRunRipgrepSearch_ExcludesSecretFiles` · `TestRunRipgrepSearch_SecretGlobsInArgv` ·
 `TestPipelineSearch_ExcludesSecretFiles` · `TestSecretExcludeGlobs_CoverDenylist`.
 
+### perf(read): resolve the path once, memoize the hash, drop the extra copy
+
+`read_file` was the slowest operation in the catalog by a wide margin, and the cost was not in
+the I/O: a warm read of a 2 KB file spent most of its time resolving **the same path four
+times** and re-hashing bytes it had already hashed.
+
+Three changes, all measured with the new benchmarks (`core/read_perf_test.go`,
+`internal/mcpserver/read_perf_test.go`, `internal/mcpserver/read_handler_perf_test.go`):
+
+1. **Resolve the path once.** `ReadFileSnapshot` called `IsPathAllowed`, `ResolveAndAuthorize`
+   and `CanonicalPath`, and each one resolved the path on its own — four `EvalSymlinks`
+   round-trips for a single read. The snapshot now resolves once and authorizes the result.
+   The public `IsPathAllowed` is untouched; the fast path uses the new
+   `IsPathAllowedResolved(original, resolved)`, which checks the denylist against **both** names
+   and the containment against the resolved path. This is security-equivalent: the path that is
+   opened is exactly the path that was checked, and `osroot` covers the TOCTOU window.
+2. **Memoize the hash with the bytes.** The FNV hash of the content was recomputed on every
+   read even when the bytes came from the cache. `cache.FileStatMeta.Hash` now carries it, and
+   the deduplicated read path returns the hash together with the bytes.
+   Files above the 1 MB `MaxEntrySize` of BigCache are never cached, so the hash of those lives
+   in a small TTL map (`cache.hashMemo`, 10 min) that invalidates itself on size + mtime.
+   A stale hash makes the optimistic-concurrency check fail **closed**, never pass wrongly.
+3. **No extra copies.** The hash is computed over the byte slice instead of over a `string`
+   copy of it, and the read buffer is preallocated with the size reported by `stat` instead of
+   growing through `io.ReadAll` (which copied ~11 MB of garbage for a 5 MB file).
+
+| Measurement | Before | After | Delta |
+|---|---|---|---|
+| `ReadFileSnapshot`, 2 KB, warm | 2.19 ms | 0.52 ms | −76 % |
+| `ReadFileSnapshot`, 2 KB, cold | 2.80 ms | 1.10 ms | −61 % |
+| `ReadFileSnapshot`, 5 MB, warm | 10.31 ms | 2.19 ms | −79 % |
+| `ReadFileSnapshot`, 5 MB, cold | 15.63 ms | 1.95 ms | −88 % |
+| Validation sequence alone | 2.15 ms / 326 allocs | 0.78 ms / 98 allocs | −64 % |
+| `read_file` over MCP (stdio), 2 KB | 2.08 ms | 1.03 ms | −50 % |
+| `read_file` over MCP (stdio), 5 MB | 21.63 ms | 14.57 ms | −33 % |
+
+The projection (`projectReadCursor`) was measured and deliberately left alone: it costs 1.68 ms
+on a 5 MB file and 744 ns on a 2 KB file, and rewriting it would risk the continuation and
+footer contract to save about 1.7 ms.
+
+The wire cost did not change: a 5 MB read still returns 100 KB in total (49.906 B of text plus
+50.306 B of structured content) — the file itself is never sent.
+
+**Verification:** `TestContentHashFNVBytesMatchesString` ·
+`TestReadFileSnapshot_CanonMatchesCanonicalPath` · `TestReadFileSnapshot_CachesHash` ·
+`TestReadFileSnapshot_SecretSymlinkDenied` ·
+`TestReadFileSnapshot_LegitimateSymlinkStillReads` ·
+`TestReadFileSnapshot_OutsideAllowedDenied`.
 ## [4.9.2] - 2026-11-25
 
 ### fix(catalog): the `read_file` hint must not leave a dangling question

@@ -157,6 +157,9 @@ func (c *IntelligentCache) Close() error {
 		if c.metaCache != nil {
 			c.metaCache.stopSweep()
 		}
+		if c.hashMemo != nil {
+			c.hashMemo.stopSweep()
+		}
 		c.Flush()
 		closeErr = c.fileCache.Close()
 	})

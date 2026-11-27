@@ -64,7 +64,7 @@ func readSnapshot(e *UltraFastEngine, path, canon string) (FileSnapshot, error) 
 		Path:   path,
 		Canon:  canon,
 		Bytes:  raw,
-		Hash:   contentHashFNV(string(raw)),
+		Hash:   contentHashFNVBytes(raw),
 		Mode:   mode,
 		Exists: true,
 	}, nil
@@ -145,7 +145,7 @@ func (e *UltraFastEngine) FindOCCBaseline(path, expectedHash string) []byte {
 				continue
 			}
 			raw, err := os.ReadFile(filepath.Join(e.backupManager.GetBackupPath(backup.BackupID), file.BackupPath))
-			if err == nil && contentHashFNV(string(raw)) == expectedHash {
+			if err == nil && contentHashFNVBytes(raw) == expectedHash {
 				return append([]byte{}, raw...)
 			}
 		}
@@ -192,12 +192,12 @@ func (t *FileTxn) Commit(ctx context.Context, newBytes []byte, dryRun bool, back
 	if err := t.engine.atomicWriteWithinRoot(path, newBytes, mode); err != nil {
 		return backupID, fmt.Errorf("error writing file: %w", err)
 	}
-	after := FileSnapshot{Path: path, Canon: t.snap.Canon, Exists: true, Hash: contentHashFNV(string(newBytes)), Mode: mode}
+	after := FileSnapshot{Path: path, Canon: t.snap.Canon, Exists: true, Hash: contentHashFNVBytes(newBytes), Mode: mode}
 	journalFrom(ctx).record(t.snap, after)
 	t.snap = after
 	t.snap.Bytes = append([]byte(nil), newBytes...)
 	t.engine.invalidateMutatedPath(path)
-	RecordWriteHash(path, contentHashFNV(string(newBytes)))
+	RecordWriteHash(path, contentHashFNVBytes(newBytes))
 	return backupID, nil
 }
 
@@ -244,7 +244,7 @@ func (e *UltraFastEngine) ReadSnapshot(ctx context.Context, path string) (FileSn
 			Path:   path,
 			Canon:  canon,
 			Bytes:  raw,
-			Hash:   contentHashFNV(string(raw)),
+			Hash:   contentHashFNVBytes(raw),
 			Mode:   mode,
 			Exists: true,
 		}, nil
@@ -261,7 +261,7 @@ func (e *UltraFastEngine) ReadSnapshot(ctx context.Context, path string) (FileSn
 		Path:   path,
 		Canon:  canon,
 		Bytes:  raw,
-		Hash:   contentHashFNV(string(raw)),
+		Hash:   contentHashFNVBytes(raw),
 		Mode:   mode,
 		Exists: true,
 	}, nil
