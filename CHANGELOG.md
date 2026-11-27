@@ -4,6 +4,43 @@
 
 ## [Unreleased]
 
+### fix(security): `search_files` must never return the content of a secret file
+
+`read_file` denies credential files (`.env`, `credentials.json`, `id_rsa*`, `*.pem`, `*.key`,
+`*.p12`, `*.pfx`) with `SECRET_DENIED`, but the search path did not apply the same denylist:
+searching a directory that contained a `.env` returned the matching line, secret value included.
+
+The guard now lives in one place. `core/secrets.go` holds the denylist as a table and derives
+both views from it:
+
+- `IsSecretPath` — the path predicate used by the read/write guard and by the native walk.
+- `SecretExcludeGlobs` — the ripgrep exclusion globs, derived from the same entries, so the
+  search backend can never expose a file the read path refuses.
+
+Two layers, because one is not enough:
+
+1. **Exclusion globs in the ripgrep argv.** The secret files are never opened. The globs go
+   *after* the positive `file_types`/`include` globs, because in ripgrep the last matching glob
+   wins — a later positive glob would re-enable the secret.
+2. **A path re-check on every parsed match.** Ripgrep does not apply exclusion globs to a file
+   given as the explicit search target, so the parsed matches are re-checked against the
+   denylist. This layer is the authoritative one.
+
+The same denylist is now applied to the native search (including the case where the secret file
+is the search root), to the occurrence counter, to the pipeline `search` action of
+`batch_operations` (which walked the tree on its own and could return the whole file), and to
+`analyze_code` content reads.
+
+A search never discloses secret content, not even with `--allow-secrets`: that flag keeps its
+meaning on the read path (`read_file`, `file_bytes`, `json_query`), which stays the explicit and
+audited way to reach a credential file.
+
+**Verification:** `TestSearchFiles_NeverExposesSecretFiles` ·
+`TestSearchFiles_ExplicitSecretTargetIsBlocked` ·
+`TestSearchFiles_CountExplicitSecretTargetIsBlocked` ·
+`TestRunRipgrepSearch_ExcludesSecretFiles` · `TestRunRipgrepSearch_SecretGlobsInArgv` ·
+`TestPipelineSearch_ExcludesSecretFiles` · `TestSecretExcludeGlobs_CoverDenylist`.
+
 ## [4.9.2] - 2026-11-25
 
 ### fix(catalog): the `read_file` hint must not leave a dangling question

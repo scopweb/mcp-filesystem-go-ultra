@@ -57,7 +57,7 @@ If a client asks for `read_multiple_files` / `read_text_file`, use `read_file` (
 | `project_map` | Cheap structural orientation of an unknown project. Metadata only. `detail:"summary"` (top level) / `"normal"` (directories only, default) / `"full"` (directories + files). Bounded: 5000 entries, 2.5 s, 512 KiB of metadata; a limit sets `truncated=true` + `summary_scope="visited_entries"`. Never follows symlinks; hidden paths (file-security policy) are not counted or named |
 | `directory_tree` | Only when the actual tree is needed. Gitignore ON |
 | `list_directory` | Copy exact paths (case) before edits |
-| `search_files` | Gitignore ON. Omit `max_results` and the page is 40. Omitted `include_content` searches content; a filename glob (`*.go`, `Reports.*`) stays names-only, a regex (`preview.*range`) does not; `include_content:false` is names only. Empty results name the scope. Do not pair `count_only` with `detail=full` |
+| `search_files` | Gitignore ON. Omit `max_results` and the page is 40. Omitted `include_content` searches content; a filename glob (`*.go`, `Reports.*`) stays names-only, a regex (`preview.*range`) does not; `include_content:false` is names only. Empty results name the scope. Do not pair `count_only` with `detail=full`. Secret files (`.env`, `credentials.json`, `id_rsa*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`) are never searched, so zero hits inside them is expected, not a missing-file error |
 | `get_file_info` | Verify after a host mutation. Batch `paths[]` |
 | `read_file` | Full / range / head / tail / base64 / `paths[]`. Logs: `mode:"tail"` `max_lines:40` |
 | `write_file` | New files or whole-file rewrite. `mode:"append"` skips rewrite-guard |

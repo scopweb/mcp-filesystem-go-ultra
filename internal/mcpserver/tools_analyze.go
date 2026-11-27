@@ -64,7 +64,10 @@ func registerAnalyzeTools(reg *toolRegistry) {
 			return pathErrorResult(errCodeInvalidParams, "unknown action", path, nil, `action must be symbols|lint|sec|impact`), nil
 		}
 		core.WithAnalyzeBlock(func(p string) bool {
-			return engine.BlockContent(p) || engine.OmitFromDiscovery(p)
+			// Secret files are denied by the read path (SECRET_DENIED);
+			// analysis findings would expose their content, so they are
+			// never read here either.
+			return engine.BlockContent(p) || engine.OmitFromDiscovery(p) || core.IsSecretPath(p)
 		}, func() {
 			switch action {
 			case "symbols":

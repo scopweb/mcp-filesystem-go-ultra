@@ -565,6 +565,13 @@ func (e *UltraFastEngine) performSmartSearchOutcome(ctx context.Context, path, p
 			}
 			return nil
 		}
+		// A secret file must never be searched: the read path denies it
+		// (SECRET_DENIED) and the match line would expose its content.
+		// skipWalkDir prunes nested secrets but deliberately lets the walk
+		// root through, so the root case needs an explicit check.
+		if !d.IsDir() && IsSecretPath(currentPath) {
+			return nil
+		}
 		if d.IsDir() {
 			return nil
 		}
@@ -845,6 +852,13 @@ func (e *UltraFastEngine) performAdvancedTextSearch(ctx context.Context, path, p
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		// A secret file must never be searched: the read path denies it
+		// (SECRET_DENIED) and the match line would expose its content.
+		// skipWalkDir prunes nested secrets but deliberately lets the walk
+		// root through, so the root case needs an explicit check.
+		if !d.IsDir() && IsSecretPath(currentPath) {
 			return nil
 		}
 		if d.IsDir() {
@@ -1221,6 +1235,11 @@ func (e *UltraFastEngine) countOccurrencesOpts(ctx context.Context, opts SearchO
 		return e.countOccurrencesInDir(ctx, validPath, pattern, regexPattern, returnLines, noIgnore, fileTypes, opts.Include)
 	}
 	if !fileMatchesSearchFilters(validPath, filepath.Dir(validPath), fileTypes, opts.Include) {
+		return "0 matches", 0, nil
+	}
+	// Secret files are denied by the read path (SECRET_DENIED); counting
+	// their occurrences would still reveal which lines hold a credential.
+	if IsSecretPath(validPath) {
 		return "0 matches", 0, nil
 	}
 	return e.countOccurrencesInFile(validPath, pattern, regexPattern, returnLines)

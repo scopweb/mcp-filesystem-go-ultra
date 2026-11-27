@@ -1145,6 +1145,18 @@ func (pe *PipelineExecutor) performSmartSearchInternal(ctx context.Context, path
 
 		// Skip directories
 		if info.IsDir() {
+			// A secret-named directory is pruned entirely (same rule as
+			// the native search walk) so its content cannot be exposed.
+			if filePath != normalizedPath && IsSecretPath(filePath) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Never search secret files: the read path denies them
+		// (SECRET_DENIED) and includeContent would return the credential
+		// material verbatim.
+		if IsSecretPath(filePath) {
 			return nil
 		}
 

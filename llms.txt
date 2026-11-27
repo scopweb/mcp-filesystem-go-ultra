@@ -162,6 +162,12 @@ Orientation and discovery
     names-only; explicit `include_content:false` is names-only. An empty
     result names the scope ("0 coincidencias en contenido" / "0 coincidencias
     en nombres de fichero"): a names-only zero is not proof the text is absent.
+  - Secret files are **never** searched (`.env` and `.env.*`,
+    `credentials.json`, `.npmrc`, `.pypirc`, `id_rsa*`, `id_ed25519*`,
+    `id_ecdsa*`, `.pem`, `.key`, `.p12`, `.pfx`). They are skipped, so zero
+    hits inside them is expected, not a missing-file error. The same denylist
+    makes `read_file` answer `SECRET_DENIED`; `--allow-secrets` opens that
+    read path, never the search path.
 
 Reading
 - `get_file_info` — metadata for one path or a batch.

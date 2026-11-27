@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"unicode"
 
 	"github.com/mcp/filesystem-ultra/embed/ripgrep"
 )
@@ -125,6 +124,15 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 	for _, pat := range ripgrepMinifiedExcludeGlobs() {
 		args = append(args, "--glob", pat)
 	}
+	// Layer 1 of the secret guard: secret files are denied by the read
+	// path (SECRET_DENIED), so ripgrep must never open them. These
+	// exclusion globs are derived from the same denylist as
+	// IsSecretPath (see core/secrets.go) and must stay AFTER the
+	// positive filters above: in ripgrep the last glob wins, so a later
+	// positive glob would re-enable the secret.
+	for _, pat := range SecretExcludeGlobs() {
+		args = append(args, "--glob", pat)
+	}
 
 	// `-e` forces the next argument to be parsed as the pattern even when it
 	// starts with '-' — this prevents flag injection (e.g. a pattern of
@@ -172,6 +180,13 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 		if !filepath.IsAbs(match.File) {
 			match.File = filepath.Join(root, match.File)
 		}
+		// Layer 2 of the secret guard: ripgrep does not apply the
+		// exclusion globs when the secret file is the explicit search
+		// target, so every parsed match is re-checked against the
+		// denylist here. This is the authoritative check.
+		if IsSecretPath(match.File) {
+			continue
+		}
 		if fileMatchesSearchFilters(match.File, root, fileTypes, includeGroups...) {
 			filtered = append(filtered, match)
 		}
@@ -182,16 +197,7 @@ func (e *UltraFastEngine) RunRipgrepSearch(ctx context.Context, path, pattern st
 // caseInsensitiveExtensionGlob preserves the native extension-case contract
 // without changing the case sensitivity or precedence of include/exclude globs.
 func caseInsensitiveExtensionGlob(glob string) string {
-	var b strings.Builder
-	for _, r := range glob {
-		lower, upper := unicode.ToLower(r), unicode.ToUpper(r)
-		if lower != upper {
-			fmt.Fprintf(&b, "[%c%c]", lower, upper)
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+	return globCaseInsensitive(glob)
 }
 
 // Keep absolute line numbers: rg emits disjoint context groups and suppresses

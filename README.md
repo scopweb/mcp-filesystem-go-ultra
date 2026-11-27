@@ -642,6 +642,7 @@ tests/                      Black-box suite over the exported core API
 
 - `IsPathAllowed()` resolves symlinks via `filepath.EvalSymlinks()` before the containment check — prevents symlink escape from allowed paths
 - **Secret files denied by default** — base name only, case-insensitive: `.env` and `.env.*`, `credentials.json`, `.npmrc`, `.pypirc`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`, and the extensions `.pem`, `.key`, `.p12`, `.pfx`. Opt in with `--allow-secrets` (audited)
+- **Search never discloses a secret file** — the denylist above is applied to search results as well as to reads: `search_files` (both backends), the occurrence counter, the pipeline `search` action of `batch_operations`, and `analyze_code` skip secret files instead of returning their content. The flag keeps its meaning on the read path (`read_file`, `file_bytes`, `json_query`), which stays the explicit and audited way to reach a credential file
 - **Search regex is Go RE2** — `search_files` compiles with `regexp`. Nested quantifiers stay linear; backreferences are rejected
 - **Writes are temp + rename** — crash-safe replace on every platform. NTFS file id, birthtime, and hardlinks are not preserved (same tradeoff the reference server kept on Windows)
 - **Allowed-path root protection** (v4.2.1) — `delete_file`, `soft_delete`, and `move_file` reject the `--allowed-paths` root itself, preventing `os.RemoveAll()` from wiping an entire tree
